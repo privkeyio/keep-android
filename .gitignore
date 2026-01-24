@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Local properties
+local.properties
+
+# Generated files
+app/src/main/jniLibs/
+app/src/main/kotlin/io/privkey/keep/uniffi/
+
+# Signing
+*.keystore
+*.jks
