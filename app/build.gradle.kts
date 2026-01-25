@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "io.privkey.keep"
-        minSdk = 26  // Android 8.0 for BiometricPrompt
+        minSdk = 33  // Android 13 for UniFFI Cleaner API
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -51,9 +51,6 @@ android {
         }
     }
 
-    lint {
-        disable += "NewApi"
-    }
 }
 
 dependencies {
