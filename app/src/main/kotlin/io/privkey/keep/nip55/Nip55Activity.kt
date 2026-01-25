@@ -114,7 +114,7 @@ class Nip55Activity : FragmentActivity() {
             }
 
             val response = withContext(Dispatchers.Default) {
-                runCatching { h.handleRequest(req) }.getOrNull()
+                runCatching { h.handleRequest(req, callerPackage) }.getOrNull()
             }
             if (response != null) {
                 finishWithResult(response)
