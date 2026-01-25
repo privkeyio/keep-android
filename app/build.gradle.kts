@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -10,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "io.privkey.keep"
-        minSdk = 26  // Android 8.0 for BiometricPrompt
+        minSdk = 33  // Android 13 for UniFFI Cleaner API
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -44,15 +45,12 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.6"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
 }
 
 dependencies {
