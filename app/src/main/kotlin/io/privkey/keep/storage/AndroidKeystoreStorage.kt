@@ -131,84 +131,41 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
-        try {
-            val encrypted = cipher.doFinal(data)
-            val iv = cipher.iv
-
-            prefs.edit()
-                .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-                .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-                .putString(KEY_SHARE_NAME, metadata.name)
-                .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
-                .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
-                .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
-                .putString(
-                    KEY_SHARE_GROUP_PUBKEY,
-                    Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
-                )
-                .apply()
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to store share")
-        }
+        val encrypted = cipher.doFinal(data)
+        val iv = cipher.iv
+        saveShareData(encrypted, iv, metadata)
     }
 
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
-        try {
-            val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
-                ?: throw KeepMobileException.StorageException("No share stored")
-
-            return cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: KeepMobileException) {
-            throw e
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to load share")
-        }
+        val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
+            ?: throw KeepMobileException.StorageException("No share stored")
+        return cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        try {
-            val key = getOrCreateKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
+        val cipher = getCipherForEncryption()
+        storeShareWithCipher(cipher, data, metadata)
+    }
 
-            val encrypted = cipher.doFinal(data)
-            val iv = cipher.iv
-
-            prefs.edit()
-                .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-                .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-                .putString(KEY_SHARE_NAME, metadata.name)
-                .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
-                .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
-                .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
-                .putString(
-                    KEY_SHARE_GROUP_PUBKEY,
-                    Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
-                )
-                .apply()
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException(e.message ?: "Failed to store share")
-        }
+    private fun saveShareData(encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
+        prefs.edit()
+            .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+            .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+            .putString(KEY_SHARE_NAME, metadata.name)
+            .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
+            .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
+            .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
+            .putString(
+                KEY_SHARE_GROUP_PUBKEY,
+                Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
+            )
+            .apply()
     }
 
     override fun loadShare(): ByteArray {
-        try {
-            val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
-                ?: throw KeepMobileException.StorageException("No share stored")
-            val iv = prefs.getString(KEY_SHARE_IV, null)
-                ?: throw KeepMobileException.StorageException("No IV stored")
-
-            val key = getOrCreateKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
-
-            return cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: KeepMobileException) {
-            throw e
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException(e.message ?: "Failed to load share")
-        }
+        val cipher = getCipherForDecryption()
+            ?: throw KeepMobileException.StorageException("No share stored")
+        return loadShareWithCipher(cipher)
     }
 
     override fun hasShare(): Boolean {
