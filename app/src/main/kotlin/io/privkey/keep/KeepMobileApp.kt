@@ -18,14 +18,13 @@ class KeepMobileApp : Application() {
 
     private fun initializeKeepMobile() {
         try {
-            storage = AndroidKeystoreStorage(this)
-            keepMobile = KeepMobile(storage!!)
-            nip55Handler = Nip55Handler(keepMobile!!)
+            val s = AndroidKeystoreStorage(this)
+            val k = KeepMobile(s)
+            storage = s
+            keepMobile = k
+            nip55Handler = Nip55Handler(k)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize KeepMobile", e)
-            keepMobile = null
-            storage = null
-            nip55Handler = null
         }
     }
 

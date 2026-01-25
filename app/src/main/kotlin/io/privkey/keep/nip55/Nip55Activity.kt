@@ -74,48 +74,37 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun parseAndSetRequest(intent: Intent) {
-        val uri = intent.data?.toString() ?: run {
-            finishWithError("Invalid request")
-            return
-        }
-
-        try {
-            request = handler?.parseIntentUri(uri)
-        } catch (e: Exception) {
-            finishWithError("Invalid request")
-        }
+        val uri = intent.data?.toString() ?: return finishWithError("Invalid request")
+        request = runCatching { handler?.parseIntentUri(uri) }.getOrNull()
+            ?: return finishWithError("Invalid request")
     }
 
     private fun handleApprove() {
+        val req = request ?: return
+        val h = handler ?: return finishWithError("Handler not initialized")
+
         lifecycleScope.launch {
-            try {
-                val needsBiometric = request?.requestType != Nip55RequestType.GET_PUBLIC_KEY
+            val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
-                if (needsBiometric) {
-                    val authenticated = biometricHelper.authenticate(
-                        title = "Approve Request",
-                        subtitle = getRequestDescription(request!!)
-                    )
-                    if (!authenticated) {
-                        finishWithError("Authentication failed")
-                        return@launch
-                    }
+            if (needsBiometric) {
+                val authenticated = biometricHelper.authenticate(
+                    title = "Approve Request",
+                    subtitle = req.requestType.displayName()
+                )
+                if (!authenticated) {
+                    finishWithError("Authentication failed")
+                    return@launch
                 }
+            }
 
-                val response = handler?.handleRequest(request!!)
-                if (response != null) {
-                    finishWithResult(response)
-                } else {
-                    finishWithError("No response")
-                }
-            } catch (e: Exception) {
+            val response = runCatching { h.handleRequest(req) }.getOrNull()
+            if (response != null) {
+                finishWithResult(response)
+            } else {
                 finishWithError("Request failed")
             }
         }
     }
-
-    private fun getRequestDescription(request: Nip55Request): String =
-        request.requestType.displayName()
 
     private fun finishWithResult(response: Nip55Response) {
         val resultIntent = Intent().apply {
