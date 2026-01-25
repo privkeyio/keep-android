@@ -131,7 +131,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
-        val encrypted = cipher.doFinal(data)
+        val encrypted = try {
+            cipher.doFinal(data)
+        } catch (e: Exception) {
+            throw KeepMobileException.StorageException("Failed to encrypt share")
+        }
         val iv = cipher.iv
         saveShareData(encrypted, iv, metadata)
     }
@@ -139,7 +143,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
         val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageException("No share stored")
-        return cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
+        return try {
+            cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
+        } catch (e: Exception) {
+            throw KeepMobileException.StorageException("Failed to decrypt share")
+        }
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {

@@ -77,19 +77,25 @@ fun MainScreen(
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
 ) {
-    val hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
-    val shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
+    var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
+    var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
     var pendingCount by remember { mutableStateOf(0) }
 
-    LaunchedEffect(hasShare) {
-        if (hasShare) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (true) {
+    fun refreshShareState() {
+        hasShare = keepMobile.hasShare()
+        shareInfo = keepMobile.getShareInfo()
+    }
+
+    LaunchedEffect(Unit) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                refreshShareState()
+                if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
-                    delay(2000)
                 }
+                delay(2000)
             }
         }
     }
@@ -132,8 +138,7 @@ fun MainScreen(
             }
         } else {
             NoShareCard(
-                onImport = {
-                }
+                onImport = { refreshShareState() }
             )
         }
     }
