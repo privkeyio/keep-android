@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -18,7 +19,9 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
@@ -34,6 +37,11 @@ class Nip55Activity : FragmentActivity() {
     private var requestId: String? = null
     private var callerPackage: String = "unknown"
 
+    companion object {
+        private const val TAG = "Nip55Activity"
+        private const val GENERIC_ERROR_MESSAGE = "An error occurred"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -46,6 +54,22 @@ class Nip55Activity : FragmentActivity() {
 
         if (request == null) return
 
+        setupContent()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        callerPackage = callingActivity?.packageName ?: "unknown"
+        requestId = intent.getStringExtra("id")
+        parseAndSetRequest(intent)
+
+        if (request == null) return
+
+        setupContent()
+    }
+
+    private fun setupContent() {
         setContent {
             KeepAndroidTheme {
                 Surface(
@@ -63,14 +87,6 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        callerPackage = callingActivity?.packageName ?: "unknown"
-        requestId = intent.getStringExtra("id")
-        parseAndSetRequest(intent)
     }
 
     private fun parseAndSetRequest(intent: Intent) {
@@ -97,7 +113,9 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
 
-            val response = runCatching { h.handleRequest(req) }.getOrNull()
+            val response = withContext(Dispatchers.Default) {
+                runCatching { h.handleRequest(req) }.getOrNull()
+            }
             if (response != null) {
                 finishWithResult(response)
             } else {
@@ -118,8 +136,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithError(error: String) {
+        Log.e(TAG, "NIP-55 request failed: $error${requestId?.let { " (requestId=$it)" } ?: ""}")
         val resultIntent = Intent().apply {
-            putExtra("error", error)
+            putExtra("error", GENERIC_ERROR_MESSAGE)
         }
         setResult(RESULT_CANCELED, resultIntent)
         finish()
