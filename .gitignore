@@ -20,4 +20,4 @@ app/src/main/kotlin/io/privkey/keep/uniffi/
 *.jks
 
 # Symlinks
-keep
+/keep

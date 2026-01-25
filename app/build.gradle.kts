@@ -51,6 +51,10 @@ android {
         }
     }
 
+    lint {
+        disable += "MutableCollectionMutableState"
+        disable += "AutoboxingStateCreation"
+    }
 }
 
 dependencies {
