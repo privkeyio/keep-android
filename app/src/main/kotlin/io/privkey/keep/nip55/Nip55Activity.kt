@@ -1,0 +1,242 @@
+package io.privkey.keep.nip55
+
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import io.privkey.keep.BiometricHelper
+import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.uniffi.Nip55Request
+import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55Response
+import kotlinx.coroutines.launch
+
+private fun Nip55RequestType.displayName(): String = when (this) {
+    Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
+    Nip55RequestType.SIGN_EVENT -> "Sign Event"
+    Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
+    Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
+}
+
+class Nip55Activity : FragmentActivity() {
+    private lateinit var biometricHelper: BiometricHelper
+    private var handler: Nip55Handler? = null
+    private var request: Nip55Request? = null
+    private var requestId: String? = null
+    private var callerPackage: String = "unknown"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        biometricHelper = BiometricHelper(this)
+        handler = (application as? KeepMobileApp)?.getNip55Handler()
+        callerPackage = callingActivity?.packageName ?: "unknown"
+        requestId = intent.getStringExtra("id")
+
+        parseAndSetRequest(intent)
+
+        if (request == null) return
+
+        setContent {
+            KeepAndroidTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    request?.let { req ->
+                        ApprovalScreen(
+                            request = req,
+                            callerPackage = callerPackage,
+                            onApprove = { handleApprove() },
+                            onReject = { finishWithError("User rejected") }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        callerPackage = callingActivity?.packageName ?: "unknown"
+        requestId = intent.getStringExtra("id")
+        parseAndSetRequest(intent)
+    }
+
+    private fun parseAndSetRequest(intent: Intent) {
+        val uri = intent.data?.toString() ?: run {
+            finishWithError("Invalid request")
+            return
+        }
+
+        try {
+            request = handler?.parseIntentUri(uri)
+        } catch (e: Exception) {
+            finishWithError("Invalid request")
+        }
+    }
+
+    private fun handleApprove() {
+        lifecycleScope.launch {
+            try {
+                val needsBiometric = request?.requestType != Nip55RequestType.GET_PUBLIC_KEY
+
+                if (needsBiometric) {
+                    val authenticated = biometricHelper.authenticate(
+                        title = "Approve Request",
+                        subtitle = getRequestDescription(request!!)
+                    )
+                    if (!authenticated) {
+                        finishWithError("Authentication failed")
+                        return@launch
+                    }
+                }
+
+                val response = handler?.handleRequest(request!!)
+                if (response != null) {
+                    finishWithResult(response)
+                } else {
+                    finishWithError("No response")
+                }
+            } catch (e: Exception) {
+                finishWithError("Request failed")
+            }
+        }
+    }
+
+    private fun getRequestDescription(request: Nip55Request): String =
+        request.requestType.displayName()
+
+    private fun finishWithResult(response: Nip55Response) {
+        val resultIntent = Intent().apply {
+            putExtra("result", response.result)
+            putExtra("package", packageName)
+            response.event?.let { putExtra("event", it) }
+            requestId?.let { putExtra("id", it) }
+        }
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+
+    private fun finishWithError(error: String) {
+        val resultIntent = Intent().apply {
+            putExtra("error", error)
+        }
+        setResult(RESULT_CANCELED, resultIntent)
+        finish()
+    }
+}
+
+@Composable
+fun ApprovalScreen(
+    request: Nip55Request,
+    callerPackage: String,
+    onApprove: () -> Unit,
+    onReject: () -> Unit
+) {
+    var isLoading by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Signing Request",
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "from $callerPackage",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Type",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = request.requestType.displayName(),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+
+                if (request.content.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Content",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (request.content.length > 200) {
+                            request.content.take(200) + "..."
+                        } else {
+                            request.content
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                request.pubkey?.let { pk ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Recipient",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${pk.take(16)}...${pk.takeLast(8)}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        if (isLoading) {
+            CircularProgressIndicator()
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onReject,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Reject")
+                }
+                Button(
+                    onClick = {
+                        isLoading = true
+                        onApprove()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Approve")
+                }
+            }
+        }
+    }
+}

@@ -10,6 +10,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 class BiometricHelper(private val activity: FragmentActivity) {
+    private val executor = ContextCompat.getMainExecutor(activity)
 
     enum class BiometricStatus {
         AVAILABLE,
@@ -29,23 +30,42 @@ class BiometricHelper(private val activity: FragmentActivity) {
         }
     }
 
+    suspend fun authenticate(
+        title: String = "Authenticate",
+        subtitle: String = "Confirm your identity",
+        negativeButtonText: String = "Cancel"
+    ): Boolean = suspendCoroutine { continuation ->
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                continuation.resume(true)
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                continuation.resume(false)
+            }
+
+            override fun onAuthenticationFailed() {}
+        }
+
+        BiometricPrompt(activity, executor, callback)
+            .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+    }
+
     suspend fun authenticateWithCrypto(
         cipher: Cipher,
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel"
     ): Cipher? = suspendCoroutine { continuation ->
-        val executor = ContextCompat.getMainExecutor(activity)
-
         val callback = object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 continuation.resume(result.cryptoObject?.cipher)
             }
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                if (errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
                     errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                ) {
+                if (isCancellation) {
                     continuation.resume(null)
                 } else {
                     continuation.resumeWithException(
@@ -54,22 +74,25 @@ class BiometricHelper(private val activity: FragmentActivity) {
                 }
             }
 
-            override fun onAuthenticationFailed() {
-            }
+            override fun onAuthenticationFailed() {}
         }
 
-        val biometricPrompt = BiometricPrompt(activity, executor, callback)
-        val cryptoObject = BiometricPrompt.CryptoObject(cipher)
-
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(title)
-            .setSubtitle(subtitle)
-            .setNegativeButtonText(negativeButtonText)
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-            .build()
-
-        biometricPrompt.authenticate(promptInfo, cryptoObject)
+        BiometricPrompt(activity, executor, callback).authenticate(
+            buildPromptInfo(title, subtitle, negativeButtonText),
+            BiometricPrompt.CryptoObject(cipher)
+        )
     }
+
+    private fun buildPromptInfo(
+        title: String,
+        subtitle: String,
+        negativeButtonText: String
+    ): BiometricPrompt.PromptInfo = BiometricPrompt.PromptInfo.Builder()
+        .setTitle(title)
+        .setSubtitle(subtitle)
+        .setNegativeButtonText(negativeButtonText)
+        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        .build()
 
     class BiometricException(val errorCode: Int, message: String) : Exception(message)
 }
