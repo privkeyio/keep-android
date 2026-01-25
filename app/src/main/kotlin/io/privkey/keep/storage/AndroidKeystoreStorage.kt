@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -49,6 +50,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         )
     }
 
+    @Synchronized
     private fun getOrCreateKey(): SecretKey {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) {
             val keyGenerator = KeyGenerator.getInstance(
@@ -120,8 +122,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key)
             return cipher
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
         } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for encryption: ${e.message}")
+            throw KeepMobileException.StorageException("Failed to initialize cipher for encryption")
         }
     }
 
@@ -133,8 +137,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
             cipher.init(Cipher.DECRYPT_MODE, key, spec)
             return cipher
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
         } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for decryption: ${e.message}")
+            throw KeepMobileException.StorageException("Failed to initialize cipher for decryption")
         }
     }
 
@@ -164,7 +170,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     private fun saveShareData(encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
-        prefs.edit()
+        val saved = prefs.edit()
             .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString(KEY_SHARE_NAME, metadata.name)
@@ -175,7 +181,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 KEY_SHARE_GROUP_PUBKEY,
                 Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
             )
-            .apply()
+            .commit()
+        if (!saved) {
+            throw KeepMobileException.StorageException("Failed to save share data")
+        }
     }
 
     override fun loadShare(): ByteArray {
@@ -219,7 +228,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         } catch (e: KeepMobileException.StorageException) {
             throw e
         } catch (e: Exception) {
-            throw KeepMobileException.StorageException(e.message ?: "Failed to delete share")
+            throw KeepMobileException.StorageException("Failed to delete share")
         }
     }
 }
