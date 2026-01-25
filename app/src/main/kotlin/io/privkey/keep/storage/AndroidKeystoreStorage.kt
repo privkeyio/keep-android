@@ -88,17 +88,6 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun isHardwareBacked(): Boolean {
-        return try {
-            val key = getOrCreateKey()
-            val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
-            val keyInfo = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
-            keyInfo.isInsideSecureHardware
-        } catch (e: Exception) {
-            false
-        }
-    }
-
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
         return try {
@@ -217,18 +206,16 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun deleteShare() {
+        val cleared = prefs.edit().clear().commit()
+        if (!cleared) {
+            throw KeepMobileException.StorageException("Failed to clear share metadata")
+        }
         try {
-            val cleared = prefs.edit().clear().commit()
-            if (!cleared) {
-                throw KeepMobileException.StorageException("Failed to clear share metadata")
-            }
             if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
                 keyStore.deleteEntry(KEYSTORE_ALIAS)
             }
-        } catch (e: KeepMobileException.StorageException) {
-            throw e
         } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to delete share")
+            throw KeepMobileException.StorageException("Failed to delete keystore entry")
         }
     }
 }
