@@ -115,19 +115,27 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun getCipherForEncryption(): Cipher {
-        val key = getOrCreateKey()
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        return cipher
+        try {
+            val key = getOrCreateKey()
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            return cipher
+        } catch (e: Throwable) {
+            throw KeepMobileException.StorageException("Failed to initialize cipher for encryption: ${e.message}")
+        }
     }
 
     fun getCipherForDecryption(): Cipher? {
         val iv = prefs.getString(KEY_SHARE_IV, null) ?: return null
-        val key = getOrCreateKey()
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
-        cipher.init(Cipher.DECRYPT_MODE, key, spec)
-        return cipher
+        try {
+            val key = getOrCreateKey()
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
+            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            return cipher
+        } catch (e: Throwable) {
+            throw KeepMobileException.StorageException("Failed to initialize cipher for decryption: ${e.message}")
+        }
     }
 
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
