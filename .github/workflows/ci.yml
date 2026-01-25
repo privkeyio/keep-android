@@ -29,6 +29,9 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;27.0.12077973"
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -46,6 +49,7 @@ jobs:
         run: ./build-rust.sh
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
