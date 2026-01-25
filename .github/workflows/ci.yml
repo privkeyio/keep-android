@@ -55,7 +55,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Run unit tests
-        run: ./gradlew test --no-daemon
+        run: ./gradlew testDebugUnitTest --no-daemon
 
       - name: Run lint
-        run: ./gradlew lint --no-daemon
+        run: ./gradlew lintDebug --no-daemon
