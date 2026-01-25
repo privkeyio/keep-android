@@ -201,10 +201,15 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun deleteShare() {
         try {
-            prefs.edit().clear().apply()
+            val cleared = prefs.edit().clear().commit()
+            if (!cleared) {
+                throw KeepMobileException.StorageException("Failed to clear share metadata")
+            }
             if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
                 keyStore.deleteEntry(KEYSTORE_ALIAS)
             }
+        } catch (e: KeepMobileException.StorageException) {
+            throw e
         } catch (e: Exception) {
             throw KeepMobileException.StorageException(e.message ?: "Failed to delete share")
         }
