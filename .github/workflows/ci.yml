@@ -45,7 +45,7 @@ jobs:
       - name: Build native libraries
         run: ./build-rust.sh
         env:
-          KEEP_REPO: ./keep
+          KEEP_REPO: ${{ github.workspace }}/keep
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
