@@ -28,6 +28,8 @@ import kotlinx.coroutines.withContext
 private fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
     Nip55RequestType.SIGN_EVENT -> "Sign Event"
+    Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
+    Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
     Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
     Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
@@ -141,6 +143,7 @@ class Nip55Activity : FragmentActivity() {
                 content = parsed.content,
                 pubkey = parsed.pubkey,
                 returnType = parsed.returnType,
+                compressionType = parsed.compressionType,
                 callbackUrl = parsed.callbackUrl,
                 id = parsed.id,
                 currentUser = currentUser ?: parsed.currentUser,
@@ -168,6 +171,8 @@ class Nip55Activity : FragmentActivity() {
                 val requestType = when (type) {
                     "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
                     "sign_event" -> Nip55RequestType.SIGN_EVENT
+                    "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
+                    "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
                     "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
                     "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
                     "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
@@ -179,6 +184,7 @@ class Nip55Activity : FragmentActivity() {
                     content = content,
                     pubkey = pubkey,
                     returnType = "signature",
+                    compressionType = "none",
                     callbackUrl = null,
                     id = id,
                     currentUser = currentUser,
