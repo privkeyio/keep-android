@@ -24,16 +24,12 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val CODE_GET_PUBLIC_KEY = 1
         private const val CODE_SIGN_EVENT = 2
-        private const val CODE_NIP04_ENCRYPT = 3
-        private const val CODE_NIP04_DECRYPT = 4
         private const val CODE_NIP44_ENCRYPT = 5
         private const val CODE_NIP44_DECRYPT = 6
 
         private val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
             addURI(AUTHORITY, "get_public_key", CODE_GET_PUBLIC_KEY)
             addURI(AUTHORITY, "sign_event", CODE_SIGN_EVENT)
-            addURI(AUTHORITY, "nip04_encrypt", CODE_NIP04_ENCRYPT)
-            addURI(AUTHORITY, "nip04_decrypt", CODE_NIP04_DECRYPT)
             addURI(AUTHORITY, "nip44_encrypt", CODE_NIP44_ENCRYPT)
             addURI(AUTHORITY, "nip44_decrypt", CODE_NIP44_DECRYPT)
         }
@@ -77,8 +73,6 @@ class Nip55ContentProvider : ContentProvider() {
         val requestType = when (uriMatcher.match(uri)) {
             CODE_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
             CODE_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
-            CODE_NIP04_ENCRYPT -> Nip55RequestType.NIP04_ENCRYPT
-            CODE_NIP04_DECRYPT -> Nip55RequestType.NIP04_DECRYPT
             CODE_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             CODE_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
             else -> return errorCursor("invalid_uri", null)
@@ -87,7 +81,6 @@ class Nip55ContentProvider : ContentProvider() {
         val id = uri.getQueryParameter("id")
         val content = uri.getQueryParameter("content") ?: ""
         val pubkey = uri.getQueryParameter("pubkey")
-        val currentUser = uri.getQueryParameter("current_user")
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) {
             parseEventKind(content)
@@ -99,7 +92,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         when (permissionResult) {
             true -> {
-                return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, currentUser, id, eventKind)
+                return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
             }
             false -> {
                 runBlocking {
@@ -120,7 +113,6 @@ class Nip55ContentProvider : ContentProvider() {
         requestType: Nip55RequestType,
         content: String,
         pubkey: String?,
-        currentUser: String?,
         id: String?,
         eventKind: Int?
     ): Cursor {
@@ -129,11 +121,8 @@ class Nip55ContentProvider : ContentProvider() {
             content = content,
             pubkey = pubkey,
             returnType = "signature",
-            compressionType = "none",
             callbackUrl = null,
-            id = id,
-            currentUser = currentUser,
-            permissions = null
+            id = id
         )
 
         return try {

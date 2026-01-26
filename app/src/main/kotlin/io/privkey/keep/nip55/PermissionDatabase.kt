@@ -52,6 +52,9 @@ interface Nip55PermissionDao {
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
 
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType")
+    suspend fun deleteForCallerAndType(callerPackage: String, requestType: String)
+
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 }
@@ -177,7 +180,7 @@ class PermissionStore(private val db: Nip55Database) {
         if (requestType == null) {
             dao.deleteForCaller(callerPackage)
         } else {
-            dao.deleteForCaller(callerPackage)
+            dao.deleteForCallerAndType(callerPackage, requestType.name)
         }
     }
 

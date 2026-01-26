@@ -13,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -40,6 +41,7 @@ class MainActivity : FragmentActivity() {
                     if (keepMobile != null && storage != null) {
                         MainScreen(
                             keepMobile = keepMobile,
+                            storage = storage,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onBiometricRequest = { title, subtitle, cipher, callback ->
@@ -73,6 +75,7 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun MainScreen(
     keepMobile: KeepMobile,
+    storage: AndroidKeystoreStorage,
     securityLevel: String,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
@@ -81,6 +84,8 @@ fun MainScreen(
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
     var pendingCount by remember { mutableStateOf(0) }
+    var showImportScreen by remember { mutableStateOf(false) }
+    var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
 
     fun refreshShareState() {
         hasShare = keepMobile.hasShare()
@@ -98,6 +103,34 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    if (showImportScreen) {
+        ImportShareScreen(
+            onImport = { data, passphrase, name, cipher ->
+                importState = ImportState.Importing
+                try {
+                    storage.setPendingCipher(cipher)
+                    val result = keepMobile.importShare(data, passphrase, name)
+                    importState = ImportState.Success(result.name)
+                    refreshShareState()
+                } catch (e: Exception) {
+                    importState = ImportState.Error(e.message ?: "Import failed")
+                } finally {
+                    storage.clearPendingCipher()
+                }
+            },
+            onGetCipher = { storage.getCipherForEncryption() },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Import Share", "Authenticate to store share securely", cipher, callback)
+            },
+            onDismiss = {
+                showImportScreen = false
+                importState = ImportState.Idle
+            },
+            importState = importState
+        )
+        return
     }
 
     Column(
@@ -138,7 +171,7 @@ fun MainScreen(
             }
         } else {
             NoShareCard(
-                onImport = { refreshShareState() }
+                onImport = { showImportScreen = true }
             )
         }
     }

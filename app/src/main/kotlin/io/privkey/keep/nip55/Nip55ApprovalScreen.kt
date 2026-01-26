@@ -12,18 +12,15 @@ import io.privkey.keep.uniffi.Nip55RequestType
 internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
     Nip55RequestType.SIGN_EVENT -> "Sign Event"
-    Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
-    Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
     Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
     Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
-    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
 private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
     Nip55RequestType.SIGN_EVENT -> "Signing Request"
-    Nip55RequestType.NIP04_ENCRYPT, Nip55RequestType.NIP44_ENCRYPT -> "Encryption Request"
-    Nip55RequestType.NIP04_DECRYPT, Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decryption Request"
+    Nip55RequestType.NIP44_ENCRYPT -> "Encryption Request"
+    Nip55RequestType.NIP44_DECRYPT -> "Decryption Request"
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
@@ -49,7 +46,6 @@ fun ApprovalScreen(
     request: Nip55Request,
     callerPackage: String?,
     callerVerified: Boolean,
-    batchCount: Int? = null,
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
@@ -70,7 +66,7 @@ fun ApprovalScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (batchCount != null) "Batch Request ($batchCount)" else request.requestType.headerTitle(),
+            text = request.requestType.headerTitle(),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -113,7 +109,7 @@ fun ApprovalScreen(
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (batchCount != null) "Approve All" else "Approve")
+                    Text("Approve")
                 }
             }
         }

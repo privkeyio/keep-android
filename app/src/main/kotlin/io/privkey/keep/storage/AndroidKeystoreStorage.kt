@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import java.security.KeyStore
+import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -32,6 +33,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_SHARE_TOTAL = "share_total"
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
     }
+
+    private val pendingCipher = AtomicReference<Cipher?>(null)
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -153,8 +156,16 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
+    fun setPendingCipher(cipher: Cipher) {
+        pendingCipher.set(cipher)
+    }
+
+    fun clearPendingCipher() {
+        pendingCipher.set(null)
+    }
+
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = getCipherForEncryption()
+        val cipher = pendingCipher.getAndSet(null) ?: getCipherForEncryption()
         storeShareWithCipher(cipher, data, metadata)
     }
 
