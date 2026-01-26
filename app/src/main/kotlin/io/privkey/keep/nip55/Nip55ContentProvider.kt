@@ -7,14 +7,16 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
+import android.util.Log
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.runBlocking
 
 class Nip55ContentProvider : ContentProvider() {
     private var handler: Nip55Handler? = null
-    private val permissionStore = PermissionStore()
+    private var permissionStore: PermissionStore? = null
 
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -46,14 +48,22 @@ class Nip55ContentProvider : ContentProvider() {
         return handler
     }
 
+    private fun getPermissionStore(): PermissionStore? {
+        if (permissionStore == null) {
+            permissionStore = (context?.applicationContext as? KeepMobileApp)?.getPermissionStore()
+        }
+        return permissionStore
+    }
+
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
         selection: String?,
         selectionArgs: Array<out String>?,
         sortOrder: String?
-    ): Cursor {
+    ): Cursor? {
         val h = getHandler() ?: return errorCursor("not_initialized", null)
+        val store = getPermissionStore()
 
         val callerPackage = getCallerPackage()
         if (callerPackage == null) {
@@ -73,10 +83,41 @@ class Nip55ContentProvider : ContentProvider() {
         val pubkey = uri.getQueryParameter("pubkey")
         val currentUser = uri.getQueryParameter("current_user")
 
-        if (!permissionStore.hasPermission(callerPackage, requestType)) {
-            return rejectedCursor(id)
-        }
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) {
+            parseEventKind(content)
+        } else null
 
+        val permissionResult = if (store != null) {
+            runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
+        } else null
+
+        when (permissionResult) {
+            true -> {
+                return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, currentUser, id, eventKind)
+            }
+            false -> {
+                runBlocking {
+                    store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
+                }
+                return rejectedCursor(id)
+            }
+            null -> {
+                return null
+            }
+        }
+    }
+
+    private fun executeBackgroundRequest(
+        h: Nip55Handler,
+        store: PermissionStore?,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        content: String,
+        pubkey: String?,
+        currentUser: String?,
+        id: String?,
+        eventKind: Int?
+    ): Cursor {
         val request = Nip55Request(
             requestType = requestType,
             content = content,
@@ -90,6 +131,9 @@ class Nip55ContentProvider : ContentProvider() {
 
         return try {
             val response = h.handleRequest(request, callerPackage)
+            runBlocking {
+                store?.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+            }
             val cursor = MatrixCursor(RESULT_COLUMNS)
             val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
                 response.result
@@ -104,9 +148,14 @@ class Nip55ContentProvider : ContentProvider() {
             ))
             cursor
         } catch (e: Exception) {
+            Log.e(TAG, "Background request failed", e)
             errorCursor("request_failed", id)
         }
     }
+
+    private fun parseEventKind(content: String): Int? = runCatching {
+        org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
+    }.getOrNull()
 
     private fun getCallerPackage(): String? {
         val callingUid = Binder.getCallingUid()
@@ -134,28 +183,4 @@ class Nip55ContentProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
-}
-
-class PermissionStore {
-    private val permissions = mutableMapOf<String, MutableSet<Nip55RequestType>>()
-
-    @Synchronized
-    fun grantPermission(callerPackage: String, requestType: Nip55RequestType) {
-        permissions.getOrPut(callerPackage) { mutableSetOf() }.add(requestType)
-    }
-
-    @Synchronized
-    fun revokePermission(callerPackage: String, requestType: Nip55RequestType) {
-        permissions[callerPackage]?.remove(requestType)
-    }
-
-    @Synchronized
-    fun hasPermission(callerPackage: String, requestType: Nip55RequestType): Boolean {
-        return permissions[callerPackage]?.contains(requestType) == true
-    }
-
-    @Synchronized
-    fun revokeAll(callerPackage: String) {
-        permissions.remove(callerPackage)
-    }
 }

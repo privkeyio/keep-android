@@ -36,6 +36,7 @@ private fun Nip55RequestType.displayName(): String = when (this) {
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var handler: Nip55Handler? = null
+    private var permissionStore: PermissionStore? = null
     private var request: Nip55Request? = null
     private var batchRequests: List<Nip55Request>? = null
     private var requestId: String? = null
@@ -53,6 +54,7 @@ class Nip55Activity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         biometricHelper = BiometricHelper(this)
         handler = (application as? KeepMobileApp)?.getNip55Handler()
+        permissionStore = (application as? KeepMobileApp)?.getPermissionStore()
         handleIntent(intent)
     }
 
@@ -86,8 +88,8 @@ class Nip55Activity : FragmentActivity() {
         }
 
         val packages = packageManager.getPackagesForUid(callingUid)
-        callerPackage = packages?.firstOrNull()
         callerVerified = packages?.size == 1
+        callerPackage = if (callerVerified) packages?.firstOrNull() else null
     }
 
     private fun setupContent() {
@@ -108,8 +110,10 @@ class Nip55Activity : FragmentActivity() {
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
                         batchCount = if (isBatch) batch?.size else null,
-                        onApprove = { if (isBatch) handleBatchApprove() else handleApprove() },
-                        onReject = { finishWithError("User rejected") }
+                        onApprove = { duration ->
+                            if (isBatch) handleBatchApprove(duration) else handleApprove(duration)
+                        },
+                        onReject = { duration -> handleReject(duration) }
                     )
                 }
             }
@@ -144,6 +148,9 @@ class Nip55Activity : FragmentActivity() {
             )
         }
         request = parsed
+        if (requestId.isNullOrBlank()) {
+            requestId = parsed.id
+        }
     }
 
     private fun parseBatchRequests(json: String): List<Nip55Request>? {
@@ -185,10 +192,14 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun handleApprove() {
+    private fun handleApprove(duration: PermissionDuration) {
         val req = request ?: return
         val h = handler ?: return finishWithError("Handler not initialized")
         val callerId = callerPackage ?: "unknown"
+        val store = permissionStore
+        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) {
+            parseEventKind(req.content)
+        } else null
 
         lifecycleScope.launch {
             val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
@@ -204,12 +215,19 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
 
+            if (store != null && callerId != "unknown") {
+                store.grantPermission(callerId, req.requestType, eventKind, duration)
+            }
+
             val result = withContext(Dispatchers.Default) {
                 runCatching { h.handleRequest(req, callerId) }
             }
 
             result.fold(
-                onSuccess = { response -> finishWithResult(response) },
+                onSuccess = { response ->
+                    store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
+                    finishWithResult(response)
+                },
                 onFailure = { e ->
                     val errorMsg = when (e) {
                         is KeepMobileException.RateLimited -> "rate_limited"
@@ -225,10 +243,28 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun handleBatchApprove() {
+    private fun handleReject(duration: PermissionDuration) {
+        val req = request
+        val callerId = callerPackage ?: "unknown"
+        val store = permissionStore
+        val eventKind = if (req?.requestType == Nip55RequestType.SIGN_EVENT) {
+            parseEventKind(req.content)
+        } else null
+
+        lifecycleScope.launch {
+            if (store != null && callerId != "unknown" && req != null) {
+                store.denyPermission(callerId, req.requestType, eventKind, duration)
+                store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
+            }
+            finishWithError("User rejected")
+        }
+    }
+
+    private fun handleBatchApprove(duration: PermissionDuration) {
         val reqs = batchRequests ?: return
         val h = handler ?: return finishWithError("Handler not initialized")
         val callerId = callerPackage ?: "unknown"
+        val store = permissionStore
 
         lifecycleScope.launch {
             val needsBiometric = reqs.any { it.requestType != Nip55RequestType.GET_PUBLIC_KEY }
@@ -244,11 +280,43 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
 
-            val responses = withContext(Dispatchers.Default) {
-                h.handleBatchRequest(reqs, callerId)
+            if (store != null && callerId != "unknown") {
+                reqs.forEach { req ->
+                    val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) {
+                        parseEventKind(req.content)
+                    } else null
+                    store.grantPermission(callerId, req.requestType, eventKind, duration)
+                }
             }
 
-            finishWithBatchResult(responses)
+            val result = withContext(Dispatchers.Default) {
+                runCatching { h.handleBatchRequest(reqs, callerId) }
+            }
+
+            result.fold(
+                onSuccess = { responses ->
+                    if (store != null) {
+                        reqs.forEach { req ->
+                            val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) {
+                                parseEventKind(req.content)
+                            } else null
+                            store.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
+                        }
+                    }
+                    finishWithBatchResult(responses)
+                },
+                onFailure = { e ->
+                    val errorMsg = when (e) {
+                        is KeepMobileException.RateLimited -> "rate_limited"
+                        is KeepMobileException.NotInitialized -> "not_initialized"
+                        is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
+                        is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
+                        else -> "batch_request_failed"
+                    }
+                    Log.e(TAG, "Batch request failed: ${e.message}")
+                    finishWithError(errorMsg)
+                }
+            )
         }
     }
 
@@ -313,10 +381,12 @@ fun ApprovalScreen(
     callerPackage: String?,
     callerVerified: Boolean,
     batchCount: Int? = null,
-    onApprove: () -> Unit,
-    onReject: () -> Unit
+    onApprove: (PermissionDuration) -> Unit,
+    onReject: (PermissionDuration) -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
+    var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
+    var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventKind = remember(request) {
         if (request.requestType == Nip55RequestType.SIGN_EVENT) {
             parseEventKind(request.content)
@@ -343,7 +413,16 @@ fun ApprovalScreen(
 
         RequestDetailsCard(request, eventKind)
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        DurationSelector(
+            selectedDuration = selectedDuration,
+            expanded = durationDropdownExpanded,
+            onExpandedChange = { durationDropdownExpanded = it },
+            onDurationSelected = { selectedDuration = it }
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         if (isLoading) {
             CircularProgressIndicator()
@@ -353,7 +432,7 @@ fun ApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = onReject,
+                    onClick = { onReject(selectedDuration) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Reject")
@@ -361,11 +440,57 @@ fun ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove()
+                        onApprove(selectedDuration)
                     },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(if (batchCount != null) "Approve All" else "Approve")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DurationSelector(
+    selectedDuration: PermissionDuration,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onDurationSelected: (PermissionDuration) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Remember this choice",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = onExpandedChange
+        ) {
+            OutlinedTextField(
+                value = selectedDuration.displayName,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { onExpandedChange(false) }
+            ) {
+                PermissionDuration.entries.forEach { duration ->
+                    DropdownMenuItem(
+                        text = { Text(duration.displayName) },
+                        onClick = {
+                            onDurationSelected(duration)
+                            onExpandedChange(false)
+                        }
+                    )
                 }
             }
         }
