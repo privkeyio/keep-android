@@ -111,6 +111,7 @@ class Nip55ContentProvider : ContentProvider() {
             content = content,
             pubkey = pubkey,
             returnType = "signature",
+            compressionType = "none",
             callbackUrl = null,
             id = id,
             currentUser = null,
