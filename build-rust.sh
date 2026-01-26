@@ -24,6 +24,9 @@ for target in "${TARGETS[@]}"; do
     cargo ndk -t "$target" -o "$JNILIBS_DIR" build --release
 done
 
+# Remove unnecessary redb cdylib artifacts (redb is statically linked)
+rm -f "$JNILIBS_DIR"/*/libredb-*.so
+
 # Generate Kotlin bindings
 echo "Generating Kotlin bindings..."
 cargo run --bin uniffi-bindgen generate \

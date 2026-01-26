@@ -27,6 +27,25 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".nip55.Nip55Activity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.KeepAndroid">
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostrsigner" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name=".nip55.Nip55ContentProvider"
+            android:authorities="io.privkey.keep.nip55"
+            android:exported="true" />
+
     </application>
 
 </manifest>

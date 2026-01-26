@@ -11,7 +11,7 @@ build/
 # Local properties
 local.properties
 
-# Generated files
+# Generated files (built by CI)
 app/src/main/jniLibs/
 app/src/main/kotlin/io/privkey/keep/uniffi/
 
