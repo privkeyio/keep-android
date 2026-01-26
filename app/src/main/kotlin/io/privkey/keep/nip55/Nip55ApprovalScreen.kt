@@ -14,6 +14,9 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.SIGN_EVENT -> "Sign Event"
     Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
     Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
+    Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
+    Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
+    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
 private fun Nip55RequestType.headerTitle(): String = when (this) {
@@ -21,6 +24,9 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.SIGN_EVENT -> "Signing Request"
     Nip55RequestType.NIP44_ENCRYPT -> "Encryption Request"
     Nip55RequestType.NIP44_DECRYPT -> "Decryption Request"
+    Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
+    Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
+    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {

@@ -98,7 +98,7 @@ class Nip55ContentProvider : ContentProvider() {
                 }
                 rejectedCursor(id)
             }
-            null -> null
+            null -> errorCursor("permissions_unavailable", id)
         }
     }
 
@@ -117,8 +117,11 @@ class Nip55ContentProvider : ContentProvider() {
             content = content,
             pubkey = pubkey,
             returnType = "signature",
+            compressionType = "none",
             callbackUrl = null,
-            id = id
+            id = id,
+            currentUser = null,
+            permissions = null
         )
 
         return try {

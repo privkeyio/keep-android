@@ -28,6 +28,7 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import java.util.concurrent.Executors
 import javax.crypto.Cipher
 
@@ -159,19 +160,35 @@ fun ImportShareScreen(
                     Text(if (importState is ImportState.Success) "Done" else "Cancel")
                 }
                 if (importState !is ImportState.Success) {
+                    var cipherError by remember { mutableStateOf<String?>(null) }
                     Button(
                         onClick = {
-                            val cipher = onGetCipher()
-                            onBiometricAuth(cipher) { authedCipher ->
-                                if (authedCipher != null) {
-                                    onImport(shareData, passphrase, shareName, authedCipher)
+                            cipherError = null
+                            try {
+                                val cipher = onGetCipher()
+                                onBiometricAuth(cipher) { authedCipher ->
+                                    if (authedCipher != null) {
+                                        onImport(shareData, passphrase, shareName, authedCipher)
+                                    }
                                 }
+                            } catch (e: KeyPermanentlyInvalidatedException) {
+                                cipherError = "Biometric key invalidated. Please re-enroll biometrics."
+                            } catch (e: Exception) {
+                                cipherError = "Failed to initialize encryption: ${e.message}"
                             }
                         },
                         modifier = Modifier.weight(1f),
                         enabled = shareData.isNotBlank() && passphrase.isNotBlank() && isInputEnabled
                     ) {
                         Text("Import")
+                    }
+                    cipherError?.let { error ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }
