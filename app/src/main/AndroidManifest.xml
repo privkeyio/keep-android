@@ -41,6 +41,11 @@
             </intent-filter>
         </activity>
 
+        <provider
+            android:name=".nip55.Nip55ContentProvider"
+            android:authorities="io.privkey.keep.nip55"
+            android:exported="true" />
+
     </application>
 
 </manifest>

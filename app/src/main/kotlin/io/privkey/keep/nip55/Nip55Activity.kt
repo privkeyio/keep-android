@@ -30,15 +30,19 @@ private fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.SIGN_EVENT -> "Sign Event"
     Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
     Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
+    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var handler: Nip55Handler? = null
     private var request: Nip55Request? = null
+    private var batchRequests: List<Nip55Request>? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
+    private var currentUser: String? = null
+    private var permissions: String? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -47,35 +51,29 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         biometricHelper = BiometricHelper(this)
         handler = (application as? KeepMobileApp)?.getNip55Handler()
-        identifyCaller()
-        requestId = intent.getStringExtra("id")
-
-        parseAndSetRequest(intent)
-
-        if (request == null) return
-
-        setupContent()
+        handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
         identifyCaller()
         requestId = intent.getStringExtra("id")
+        currentUser = intent.getStringExtra("current_user")
+        permissions = intent.getStringExtra("permissions")
         parseAndSetRequest(intent)
-
-        if (request == null) return
-
-        setupContent()
+        if (request != null || batchRequests != null) setupContent()
     }
 
     private fun identifyCaller() {
-        val activity = callingActivity
-        if (activity != null) {
-            callerPackage = activity.packageName
+        callingActivity?.let {
+            callerPackage = it.packageName
             callerVerified = true
             return
         }
@@ -88,19 +86,16 @@ class Nip55Activity : FragmentActivity() {
         }
 
         val packages = packageManager.getPackagesForUid(callingUid)
-        if (packages != null && packages.size == 1) {
-            callerPackage = packages[0]
-            callerVerified = true
-        } else {
-            callerPackage = packages?.firstOrNull()
-            callerVerified = false
-        }
+        callerPackage = packages?.firstOrNull()
+        callerVerified = packages?.size == 1
     }
 
     private fun setupContent() {
-        val currentRequest = request ?: return
+        val batch = batchRequests
+        val currentRequest = if (batch != null && batch.isNotEmpty()) batch[0] else request ?: return
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
+        val isBatch = batch != null && batch.size > 1
 
         setContent {
             KeepAndroidTheme {
@@ -112,7 +107,8 @@ class Nip55Activity : FragmentActivity() {
                         request = currentRequest,
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
-                        onApprove = { handleApprove() },
+                        batchCount = if (isBatch) batch?.size else null,
+                        onApprove = { if (isBatch) handleBatchApprove() else handleApprove() },
                         onReject = { finishWithError("User rejected") }
                     )
                 }
@@ -122,8 +118,71 @@ class Nip55Activity : FragmentActivity() {
 
     private fun parseAndSetRequest(intent: Intent) {
         val uri = intent.data?.toString() ?: return finishWithError("Invalid request")
-        request = runCatching { handler?.parseIntentUri(uri) }.getOrNull()
+
+        val batchJson = intent.getStringExtra("requests")
+        if (batchJson != null) {
+            batchRequests = parseBatchRequests(batchJson)
+            if (batchRequests == null || batchRequests!!.isEmpty()) {
+                return finishWithError("Invalid batch request")
+            }
+            return
+        }
+
+        var parsed = runCatching { handler?.parseIntentUri(uri) }.getOrNull()
             ?: return finishWithError("Invalid request")
+
+        if (currentUser != null || permissions != null) {
+            parsed = Nip55Request(
+                requestType = parsed.requestType,
+                content = parsed.content,
+                pubkey = parsed.pubkey,
+                returnType = parsed.returnType,
+                callbackUrl = parsed.callbackUrl,
+                id = parsed.id,
+                currentUser = currentUser ?: parsed.currentUser,
+                permissions = permissions ?: parsed.permissions
+            )
+        }
+        request = parsed
+    }
+
+    private fun parseBatchRequests(json: String): List<Nip55Request>? {
+        return try {
+            val h = handler ?: return null
+            val array = org.json.JSONArray(json)
+            val requests = mutableListOf<Nip55Request>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val type = obj.getString("type")
+                val content = obj.optString("content", "")
+                val pubkey: String? = if (obj.has("pubkey")) obj.getString("pubkey") else null
+                val id: String? = if (obj.has("id")) obj.getString("id") else null
+
+                val requestType = when (type) {
+                    "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
+                    "sign_event" -> Nip55RequestType.SIGN_EVENT
+                    "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
+                    "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+                    "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
+                    else -> continue
+                }
+
+                requests.add(Nip55Request(
+                    requestType = requestType,
+                    content = content,
+                    pubkey = pubkey,
+                    returnType = "signature",
+                    callbackUrl = null,
+                    id = id,
+                    currentUser = currentUser,
+                    permissions = permissions
+                ))
+            }
+            requests
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse batch requests", e)
+            null
+        }
     }
 
     private fun handleApprove() {
@@ -166,11 +225,54 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    private fun handleBatchApprove() {
+        val reqs = batchRequests ?: return
+        val h = handler ?: return finishWithError("Handler not initialized")
+        val callerId = callerPackage ?: "unknown"
+
+        lifecycleScope.launch {
+            val needsBiometric = reqs.any { it.requestType != Nip55RequestType.GET_PUBLIC_KEY }
+
+            if (needsBiometric) {
+                val authenticated = biometricHelper.authenticate(
+                    title = "Approve Batch Request",
+                    subtitle = "${reqs.size} operations"
+                )
+                if (!authenticated) {
+                    finishWithError("Authentication failed")
+                    return@launch
+                }
+            }
+
+            val responses = withContext(Dispatchers.Default) {
+                h.handleBatchRequest(reqs, callerId)
+            }
+
+            finishWithBatchResult(responses)
+        }
+    }
+
     private fun finishWithResult(response: Nip55Response) {
+        val req = request
         val resultIntent = Intent().apply {
             putExtra("result", response.result)
             putExtra("package", packageName)
             response.event?.let { putExtra("event", it) }
+            requestId?.let { putExtra("id", it) }
+            if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+                putExtra("pubkey", response.result)
+            }
+        }
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+
+    private fun finishWithBatchResult(responses: List<Nip55Response>) {
+        val h = handler ?: return finishWithError("Handler not initialized")
+        val resultsJson = h.serializeBatchResults(responses)
+        val resultIntent = Intent().apply {
+            putExtra("results", resultsJson)
+            putExtra("package", packageName)
             requestId?.let { putExtra("id", it) }
         }
         setResult(RESULT_OK, resultIntent)
@@ -187,12 +289,9 @@ class Nip55Activity : FragmentActivity() {
     }
 }
 
-private fun parseEventKind(content: String): Int? {
-    return runCatching {
-        val json = org.json.JSONObject(content)
-        json.optInt("kind", -1).takeIf { it >= 0 }
-    }.getOrNull()
-}
+private fun parseEventKind(content: String): Int? = runCatching {
+    org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
+}.getOrNull()
 
 private fun eventKindDescription(kind: Int): String = when (kind) {
     0 -> "Profile Metadata"
@@ -213,6 +312,7 @@ fun ApprovalScreen(
     request: Nip55Request,
     callerPackage: String?,
     callerVerified: Boolean,
+    batchCount: Int? = null,
     onApprove: () -> Unit,
     onReject: () -> Unit
 ) {
@@ -231,95 +331,17 @@ fun ApprovalScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Signing Request",
+            text = if (batchCount != null) "Batch Request ($batchCount)" else "Signing Request",
             style = MaterialTheme.typography.headlineMedium
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (callerPackage != null) {
-            Text(
-                text = "from $callerPackage",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (callerVerified) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.error
-                }
-            )
-            if (!callerVerified) {
-                Text(
-                    text = "(unverified)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        } else {
-            Text(
-                text = "from unknown app",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
+        CallerLabel(callerPackage, callerVerified)
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Type",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = request.requestType.displayName(),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-
-                eventKind?.let { kind ->
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Event Kind",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = eventKindDescription(kind),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-
-                if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Content",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = if (request.content.length > 200) {
-                            request.content.take(200) + "..."
-                        } else {
-                            request.content
-                        },
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                request.pubkey?.let { pk ->
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Recipient",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${pk.take(16)}...${pk.takeLast(8)}",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        }
+        RequestDetailsCard(request, eventKind)
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -343,9 +365,76 @@ fun ApprovalScreen(
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Approve")
+                    Text(if (batchCount != null) "Approve All" else "Approve")
                 }
             }
         }
     }
+}
+
+@Composable
+private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
+    val errorColor = MaterialTheme.colorScheme.error
+    if (callerPackage == null) {
+        Text(
+            text = "from unknown app",
+            style = MaterialTheme.typography.bodySmall,
+            color = errorColor
+        )
+        return
+    }
+
+    Text(
+        text = "from $callerPackage",
+        style = MaterialTheme.typography.bodySmall,
+        color = if (callerVerified) MaterialTheme.colorScheme.onSurfaceVariant else errorColor
+    )
+    if (!callerVerified) {
+        Text(
+            text = "(unverified)",
+            style = MaterialTheme.typography.labelSmall,
+            color = errorColor
+        )
+    }
+}
+
+@Composable
+private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            DetailRow("Type", request.requestType.displayName())
+
+            eventKind?.let { kind ->
+                Spacer(modifier = Modifier.height(16.dp))
+                DetailRow("Event Kind", eventKindDescription(kind))
+            }
+
+            if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
+                val displayContent = request.content.take(200).let {
+                    if (request.content.length > 200) "$it..." else it
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
+            }
+
+            request.pubkey?.let { pk ->
+                Spacer(modifier = Modifier.height(16.dp))
+                DetailRow("Recipient", "${pk.take(16)}...${pk.takeLast(8)}", MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+    valueStyle: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Text(text = value, style = valueStyle)
 }
