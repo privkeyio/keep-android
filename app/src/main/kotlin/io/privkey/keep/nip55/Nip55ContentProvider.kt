@@ -22,6 +22,10 @@ class Nip55ContentProvider : ContentProvider() {
         private const val TAG = "Nip55ContentProvider"
         private const val AUTHORITY = "io.privkey.keep.nip55"
 
+        private const val MAX_ID_LENGTH = 128
+        private const val MAX_PUBKEY_LENGTH = 128
+        private const val MAX_CONTENT_LENGTH = 1024 * 1024
+
         private const val CODE_GET_PUBLIC_KEY = 1
         private const val CODE_SIGN_EVENT = 2
         private const val CODE_NIP44_ENCRYPT = 5
@@ -58,8 +62,8 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        val h = getHandler() ?: return errorCursor("not_initialized", null)
-        val store = getPermissionStore()
+        val h = handler ?: return errorCursor("not_initialized", null)
+        val store = permissionStore
 
         val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
@@ -71,9 +75,9 @@ class Nip55ContentProvider : ContentProvider() {
             else -> return errorCursor("invalid_uri", null)
         }
 
-        val id = uri.getQueryParameter("id")
-        val content = uri.getQueryParameter("content") ?: ""
-        val pubkey = uri.getQueryParameter("pubkey")
+        val id = uri.getQueryParameter("id")?.take(MAX_ID_LENGTH)
+        val content = uri.getQueryParameter("content")?.take(MAX_CONTENT_LENGTH) ?: ""
+        val pubkey = uri.getQueryParameter("pubkey")?.take(MAX_PUBKEY_LENGTH)
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) {
             parseEventKind(content)
@@ -110,7 +114,6 @@ class Nip55ContentProvider : ContentProvider() {
             content = content,
             pubkey = pubkey,
             returnType = "signature",
-            compressionType = "none",
             callbackUrl = null,
             id = id,
             currentUser = null,
@@ -130,7 +133,7 @@ class Nip55ContentProvider : ContentProvider() {
                 response.result,
                 response.event,
                 response.error,
-                response.id,
+                id,
                 pubkeyValue,
                 null
             ))
