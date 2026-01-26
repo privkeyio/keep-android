@@ -90,19 +90,15 @@ class Nip55ContentProvider : ContentProvider() {
             runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
         } else null
 
-        when (permissionResult) {
-            true -> {
-                return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
-            }
+        return when (permissionResult) {
+            true -> executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
             false -> {
                 runBlocking {
                     store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
                 }
-                return rejectedCursor(id)
+                rejectedCursor(id)
             }
-            null -> {
-                return null
-            }
+            null -> null
         }
     }
 
@@ -148,10 +144,6 @@ class Nip55ContentProvider : ContentProvider() {
             errorCursor("request_failed", id)
         }
     }
-
-    private fun parseEventKind(content: String): Int? = runCatching {
-        org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
-    }.getOrNull()
 
     private fun getCallerPackage(): String? {
         val callingUid = Binder.getCallingUid()

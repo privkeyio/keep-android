@@ -33,7 +33,6 @@ import javax.crypto.Cipher
 
 sealed class ImportState {
     object Idle : ImportState()
-    object Scanning : ImportState()
     object Importing : ImportState()
     data class Error(val message: String) : ImportState()
     data class Success(val name: String) : ImportState()
@@ -262,29 +261,19 @@ fun QrScannerScreen(
 
             analysis.setAnalyzer(executor) { imageProxy ->
                 val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    val image = InputImage.fromMediaImage(
-                        mediaImage,
-                        imageProxy.imageInfo.rotationDegrees
-                    )
-                    scanner.process(image)
-                        .addOnSuccessListener { barcodes ->
-                            for (barcode in barcodes) {
-                                if (barcode.valueType == Barcode.TYPE_TEXT) {
-                                    barcode.rawValue?.let { value ->
-                                        if (value.startsWith("kshare") && value.length <= 8192) {
-                                            onCodeScanned(value)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .addOnCompleteListener {
-                            imageProxy.close()
-                        }
-                } else {
+                if (mediaImage == null) {
                     imageProxy.close()
+                    return@setAnalyzer
                 }
+                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                scanner.process(image)
+                    .addOnSuccessListener { barcodes ->
+                        barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
+                            ?.rawValue
+                            ?.takeIf { it.startsWith("kshare") && it.length <= 8192 }
+                            ?.let(onCodeScanned)
+                    }
+                    .addOnCompleteListener { imageProxy.close() }
             }
 
             try {

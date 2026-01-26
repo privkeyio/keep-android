@@ -3,8 +3,6 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.room.*
 import io.privkey.keep.uniffi.Nip55RequestType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Entity(
     tableName = "nip55_permissions",
@@ -143,25 +141,21 @@ class PermissionStore(private val db: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
-    ) {
-        if (!duration.shouldPersist) return
-
-        val permission = Nip55Permission(
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = "allow",
-            expiresAt = if (duration == PermissionDuration.FOREVER) null else duration.expiresAt(),
-            createdAt = System.currentTimeMillis()
-        )
-        dao.insertPermission(permission)
-    }
+    ) = savePermission(callerPackage, requestType, eventKind, duration, "allow")
 
     suspend fun denyPermission(
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
+    ) = savePermission(callerPackage, requestType, eventKind, duration, "deny")
+
+    private suspend fun savePermission(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        duration: PermissionDuration,
+        decision: String
     ) {
         if (!duration.shouldPersist) return
 
@@ -169,7 +163,7 @@ class PermissionStore(private val db: Nip55Database) {
             callerPackage = callerPackage,
             requestType = requestType.name,
             eventKind = eventKind,
-            decision = "deny",
+            decision = decision,
             expiresAt = if (duration == PermissionDuration.FOREVER) null else duration.expiresAt(),
             createdAt = System.currentTimeMillis()
         )
