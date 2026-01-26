@@ -19,6 +19,13 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
+private fun Nip55RequestType.headerTitle(): String = when (this) {
+    Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
+    Nip55RequestType.SIGN_EVENT -> "Signing Request"
+    Nip55RequestType.NIP04_ENCRYPT, Nip55RequestType.NIP44_ENCRYPT -> "Encryption Request"
+    Nip55RequestType.NIP04_DECRYPT, Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decryption Request"
+}
+
 internal fun parseEventKind(content: String): Int? = runCatching {
     org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
 }.getOrNull()
@@ -63,7 +70,7 @@ fun ApprovalScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = if (batchCount != null) "Batch Request ($batchCount)" else "Signing Request",
+            text = if (batchCount != null) "Batch Request ($batchCount)" else request.requestType.headerTitle(),
             style = MaterialTheme.typography.headlineMedium
         )
 
