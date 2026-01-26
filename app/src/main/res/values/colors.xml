@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#4a5b3e</color>
+    <color name="breez_app_icon_start_gradient_color">#469df8</color>
+    <color name="breez_app_icon_end_gradient_color">#3070f6</color>
+</resources>
