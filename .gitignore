@@ -11,9 +11,7 @@ build/
 # Local properties
 local.properties
 
-# Generated files
-app/src/main/jniLibs/
-app/src/main/kotlin/io/privkey/keep/uniffi/
+# Generated files (committed for production builds)
 
 # Signing
 *.keystore
