@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout keep repo
+        uses: actions/checkout@v4
+        with:
+          repository: privkeyio/keep
+          path: keep
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;29.0.13113456"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Build native libraries
+        run: ./build-rust.sh
+        env:
+          KEEP_REPO: ${{ github.workspace }}/keep
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.13113456
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: mv app/build/outputs/apk/debug/app-debug.apk keep-android-${{ github.ref_name }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: keep-android-${{ github.ref_name }}.apk
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
