@@ -85,7 +85,10 @@ class Nip55ContentProvider : ContentProvider() {
             runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
         } else null
 
-        if (permissionResult == null) return null
+        if (permissionResult == null) {
+            runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "error:store-missing", wasAutomatic = true) }
+            return errorCursor("permission_store_unavailable", id)
+        }
         if (!permissionResult) {
             runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
             return rejectedCursor(id)

@@ -1,7 +1,9 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.room.*
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
 @Entity(
@@ -93,11 +95,11 @@ abstract class Nip55Database : RoomDatabase() {
     }
 }
 
-enum class PermissionDuration(val millis: Long?, val displayName: String) {
-    JUST_THIS_TIME(null, "Just this time"),
-    ONE_HOUR(60 * 60 * 1000L, "For 1 hour"),
-    ONE_DAY(24 * 60 * 60 * 1000L, "For 24 hours"),
-    FOREVER(null, "Always");
+enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
+    JUST_THIS_TIME(null, R.string.permission_duration_just_this_time),
+    ONE_HOUR(60 * 60 * 1000L, R.string.permission_duration_one_hour),
+    ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
+    FOREVER(null, R.string.permission_duration_forever);
 
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
 
@@ -114,10 +116,19 @@ class PermissionStore(db: Nip55Database) {
     }
 
     suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
-        val permission = dao.getPermission(callerPackage, requestType.name, eventKind) ?: return null
-        val expired = permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()
-        if (expired) return null
-        return permission.decision == "allow"
+        val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
+        if (permission != null) {
+            val expired = permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()
+            if (!expired) return permission.decision == "allow"
+        }
+        if (eventKind != null) {
+            val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
+            if (genericPermission != null) {
+                val genericExpired = genericPermission.expiresAt != null && genericPermission.expiresAt < System.currentTimeMillis()
+                if (!genericExpired) return genericPermission.decision == "allow"
+            }
+        }
+        return null
     }
 
     suspend fun grantPermission(

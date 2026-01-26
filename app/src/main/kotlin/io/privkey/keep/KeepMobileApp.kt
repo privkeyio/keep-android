@@ -70,8 +70,16 @@ class KeepMobileApp : Application() {
     fun getPermissionStore(): PermissionStore? = permissionStore
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
-        val mobile = keepMobile ?: return
-        val config = relayConfigStore ?: return
+        val mobile = keepMobile ?: run {
+            Log.e(TAG, "Cannot initialize: KeepMobile not available")
+            onError("KeepMobile not initialized")
+            return
+        }
+        val config = relayConfigStore ?: run {
+            Log.e(TAG, "Cannot initialize: RelayConfigStore not available")
+            onError("Relay configuration not available")
+            return
+        }
         config.setRelays(relays)
         applicationScope.launch {
             runCatching { mobile.initialize(relays) }
