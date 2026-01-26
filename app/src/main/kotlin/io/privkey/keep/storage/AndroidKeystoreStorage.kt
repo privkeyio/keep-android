@@ -165,7 +165,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = pendingCipher.getAndSet(null) ?: getCipherForEncryption()
+        val cipher = pendingCipher.getAndSet(null)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available")
         storeShareWithCipher(cipher, data, metadata)
     }
 

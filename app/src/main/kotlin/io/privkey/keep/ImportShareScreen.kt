@@ -32,6 +32,17 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import java.util.concurrent.Executors
 import javax.crypto.Cipher
 
+private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+private const val MAX_SHARE_LENGTH = 8192
+
+private fun isValidKshareFormat(data: String): Boolean {
+    if (data.length > MAX_SHARE_LENGTH) return false
+    if (!data.startsWith("kshare1")) return false
+    val payload = data.removePrefix("kshare1")
+    if (payload.isEmpty()) return false
+    return payload.all { it in BECH32_CHARSET }
+}
+
 sealed class ImportState {
     object Idle : ImportState()
     object Importing : ImportState()
@@ -82,7 +93,7 @@ fun ImportShareScreen(
 
         OutlinedTextField(
             value = shareData,
-            onValueChange = { shareData = it },
+            onValueChange = { if (it.length <= 8192) shareData = it },
             label = { Text("Share Data") },
             placeholder = { Text("kshare1q...") },
             modifier = Modifier.fillMaxWidth(),
@@ -174,7 +185,7 @@ fun ImportShareScreen(
                             } catch (e: KeyPermanentlyInvalidatedException) {
                                 cipherError = "Biometric key invalidated. Please re-enroll biometrics."
                             } catch (e: Exception) {
-                                cipherError = "Failed to initialize encryption: ${e.message}"
+                                cipherError = "Failed to initialize encryption"
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -287,7 +298,7 @@ fun QrScannerScreen(
                     .addOnSuccessListener { barcodes ->
                         barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
                             ?.rawValue
-                            ?.takeIf { it.startsWith("kshare") && it.length <= 8192 }
+                            ?.takeIf { isValidKshareFormat(it) }
                             ?.let(onCodeScanned)
                     }
                     .addOnCompleteListener { imageProxy.close() }
@@ -302,6 +313,7 @@ fun QrScannerScreen(
                     analysis
                 )
             } catch (e: Exception) {
+                executor.shutdown()
                 onDismiss()
             }
 
