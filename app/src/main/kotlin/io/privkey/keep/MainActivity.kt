@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -115,7 +116,8 @@ fun MainScreen(
                     importState = ImportState.Success(result.name)
                     refreshShareState()
                 } catch (e: Exception) {
-                    importState = ImportState.Error(e.message ?: "Import failed")
+                    Log.e("MainActivity", "Import failed", e)
+                    importState = ImportState.Error("Import failed. Please try again.")
                 } finally {
                     storage.clearPendingCipher()
                 }
