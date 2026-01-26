@@ -146,15 +146,7 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        Text(
-            text = "Security: $securityLevel",
-            style = MaterialTheme.typography.bodySmall,
-            color = when (securityLevel) {
-                "strongbox" -> MaterialTheme.colorScheme.primary
-                "tee" -> MaterialTheme.colorScheme.secondary
-                else -> MaterialTheme.colorScheme.error
-            }
-        )
+        SecurityLevelBadge(securityLevel)
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -178,7 +170,7 @@ fun MainScreen(
 }
 
 @Composable
-fun ShareInfoCard(info: ShareInfo) {
+private fun ShareInfoCard(info: ShareInfo) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(info.name, style = MaterialTheme.typography.titleLarge)
@@ -196,7 +188,7 @@ fun ShareInfoCard(info: ShareInfo) {
 }
 
 @Composable
-fun PeersCard(peers: List<PeerInfo>) {
+private fun PeersCard(peers: List<PeerInfo>) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Peers (${peers.size})", style = MaterialTheme.typography.titleMedium)
@@ -205,21 +197,7 @@ fun PeersCard(peers: List<PeerInfo>) {
                 Text("No peers connected", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 peers.forEach { peer ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Share ${peer.shareIndex}")
-                        Text(
-                            peer.status.name,
-                            color = when (peer.status.name) {
-                                "Online" -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
+                    PeerRow(peer)
                 }
             }
         }
@@ -227,7 +205,24 @@ fun PeersCard(peers: List<PeerInfo>) {
 }
 
 @Composable
-fun NoShareCard(onImport: () -> Unit) {
+private fun PeerRow(peer: PeerInfo) {
+    val statusColor = if (peer.status.name == "Online") {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("Share ${peer.shareIndex}")
+        Text(peer.status.name, color = statusColor)
+    }
+}
+
+@Composable
+private fun NoShareCard(onImport: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -243,8 +238,22 @@ fun NoShareCard(onImport: () -> Unit) {
 }
 
 @Composable
-fun ErrorScreen(message: String) {
+private fun ErrorScreen(message: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.error)
     }
+}
+
+@Composable
+private fun SecurityLevelBadge(securityLevel: String) {
+    val color = when (securityLevel) {
+        "strongbox" -> MaterialTheme.colorScheme.primary
+        "tee" -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.error
+    }
+    Text(
+        text = "Security: $securityLevel",
+        style = MaterialTheme.typography.bodySmall,
+        color = color
+    )
 }

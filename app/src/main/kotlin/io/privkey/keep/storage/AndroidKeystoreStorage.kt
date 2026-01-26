@@ -93,8 +93,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
+        val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
         return try {
-            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             val keyInfo = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
             when (keyInfo.securityLevel) {
@@ -108,31 +108,29 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun getCipherForEncryption(): Cipher {
-        try {
-            val key = getOrCreateKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
-        } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for encryption")
-        }
-    }
+    fun getCipherForEncryption(): Cipher = initCipher(Cipher.ENCRYPT_MODE, null)
 
     fun getCipherForDecryption(): Cipher? {
         val iv = prefs.getString(KEY_SHARE_IV, null) ?: return null
+        return initCipher(Cipher.DECRYPT_MODE, iv)
+    }
+
+    private fun initCipher(mode: Int, ivBase64: String?): Cipher {
         try {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            if (ivBase64 != null) {
+                val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
+                cipher.init(mode, key, spec)
+            } else {
+                cipher.init(mode, key)
+            }
             return cipher
         } catch (e: KeyPermanentlyInvalidatedException) {
             throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
         } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for decryption")
+            val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
+            throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
         }
     }
 

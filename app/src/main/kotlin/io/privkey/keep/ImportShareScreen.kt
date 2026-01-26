@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,7 +29,6 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import android.security.keystore.KeyPermanentlyInvalidatedException
 import java.util.concurrent.Executors
 import javax.crypto.Cipher
 
@@ -39,8 +39,7 @@ private fun isValidKshareFormat(data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
     if (!data.startsWith("kshare1")) return false
     val payload = data.removePrefix("kshare1")
-    if (payload.isEmpty()) return false
-    return payload.all { it in BECH32_CHARSET }
+    return payload.isNotEmpty() && payload.all { it in BECH32_CHARSET }
 }
 
 sealed class ImportState {
@@ -159,50 +158,70 @@ fun ImportShareScreen(
         if (importState is ImportState.Importing) {
             CircularProgressIndicator()
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    enabled = importState !is ImportState.Importing
-                ) {
-                    Text(if (importState is ImportState.Success) "Done" else "Cancel")
-                }
-                if (importState !is ImportState.Success) {
-                    var cipherError by remember { mutableStateOf<String?>(null) }
-                    Button(
-                        onClick = {
-                            cipherError = null
-                            try {
-                                val cipher = onGetCipher()
-                                onBiometricAuth(cipher) { authedCipher ->
-                                    if (authedCipher != null) {
-                                        onImport(shareData, passphrase, shareName, authedCipher)
-                                    }
-                                }
-                            } catch (e: KeyPermanentlyInvalidatedException) {
-                                cipherError = "Biometric key invalidated. Please re-enroll biometrics."
-                            } catch (e: Exception) {
-                                cipherError = "Failed to initialize encryption"
+            ImportButtons(
+                importState = importState,
+                canImport = shareData.isNotBlank() && passphrase.isNotBlank() && isInputEnabled,
+                onDismiss = onDismiss,
+                onImportClick = {
+                    try {
+                        val cipher = onGetCipher()
+                        onBiometricAuth(cipher) { authedCipher ->
+                            if (authedCipher != null) {
+                                onImport(shareData, passphrase, shareName, authedCipher)
                             }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = shareData.isNotBlank() && passphrase.isNotBlank() && isInputEnabled
-                    ) {
-                        Text("Import")
+                        }
+                        null
+                    } catch (e: KeyPermanentlyInvalidatedException) {
+                        "Biometric key invalidated. Please re-enroll biometrics."
+                    } catch (e: Exception) {
+                        "Failed to initialize encryption"
                     }
-                    cipherError?.let { error ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = error,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImportButtons(
+    importState: ImportState,
+    canImport: Boolean,
+    onDismiss: () -> Unit,
+    onImportClick: () -> String?
+) {
+    var cipherError by remember { mutableStateOf<String?>(null) }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (importState is ImportState.Success) "Done" else "Cancel")
+            }
+            if (importState !is ImportState.Success) {
+                Button(
+                    onClick = {
+                        cipherError = onImportClick()
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = canImport
+                ) {
+                    Text("Import")
                 }
             }
+        }
+
+        cipherError?.let { error ->
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -217,11 +236,7 @@ private fun StatusCard(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(16.dp),
-            color = contentColor
-        )
+        Text(text = text, modifier = Modifier.padding(16.dp), color = contentColor)
     }
 }
 
@@ -231,7 +246,6 @@ fun QrScannerScreen(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -239,9 +253,7 @@ fun QrScannerScreen(
         )
     }
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         hasCameraPermission = granted
         if (!granted) onDismiss()
     }
@@ -253,14 +265,22 @@ fun QrScannerScreen(
     }
 
     if (!hasCameraPermission) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Camera permission required")
         }
         return
     }
+
+    CameraPreview(context, onCodeScanned, onDismiss)
+}
+
+@Composable
+private fun CameraPreview(
+    context: android.content.Context,
+    onCodeScanned: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     Box(modifier = Modifier.fillMaxSize()) {
         var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -270,9 +290,7 @@ fun QrScannerScreen(
 
         LaunchedEffect(Unit) {
             val future = ProcessCameraProvider.getInstance(context)
-            future.addListener({
-                cameraProvider = future.get()
-            }, ContextCompat.getMainExecutor(context))
+            future.addListener({ cameraProvider = future.get() }, ContextCompat.getMainExecutor(context))
         }
 
         DisposableEffect(cameraProvider) {
@@ -306,12 +324,7 @@ fun QrScannerScreen(
 
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    analysis
-                )
+                provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
                 executor.shutdown()
                 onDismiss()
@@ -323,27 +336,27 @@ fun QrScannerScreen(
             }
         }
 
-        AndroidView(
-            factory = { previewView },
-            modifier = Modifier.fillMaxSize()
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+
+        ScannerOverlay(onDismiss)
+    }
+}
+
+@Composable
+private fun ScannerOverlay(onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Scan FROST Share QR Code",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface
         )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Scan FROST Share QR Code",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+        OutlinedButton(onClick = onDismiss) {
+            Text("Cancel")
         }
     }
 }
