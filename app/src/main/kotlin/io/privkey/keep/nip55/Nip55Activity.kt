@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import android.content.Intent
+import android.os.Binder
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -35,7 +37,8 @@ class Nip55Activity : FragmentActivity() {
     private var handler: Nip55Handler? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
-    private var callerPackage: String = "unknown"
+    private var callerPackage: String? = null
+    private var callerVerified: Boolean = false
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -47,7 +50,7 @@ class Nip55Activity : FragmentActivity() {
 
         biometricHelper = BiometricHelper(this)
         handler = (application as? KeepMobileApp)?.getNip55Handler()
-        callerPackage = callingActivity?.packageName ?: "unknown"
+        identifyCaller()
         requestId = intent.getStringExtra("id")
 
         parseAndSetRequest(intent)
@@ -60,7 +63,7 @@ class Nip55Activity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        callerPackage = callingActivity?.packageName ?: "unknown"
+        identifyCaller()
         requestId = intent.getStringExtra("id")
         parseAndSetRequest(intent)
 
@@ -69,21 +72,49 @@ class Nip55Activity : FragmentActivity() {
         setupContent()
     }
 
+    private fun identifyCaller() {
+        val activity = callingActivity
+        if (activity != null) {
+            callerPackage = activity.packageName
+            callerVerified = true
+            return
+        }
+
+        val callingUid = Binder.getCallingUid()
+        if (callingUid == android.os.Process.myUid()) {
+            callerPackage = null
+            callerVerified = false
+            return
+        }
+
+        val packages = packageManager.getPackagesForUid(callingUid)
+        if (packages != null && packages.size == 1) {
+            callerPackage = packages[0]
+            callerVerified = true
+        } else {
+            callerPackage = packages?.firstOrNull()
+            callerVerified = false
+        }
+    }
+
     private fun setupContent() {
+        val currentRequest = request ?: return
+        val currentCallerPackage = callerPackage
+        val currentCallerVerified = callerVerified
+
         setContent {
             KeepAndroidTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    request?.let { req ->
-                        ApprovalScreen(
-                            request = req,
-                            callerPackage = callerPackage,
-                            onApprove = { handleApprove() },
-                            onReject = { finishWithError("User rejected") }
-                        )
-                    }
+                    ApprovalScreen(
+                        request = currentRequest,
+                        callerPackage = currentCallerPackage,
+                        callerVerified = currentCallerVerified,
+                        onApprove = { handleApprove() },
+                        onReject = { finishWithError("User rejected") }
+                    )
                 }
             }
         }
@@ -98,6 +129,7 @@ class Nip55Activity : FragmentActivity() {
     private fun handleApprove() {
         val req = request ?: return
         val h = handler ?: return finishWithError("Handler not initialized")
+        val callerId = callerPackage ?: "unknown"
 
         lifecycleScope.launch {
             val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
@@ -113,14 +145,24 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
 
-            val response = withContext(Dispatchers.Default) {
-                runCatching { h.handleRequest(req, callerPackage) }.getOrNull()
+            val result = withContext(Dispatchers.Default) {
+                runCatching { h.handleRequest(req, callerId) }
             }
-            if (response != null) {
-                finishWithResult(response)
-            } else {
-                finishWithError("Request failed")
-            }
+
+            result.fold(
+                onSuccess = { response -> finishWithResult(response) },
+                onFailure = { e ->
+                    val errorMsg = when (e) {
+                        is KeepMobileException.RateLimited -> "rate_limited"
+                        is KeepMobileException.NotInitialized -> "not_initialized"
+                        is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
+                        is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
+                        else -> "request_failed"
+                    }
+                    Log.e(TAG, "Request failed: ${e.message}")
+                    finishWithError(errorMsg)
+                }
+            )
         }
     }
 
@@ -145,14 +187,41 @@ class Nip55Activity : FragmentActivity() {
     }
 }
 
+private fun parseEventKind(content: String): Int? {
+    return runCatching {
+        val json = org.json.JSONObject(content)
+        json.optInt("kind", -1).takeIf { it >= 0 }
+    }.getOrNull()
+}
+
+private fun eventKindDescription(kind: Int): String = when (kind) {
+    0 -> "Profile Metadata"
+    1 -> "Short Text Note"
+    3 -> "Contact List"
+    4 -> "Encrypted DM"
+    5 -> "Event Deletion"
+    6 -> "Repost"
+    7 -> "Reaction"
+    in 10000..19999 -> "Replaceable Event"
+    in 20000..29999 -> "Ephemeral Event"
+    in 30000..39999 -> "Parameterized Replaceable"
+    else -> "Kind $kind"
+}
+
 @Composable
 fun ApprovalScreen(
     request: Nip55Request,
-    callerPackage: String,
+    callerPackage: String?,
+    callerVerified: Boolean,
     onApprove: () -> Unit,
     onReject: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
+    val eventKind = remember(request) {
+        if (request.requestType == Nip55RequestType.SIGN_EVENT) {
+            parseEventKind(request.content)
+        } else null
+    }
 
     Column(
         modifier = Modifier
@@ -168,11 +237,30 @@ fun ApprovalScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = "from $callerPackage",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (callerPackage != null) {
+            Text(
+                text = "from $callerPackage",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (callerVerified) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
+            )
+            if (!callerVerified) {
+                Text(
+                    text = "(unverified)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        } else {
+            Text(
+                text = "from unknown app",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -188,7 +276,20 @@ fun ApprovalScreen(
                     style = MaterialTheme.typography.bodyLarge
                 )
 
-                if (request.content.isNotEmpty()) {
+                eventKind?.let { kind ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Event Kind",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = eventKindDescription(kind),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+
+                if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "Content",
