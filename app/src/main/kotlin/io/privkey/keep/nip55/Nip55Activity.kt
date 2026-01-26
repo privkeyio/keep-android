@@ -60,8 +60,8 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun identifyCaller() {
-        callingActivity?.let {
-            callerPackage = it.packageName
+        callingActivity?.let { activity ->
+            callerPackage = activity.packageName
             callerVerified = true
             return
         }
@@ -75,7 +75,7 @@ class Nip55Activity : FragmentActivity() {
 
         val packages = packageManager.getPackagesForUid(callingUid)
         callerVerified = packages?.size == 1
-        callerPackage = if (callerVerified) packages?.firstOrNull() else null
+        callerPackage = packages?.singleOrNull()
     }
 
     private fun setupContent() {
@@ -116,16 +116,13 @@ class Nip55Activity : FragmentActivity() {
 
     private fun handleApprove(duration: PermissionDuration) {
         val req = request ?: return
-        val h = handler ?: return finishWithError("Handler not initialized")
+        val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val callerId = callerPackage ?: "unknown"
         val store = permissionStore
-        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(req.content)
-        } else null
+        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
+        val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
-            val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
-
             if (needsBiometric) {
                 val authenticated = biometricHelper.authenticate(
                     title = "Approve Request",
@@ -141,16 +138,13 @@ class Nip55Activity : FragmentActivity() {
                 store.grantPermission(callerId, req.requestType, eventKind, duration)
             }
 
-            val result = withContext(Dispatchers.Default) {
-                runCatching { h.handleRequest(req, callerId) }
-            }
-
-            result.fold(
-                onSuccess = { response ->
+            withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
+                .onSuccess { response ->
                     store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                     finishWithResult(response)
-                },
-                onFailure = { e ->
+                }
+                .onFailure { e ->
+                    Log.e(TAG, "Request failed: ${e.message}")
                     val errorMsg = when (e) {
                         is KeepMobileException.RateLimited -> "rate_limited"
                         is KeepMobileException.NotInitialized -> "not_initialized"
@@ -158,23 +152,19 @@ class Nip55Activity : FragmentActivity() {
                         is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
                         else -> "request_failed"
                     }
-                    Log.e(TAG, "Request failed: ${e::class.simpleName}")
                     finishWithError(errorMsg)
                 }
-            )
         }
     }
 
     private fun handleReject(duration: PermissionDuration) {
-        val req = request
+        val req = request ?: return finishWithError("User rejected")
         val callerId = callerPackage ?: "unknown"
         val store = permissionStore
-        val eventKind = if (req?.requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(req.content)
-        } else null
+        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
 
         lifecycleScope.launch {
-            if (store != null && callerId != "unknown" && req != null) {
+            if (store != null && callerId != "unknown") {
                 store.denyPermission(callerId, req.requestType, eventKind, duration)
                 store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
             }

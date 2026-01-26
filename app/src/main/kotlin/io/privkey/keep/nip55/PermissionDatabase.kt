@@ -93,27 +93,19 @@ abstract class Nip55Database : RoomDatabase() {
     }
 }
 
-enum class PermissionDuration(val millis: Long?) {
-    JUST_THIS_TIME(null),
-    ONE_HOUR(60 * 60 * 1000L),
-    ONE_DAY(24 * 60 * 60 * 1000L),
-    FOREVER(null);
+enum class PermissionDuration(val millis: Long?, val displayName: String) {
+    JUST_THIS_TIME(null, "Just this time"),
+    ONE_HOUR(60 * 60 * 1000L, "For 1 hour"),
+    ONE_DAY(24 * 60 * 60 * 1000L, "For 24 hours"),
+    FOREVER(null, "Always");
 
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
-
-    val displayName: String
-        get() = when (this) {
-            JUST_THIS_TIME -> "Just this time"
-            ONE_HOUR -> "For 1 hour"
-            ONE_DAY -> "For 24 hours"
-            FOREVER -> "Always"
-        }
 
     val shouldPersist: Boolean
         get() = this != JUST_THIS_TIME
 }
 
-class PermissionStore(private val db: Nip55Database) {
+class PermissionStore(db: Nip55Database) {
     private val dao = db.permissionDao()
     private val auditDao = db.auditLogDao()
 
@@ -122,13 +114,9 @@ class PermissionStore(private val db: Nip55Database) {
     }
 
     suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
-        val typeStr = requestType.name
-        val permission = dao.getPermission(callerPackage, typeStr, eventKind) ?: return null
-
-        if (permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()) {
-            return null
-        }
-
+        val permission = dao.getPermission(callerPackage, requestType.name, eventKind) ?: return null
+        val expired = permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()
+        if (expired) return null
         return permission.decision == "allow"
     }
 
@@ -154,16 +142,16 @@ class PermissionStore(private val db: Nip55Database) {
         decision: String
     ) {
         if (!duration.shouldPersist) return
-
-        val permission = Nip55Permission(
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = decision,
-            expiresAt = duration.expiresAt(),
-            createdAt = System.currentTimeMillis()
+        dao.insertPermission(
+            Nip55Permission(
+                callerPackage = callerPackage,
+                requestType = requestType.name,
+                eventKind = eventKind,
+                decision = decision,
+                expiresAt = duration.expiresAt(),
+                createdAt = System.currentTimeMillis()
+            )
         )
-        dao.insertPermission(permission)
     }
 
     suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null) {

@@ -112,15 +112,11 @@ fun MainScreen(
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
 
-    fun refreshShareState() {
-        hasShare = keepMobile.hasShare()
-        shareInfo = keepMobile.getShareInfo()
-    }
-
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                refreshShareState()
+                hasShare = keepMobile.hasShare()
+                shareInfo = keepMobile.getShareInfo()
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
@@ -361,23 +357,18 @@ fun RelaysCard(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = if (newRelayUrl.startsWith("wss://")) {
-                        newRelayUrl
-                    } else {
-                        "wss://$newRelayUrl"
+                    val url = if (newRelayUrl.startsWith("wss://")) newRelayUrl else "wss://$newRelayUrl"
+                    val urlRegex = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]*)?$")
+                    when {
+                        url.length > 256 -> error = "URL too long"
+                        !url.matches(urlRegex) -> error = "Invalid relay URL"
+                        else -> {
+                            onAddRelay(url)
+                            showAddDialog = false
+                            newRelayUrl = ""
+                            error = null
+                        }
                     }
-                    if (url.length > 256) {
-                        error = "URL too long"
-                        return@TextButton
-                    }
-                    if (!url.matches(Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]*)?$"))) {
-                        error = "Invalid relay URL"
-                        return@TextButton
-                    }
-                    onAddRelay(url)
-                    showAddDialog = false
-                    newRelayUrl = ""
-                    error = null
                 }) {
                     Text("Add")
                 }

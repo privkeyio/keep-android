@@ -79,24 +79,18 @@ class Nip55ContentProvider : ContentProvider() {
         val content = uri.getQueryParameter("content")?.take(MAX_CONTENT_LENGTH) ?: ""
         val pubkey = uri.getQueryParameter("pubkey")?.take(MAX_PUBKEY_LENGTH)
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(content)
-        } else null
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
 
         val permissionResult = if (store != null) {
             runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
         } else null
 
-        return when (permissionResult) {
-            true -> executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
-            false -> {
-                runBlocking {
-                    store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
-                }
-                rejectedCursor(id)
-            }
-            null -> null
+        if (permissionResult == null) return null
+        if (!permissionResult) {
+            runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+            return rejectedCursor(id)
         }
+        return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
     }
 
     private fun executeBackgroundRequest(
@@ -120,28 +114,20 @@ class Nip55ContentProvider : ContentProvider() {
             permissions = null
         )
 
-        return try {
-            val response = h.handleRequest(request, callerPackage)
-            runBlocking {
-                store?.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+        return runCatching { h.handleRequest(request, callerPackage) }
+            .onSuccess {
+                runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
             }
-            val cursor = MatrixCursor(RESULT_COLUMNS)
-            val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
-                response.result
-            } else null
-            cursor.addRow(arrayOf(
-                response.result,
-                response.event,
-                response.error,
-                id,
-                pubkeyValue,
-                null
-            ))
-            cursor
-        } catch (e: Exception) {
-            Log.e(TAG, "Background request failed: ${e::class.simpleName}")
-            errorCursor("request_failed", id)
-        }
+            .map { response ->
+                val cursor = MatrixCursor(RESULT_COLUMNS)
+                val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
+                cursor.addRow(arrayOf(response.result, response.event, response.error, id, pubkeyValue, null))
+                cursor
+            }
+            .getOrElse { e ->
+                Log.e(TAG, "Background request failed", e)
+                errorCursor("request_failed", id)
+            }
     }
 
     private fun getCallerPackage(): String? {

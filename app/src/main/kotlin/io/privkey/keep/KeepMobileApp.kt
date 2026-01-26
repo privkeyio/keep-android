@@ -29,24 +29,19 @@ class KeepMobileApp : Application() {
 
     private fun initializeKeepMobile() {
         try {
-            val s = AndroidKeystoreStorage(this)
-            val r = RelayConfigStore(this)
-            val k = KeepMobile(s)
-            storage = s
-            relayConfigStore = r
-            keepMobile = k
-            nip55Handler = Nip55Handler(k)
+            val newStorage = AndroidKeystoreStorage(this)
+            val newRelayConfig = RelayConfigStore(this)
+            val newKeepMobile = KeepMobile(newStorage)
+            storage = newStorage
+            relayConfigStore = newRelayConfig
+            keepMobile = newKeepMobile
+            nip55Handler = Nip55Handler(newKeepMobile)
 
-            if (s.hasShare()) {
-                val relays = r.getRelays()
-                if (relays.isNotEmpty()) {
-                    applicationScope.launch {
-                        try {
-                            k.initialize(relays)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to initialize with relays", e)
-                        }
-                    }
+            val relays = newRelayConfig.getRelays()
+            if (newStorage.hasShare() && relays.isNotEmpty()) {
+                applicationScope.launch {
+                    runCatching { newKeepMobile.initialize(relays) }
+                        .onFailure { Log.e(TAG, "Failed to initialize with relays", it) }
                 }
             }
         } catch (e: Exception) {
@@ -56,11 +51,9 @@ class KeepMobileApp : Application() {
 
     private fun initializePermissionStore() {
         try {
-            val db = Nip55Database.getInstance(this)
-            permissionStore = PermissionStore(db)
-            applicationScope.launch {
-                permissionStore?.cleanupExpired()
-            }
+            val store = PermissionStore(Nip55Database.getInstance(this))
+            permissionStore = store
+            applicationScope.launch { store.cleanupExpired() }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize PermissionStore", e)
         }
@@ -77,16 +70,15 @@ class KeepMobileApp : Application() {
     fun getPermissionStore(): PermissionStore? = permissionStore
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
-        val k = keepMobile ?: return
-        val r = relayConfigStore ?: return
-        r.setRelays(relays)
+        val mobile = keepMobile ?: return
+        val config = relayConfigStore ?: return
+        config.setRelays(relays)
         applicationScope.launch {
-            try {
-                k.initialize(relays)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize with relays", e)
-                onError(e.message ?: "Failed to connect")
-            }
+            runCatching { mobile.initialize(relays) }
+                .onFailure {
+                    Log.e(TAG, "Failed to initialize with relays", it)
+                    onError(it.message ?: "Failed to connect")
+                }
         }
     }
 

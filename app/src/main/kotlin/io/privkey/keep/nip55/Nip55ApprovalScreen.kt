@@ -58,9 +58,7 @@ fun ApprovalScreen(
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventKind = remember(request) {
-        if (request.requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(request.content)
-        } else null
+        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(request.content) else null
     }
 
     Column(
@@ -170,21 +168,15 @@ private fun DurationSelector(
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
     val errorColor = MaterialTheme.colorScheme.error
-    if (callerPackage == null) {
-        Text(
-            text = "from unknown app",
-            style = MaterialTheme.typography.bodySmall,
-            color = errorColor
-        )
-        return
-    }
+    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
+    val textColor = if (callerPackage == null || !callerVerified) errorColor else MaterialTheme.colorScheme.onSurfaceVariant
 
     Text(
-        text = "from $callerPackage",
+        text = displayText,
         style = MaterialTheme.typography.bodySmall,
-        color = if (callerVerified) MaterialTheme.colorScheme.onSurfaceVariant else errorColor
+        color = textColor
     )
-    if (!callerVerified) {
+    if (callerPackage != null && !callerVerified) {
         Text(
             text = "(unverified)",
             style = MaterialTheme.typography.labelSmall,
@@ -205,9 +197,9 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val displayContent = request.content.take(200).let {
-                    if (request.content.length > 200) "$it..." else it
-                }
+                val displayContent = if (request.content.length > 200) {
+                    "${request.content.take(200)}..."
+                } else request.content
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
             }
