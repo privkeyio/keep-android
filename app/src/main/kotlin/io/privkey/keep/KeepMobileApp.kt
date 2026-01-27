@@ -85,7 +85,7 @@ class KeepMobileApp : Application() {
             runCatching { mobile.initialize(relays) }
                 .onFailure {
                     Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}")
-                    onError(it.message ?: "Failed to connect")
+                    onError("Failed to connect to relays")
                 }
         }
     }

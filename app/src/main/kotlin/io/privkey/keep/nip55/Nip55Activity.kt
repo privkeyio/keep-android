@@ -189,7 +189,8 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithError(error: String) {
-        Log.e(TAG, "NIP-55 request failed: $error${requestId?.let { " (requestId=$it)" } ?: ""}")
+        val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
+        Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
         val resultIntent = Intent().apply {
             putExtra("error", GENERIC_ERROR_MESSAGE)
         }

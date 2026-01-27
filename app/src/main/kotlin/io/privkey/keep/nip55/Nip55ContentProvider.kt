@@ -25,7 +25,6 @@ class Nip55ContentProvider : ContentProvider() {
         private const val AUTHORITY_NIP44_ENCRYPT = "io.privkey.keep.NIP44_ENCRYPT"
         private const val AUTHORITY_NIP44_DECRYPT = "io.privkey.keep.NIP44_DECRYPT"
 
-        private const val MAX_ID_LENGTH = 128
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
 
@@ -66,33 +65,27 @@ class Nip55ContentProvider : ContentProvider() {
             else -> return errorCursor("invalid_uri", null)
         }
 
-        val rawId = uri.getQueryParameter("id")
-        val rawContent = uri.getQueryParameter("content") ?: ""
-        val rawPubkey = uri.getQueryParameter("pubkey")
+        val rawContent = projection?.getOrNull(0) ?: ""
+        val rawPubkey = projection?.getOrNull(1)?.takeIf { it.isNotBlank() }
+        val currentUser = projection?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
-        if (rawId != null && rawId.length > MAX_ID_LENGTH)
-            return errorCursor("id exceeds max length of $MAX_ID_LENGTH", null)
         if (rawContent.length > MAX_CONTENT_LENGTH)
             return errorCursor("content exceeds max length of $MAX_CONTENT_LENGTH", null)
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
             return errorCursor("pubkey exceeds max length of $MAX_PUBKEY_LENGTH", null)
 
-        val id = rawId
-        val content = rawContent
-        val pubkey = rawPubkey
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
-
-        if (store == null) return errorCursor("permission_store_unavailable", id)
+        if (store == null) return null
 
         val permissionResult = runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
-            ?: return errorCursor("permission_store_unavailable", id)
+            ?: return null
 
         if (!permissionResult) {
             runBlocking { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
-            return rejectedCursor(id)
+            return rejectedCursor(null)
         }
-        return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
+        return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
     }
 
     private fun executeBackgroundRequest(
@@ -103,7 +96,8 @@ class Nip55ContentProvider : ContentProvider() {
         content: String,
         pubkey: String?,
         id: String?,
-        eventKind: Int?
+        eventKind: Int?,
+        currentUser: String? = null
     ): Cursor {
         val request = Nip55Request(
             requestType = requestType,
@@ -113,7 +107,7 @@ class Nip55ContentProvider : ContentProvider() {
             compressionType = "none",
             callbackUrl = null,
             id = id,
-            currentUser = null,
+            currentUser = currentUser,
             permissions = null
         )
 
@@ -154,7 +148,14 @@ class Nip55ContentProvider : ContentProvider() {
         return cursor
     }
 
-    override fun getType(uri: Uri): String = "vnd.android.cursor.item/vnd.${uri.authority}"
+    override fun getType(uri: Uri): String {
+        val authority = when (uri.authority) {
+            AUTHORITY_GET_PUBLIC_KEY, AUTHORITY_SIGN_EVENT,
+            AUTHORITY_NIP44_ENCRYPT, AUTHORITY_NIP44_DECRYPT -> uri.authority
+            else -> "io.privkey.keep"
+        }
+        return "vnd.android.cursor.item/vnd.$authority"
+    }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0

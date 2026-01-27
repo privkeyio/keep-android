@@ -178,15 +178,16 @@ class PermissionStore(db: Nip55Database) {
         decision: String,
         wasAutomatic: Boolean
     ) {
-        val log = Nip55AuditLog(
-            timestamp = System.currentTimeMillis(),
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = decision,
-            wasAutomatic = wasAutomatic
+        auditDao.insert(
+            Nip55AuditLog(
+                timestamp = System.currentTimeMillis(),
+                callerPackage = callerPackage,
+                requestType = requestType.name,
+                eventKind = eventKind,
+                decision = decision,
+                wasAutomatic = wasAutomatic
+            )
         )
-        auditDao.insert(log)
     }
 
     suspend fun getAllPermissions(): List<Nip55Permission> = dao.getAll()

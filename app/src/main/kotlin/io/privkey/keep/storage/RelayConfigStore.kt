@@ -11,6 +11,7 @@ class RelayConfigStore(context: Context) {
         private const val PREFS_NAME = "keep_relay_config"
         private const val KEY_RELAYS = "relay_urls"
         private const val RELAY_SEPARATOR = "\n"
+        internal const val MAX_RELAYS = 20
         internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
     }
 
@@ -33,30 +34,9 @@ class RelayConfigStore(context: Context) {
     }
 
     fun setRelays(relays: List<String>) {
+        val validated = relays.filter { it.matches(RELAY_URL_REGEX) }.take(MAX_RELAYS)
         prefs.edit()
-            .putString(KEY_RELAYS, relays.joinToString(RELAY_SEPARATOR))
+            .putString(KEY_RELAYS, validated.joinToString(RELAY_SEPARATOR))
             .apply()
-    }
-
-    private val lock = Any()
-
-    fun addRelay(relay: String): Boolean {
-        if (!relay.matches(RELAY_URL_REGEX)) return false
-        synchronized(lock) {
-            val current = getRelays().toMutableList()
-            if (current.contains(relay)) return false
-            current.add(relay)
-            setRelays(current)
-            return true
-        }
-    }
-
-    fun removeRelay(relay: String): Boolean {
-        synchronized(lock) {
-            val current = getRelays().toMutableList()
-            if (!current.remove(relay)) return false
-            setRelays(current)
-            return true
-        }
     }
 }
