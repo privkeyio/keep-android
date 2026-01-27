@@ -141,7 +141,8 @@ fun MainScreen(
                             keepMobile.importShare(data, passphrase, name)
                         }
                         importState = ImportState.Success(result.name)
-                        refreshShareState()
+                        hasShare = keepMobile.hasShare()
+                        shareInfo = keepMobile.getShareInfo()
                     } catch (e: Exception) {
                         Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
