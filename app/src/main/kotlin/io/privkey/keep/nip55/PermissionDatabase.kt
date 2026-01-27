@@ -1,7 +1,9 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.room.*
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
 @Entity(
@@ -16,7 +18,9 @@ data class Nip55Permission(
     val decision: String,
     val expiresAt: Long?,
     val createdAt: Long
-)
+) {
+    fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+}
 
 @Entity(tableName = "nip55_audit_log")
 data class Nip55AuditLog(
@@ -93,43 +97,36 @@ abstract class Nip55Database : RoomDatabase() {
     }
 }
 
-enum class PermissionDuration(val millis: Long?) {
-    JUST_THIS_TIME(null),
-    ONE_HOUR(60 * 60 * 1000L),
-    ONE_DAY(24 * 60 * 60 * 1000L),
-    FOREVER(null);
+enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
+    JUST_THIS_TIME(null, R.string.permission_duration_just_this_time),
+    ONE_HOUR(60 * 60 * 1000L, R.string.permission_duration_one_hour),
+    ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
+    FOREVER(null, R.string.permission_duration_forever);
 
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
-
-    val displayName: String
-        get() = when (this) {
-            JUST_THIS_TIME -> "Just this time"
-            ONE_HOUR -> "For 1 hour"
-            ONE_DAY -> "For 24 hours"
-            FOREVER -> "Always"
-        }
 
     val shouldPersist: Boolean
         get() = this != JUST_THIS_TIME
 }
 
-class PermissionStore(private val db: Nip55Database) {
+class PermissionStore(db: Nip55Database) {
     private val dao = db.permissionDao()
     private val auditDao = db.auditLogDao()
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
+        auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
     }
 
     suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
-        val typeStr = requestType.name
-        val permission = dao.getPermission(callerPackage, typeStr, eventKind) ?: return null
+        val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
+        if (permission != null && !permission.isExpired()) return permission.decision == "allow"
 
-        if (permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()) {
-            return null
+        if (eventKind != null) {
+            val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
+            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.decision == "allow"
         }
-
-        return permission.decision == "allow"
+        return null
     }
 
     suspend fun grantPermission(
@@ -154,16 +151,16 @@ class PermissionStore(private val db: Nip55Database) {
         decision: String
     ) {
         if (!duration.shouldPersist) return
-
-        val permission = Nip55Permission(
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = decision,
-            expiresAt = duration.expiresAt(),
-            createdAt = System.currentTimeMillis()
+        dao.insertPermission(
+            Nip55Permission(
+                callerPackage = callerPackage,
+                requestType = requestType.name,
+                eventKind = eventKind,
+                decision = decision,
+                expiresAt = duration.expiresAt(),
+                createdAt = System.currentTimeMillis()
+            )
         )
-        dao.insertPermission(permission)
     }
 
     suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null) {
@@ -181,15 +178,16 @@ class PermissionStore(private val db: Nip55Database) {
         decision: String,
         wasAutomatic: Boolean
     ) {
-        val log = Nip55AuditLog(
-            timestamp = System.currentTimeMillis(),
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = decision,
-            wasAutomatic = wasAutomatic
+        auditDao.insert(
+            Nip55AuditLog(
+                timestamp = System.currentTimeMillis(),
+                callerPackage = callerPackage,
+                requestType = requestType.name,
+                eventKind = eventKind,
+                decision = decision,
+                wasAutomatic = wasAutomatic
+            )
         )
-        auditDao.insert(log)
     }
 
     suspend fun getAllPermissions(): List<Nip55Permission> = dao.getAll()

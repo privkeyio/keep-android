@@ -5,6 +5,9 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +19,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -35,6 +39,7 @@ class MainActivity : FragmentActivity() {
         val app = application as KeepMobileApp
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
+        val relayConfigStore = app.getRelayConfigStore()
 
         setContent {
             KeepAndroidTheme {
@@ -42,12 +47,24 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null) {
+                    if (keepMobile != null && storage != null && relayConfigStore != null) {
                         MainScreen(
                             keepMobile = keepMobile,
                             storage = storage,
+                            relayConfigStore = relayConfigStore,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
+                            onRelaysChanged = { relays ->
+                                app.initializeWithRelays(relays) { error ->
+                                    lifecycleScope.launch {
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            error,
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            },
                             onBiometricRequest = { title, subtitle, cipher, callback ->
                                 lifecycleScope.launch {
                                     try {
@@ -80,8 +97,10 @@ class MainActivity : FragmentActivity() {
 fun MainScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
+    relayConfigStore: RelayConfigStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
+    onRelaysChanged: (List<String>) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
@@ -91,16 +110,13 @@ fun MainScreen(
     var showImportScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
-
-    fun refreshShareState() {
-        hasShare = keepMobile.hasShare()
-        shareInfo = keepMobile.getShareInfo()
-    }
+    var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                refreshShareState()
+                hasShare = keepMobile.hasShare()
+                shareInfo = keepMobile.getShareInfo()
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
@@ -125,7 +141,8 @@ fun MainScreen(
                             keepMobile.importShare(data, passphrase, name)
                         }
                         importState = ImportState.Success(result.name)
-                        refreshShareState()
+                        hasShare = keepMobile.hasShare()
+                        shareInfo = keepMobile.getShareInfo()
                     } catch (e: Exception) {
                         Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
@@ -167,6 +184,24 @@ fun MainScreen(
         val currentShareInfo = shareInfo
         if (hasShare && currentShareInfo != null) {
             ShareInfoCard(currentShareInfo)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            RelaysCard(
+                relays = relays,
+                onAddRelay = { relay ->
+                    if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
+                        val updated = relays + relay
+                        relays = updated
+                        onRelaysChanged(updated)
+                    }
+                },
+                onRemoveRelay = { relay ->
+                    val updated = relays - relay
+                    relays = updated
+                    onRelaysChanged(updated)
+                }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -233,6 +268,125 @@ private fun PeerRow(peer: PeerInfo) {
     ) {
         Text("Share ${peer.shareIndex}")
         Text(peer.status.name, color = statusColor)
+    }
+}
+
+@Composable
+fun RelaysCard(
+    relays: List<String>,
+    onAddRelay: (String) -> Unit,
+    onRemoveRelay: (String) -> Unit
+) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var newRelayUrl by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun dismissDialog() {
+        showAddDialog = false
+        newRelayUrl = ""
+        error = null
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Relays", style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = { showAddDialog = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Add relay")
+                }
+            }
+            if (relays.isEmpty()) {
+                Text(
+                    "No relays configured",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                relays.forEach { relay ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            relay.removePrefix("wss://"),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        IconButton(
+                            onClick = { onRemoveRelay(relay) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remove",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = ::dismissDialog,
+            title = { Text("Add Relay") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newRelayUrl,
+                        onValueChange = {
+                            newRelayUrl = it
+                            error = null
+                        },
+                        label = { Text("Relay URL") },
+                        placeholder = { Text("wss://relay.example.com") },
+                        singleLine = true,
+                        isError = error != null
+                    )
+                    error?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val url = if (newRelayUrl.startsWith("wss://")) newRelayUrl else "wss://$newRelayUrl"
+                    when {
+                        url.length > 256 -> error = "URL too long"
+                        !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
+                        else -> {
+                            val port = Regex(":(\\d{1,5})").find(url.removePrefix("wss://"))
+                                ?.groupValues?.get(1)?.toIntOrNull()
+                            if (port != null && port !in 1..65535) {
+                                error = "Port must be between 1 and 65535"
+                                return@TextButton
+                            }
+                            onAddRelay(url)
+                            dismissDialog()
+                        }
+                    }
+                }) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = ::dismissDialog) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

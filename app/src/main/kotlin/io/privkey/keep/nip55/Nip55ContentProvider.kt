@@ -2,7 +2,6 @@ package io.privkey.keep.nip55
 
 import android.content.ContentProvider
 import android.content.ContentValues
-import android.content.UriMatcher
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -20,19 +19,14 @@ class Nip55ContentProvider : ContentProvider() {
 
     companion object {
         private const val TAG = "Nip55ContentProvider"
-        private const val AUTHORITY = "io.privkey.keep.nip55"
 
-        private const val CODE_GET_PUBLIC_KEY = 1
-        private const val CODE_SIGN_EVENT = 2
-        private const val CODE_NIP44_ENCRYPT = 5
-        private const val CODE_NIP44_DECRYPT = 6
+        private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
+        private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
+        private const val AUTHORITY_NIP44_ENCRYPT = "io.privkey.keep.NIP44_ENCRYPT"
+        private const val AUTHORITY_NIP44_DECRYPT = "io.privkey.keep.NIP44_DECRYPT"
 
-        private val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
-            addURI(AUTHORITY, "get_public_key", CODE_GET_PUBLIC_KEY)
-            addURI(AUTHORITY, "sign_event", CODE_SIGN_EVENT)
-            addURI(AUTHORITY, "nip44_encrypt", CODE_NIP44_ENCRYPT)
-            addURI(AUTHORITY, "nip44_decrypt", CODE_NIP44_DECRYPT)
-        }
+        private const val MAX_PUBKEY_LENGTH = 128
+        private const val MAX_CONTENT_LENGTH = 1024 * 1024
 
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
@@ -63,47 +57,47 @@ class Nip55ContentProvider : ContentProvider() {
 
         val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
-        val requestType = when (uriMatcher.match(uri)) {
-            CODE_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
-            CODE_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
-            CODE_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
-            CODE_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
+        val requestType = when (uri.authority) {
+            AUTHORITY_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
+            AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
+            AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
+            AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
             else -> return errorCursor("invalid_uri", null)
         }
 
-        val id = uri.getQueryParameter("id")
-        val content = uri.getQueryParameter("content") ?: ""
-        val pubkey = uri.getQueryParameter("pubkey")
+        val rawContent = projection?.getOrNull(0) ?: ""
+        val rawPubkey = projection?.getOrNull(1)?.takeIf { it.isNotBlank() }
+        val currentUser = projection?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(content)
-        } else null
+        if (rawContent.length > MAX_CONTENT_LENGTH)
+            return errorCursor("invalid input length", null)
+        if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
+            return errorCursor("invalid input length", null)
 
-        val permissionResult = if (store != null) {
-            runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
-        } else null
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
-        return when (permissionResult) {
-            true -> executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
-            false -> {
-                runBlocking {
-                    store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
-                }
-                rejectedCursor(id)
-            }
-            null -> null
+        if (store == null) return null
+
+        val permissionResult = runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
+            ?: return null
+
+        if (!permissionResult) {
+            runBlocking { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+            return rejectedCursor(null)
         }
+        return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
     }
 
     private fun executeBackgroundRequest(
         h: Nip55Handler,
-        store: PermissionStore?,
+        store: PermissionStore,
         callerPackage: String,
         requestType: Nip55RequestType,
         content: String,
         pubkey: String?,
         id: String?,
-        eventKind: Int?
+        eventKind: Int?,
+        currentUser: String? = null
     ): Cursor {
         val request = Nip55Request(
             requestType = requestType,
@@ -113,32 +107,24 @@ class Nip55ContentProvider : ContentProvider() {
             compressionType = "none",
             callbackUrl = null,
             id = id,
-            currentUser = null,
+            currentUser = currentUser,
             permissions = null
         )
 
-        return try {
-            val response = h.handleRequest(request, callerPackage)
-            runBlocking {
-                store?.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+        return runCatching { h.handleRequest(request, callerPackage) }
+            .onSuccess {
+                runBlocking { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
             }
-            val cursor = MatrixCursor(RESULT_COLUMNS)
-            val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
-                response.result
-            } else null
-            cursor.addRow(arrayOf(
-                response.result,
-                response.event,
-                response.error,
-                response.id,
-                pubkeyValue,
-                null
-            ))
-            cursor
-        } catch (e: Exception) {
-            Log.e(TAG, "Background request failed: ${e::class.simpleName}")
-            errorCursor("request_failed", id)
-        }
+            .map { response ->
+                val cursor = MatrixCursor(RESULT_COLUMNS)
+                val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
+                cursor.addRow(arrayOf(response.result, response.event, response.error, id, pubkeyValue, null))
+                cursor
+            }
+            .getOrElse { e ->
+                Log.e(TAG, "Background request failed: ${e::class.simpleName}")
+                errorCursor("request_failed", id)
+            }
     }
 
     private fun getCallerPackage(): String? {
@@ -162,7 +148,14 @@ class Nip55ContentProvider : ContentProvider() {
         return cursor
     }
 
-    override fun getType(uri: Uri): String = "vnd.android.cursor.item/vnd.$AUTHORITY"
+    override fun getType(uri: Uri): String {
+        val authority = when (uri.authority) {
+            AUTHORITY_GET_PUBLIC_KEY, AUTHORITY_SIGN_EVENT,
+            AUTHORITY_NIP44_ENCRYPT, AUTHORITY_NIP44_DECRYPT -> uri.authority
+            else -> "io.privkey.keep"
+        }
+        return "vnd.android.cursor.item/vnd.$authority"
+    }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0

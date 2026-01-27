@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.Nip55Request
@@ -18,6 +19,7 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
     Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
+    else -> name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
 }
 
 private fun Nip55RequestType.headerTitle(): String = when (this) {
@@ -26,6 +28,7 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
     Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
+    else -> "${displayName()} Request"
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
@@ -58,9 +61,7 @@ fun ApprovalScreen(
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventKind = remember(request) {
-        if (request.requestType == Nip55RequestType.SIGN_EVENT) {
-            parseEventKind(request.content)
-        } else null
+        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(request.content) else null
     }
 
     Column(
@@ -141,7 +142,7 @@ private fun DurationSelector(
             onExpandedChange = onExpandedChange
         ) {
             OutlinedTextField(
-                value = selectedDuration.displayName,
+                value = stringResource(selectedDuration.displayNameRes),
                 onValueChange = {},
                 readOnly = true,
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -155,7 +156,7 @@ private fun DurationSelector(
             ) {
                 PermissionDuration.entries.forEach { duration ->
                     DropdownMenuItem(
-                        text = { Text(duration.displayName) },
+                        text = { Text(stringResource(duration.displayNameRes)) },
                         onClick = {
                             onDurationSelected(duration)
                             onExpandedChange(false)
@@ -170,21 +171,15 @@ private fun DurationSelector(
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
     val errorColor = MaterialTheme.colorScheme.error
-    if (callerPackage == null) {
-        Text(
-            text = "from unknown app",
-            style = MaterialTheme.typography.bodySmall,
-            color = errorColor
-        )
-        return
-    }
+    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
+    val textColor = if (callerPackage == null || !callerVerified) errorColor else MaterialTheme.colorScheme.onSurfaceVariant
 
     Text(
-        text = "from $callerPackage",
+        text = displayText,
         style = MaterialTheme.typography.bodySmall,
-        color = if (callerVerified) MaterialTheme.colorScheme.onSurfaceVariant else errorColor
+        color = textColor
     )
-    if (!callerVerified) {
+    if (callerPackage != null && !callerVerified) {
         Text(
             text = "(unverified)",
             style = MaterialTheme.typography.labelSmall,
@@ -205,9 +200,9 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val displayContent = request.content.take(200).let {
-                    if (request.content.length > 200) "$it..." else it
-                }
+                val displayContent = if (request.content.length > 200) {
+                    "${request.content.take(200)}..."
+                } else request.content
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
             }

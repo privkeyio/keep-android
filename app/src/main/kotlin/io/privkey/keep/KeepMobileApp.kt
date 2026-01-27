@@ -5,6 +5,7 @@ import android.util.Log
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
 import kotlinx.coroutines.CoroutineScope
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
     private var storage: AndroidKeystoreStorage? = null
+    private var relayConfigStore: RelayConfigStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -27,25 +29,33 @@ class KeepMobileApp : Application() {
 
     private fun initializeKeepMobile() {
         try {
-            val s = AndroidKeystoreStorage(this)
-            val k = KeepMobile(s)
-            storage = s
-            keepMobile = k
-            nip55Handler = Nip55Handler(k)
+            val newStorage = AndroidKeystoreStorage(this)
+            val newRelayConfig = RelayConfigStore(this)
+            val newKeepMobile = KeepMobile(newStorage)
+            storage = newStorage
+            relayConfigStore = newRelayConfig
+            keepMobile = newKeepMobile
+            nip55Handler = Nip55Handler(newKeepMobile)
+
+            val relays = newRelayConfig.getRelays()
+            if (newStorage.hasShare() && relays.isNotEmpty()) {
+                applicationScope.launch {
+                    runCatching { newKeepMobile.initialize(relays) }
+                        .onFailure { Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}") }
+                }
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize KeepMobile", e)
+            Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}")
         }
     }
 
     private fun initializePermissionStore() {
         try {
-            val db = Nip55Database.getInstance(this)
-            permissionStore = PermissionStore(db)
-            applicationScope.launch {
-                permissionStore?.cleanupExpired()
-            }
+            val store = PermissionStore(Nip55Database.getInstance(this))
+            permissionStore = store
+            applicationScope.launch { store.cleanupExpired() }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize PermissionStore", e)
+            Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
     }
 
@@ -53,9 +63,32 @@ class KeepMobileApp : Application() {
 
     fun getStorage(): AndroidKeystoreStorage? = storage
 
+    fun getRelayConfigStore(): RelayConfigStore? = relayConfigStore
+
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
     fun getPermissionStore(): PermissionStore? = permissionStore
+
+    fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
+        val mobile = keepMobile ?: run {
+            Log.e(TAG, "Cannot initialize: KeepMobile not available")
+            onError("KeepMobile not initialized")
+            return
+        }
+        val config = relayConfigStore ?: run {
+            Log.e(TAG, "Cannot initialize: RelayConfigStore not available")
+            onError("Relay configuration not available")
+            return
+        }
+        config.setRelays(relays)
+        applicationScope.launch {
+            runCatching { mobile.initialize(relays) }
+                .onFailure {
+                    Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}")
+                    onError("Failed to connect to relays")
+                }
+        }
+    }
 
     companion object {
         private const val TAG = "KeepMobileApp"
