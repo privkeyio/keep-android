@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import java.security.KeyStore
+import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -32,6 +33,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_SHARE_TOTAL = "share_total"
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
     }
+
+    private val pendingCipher = AtomicReference<Cipher?>(null)
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -91,7 +94,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
         return try {
-            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             val keyInfo = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
             when (keyInfo.securityLevel) {
@@ -105,31 +108,29 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun getCipherForEncryption(): Cipher {
-        try {
-            val key = getOrCreateKey()
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, key)
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
-        } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for encryption")
-        }
-    }
+    fun getCipherForEncryption(): Cipher = initCipher(Cipher.ENCRYPT_MODE, null)
 
     fun getCipherForDecryption(): Cipher? {
         val iv = prefs.getString(KEY_SHARE_IV, null) ?: return null
+        return initCipher(Cipher.DECRYPT_MODE, iv)
+    }
+
+    private fun initCipher(mode: Int, ivBase64: String?): Cipher {
         try {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val spec = GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP))
-            cipher.init(Cipher.DECRYPT_MODE, key, spec)
+            if (ivBase64 != null) {
+                val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
+                cipher.init(mode, key, spec)
+            } else {
+                cipher.init(mode, key)
+            }
             return cipher
         } catch (e: KeyPermanentlyInvalidatedException) {
             throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
         } catch (e: Throwable) {
-            throw KeepMobileException.StorageException("Failed to initialize cipher for decryption")
+            val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
+            throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
         }
     }
 
@@ -153,8 +154,17 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
+    fun setPendingCipher(cipher: Cipher) {
+        pendingCipher.set(cipher)
+    }
+
+    fun clearPendingCipher() {
+        pendingCipher.set(null)
+    }
+
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = getCipherForEncryption()
+        val cipher = pendingCipher.getAndSet(null)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available")
         storeShareWithCipher(cipher, data, metadata)
     }
 

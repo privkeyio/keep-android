@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -11,11 +12,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -40,6 +45,7 @@ class MainActivity : FragmentActivity() {
                     if (keepMobile != null && storage != null) {
                         MainScreen(
                             keepMobile = keepMobile,
+                            storage = storage,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onBiometricRequest = { title, subtitle, cipher, callback ->
@@ -73,14 +79,18 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun MainScreen(
     keepMobile: KeepMobile,
+    storage: AndroidKeystoreStorage,
     securityLevel: String,
-    lifecycleOwner: androidx.lifecycle.LifecycleOwner,
+    lifecycleOwner: LifecycleOwner,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
     var pendingCount by remember { mutableStateOf(0) }
+    var showImportScreen by remember { mutableStateOf(false) }
+    var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
+    val coroutineScope = rememberCoroutineScope()
 
     fun refreshShareState() {
         hasShare = keepMobile.hasShare()
@@ -100,6 +110,43 @@ fun MainScreen(
         }
     }
 
+    if (showImportScreen) {
+        ImportShareScreen(
+            onImport = { data, passphrase, name, cipher ->
+                importState = ImportState.Importing
+                if (!isValidKshareFormat(data)) {
+                    importState = ImportState.Error("Invalid share format")
+                    return@ImportShareScreen
+                }
+                coroutineScope.launch {
+                    storage.setPendingCipher(cipher)
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            keepMobile.importShare(data, passphrase, name)
+                        }
+                        importState = ImportState.Success(result.name)
+                        refreshShareState()
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
+                        importState = ImportState.Error("Import failed. Please try again.")
+                    } finally {
+                        storage.clearPendingCipher()
+                    }
+                }
+            },
+            onGetCipher = { storage.getCipherForEncryption() },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Import Share", "Authenticate to store share securely", cipher, callback)
+            },
+            onDismiss = {
+                showImportScreen = false
+                importState = ImportState.Idle
+            },
+            importState = importState
+        )
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -113,20 +160,13 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        Text(
-            text = "Security: $securityLevel",
-            style = MaterialTheme.typography.bodySmall,
-            color = when (securityLevel) {
-                "strongbox" -> MaterialTheme.colorScheme.primary
-                "tee" -> MaterialTheme.colorScheme.secondary
-                else -> MaterialTheme.colorScheme.error
-            }
-        )
+        SecurityLevelBadge(securityLevel)
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (hasShare && shareInfo != null) {
-            ShareInfoCard(shareInfo!!)
+        val currentShareInfo = shareInfo
+        if (hasShare && currentShareInfo != null) {
+            ShareInfoCard(currentShareInfo)
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -138,14 +178,14 @@ fun MainScreen(
             }
         } else {
             NoShareCard(
-                onImport = { refreshShareState() }
+                onImport = { showImportScreen = true }
             )
         }
     }
 }
 
 @Composable
-fun ShareInfoCard(info: ShareInfo) {
+private fun ShareInfoCard(info: ShareInfo) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(info.name, style = MaterialTheme.typography.titleLarge)
@@ -163,7 +203,7 @@ fun ShareInfoCard(info: ShareInfo) {
 }
 
 @Composable
-fun PeersCard(peers: List<PeerInfo>) {
+private fun PeersCard(peers: List<PeerInfo>) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Peers (${peers.size})", style = MaterialTheme.typography.titleMedium)
@@ -172,21 +212,7 @@ fun PeersCard(peers: List<PeerInfo>) {
                 Text("No peers connected", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 peers.forEach { peer ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Share ${peer.shareIndex}")
-                        Text(
-                            peer.status.name,
-                            color = when (peer.status.name) {
-                                "Online" -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                    }
+                    PeerRow(peer)
                 }
             }
         }
@@ -194,7 +220,24 @@ fun PeersCard(peers: List<PeerInfo>) {
 }
 
 @Composable
-fun NoShareCard(onImport: () -> Unit) {
+private fun PeerRow(peer: PeerInfo) {
+    val statusColor = if (peer.status.name == "Online") {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("Share ${peer.shareIndex}")
+        Text(peer.status.name, color = statusColor)
+    }
+}
+
+@Composable
+private fun NoShareCard(onImport: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -210,8 +253,22 @@ fun NoShareCard(onImport: () -> Unit) {
 }
 
 @Composable
-fun ErrorScreen(message: String) {
+private fun ErrorScreen(message: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.error)
     }
+}
+
+@Composable
+private fun SecurityLevelBadge(securityLevel: String) {
+    val color = when (securityLevel) {
+        "strongbox" -> MaterialTheme.colorScheme.primary
+        "tee" -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.error
+    }
+    Text(
+        text = "Security: $securityLevel",
+        style = MaterialTheme.typography.bodySmall,
+        color = color
+    )
 }

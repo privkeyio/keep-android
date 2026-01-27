@@ -3,8 +3,6 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.room.*
 import io.privkey.keep.uniffi.Nip55RequestType
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Entity(
     tableName = "nip55_permissions",
@@ -52,6 +50,9 @@ interface Nip55PermissionDao {
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
 
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType")
+    suspend fun deleteForCallerAndType(callerPackage: String, requestType: String)
+
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 }
@@ -98,11 +99,7 @@ enum class PermissionDuration(val millis: Long?) {
     ONE_DAY(24 * 60 * 60 * 1000L),
     FOREVER(null);
 
-    fun expiresAt(): Long? = when (this) {
-        JUST_THIS_TIME -> null
-        FOREVER -> null
-        else -> System.currentTimeMillis() + (millis ?: 0L)
-    }
+    fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
 
     val displayName: String
         get() = when (this) {
@@ -140,25 +137,21 @@ class PermissionStore(private val db: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
-    ) {
-        if (!duration.shouldPersist) return
-
-        val permission = Nip55Permission(
-            callerPackage = callerPackage,
-            requestType = requestType.name,
-            eventKind = eventKind,
-            decision = "allow",
-            expiresAt = if (duration == PermissionDuration.FOREVER) null else duration.expiresAt(),
-            createdAt = System.currentTimeMillis()
-        )
-        dao.insertPermission(permission)
-    }
+    ) = savePermission(callerPackage, requestType, eventKind, duration, "allow")
 
     suspend fun denyPermission(
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
+    ) = savePermission(callerPackage, requestType, eventKind, duration, "deny")
+
+    private suspend fun savePermission(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        duration: PermissionDuration,
+        decision: String
     ) {
         if (!duration.shouldPersist) return
 
@@ -166,8 +159,8 @@ class PermissionStore(private val db: Nip55Database) {
             callerPackage = callerPackage,
             requestType = requestType.name,
             eventKind = eventKind,
-            decision = "deny",
-            expiresAt = if (duration == PermissionDuration.FOREVER) null else duration.expiresAt(),
+            decision = decision,
+            expiresAt = duration.expiresAt(),
             createdAt = System.currentTimeMillis()
         )
         dao.insertPermission(permission)
@@ -177,7 +170,7 @@ class PermissionStore(private val db: Nip55Database) {
         if (requestType == null) {
             dao.deleteForCaller(callerPackage)
         } else {
-            dao.deleteForCaller(callerPackage)
+            dao.deleteForCallerAndType(callerPackage, requestType.name)
         }
     }
 
