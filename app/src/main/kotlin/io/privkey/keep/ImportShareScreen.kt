@@ -35,7 +35,7 @@ import javax.crypto.Cipher
 private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private const val MAX_SHARE_LENGTH = 8192
 
-private fun isValidKshareFormat(data: String): Boolean {
+internal fun isValidKshareFormat(data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
     if (!data.startsWith("kshare1")) return false
     val payload = data.removePrefix("kshare1")
@@ -65,6 +65,20 @@ fun ImportShareScreen(
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
+    LaunchedEffect(importState) {
+        if (importState is ImportState.Success) {
+            shareData = ""
+            passphrase = ""
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            shareData = ""
+            passphrase = ""
+        }
+    }
+
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
@@ -92,7 +106,7 @@ fun ImportShareScreen(
 
         OutlinedTextField(
             value = shareData,
-            onValueChange = { if (it.length <= 8192) shareData = it },
+            onValueChange = { if (it.length <= MAX_SHARE_LENGTH) shareData = it },
             label = { Text("Share Data") },
             placeholder = { Text("kshare1q...") },
             modifier = Modifier.fillMaxWidth(),
@@ -115,7 +129,7 @@ fun ImportShareScreen(
 
         OutlinedTextField(
             value = passphrase,
-            onValueChange = { passphrase = it },
+            onValueChange = { if (it.length <= 256) passphrase = it },
             label = { Text("Passphrase") },
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
@@ -128,7 +142,7 @@ fun ImportShareScreen(
 
         OutlinedTextField(
             value = shareName,
-            onValueChange = { shareName = it },
+            onValueChange = { if (it.length <= 64) shareName = it },
             label = { Text("Share Name") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,

@@ -111,12 +111,16 @@ fun MainScreen(
             onImport = { data, passphrase, name, cipher ->
                 importState = ImportState.Importing
                 try {
+                    if (!isValidKshareFormat(data)) {
+                        importState = ImportState.Error("Invalid share format")
+                        return@ImportShareScreen
+                    }
                     storage.setPendingCipher(cipher)
                     val result = keepMobile.importShare(data, passphrase, name)
                     importState = ImportState.Success(result.name)
                     refreshShareState()
                 } catch (e: Exception) {
-                    Log.e("MainActivity", "Import failed", e)
+                    Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                     importState = ImportState.Error("Import failed. Please try again.")
                 } finally {
                     storage.clearPendingCipher()
@@ -152,8 +156,9 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (hasShare && shareInfo != null) {
-            ShareInfoCard(shareInfo!!)
+        val currentShareInfo = shareInfo
+        if (hasShare && currentShareInfo != null) {
+            ShareInfoCard(currentShareInfo)
 
             Spacer(modifier = Modifier.height(16.dp))
 

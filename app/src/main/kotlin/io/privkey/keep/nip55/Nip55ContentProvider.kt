@@ -42,17 +42,11 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     private fun getHandler(): Nip55Handler? {
-        if (handler == null) {
-            handler = (context?.applicationContext as? KeepMobileApp)?.getNip55Handler()
-        }
-        return handler
+        return handler ?: (context?.applicationContext as? KeepMobileApp)?.getNip55Handler()?.also { handler = it }
     }
 
     private fun getPermissionStore(): PermissionStore? {
-        if (permissionStore == null) {
-            permissionStore = (context?.applicationContext as? KeepMobileApp)?.getPermissionStore()
-        }
-        return permissionStore
+        return permissionStore ?: (context?.applicationContext as? KeepMobileApp)?.getPermissionStore()?.also { permissionStore = it }
     }
 
     override fun query(
@@ -65,10 +59,7 @@ class Nip55ContentProvider : ContentProvider() {
         val h = getHandler() ?: return errorCursor("not_initialized", null)
         val store = getPermissionStore()
 
-        val callerPackage = getCallerPackage()
-        if (callerPackage == null) {
-            return errorCursor("unknown_caller", null)
-        }
+        val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
         val requestType = when (uriMatcher.match(uri)) {
             CODE_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
@@ -98,7 +89,7 @@ class Nip55ContentProvider : ContentProvider() {
                 }
                 rejectedCursor(id)
             }
-            null -> errorCursor("permissions_unavailable", id)
+            null -> errorCursor("request_failed", id)
         }
     }
 
