@@ -18,7 +18,9 @@ data class Nip55Permission(
     val decision: String,
     val expiresAt: Long?,
     val createdAt: Long
-)
+) {
+    fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+}
 
 @Entity(tableName = "nip55_audit_log")
 data class Nip55AuditLog(
@@ -113,20 +115,16 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
+        auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
     }
 
     suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
         val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
-        if (permission != null) {
-            val expired = permission.expiresAt != null && permission.expiresAt < System.currentTimeMillis()
-            if (!expired) return permission.decision == "allow"
-        }
+        if (permission != null && !permission.isExpired()) return permission.decision == "allow"
+
         if (eventKind != null) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
-            if (genericPermission != null) {
-                val genericExpired = genericPermission.expiresAt != null && genericPermission.expiresAt < System.currentTimeMillis()
-                if (!genericExpired) return genericPermission.decision == "allow"
-            }
+            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.decision == "allow"
         }
         return null
     }

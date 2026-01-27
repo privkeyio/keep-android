@@ -11,6 +11,7 @@ class RelayConfigStore(context: Context) {
         private const val PREFS_NAME = "keep_relay_config"
         private const val KEY_RELAYS = "relay_urls"
         private const val RELAY_SEPARATOR = "\n"
+        internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
     }
 
     private val prefs: SharedPreferences = run {
@@ -38,6 +39,7 @@ class RelayConfigStore(context: Context) {
     }
 
     fun addRelay(relay: String): Boolean {
+        if (!relay.matches(RELAY_URL_REGEX)) return false
         val current = getRelays().toMutableList()
         if (current.contains(relay)) return false
         current.add(relay)

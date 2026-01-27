@@ -72,16 +72,13 @@ class Nip55ContentProvider : ContentProvider() {
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
 
-        val permissionResult = if (store != null) {
-            runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
-        } else null
+        if (store == null) return errorCursor("permission_store_unavailable", id)
 
-        if (permissionResult == null) {
-            runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "error:store-missing", wasAutomatic = true) }
-            return errorCursor("permission_store_unavailable", id)
-        }
+        val permissionResult = runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
+            ?: return errorCursor("permission_store_unavailable", id)
+
         if (!permissionResult) {
-            runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+            runBlocking { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
             return rejectedCursor(id)
         }
         return executeBackgroundRequest(h, store, callerPackage, requestType, content, pubkey, id, eventKind)
@@ -89,7 +86,7 @@ class Nip55ContentProvider : ContentProvider() {
 
     private fun executeBackgroundRequest(
         h: Nip55Handler,
-        store: PermissionStore?,
+        store: PermissionStore,
         callerPackage: String,
         requestType: Nip55RequestType,
         content: String,
@@ -111,7 +108,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runBlocking { store?.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                runBlocking { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
@@ -120,7 +117,7 @@ class Nip55ContentProvider : ContentProvider() {
                 cursor
             }
             .getOrElse { e ->
-                Log.e(TAG, "Background request failed", e)
+                Log.e(TAG, "Background request failed: ${e::class.simpleName}")
                 errorCursor("request_failed", id)
             }
     }

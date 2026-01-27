@@ -279,6 +279,12 @@ fun RelaysCard(
     var newRelayUrl by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
+    fun dismissDialog() {
+        showAddDialog = false
+        newRelayUrl = ""
+        error = null
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -328,11 +334,7 @@ fun RelaysCard(
 
     if (showAddDialog) {
         AlertDialog(
-            onDismissRequest = {
-                showAddDialog = false
-                newRelayUrl = ""
-                error = null
-            },
+            onDismissRequest = ::dismissDialog,
             title = { Text("Add Relay") },
             text = {
                 Column {
@@ -359,15 +361,12 @@ fun RelaysCard(
             confirmButton = {
                 TextButton(onClick = {
                     val url = if (newRelayUrl.startsWith("wss://")) newRelayUrl else "wss://$newRelayUrl"
-                    val urlRegex = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]*)?$")
                     when {
                         url.length > 256 -> error = "URL too long"
-                        !url.matches(urlRegex) -> error = "Invalid relay URL"
+                        !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
                         else -> {
                             onAddRelay(url)
-                            showAddDialog = false
-                            newRelayUrl = ""
-                            error = null
+                            dismissDialog()
                         }
                     }
                 }) {
@@ -375,11 +374,7 @@ fun RelaysCard(
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showAddDialog = false
-                    newRelayUrl = ""
-                    error = null
-                }) {
+                TextButton(onClick = ::dismissDialog) {
                     Text("Cancel")
                 }
             }

@@ -60,7 +60,8 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun identifyCaller() {
-        callingActivity?.let { activity ->
+        val activity = callingActivity
+        if (activity != null) {
             callerPackage = activity.packageName
             callerVerified = true
             return
@@ -74,8 +75,8 @@ class Nip55Activity : FragmentActivity() {
         }
 
         val packages = packageManager.getPackagesForUid(callingUid)
-        callerVerified = packages?.size == 1
         callerPackage = packages?.singleOrNull()
+        callerVerified = callerPackage != null
     }
 
     private fun setupContent() {
@@ -144,7 +145,7 @@ class Nip55Activity : FragmentActivity() {
                     finishWithResult(response)
                 }
                 .onFailure { e ->
-                    Log.e(TAG, "Request failed: ${e.message}")
+                    Log.e(TAG, "Request failed: ${e::class.simpleName}")
                     val errorMsg = when (e) {
                         is KeepMobileException.RateLimited -> "rate_limited"
                         is KeepMobileException.NotInitialized -> "not_initialized"

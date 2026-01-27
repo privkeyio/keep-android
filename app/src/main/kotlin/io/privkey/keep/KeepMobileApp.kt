@@ -41,11 +41,11 @@ class KeepMobileApp : Application() {
             if (newStorage.hasShare() && relays.isNotEmpty()) {
                 applicationScope.launch {
                     runCatching { newKeepMobile.initialize(relays) }
-                        .onFailure { Log.e(TAG, "Failed to initialize with relays", it) }
+                        .onFailure { Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}") }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize KeepMobile", e)
+            Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}")
         }
     }
 
@@ -55,7 +55,7 @@ class KeepMobileApp : Application() {
             permissionStore = store
             applicationScope.launch { store.cleanupExpired() }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize PermissionStore", e)
+            Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
     }
 
@@ -84,7 +84,7 @@ class KeepMobileApp : Application() {
         applicationScope.launch {
             runCatching { mobile.initialize(relays) }
                 .onFailure {
-                    Log.e(TAG, "Failed to initialize with relays", it)
+                    Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}")
                     onError(it.message ?: "Failed to connect")
                 }
         }
