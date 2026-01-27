@@ -70,9 +70,9 @@ class Nip55ContentProvider : ContentProvider() {
         val currentUser = projection?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
         if (rawContent.length > MAX_CONTENT_LENGTH)
-            return errorCursor("content exceeds max length of $MAX_CONTENT_LENGTH", null)
+            return errorCursor("invalid input length", null)
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
-            return errorCursor("pubkey exceeds max length of $MAX_PUBKEY_LENGTH", null)
+            return errorCursor("invalid input length", null)
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
