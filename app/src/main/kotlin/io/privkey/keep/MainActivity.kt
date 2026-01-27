@@ -16,8 +16,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -87,6 +89,7 @@ fun MainScreen(
     var pendingCount by remember { mutableStateOf(0) }
     var showImportScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
+    val coroutineScope = rememberCoroutineScope()
 
     fun refreshShareState() {
         hasShare = keepMobile.hasShare()
@@ -110,20 +113,24 @@ fun MainScreen(
         ImportShareScreen(
             onImport = { data, passphrase, name, cipher ->
                 importState = ImportState.Importing
-                try {
-                    if (!isValidKshareFormat(data)) {
-                        importState = ImportState.Error("Invalid share format")
-                        return@ImportShareScreen
-                    }
+                if (!isValidKshareFormat(data)) {
+                    importState = ImportState.Error("Invalid share format")
+                    return@ImportShareScreen
+                }
+                coroutineScope.launch {
                     storage.setPendingCipher(cipher)
-                    val result = keepMobile.importShare(data, passphrase, name)
-                    importState = ImportState.Success(result.name)
-                    refreshShareState()
-                } catch (e: Exception) {
-                    Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
-                    importState = ImportState.Error("Import failed. Please try again.")
-                } finally {
-                    storage.clearPendingCipher()
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            keepMobile.importShare(data, passphrase, name)
+                        }
+                        importState = ImportState.Success(result.name)
+                        refreshShareState()
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
+                        importState = ImportState.Error("Import failed. Please try again.")
+                    } finally {
+                        storage.clearPendingCipher()
+                    }
                 }
             },
             onGetCipher = { storage.getCipherForEncryption() },
