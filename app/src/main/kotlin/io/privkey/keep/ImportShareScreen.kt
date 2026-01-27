@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import android.util.Log
 import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -189,8 +190,10 @@ fun ImportShareScreen(
                         }
                         null
                     } catch (e: KeyPermanentlyInvalidatedException) {
+                        Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
                         "Biometric key invalidated. Please re-enroll biometrics."
                     } catch (e: Exception) {
+                        Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
                         "Failed to initialize encryption"
                     }
                 }
@@ -305,6 +308,17 @@ private fun CameraPreview(
         val scanner = remember { BarcodeScanning.getClient() }
         val executor = remember { Executors.newSingleThreadExecutor() }
         val scanned = remember { AtomicBoolean(false) }
+
+        val closed = remember { AtomicBoolean(false) }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                if (closed.compareAndSet(false, true)) {
+                    try { scanner.close() } catch (_: Exception) {}
+                    try { executor.shutdown() } catch (_: Exception) {}
+                }
+            }
+        }
 
         LaunchedEffect(Unit) {
             val future = ProcessCameraProvider.getInstance(context)

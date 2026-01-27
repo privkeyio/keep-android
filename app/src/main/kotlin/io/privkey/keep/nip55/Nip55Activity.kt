@@ -103,8 +103,9 @@ class Nip55Activity : FragmentActivity() {
 
     private fun parseAndSetRequest(intent: Intent) {
         val uri = intent.data?.toString() ?: return finishWithError("Invalid request")
+        val h = handler ?: return finishWithError("Handler not initialized")
 
-        val parsed = runCatching { handler?.parseIntentUri(uri) }.getOrNull()
+        val parsed = runCatching { h.parseIntentUri(uri) }.getOrNull()
             ?: return finishWithError("Invalid request")
 
         request = parsed
