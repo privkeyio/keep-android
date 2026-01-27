@@ -190,9 +190,11 @@ fun MainScreen(
             RelaysCard(
                 relays = relays,
                 onAddRelay = { relay ->
-                    val updated = relays + relay
-                    relays = updated
-                    onRelaysChanged(updated)
+                    if (!relays.contains(relay)) {
+                        val updated = relays + relay
+                        relays = updated
+                        onRelaysChanged(updated)
+                    }
                 },
                 onRemoveRelay = { relay ->
                     val updated = relays - relay
@@ -365,6 +367,14 @@ fun RelaysCard(
                         url.length > 256 -> error = "URL too long"
                         !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
                         else -> {
+                            val portMatch = Regex(":(\\d{1,5})").find(url.removePrefix("wss://"))
+                            if (portMatch != null) {
+                                val port = portMatch.groupValues[1].toIntOrNull()
+                                if (port == null || port !in 1..65535) {
+                                    error = "Port must be between 1 and 65535"
+                                    return@TextButton
+                                }
+                            }
                             onAddRelay(url)
                             dismissDialog()
                         }

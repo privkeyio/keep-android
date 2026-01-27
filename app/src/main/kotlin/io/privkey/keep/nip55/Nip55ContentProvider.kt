@@ -66,9 +66,20 @@ class Nip55ContentProvider : ContentProvider() {
             else -> return errorCursor("invalid_uri", null)
         }
 
-        val id = uri.getQueryParameter("id")?.take(MAX_ID_LENGTH)
-        val content = uri.getQueryParameter("content")?.take(MAX_CONTENT_LENGTH) ?: ""
-        val pubkey = uri.getQueryParameter("pubkey")?.take(MAX_PUBKEY_LENGTH)
+        val rawId = uri.getQueryParameter("id")
+        val rawContent = uri.getQueryParameter("content") ?: ""
+        val rawPubkey = uri.getQueryParameter("pubkey")
+
+        if (rawId != null && rawId.length > MAX_ID_LENGTH)
+            return errorCursor("id exceeds max length of $MAX_ID_LENGTH", null)
+        if (rawContent.length > MAX_CONTENT_LENGTH)
+            return errorCursor("content exceeds max length of $MAX_CONTENT_LENGTH", null)
+        if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
+            return errorCursor("pubkey exceeds max length of $MAX_PUBKEY_LENGTH", null)
+
+        val id = rawId
+        val content = rawContent
+        val pubkey = rawPubkey
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
 

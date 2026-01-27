@@ -38,19 +38,25 @@ class RelayConfigStore(context: Context) {
             .apply()
     }
 
+    private val lock = Any()
+
     fun addRelay(relay: String): Boolean {
         if (!relay.matches(RELAY_URL_REGEX)) return false
-        val current = getRelays().toMutableList()
-        if (current.contains(relay)) return false
-        current.add(relay)
-        setRelays(current)
-        return true
+        synchronized(lock) {
+            val current = getRelays().toMutableList()
+            if (current.contains(relay)) return false
+            current.add(relay)
+            setRelays(current)
+            return true
+        }
     }
 
     fun removeRelay(relay: String): Boolean {
-        val current = getRelays().toMutableList()
-        if (!current.remove(relay)) return false
-        setRelays(current)
-        return true
+        synchronized(lock) {
+            val current = getRelays().toMutableList()
+            if (!current.remove(relay)) return false
+            setRelays(current)
+            return true
+        }
     }
 }
