@@ -93,12 +93,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
-        val key = try {
-            keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
-        } catch (e: Exception) {
-            return "unknown"
-        }
         return try {
+            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             val keyInfo = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
             when (keyInfo.securityLevel) {

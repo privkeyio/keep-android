@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Size
@@ -19,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,6 +32,7 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
 private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
@@ -243,8 +246,8 @@ private fun ImportButtons(
 @Composable
 private fun StatusCard(
     text: String,
-    containerColor: androidx.compose.ui.graphics.Color,
-    contentColor: androidx.compose.ui.graphics.Color
+    containerColor: Color,
+    contentColor: Color
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -290,7 +293,7 @@ fun QrScannerScreen(
 
 @Composable
 private fun CameraPreview(
-    context: android.content.Context,
+    context: Context,
     onCodeScanned: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -301,6 +304,7 @@ private fun CameraPreview(
         val previewView = remember { PreviewView(context) }
         val scanner = remember { BarcodeScanning.getClient() }
         val executor = remember { Executors.newSingleThreadExecutor() }
+        val scanned = remember { AtomicBoolean(false) }
 
         LaunchedEffect(Unit) {
             val future = ProcessCameraProvider.getInstance(context)
@@ -328,10 +332,15 @@ private fun CameraPreview(
                 val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
                 scanner.process(image)
                     .addOnSuccessListener { barcodes ->
+                        if (scanned.get()) return@addOnSuccessListener
                         barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
                             ?.rawValue
                             ?.takeIf { isValidKshareFormat(it) }
-                            ?.let(onCodeScanned)
+                            ?.let {
+                                if (scanned.compareAndSet(false, true)) {
+                                    onCodeScanned(it)
+                                }
+                            }
                     }
                     .addOnCompleteListener { imageProxy.close() }
             }
@@ -340,12 +349,14 @@ private fun CameraPreview(
                 provider.unbindAll()
                 provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
+                scanner.close()
                 executor.shutdown()
                 onDismiss()
             }
 
             onDispose {
                 provider.unbindAll()
+                scanner.close()
                 executor.shutdown()
             }
         }

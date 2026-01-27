@@ -99,11 +99,7 @@ enum class PermissionDuration(val millis: Long?) {
     ONE_DAY(24 * 60 * 60 * 1000L),
     FOREVER(null);
 
-    fun expiresAt(): Long? = when (this) {
-        JUST_THIS_TIME -> null
-        FOREVER -> null
-        else -> System.currentTimeMillis() + (millis ?: 0L)
-    }
+    fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
 
     val displayName: String
         get() = when (this) {
@@ -164,7 +160,7 @@ class PermissionStore(private val db: Nip55Database) {
             requestType = requestType.name,
             eventKind = eventKind,
             decision = decision,
-            expiresAt = if (duration == PermissionDuration.FOREVER) null else duration.expiresAt(),
+            expiresAt = duration.expiresAt(),
             createdAt = System.currentTimeMillis()
         )
         dao.insertPermission(permission)

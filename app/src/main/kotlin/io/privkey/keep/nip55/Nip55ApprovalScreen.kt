@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -22,10 +23,8 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
 private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
     Nip55RequestType.SIGN_EVENT -> "Signing Request"
-    Nip55RequestType.NIP44_ENCRYPT -> "Encryption Request"
-    Nip55RequestType.NIP44_DECRYPT -> "Decryption Request"
-    Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
-    Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
+    Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
+    Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
 }
 
@@ -225,7 +224,7 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
 private fun DetailRow(
     label: String,
     value: String,
-    valueStyle: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge
+    valueStyle: TextStyle = MaterialTheme.typography.bodyLarge
 ) {
     Text(
         text = label,

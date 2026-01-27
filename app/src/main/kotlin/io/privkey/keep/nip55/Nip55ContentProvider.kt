@@ -41,12 +41,14 @@ class Nip55ContentProvider : ContentProvider() {
         return true
     }
 
+    private val app get() = context?.applicationContext as? KeepMobileApp
+
     private fun getHandler(): Nip55Handler? {
-        return handler ?: (context?.applicationContext as? KeepMobileApp)?.getNip55Handler()?.also { handler = it }
+        return handler ?: app?.getNip55Handler()?.also { handler = it }
     }
 
     private fun getPermissionStore(): PermissionStore? {
-        return permissionStore ?: (context?.applicationContext as? KeepMobileApp)?.getPermissionStore()?.also { permissionStore = it }
+        return permissionStore ?: app?.getPermissionStore()?.also { permissionStore = it }
     }
 
     override fun query(
@@ -89,7 +91,7 @@ class Nip55ContentProvider : ContentProvider() {
                 }
                 rejectedCursor(id)
             }
-            null -> errorCursor("request_failed", id)
+            null -> null
         }
     }
 
@@ -134,7 +136,7 @@ class Nip55ContentProvider : ContentProvider() {
             ))
             cursor
         } catch (e: Exception) {
-            Log.e(TAG, "Background request failed", e)
+            Log.e(TAG, "Background request failed: ${e::class.simpleName}")
             errorCursor("request_failed", id)
         }
     }

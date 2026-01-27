@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -80,7 +81,7 @@ fun MainScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     securityLevel: String,
-    lifecycleOwner: androidx.lifecycle.LifecycleOwner,
+    lifecycleOwner: LifecycleOwner,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }

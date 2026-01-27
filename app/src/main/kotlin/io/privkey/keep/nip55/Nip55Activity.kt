@@ -40,8 +40,9 @@ class Nip55Activity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         biometricHelper = BiometricHelper(this)
-        handler = (application as? KeepMobileApp)?.getNip55Handler()
-        permissionStore = (application as? KeepMobileApp)?.getPermissionStore()
+        val app = application as? KeepMobileApp
+        handler = app?.getNip55Handler()
+        permissionStore = app?.getPermissionStore()
         handleIntent(intent)
     }
 
@@ -92,8 +93,8 @@ class Nip55Activity : FragmentActivity() {
                         request = currentRequest,
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
-                        onApprove = { duration -> handleApprove(duration) },
-                        onReject = { duration -> handleReject(duration) }
+                        onApprove = ::handleApprove,
+                        onReject = ::handleReject
                     )
                 }
             }
@@ -156,7 +157,7 @@ class Nip55Activity : FragmentActivity() {
                         is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
                         else -> "request_failed"
                     }
-                    Log.e(TAG, "Request failed: ${e.message}")
+                    Log.e(TAG, "Request failed: ${e::class.simpleName}")
                     finishWithError(errorMsg)
                 }
             )
