@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -72,12 +73,17 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     private fun sanitizeKey(key: String): String {
-        return key.map { c ->
-            if (c.isLetterOrDigit() || c == '_' || c == '.' || c == '-') c else '_'
-        }.joinToString("")
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(key.toByteArray(Charsets.UTF_8))
+        return hash.joinToString("") { "%02x".format(it) }
     }
 
-    private fun getLegacyKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX$key"
+    private fun getLegacyKeystoreAlias(key: String): String {
+        val legacySanitized = key.map { c ->
+            if (c.isLetterOrDigit() || c == '_' || c == '.' || c == '-') c else '_'
+        }.joinToString("")
+        return "$KEYSTORE_PREFIX$legacySanitized"
+    }
 
     private fun getSharePrefs(key: String): SharedPreferences {
         val sanitizedKey = sanitizeKey(key)

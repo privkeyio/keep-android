@@ -137,7 +137,14 @@ class Nip55ContentProvider : ContentProvider() {
             return null
         }
         val packages = context?.packageManager?.getPackagesForUid(callingUid)
-        return if (packages?.size == 1) packages[0] else null
+        return when {
+            packages.isNullOrEmpty() -> null
+            packages.size == 1 -> packages[0]
+            else -> {
+                Log.w(TAG, "Rejecting request from multi-package UID $callingUid with packages: ${packages.joinToString()}")
+                null
+            }
+        }
     }
 
     private fun errorCursor(error: String, id: String?): MatrixCursor {
