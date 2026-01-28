@@ -36,6 +36,23 @@ sealed class ExportState {
     data class Error(val message: String) : ExportState()
 }
 
+@Composable
+private fun ErrorCard(message: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Text(
+            text = message,
+            modifier = Modifier.padding(16.dp),
+            color = MaterialTheme.colorScheme.onErrorContainer
+        )
+    }
+    Spacer(modifier = Modifier.height(16.dp))
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportShareScreen(
@@ -98,36 +115,9 @@ fun ExportShareScreen(
         when (val state = exportState) {
             is ExportState.Idle, is ExportState.Error -> {
                 if (state is ExportState.Error) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            text = state.message,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    ErrorCard(state.message)
                 }
-
-                cipherError?.let { error ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            text = error,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
+                cipherError?.let { ErrorCard(it) }
 
                 OutlinedTextField(
                     value = passphrase,
@@ -216,22 +206,22 @@ fun ExportShareScreen(
             }
 
             is ExportState.Success -> {
+                val showCopiedToast = {
+                    Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
+                }
+
                 if (state.frames.size > 1) {
                     AnimatedQrCodeDisplay(
                         frames = state.frames,
                         label = "FROST Share Export",
                         fullData = state.data,
-                        onCopied = {
-                            Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
-                        }
+                        onCopied = showCopiedToast
                     )
                 } else {
                     QrCodeDisplay(
                         data = state.data,
                         label = "FROST Share Export",
-                        onCopied = {
-                            Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
-                        }
+                        onCopied = showCopiedToast
                     )
                 }
 
@@ -240,7 +230,7 @@ fun ExportShareScreen(
                 OutlinedButton(
                     onClick = {
                         copySensitiveText(context, state.data)
-                        Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
+                        showCopiedToast()
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -249,10 +239,7 @@ fun ExportShareScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                     Text("Done")
                 }
             }
@@ -263,9 +250,6 @@ fun ExportShareScreen(
 private fun generateFrames(data: String, maxBytes: Int): List<String> {
     val dataBytes = data.toByteArray(Charsets.UTF_8)
     if (dataBytes.size <= maxBytes) return listOf(data)
-
-    val totalFramesEstimate = (dataBytes.size / ((maxBytes - 30) / 2)).coerceAtLeast(1)
-    val totalDigits = totalFramesEstimate.toString().length.coerceAtLeast(2)
 
     fun jsonOverhead(frameIndex: Int, totalFrames: Int): Int {
         return """{"f":$frameIndex,"t":$totalFrames,"d":""}""".length

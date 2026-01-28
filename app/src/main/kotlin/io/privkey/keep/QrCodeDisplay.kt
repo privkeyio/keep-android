@@ -42,27 +42,15 @@ private const val FRAME_DURATION_MS = 800
 private const val CLIPBOARD_CLEAR_DELAY_MS = 60_000L
 
 @Composable
-fun QrCodeDisplay(
-    data: String,
-    label: String,
+private fun QrDisplayContainer(
     modifier: Modifier = Modifier,
-    onCopied: () -> Unit = {}
+    label: String,
+    copyData: String,
+    onCopied: () -> Unit,
+    extraContent: (@Composable ColumnScope.() -> Unit)? = null,
+    qrContent: @Composable BoxScope.() -> Unit
 ) {
     val context = LocalContext.current
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(data) {
-        bitmap?.recycle()
-        bitmap = withContext(Dispatchers.Default) {
-            generateQrCode(data)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            bitmap?.recycle()
-        }
-    }
 
     Column(
         modifier = modifier,
@@ -74,21 +62,16 @@ fun QrCodeDisplay(
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White)
                 .clickable {
-                    copySensitiveText(context, data)
+                    copySensitiveText(context, copyData)
                     onCopied()
                 },
-            contentAlignment = Alignment.Center
-        ) {
-            val bmp = bitmap
-            if (bmp != null) {
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = label,
-                    modifier = Modifier.size((QR_SIZE - 32).dp)
-                )
-            } else {
-                CircularProgressIndicator()
-            }
+            contentAlignment = Alignment.Center,
+            content = qrContent
+        )
+
+        if (extraContent != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            extraContent()
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -107,6 +90,62 @@ fun QrCodeDisplay(
 }
 
 @Composable
+private fun rememberAnimatedFrameIndex(frameCount: Int): Int {
+    val count = frameCount.coerceAtLeast(1)
+    val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
+    val frameProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = count.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = count * FRAME_DURATION_MS,
+                easing = LinearEasing
+            )
+        ),
+        label = "frame_index"
+    )
+    return frameProgress.toInt().coerceIn(0, (frameCount - 1).coerceAtLeast(0))
+}
+
+@Composable
+fun QrCodeDisplay(
+    data: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    onCopied: () -> Unit = {}
+) {
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(data) {
+        bitmap?.recycle()
+        bitmap = withContext(Dispatchers.Default) { generateQrCode(data) }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { bitmap?.recycle() }
+    }
+
+    QrDisplayContainer(
+        modifier = modifier,
+        label = label,
+        copyData = data,
+        onCopied = onCopied,
+        qrContent = {
+            val bmp = bitmap
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = label,
+                    modifier = Modifier.size((QR_SIZE - 32).dp)
+                )
+            } else {
+                CircularProgressIndicator()
+            }
+        }
+    )
+}
+
+@Composable
 fun AnimatedQrCodeDisplay(
     frames: List<String>,
     label: String,
@@ -114,9 +153,7 @@ fun AnimatedQrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    val context = LocalContext.current
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
-    var currentFrame by remember { mutableStateOf(0) }
     var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
@@ -129,44 +166,38 @@ fun AnimatedQrCodeDisplay(
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            bitmaps.forEach { it.recycle() }
-        }
+        onDispose { bitmaps.forEach { it.recycle() } }
     }
 
-    val frameCount = bitmaps.size.coerceAtLeast(1)
-    val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
-    val frameProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = frameCount.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = frameCount * FRAME_DURATION_MS,
-                easing = LinearEasing
-            )
-        ),
-        label = "frame_index"
-    )
+    val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
 
-    LaunchedEffect(frameProgress, bitmaps) {
-        currentFrame = frameProgress.toInt().coerceIn(0, (bitmaps.size - 1).coerceAtLeast(0))
-    }
-
-    Column(
+    QrDisplayContainer(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(QR_SIZE.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.White)
-                .clickable {
-                    copySensitiveText(context, fullData)
-                    onCopied()
-                },
-            contentAlignment = Alignment.Center
-        ) {
+        label = label,
+        copyData = fullData,
+        onCopied = onCopied,
+        extraContent = {
+            if (generationError) {
+                Text(
+                    text = "Some frames failed to generate",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (bitmaps.size > 1) {
+                LinearProgressIndicator(
+                    progress = (currentFrame + 1).toFloat() / bitmaps.size,
+                    modifier = Modifier.width(QR_SIZE.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Frame ${currentFrame + 1} of ${bitmaps.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        qrContent = {
             if (bitmaps.isNotEmpty() && currentFrame < bitmaps.size) {
                 Image(
                     bitmap = bitmaps[currentFrame].asImageBitmap(),
@@ -177,44 +208,7 @@ fun AnimatedQrCodeDisplay(
                 CircularProgressIndicator()
             }
         }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (generationError) {
-            Text(
-                text = "Some frames failed to generate",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-        }
-
-        if (bitmaps.size > 1) {
-            LinearProgressIndicator(
-                progress = (currentFrame + 1).toFloat() / bitmaps.size,
-                modifier = Modifier.width(QR_SIZE.dp)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Frame ${currentFrame + 1} of ${bitmaps.size}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Text(
-            text = "Tap to copy",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+    )
 }
 
 private fun generateQrCode(content: String): Bitmap? {

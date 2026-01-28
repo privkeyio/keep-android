@@ -9,13 +9,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
 
 private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShareDetailsScreen(
     shareInfo: ShareInfo,
@@ -201,15 +199,7 @@ private fun bech32CreateChecksum(hrp: String, data: List<Int>): List<Int> {
 }
 
 private fun bech32HrpExpand(hrp: String): List<Int> {
-    val result = mutableListOf<Int>()
-    for (c in hrp) {
-        result.add(c.code shr 5)
-    }
-    result.add(0)
-    for (c in hrp) {
-        result.add(c.code and 31)
-    }
-    return result
+    return hrp.map { it.code shr 5 } + 0 + hrp.map { it.code and 31 }
 }
 
 private fun bech32Polymod(values: List<Int>): Int {
