@@ -81,11 +81,12 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // QR code scanning
+    // QR code scanning and generation
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.camera:camera-camera2:1.5.2")
     implementation("androidx.camera:camera-lifecycle:1.5.2")
     implementation("androidx.camera:camera-view:1.5.2")
+    implementation("com.google.zxing:core:3.5.3")
 
     // UniFFI runtime (JNA)
     implementation("net.java.dev.jna:jna:5.13.0@aar")

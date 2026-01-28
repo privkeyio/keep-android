@@ -1,0 +1,205 @@
+package io.privkey.keep
+
+import android.graphics.Bitmap
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+private const val QR_SIZE = 300
+private const val FRAME_DURATION_MS = 800
+
+@Composable
+fun QrCodeDisplay(
+    data: String,
+    label: String,
+    modifier: Modifier = Modifier,
+    onCopied: () -> Unit = {}
+) {
+    val clipboardManager = LocalClipboardManager.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(data) {
+        bitmap = withContext(Dispatchers.Default) {
+            generateQrCode(data)
+        }
+    }
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(QR_SIZE.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White)
+                .clickable {
+                    clipboardManager.setText(AnnotatedString(data))
+                    onCopied()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            val bmp = bitmap
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = label,
+                    modifier = Modifier.size((QR_SIZE - 32).dp)
+                )
+            } else {
+                CircularProgressIndicator()
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Text(
+            text = "Tap to copy",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+fun AnimatedQrCodeDisplay(
+    frames: List<String>,
+    label: String,
+    fullData: String,
+    modifier: Modifier = Modifier,
+    onCopied: () -> Unit = {}
+) {
+    val clipboardManager = LocalClipboardManager.current
+    var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var currentFrame by remember { mutableStateOf(0) }
+
+    LaunchedEffect(frames) {
+        bitmaps = withContext(Dispatchers.Default) {
+            frames.mapNotNull { generateQrCode(it) }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
+    val frameProgress by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = frames.size.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = frames.size * FRAME_DURATION_MS,
+                easing = LinearEasing
+            )
+        ),
+        label = "frame_index"
+    )
+
+    LaunchedEffect(frameProgress) {
+        currentFrame = frameProgress.toInt().coerceIn(0, frames.size - 1)
+    }
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(QR_SIZE.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White)
+                .clickable {
+                    clipboardManager.setText(AnnotatedString(fullData))
+                    onCopied()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmaps.isNotEmpty() && currentFrame < bitmaps.size) {
+                Image(
+                    bitmap = bitmaps[currentFrame].asImageBitmap(),
+                    contentDescription = label,
+                    modifier = Modifier.size((QR_SIZE - 32).dp)
+                )
+            } else {
+                CircularProgressIndicator()
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (frames.size > 1) {
+            LinearProgressIndicator(
+                progress = (currentFrame + 1).toFloat() / frames.size,
+                modifier = Modifier.width(QR_SIZE.dp)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Frame ${currentFrame + 1} of ${frames.size}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Text(
+            text = "Tap to copy",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun generateQrCode(content: String): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val hints = mapOf(
+            EncodeHintType.MARGIN to 1,
+            EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M
+        )
+        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val pixels = IntArray(width * height)
+        val black = Color.Black.toArgb()
+        val white = Color.White.toArgb()
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                pixels[y * width + x] = if (bitMatrix[x, y]) black else white
+            }
+        }
+        Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+    } catch (_: Exception) {
+        null
+    }
+}

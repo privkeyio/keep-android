@@ -3,6 +3,9 @@
 -dontwarn javax.annotation.**
 -dontwarn java.awt.**
 
+# ZXing QR code generation
+-keep class com.google.zxing.** { *; }
+
 # Keep UniFFI generated code
 -keep class io.privkey.keep.uniffi.** { *; }
 
