@@ -170,6 +170,8 @@ fun ExportShareScreen(
                                             } catch (e: Exception) {
                                                 Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                                 exportState = ExportState.Error("Export failed. Please try again.")
+                                            } finally {
+                                                storage.clearPendingCipher()
                                             }
                                         }
                                     } else {
@@ -242,9 +244,9 @@ fun ExportShareScreen(
 }
 
 private fun generateFrames(data: String, maxBytes: Int): List<String> {
-    if (data.length <= maxBytes) return listOf(data)
-
     val dataBytes = data.toByteArray(Charsets.UTF_8)
+    if (dataBytes.size <= maxBytes) return listOf(data)
+
     val totalFramesEstimate = (dataBytes.size / ((maxBytes - 30) / 2)).coerceAtLeast(1)
     val totalDigits = totalFramesEstimate.toString().length.coerceAtLeast(2)
 

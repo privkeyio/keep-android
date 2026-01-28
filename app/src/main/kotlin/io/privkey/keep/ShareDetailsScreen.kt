@@ -25,6 +25,7 @@ fun ShareDetailsScreen(
     val npub = remember(shareInfo.groupPubkey) {
         hexToNpub(shareInfo.groupPubkey)
     }
+    val isNpubValid = npub.isNotBlank()
 
     Column(
         modifier = Modifier
@@ -54,13 +55,28 @@ fun ShareDetailsScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        QrCodeDisplay(
-            data = npub,
-            label = "Group Public Key (npub)",
-            onCopied = {
-                Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+        if (isNpubValid) {
+            QrCodeDisplay(
+                data = npub,
+                label = "Group Public Key (npub)",
+                onCopied = {
+                    Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                }
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = "Invalid group public key",
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
-        )
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -73,7 +89,7 @@ fun ShareDetailsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = npub.take(24) + "..." + npub.takeLast(8),
+                    text = if (isNpubValid) npub.take(24) + "..." + npub.takeLast(8) else "---",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -83,7 +99,8 @@ fun ShareDetailsScreen(
 
         Button(
             onClick = onExport,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = isNpubValid
         ) {
             Text("Export Share as QR")
         }
@@ -92,10 +109,13 @@ fun ShareDetailsScreen(
 
         OutlinedButton(
             onClick = {
-                copySensitiveText(context, npub)
-                Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                if (isNpubValid) {
+                    copySensitiveText(context, npub)
+                    Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                }
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = isNpubValid
         ) {
             Text("Copy npub")
         }
