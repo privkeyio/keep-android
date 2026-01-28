@@ -8,17 +8,12 @@ import android.net.Uri
 import android.os.Binder
 import android.util.Log
 import io.privkey.keep.KeepMobileApp
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 
 class Nip55ContentProvider : ContentProvider() {
-    private var handler: Nip55Handler? = null
-    private var permissionStore: PermissionStore? = null
-    private var killSwitchStore: KillSwitchStore? = null
-
     companion object {
         private const val TAG = "Nip55ContentProvider"
 
@@ -33,23 +28,9 @@ class Nip55ContentProvider : ContentProvider() {
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
 
-    override fun onCreate(): Boolean {
-        return true
-    }
+    private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private val app get() = context?.applicationContext as? KeepMobileApp
-
-    private fun getHandler(): Nip55Handler? {
-        return handler ?: app?.getNip55Handler()?.also { handler = it }
-    }
-
-    private fun getPermissionStore(): PermissionStore? {
-        return permissionStore ?: app?.getPermissionStore()?.also { permissionStore = it }
-    }
-
-    private fun getKillSwitchStore(): KillSwitchStore? {
-        return killSwitchStore ?: app?.getKillSwitchStore()?.also { killSwitchStore = it }
-    }
+    override fun onCreate(): Boolean = true
 
     override fun query(
         uri: Uri,
@@ -58,11 +39,11 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        if (getKillSwitchStore()?.isEnabled() == true) {
+        if (app?.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor("signing_disabled", null)
         }
-        val h = getHandler() ?: return errorCursor("not_initialized", null)
-        val store = getPermissionStore()
+        val h = app?.getNip55Handler() ?: return errorCursor("not_initialized", null)
+        val store = app?.getPermissionStore()
 
         val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
