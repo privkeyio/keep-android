@@ -5,6 +5,7 @@ import android.util.Log
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
@@ -17,6 +18,7 @@ class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
     private var storage: AndroidKeystoreStorage? = null
     private var relayConfigStore: RelayConfigStore? = null
+    private var killSwitchStore: KillSwitchStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -31,9 +33,11 @@ class KeepMobileApp : Application() {
         try {
             val newStorage = AndroidKeystoreStorage(this)
             val newRelayConfig = RelayConfigStore(this)
+            val newKillSwitch = KillSwitchStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
+            killSwitchStore = newKillSwitch
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
 
@@ -45,7 +49,7 @@ class KeepMobileApp : Application() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}")
+            Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
 
@@ -64,6 +68,8 @@ class KeepMobileApp : Application() {
     fun getStorage(): AndroidKeystoreStorage? = storage
 
     fun getRelayConfigStore(): RelayConfigStore? = relayConfigStore
+
+    fun getKillSwitchStore(): KillSwitchStore? = killSwitchStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 

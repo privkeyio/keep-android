@@ -58,6 +58,7 @@ fun ApprovalScreen(
     onReject: (PermissionDuration) -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
+    val canRememberChoice = callerVerified && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventKind = remember(request) {
@@ -80,18 +81,25 @@ fun ApprovalScreen(
 
         CallerLabel(callerPackage, callerVerified)
 
+        if (!callerVerified) {
+            Spacer(modifier = Modifier.height(8.dp))
+            UnverifiedCallerWarning()
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         RequestDetailsCard(request, eventKind)
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        DurationSelector(
-            selectedDuration = selectedDuration,
-            expanded = durationDropdownExpanded,
-            onExpandedChange = { durationDropdownExpanded = it },
-            onDurationSelected = { selectedDuration = it }
-        )
+        if (canRememberChoice) {
+            DurationSelector(
+                selectedDuration = selectedDuration,
+                expanded = durationDropdownExpanded,
+                onExpandedChange = { durationDropdownExpanded = it },
+                onDurationSelected = { selectedDuration = it }
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -103,7 +111,7 @@ fun ApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = { onReject(selectedDuration) },
+                    onClick = { onReject(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Reject")
@@ -111,7 +119,7 @@ fun ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove(selectedDuration)
+                        onApprove(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME)
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -179,17 +187,30 @@ private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
         style = MaterialTheme.typography.bodySmall,
         color = textColor
     )
-    if (callerPackage != null && !callerVerified) {
+}
+
+@Composable
+private fun UnverifiedCallerWarning() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
         Text(
-            text = "(unverified)",
-            style = MaterialTheme.typography.labelSmall,
-            color = errorColor
+            text = "Warning: Unable to verify the requesting app. Only approve if you initiated this action.",
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onErrorContainer
         )
     }
 }
 
 @Composable
 private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
+    var showFullContent by remember { mutableStateOf(false) }
+    val contentTruncated = request.content.length > 200
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             DetailRow("Type", request.requestType.displayName())
@@ -200,11 +221,19 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val displayContent = if (request.content.length > 200) {
+                val displayContent = if (!showFullContent && contentTruncated) {
                     "${request.content.take(200)}..."
                 } else request.content
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
+                if (contentTruncated) {
+                    TextButton(
+                        onClick = { showFullContent = !showFullContent },
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Text(if (showFullContent) "Show less" else "Show full content")
+                    }
+                }
             }
 
             request.pubkey?.let { pk ->

@@ -12,13 +12,12 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 class Nip55ContentProvider : ContentProvider() {
-    private var handler: Nip55Handler? = null
-    private var permissionStore: PermissionStore? = null
-
     companion object {
         private const val TAG = "Nip55ContentProvider"
+        private const val GENERIC_ERROR_MESSAGE = "An error occurred"
 
         private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
         private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
@@ -27,23 +26,14 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
+        private const val OPERATION_TIMEOUT_MS = 5000L
 
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
 
-    override fun onCreate(): Boolean {
-        return true
-    }
+    private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private val app get() = context?.applicationContext as? KeepMobileApp
-
-    private fun getHandler(): Nip55Handler? {
-        return handler ?: app?.getNip55Handler()?.also { handler = it }
-    }
-
-    private fun getPermissionStore(): PermissionStore? {
-        return permissionStore ?: app?.getPermissionStore()?.also { permissionStore = it }
-    }
+    override fun onCreate(): Boolean = true
 
     override fun query(
         uri: Uri,
@@ -52,8 +42,11 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        val h = getHandler() ?: return errorCursor("not_initialized", null)
-        val store = getPermissionStore()
+        if (app?.getKillSwitchStore()?.isEnabled() == true) {
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        }
+        val h = app?.getNip55Handler() ?: return errorCursor("not_initialized", null)
+        val store = app?.getPermissionStore()
 
         val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
@@ -78,11 +71,18 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val permissionResult = runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
-            ?: return null
+        val permissionResult = runBlocking {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                store.hasPermission(callerPackage, requestType, eventKind)
+            }
+        } ?: return errorCursor("timeout", null)
 
         if (!permissionResult) {
-            runBlocking { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+            runBlocking {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                    store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
+                }
+            }
             return rejectedCursor(null)
         }
         return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
@@ -113,7 +113,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runBlocking { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                runBlocking {
+                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                        store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+                    }
+                }
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
