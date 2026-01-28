@@ -65,15 +65,8 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun identifyCaller() {
-        val activity = callingActivity
-        if (activity != null) {
-            callerPackage = activity.packageName
-            callerVerified = true
-            return
-        }
-
-        callerPackage = null
-        callerVerified = false
+        callerPackage = callingActivity?.packageName
+        callerVerified = callerPackage != null
     }
 
     private fun setupContent() {

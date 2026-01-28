@@ -472,12 +472,12 @@ private fun KillSwitchCard(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
+    val containerColor = if (enabled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
+    val contentColor = if (enabled) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (enabled) MaterialTheme.colorScheme.errorContainer
-            else MaterialTheme.colorScheme.surfaceVariant
-        )
+        colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Row(
             modifier = Modifier
@@ -490,14 +490,13 @@ private fun KillSwitchCard(
                 Text(
                     text = if (enabled) "Signing Disabled" else "Kill Switch",
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (enabled) MaterialTheme.colorScheme.onErrorContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = contentColor
                 )
                 if (enabled) {
                     Text(
                         text = "All signing requests blocked",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        color = contentColor
                     )
                 }
             }
@@ -506,7 +505,7 @@ private fun KillSwitchCard(
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.error,
-                    checkedTrackColor = MaterialTheme.colorScheme.errorContainer
+                    checkedTrackColor = containerColor
                 )
             )
         }
