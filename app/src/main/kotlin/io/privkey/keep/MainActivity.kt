@@ -203,7 +203,7 @@ fun MainScreen(
                     coroutineScope.launch {
                         val authenticated = onBiometricAuth?.invoke() ?: true
                         if (authenticated) {
-                            killSwitchStore.setEnabled(false)
+                            withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
                             killSwitchEnabled = false
                         }
                     }
@@ -218,9 +218,11 @@ fun MainScreen(
                 text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
                 confirmButton = {
                     TextButton(onClick = {
-                        killSwitchStore.setEnabled(true)
-                        killSwitchEnabled = true
-                        showKillSwitchConfirmDialog = false
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
+                            killSwitchEnabled = true
+                            showKillSwitchConfirmDialog = false
+                        }
                     }) {
                         Text("Enable")
                     }

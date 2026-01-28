@@ -54,6 +54,13 @@ class Nip55Activity : FragmentActivity() {
         handleIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (killSwitchStore?.isEnabled() == true) {
+            finishWithError("signing_disabled")
+        }
+    }
+
     private fun handleIntent(intent: Intent) {
         if (killSwitchStore?.isEnabled() == true) {
             return finishWithError("signing_disabled")
@@ -106,6 +113,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleApprove(duration: PermissionDuration) {
+        if (killSwitchStore?.isEnabled() == true) {
+            return finishWithError("signing_disabled")
+        }
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val callerId = callerPackage ?: "unknown"
