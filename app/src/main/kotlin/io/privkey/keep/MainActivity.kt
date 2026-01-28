@@ -19,6 +19,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,7 @@ class MainActivity : FragmentActivity() {
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
         val relayConfigStore = app.getRelayConfigStore()
+        val killSwitchStore = app.getKillSwitchStore()
 
         setContent {
             KeepAndroidTheme {
@@ -47,11 +49,12 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null && relayConfigStore != null) {
+                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null) {
                         MainScreen(
                             keepMobile = keepMobile,
                             storage = storage,
                             relayConfigStore = relayConfigStore,
+                            killSwitchStore = killSwitchStore,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
@@ -81,6 +84,12 @@ class MainActivity : FragmentActivity() {
                                         callback(null)
                                     }
                                 }
+                            },
+                            onBiometricAuth = {
+                                biometricHelper.authenticate(
+                                    title = "Disable Kill Switch",
+                                    subtitle = "Authenticate to re-enable signing"
+                                )
                             }
                         )
                     } else {
@@ -98,10 +107,12 @@ fun MainScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     relayConfigStore: RelayConfigStore,
+    killSwitchStore: KillSwitchStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
-    onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit
+    onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
+    onBiometricAuth: (suspend () -> Boolean)? = null
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -111,6 +122,7 @@ fun MainScreen(
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
+    var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -179,7 +191,27 @@ fun MainScreen(
 
         SecurityLevelBadge(securityLevel)
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        KillSwitchCard(
+            enabled = killSwitchEnabled,
+            onToggle = { newValue ->
+                if (newValue) {
+                    killSwitchStore.setEnabled(true)
+                    killSwitchEnabled = true
+                } else {
+                    coroutineScope.launch {
+                        val authenticated = onBiometricAuth?.invoke() ?: true
+                        if (authenticated) {
+                            killSwitchStore.setEnabled(false)
+                            killSwitchEnabled = false
+                        }
+                    }
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         val currentShareInfo = shareInfo
         if (hasShare && currentShareInfo != null) {
@@ -410,6 +442,52 @@ private fun NoShareCard(onImport: () -> Unit) {
 private fun ErrorScreen(message: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.error)
+    }
+}
+
+@Composable
+private fun KillSwitchCard(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (enabled) MaterialTheme.colorScheme.errorContainer
+            else MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (enabled) "Signing Disabled" else "Kill Switch",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (enabled) MaterialTheme.colorScheme.onErrorContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (enabled) {
+                    Text(
+                        text = "All signing requests blocked",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.error,
+                    checkedTrackColor = MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
     }
 }
 

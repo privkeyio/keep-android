@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Binder
 import android.util.Log
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -16,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 class Nip55ContentProvider : ContentProvider() {
     private var handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
+    private var killSwitchStore: KillSwitchStore? = null
 
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -45,6 +47,10 @@ class Nip55ContentProvider : ContentProvider() {
         return permissionStore ?: app?.getPermissionStore()?.also { permissionStore = it }
     }
 
+    private fun getKillSwitchStore(): KillSwitchStore? {
+        return killSwitchStore ?: app?.getKillSwitchStore()?.also { killSwitchStore = it }
+    }
+
     override fun query(
         uri: Uri,
         projection: Array<out String>?,
@@ -52,6 +58,9 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
+        if (getKillSwitchStore()?.isEnabled() == true) {
+            return errorCursor("signing_disabled", null)
+        }
         val h = getHandler() ?: return errorCursor("not_initialized", null)
         val store = getPermissionStore()
 

@@ -13,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
@@ -27,6 +28,7 @@ class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
+    private var killSwitchStore: KillSwitchStore? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
@@ -43,6 +45,7 @@ class Nip55Activity : FragmentActivity() {
         val app = application as? KeepMobileApp
         handler = app?.getNip55Handler()
         permissionStore = app?.getPermissionStore()
+        killSwitchStore = app?.getKillSwitchStore()
         handleIntent(intent)
     }
 
@@ -53,6 +56,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
+        if (killSwitchStore?.isEnabled() == true) {
+            return finishWithError("signing_disabled")
+        }
         identifyCaller()
         requestId = intent.getStringExtra("id")
         parseAndSetRequest(intent)
