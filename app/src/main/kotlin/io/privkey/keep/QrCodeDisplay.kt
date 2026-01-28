@@ -223,7 +223,7 @@ private fun generateQrCode(content: String): Bitmap? {
     }
 }
 
-private fun copySensitiveText(context: Context, text: String) {
+internal fun copySensitiveText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newPlainText("share", text)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

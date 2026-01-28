@@ -8,9 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
 
@@ -24,7 +22,6 @@ fun ShareDetailsScreen(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
     val npub = remember(shareInfo.groupPubkey) {
         hexToNpub(shareInfo.groupPubkey)
     }
@@ -95,7 +92,7 @@ fun ShareDetailsScreen(
 
         OutlinedButton(
             onClick = {
-                clipboardManager.setText(AnnotatedString(npub))
+                copySensitiveText(context, npub)
                 Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
             },
             modifier = Modifier.fillMaxWidth()

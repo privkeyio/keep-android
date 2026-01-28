@@ -1,11 +1,5 @@
 package io.privkey.keep
 
-import android.content.ClipData
-import android.content.ClipDescription
-import android.content.ClipboardManager
-import android.content.Context
-import android.os.Build
-import android.os.PersistableBundle
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -250,13 +244,3 @@ private fun generateFrames(data: String, maxBytes: Int): List<String> {
     }
 }
 
-private fun copySensitiveText(context: Context, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val clip = ClipData.newPlainText("share", text)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        clip.description.extras = PersistableBundle().apply {
-            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
-        }
-    }
-    clipboard.setPrimaryClip(clip)
-}
