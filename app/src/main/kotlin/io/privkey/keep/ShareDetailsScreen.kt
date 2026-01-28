@@ -115,8 +115,12 @@ fun ShareDetailsScreen(
 }
 
 private fun hexToNpub(hex: String): String {
-    val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-    return bytesToNpub(bytes)
+    return try {
+        val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        bytesToNpub(bytes)
+    } catch (_: Exception) {
+        ""
+    }
 }
 
 private fun bytesToNpub(pubkey: ByteArray): String {

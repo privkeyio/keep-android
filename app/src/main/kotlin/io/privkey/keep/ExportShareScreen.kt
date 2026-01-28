@@ -1,5 +1,11 @@
 package io.privkey.keep
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -10,9 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -26,6 +30,7 @@ import javax.crypto.Cipher
 
 private const val MAX_SINGLE_QR_BYTES = 600
 private const val MAX_PASSPHRASE_LENGTH = 256
+private const val MIN_PASSPHRASE_LENGTH = 8
 
 sealed class ExportState {
     object Idle : ExportState()
@@ -49,7 +54,13 @@ fun ExportShareScreen(
     var cipherError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
+
+    DisposableEffect(Unit) {
+        onDispose {
+            passphrase = ""
+            exportState = ExportState.Idle
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -140,8 +151,8 @@ fun ExportShareScreen(
                     }
                     Button(
                         onClick = {
-                            if (passphrase.isBlank()) {
-                                exportState = ExportState.Error("Passphrase required")
+                            if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+                                exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
                                 return@Button
                             }
                             cipherError = null
@@ -159,8 +170,8 @@ fun ExportShareScreen(
                                                 val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
                                                 exportState = ExportState.Success(data, frames)
                                             } catch (e: Exception) {
-                                                Log.e("ExportShare", "Export failed", e)
-                                                exportState = ExportState.Error("Export failed: ${e.message}")
+                                                Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
+                                                exportState = ExportState.Error("Export failed. Please try again.")
                                             }
                                         }
                                     }
@@ -171,7 +182,7 @@ fun ExportShareScreen(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = passphrase.isNotBlank()
+                        enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH
                     ) {
                         Text("Export")
                     }
@@ -208,7 +219,7 @@ fun ExportShareScreen(
 
                 OutlinedButton(
                     onClick = {
-                        clipboardManager.setText(AnnotatedString(state.data))
+                        copySensitiveText(context, state.data)
                         Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -237,4 +248,15 @@ private fun generateFrames(data: String, maxBytes: Int): List<String> {
         val hex = chunk.toByteArray().joinToString("") { "%02x".format(it) }
         """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
     }
+}
+
+private fun copySensitiveText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("share", text)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    clipboard.setPrimaryClip(clip)
 }

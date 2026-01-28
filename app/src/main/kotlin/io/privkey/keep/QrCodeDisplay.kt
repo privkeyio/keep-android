@@ -1,6 +1,12 @@
 package io.privkey.keep
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
+import android.os.PersistableBundle
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -19,8 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -38,12 +43,19 @@ fun QrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(data) {
+        bitmap?.recycle()
         bitmap = withContext(Dispatchers.Default) {
             generateQrCode(data)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            bitmap?.recycle()
         }
     }
 
@@ -57,7 +69,7 @@ fun QrCodeDisplay(
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White)
                 .clickable {
-                    clipboardManager.setText(AnnotatedString(data))
+                    copySensitiveText(context, data)
                     onCopied()
                 },
             contentAlignment = Alignment.Center
@@ -97,13 +109,20 @@ fun AnimatedQrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var currentFrame by remember { mutableStateOf(0) }
 
     LaunchedEffect(frames) {
+        bitmaps.forEach { it.recycle() }
         bitmaps = withContext(Dispatchers.Default) {
             frames.mapNotNull { generateQrCode(it) }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            bitmaps.forEach { it.recycle() }
         }
     }
 
@@ -134,7 +153,7 @@ fun AnimatedQrCodeDisplay(
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White)
                 .clickable {
-                    clipboardManager.setText(AnnotatedString(fullData))
+                    copySensitiveText(context, fullData)
                     onCopied()
                 },
             contentAlignment = Alignment.Center
@@ -202,4 +221,15 @@ private fun generateQrCode(content: String): Bitmap? {
     } catch (_: Exception) {
         null
     }
+}
+
+private fun copySensitiveText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("share", text)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    clipboard.setPrimaryClip(clip)
 }
