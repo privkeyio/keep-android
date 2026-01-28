@@ -77,22 +77,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }.joinToString("")
     }
 
-    private fun migrateKeyIfNeeded(rawKey: String, sanitizedKey: String) {
-        if (rawKey == sanitizedKey) return
-
-        val oldAlias = "$KEYSTORE_PREFIX$rawKey"
-        val newAlias = "$KEYSTORE_PREFIX$sanitizedKey"
-        if (keyStore.containsAlias(oldAlias) && !keyStore.containsAlias(newAlias)) {
-            val oldKey = keyStore.getKey(oldAlias, null) as? SecretKey
-            if (oldKey != null) {
-                keyStore.deleteEntry(oldAlias)
-            }
-        }
-    }
+    private fun getLegacyKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX$key"
 
     private fun getSharePrefs(key: String): SharedPreferences {
         val sanitizedKey = sanitizeKey(key)
-        migrateKeyIfNeeded(key, sanitizedKey)
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -286,6 +274,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     @Synchronized
     private fun getOrCreateKeyForShare(key: String): SecretKey {
+        val legacyAlias = getLegacyKeystoreAlias(key)
+        if (keyStore.containsAlias(legacyAlias)) {
+            return keyStore.getKey(legacyAlias, null) as SecretKey
+        }
+
         val alias = getKeystoreAlias(key)
         if (!keyStore.containsAlias(alias)) {
             val keyGenerator = KeyGenerator.getInstance(
