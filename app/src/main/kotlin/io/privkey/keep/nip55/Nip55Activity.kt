@@ -12,6 +12,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
@@ -26,6 +27,7 @@ import kotlinx.coroutines.withContext
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var handler: Nip55Handler? = null
+    private var storage: AndroidKeystoreStorage? = null
     private var permissionStore: PermissionStore? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var request: Nip55Request? = null
@@ -43,6 +45,7 @@ class Nip55Activity : FragmentActivity() {
         biometricHelper = BiometricHelper(this)
         val app = application as? KeepMobileApp
         handler = app?.getNip55Handler()
+        storage = app?.getStorage()
         permissionStore = app?.getPermissionStore()
         killSwitchStore = app?.getKillSwitchStore()
         handleIntent(intent)
@@ -118,43 +121,60 @@ class Nip55Activity : FragmentActivity() {
         }
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
+        val keystoreStorage = storage
         val callerId = callerPackage ?: "unknown"
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
-            if (needsBiometric) {
-                val authenticated = biometricHelper.authenticate(
-                    title = "Approve Request",
-                    subtitle = req.requestType.displayName()
-                )
-                if (!authenticated) {
+            if (needsBiometric && keystoreStorage != null) {
+                val cipher = keystoreStorage.getCipherForDecryption()
+                if (cipher == null) {
+                    finishWithError("No share stored")
+                    return@launch
+                }
+                val authedCipher = try {
+                    biometricHelper.authenticateWithCrypto(
+                        cipher = cipher,
+                        title = "Approve Request",
+                        subtitle = req.requestType.displayName()
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
+                    null
+                }
+                if (authedCipher == null) {
                     finishWithError("Authentication failed")
                     return@launch
                 }
+                keystoreStorage.setPendingCipher(authedCipher)
             }
 
             if (store != null && callerId != "unknown") {
                 store.grantPermission(callerId, req.requestType, eventKind, duration)
             }
 
-            withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
-                .onSuccess { response ->
-                    store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
-                    finishWithResult(response)
-                }
-                .onFailure { e ->
-                    Log.e(TAG, "Request failed: ${e::class.simpleName}")
-                    val errorMsg = when (e) {
-                        is KeepMobileException.RateLimited -> "rate_limited"
-                        is KeepMobileException.NotInitialized -> "not_initialized"
-                        is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
-                        is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
-                        else -> "request_failed"
+            try {
+                withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
+                    .onSuccess { response ->
+                        store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
+                        finishWithResult(response)
                     }
-                    finishWithError(errorMsg)
-                }
+                    .onFailure { e ->
+                        Log.e(TAG, "Request failed: ${e::class.simpleName}")
+                        val errorMsg = when (e) {
+                            is KeepMobileException.RateLimited -> "rate_limited"
+                            is KeepMobileException.NotInitialized -> "not_initialized"
+                            is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
+                            is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
+                            else -> "request_failed"
+                        }
+                        finishWithError(errorMsg)
+                    }
+            } finally {
+                keystoreStorage?.clearPendingCipher()
+            }
         }
     }
 
