@@ -130,10 +130,7 @@ class Nip55Activity : FragmentActivity() {
         lifecycleScope.launch {
             if (needsBiometric && keystoreStorage != null) {
                 val cipher = keystoreStorage.getCipherForDecryption()
-                if (cipher == null) {
-                    finishWithError("No share stored")
-                    return@launch
-                }
+                    ?: return@launch finishWithError("No share stored")
                 val authedCipher = try {
                     biometricHelper.authenticateWithCrypto(
                         cipher = cipher,
@@ -143,11 +140,7 @@ class Nip55Activity : FragmentActivity() {
                 } catch (e: Exception) {
                     Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
                     null
-                }
-                if (authedCipher == null) {
-                    finishWithError("Authentication failed")
-                    return@launch
-                }
+                } ?: return@launch finishWithError("Authentication failed")
                 keystoreStorage.setPendingCipher(authedCipher)
             }
 
