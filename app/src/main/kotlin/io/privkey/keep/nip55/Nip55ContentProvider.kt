@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
+        private const val GENERIC_ERROR_MESSAGE = "An error occurred"
 
         private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
         private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
@@ -40,7 +41,7 @@ class Nip55ContentProvider : ContentProvider() {
         sortOrder: String?
     ): Cursor? {
         if (app?.getKillSwitchStore()?.isEnabled() == true) {
-            return errorCursor("signing_disabled", null)
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
         val h = app?.getNip55Handler() ?: return errorCursor("not_initialized", null)
         val store = app?.getPermissionStore()
