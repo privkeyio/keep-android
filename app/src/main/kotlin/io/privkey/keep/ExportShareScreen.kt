@@ -11,9 +11,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -48,11 +51,25 @@ fun ExportShareScreen(
     var cipherError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(Unit) {
+    DisposableEffect(lifecycleOwner) {
+        setSecureScreen(context, true)
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    passphrase = ""
+                    exportState = ExportState.Idle
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             passphrase = ""
             exportState = ExportState.Idle
+            setSecureScreen(context, false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -180,7 +197,7 @@ fun ExportShareScreen(
                                     }
                                 }
                             } catch (e: Exception) {
-                                Log.e("ExportShare", "Failed to init cipher", e)
+                                Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
                                 cipherError = "Failed to initialize encryption"
                             }
                         },

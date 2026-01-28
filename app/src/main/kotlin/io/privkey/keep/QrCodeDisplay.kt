@@ -1,12 +1,16 @@
 package io.privkey.keep
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PersistableBundle
+import android.view.WindowManager
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -35,6 +39,7 @@ import kotlinx.coroutines.withContext
 
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
+private const val CLIPBOARD_CLEAR_DELAY_MS = 60_000L
 
 @Composable
 fun QrCodeDisplay(
@@ -245,4 +250,24 @@ internal fun copySensitiveText(context: Context, text: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
+
+    Handler(Looper.getMainLooper()).postDelayed({
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            clipboard.clearPrimaryClip()
+        } else {
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+        }
+    }, CLIPBOARD_CLEAR_DELAY_MS)
+}
+
+internal fun setSecureScreen(context: Context, secure: Boolean) {
+    val activity = context as? Activity ?: return
+    if (secure) {
+        activity.window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+    } else {
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
 }

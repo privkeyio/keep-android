@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
 
@@ -26,6 +27,13 @@ fun ShareDetailsScreen(
         hexToNpub(shareInfo.groupPubkey)
     }
     val isNpubValid = npub.isNotBlank()
+
+    DisposableEffect(Unit) {
+        setSecureScreen(context, true)
+        onDispose {
+            setSecureScreen(context, false)
+        }
+    }
 
     Column(
         modifier = Modifier
