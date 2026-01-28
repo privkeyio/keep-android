@@ -12,6 +12,7 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 class Nip55ContentProvider : ContentProvider() {
     companion object {
@@ -25,6 +26,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
+        private const val OPERATION_TIMEOUT_MS = 5000L
 
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
@@ -69,11 +71,18 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val permissionResult = runBlocking { store.hasPermission(callerPackage, requestType, eventKind) }
-            ?: return null
+        val permissionResult = runBlocking {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                store.hasPermission(callerPackage, requestType, eventKind)
+            }
+        } ?: return errorCursor("timeout", null)
 
         if (!permissionResult) {
-            runBlocking { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+            runBlocking {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                    store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
+                }
+            }
             return rejectedCursor(null)
         }
         return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
@@ -104,7 +113,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runBlocking { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                runBlocking {
+                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                        store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+                    }
+                }
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)

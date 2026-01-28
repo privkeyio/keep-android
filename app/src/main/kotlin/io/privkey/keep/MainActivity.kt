@@ -123,6 +123,7 @@ fun MainScreen(
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
+    var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -197,8 +198,7 @@ fun MainScreen(
             enabled = killSwitchEnabled,
             onToggle = { newValue ->
                 if (newValue) {
-                    killSwitchStore.setEnabled(true)
-                    killSwitchEnabled = true
+                    showKillSwitchConfirmDialog = true
                 } else {
                     coroutineScope.launch {
                         val authenticated = onBiometricAuth?.invoke() ?: true
@@ -210,6 +210,28 @@ fun MainScreen(
                 }
             }
         )
+
+        if (showKillSwitchConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showKillSwitchConfirmDialog = false },
+                title = { Text("Enable Kill Switch?") },
+                text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        killSwitchStore.setEnabled(true)
+                        killSwitchEnabled = true
+                        showKillSwitchConfirmDialog = false
+                    }) {
+                        Text("Enable")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showKillSwitchConfirmDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
