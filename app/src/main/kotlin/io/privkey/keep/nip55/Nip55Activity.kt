@@ -148,11 +148,11 @@ class Nip55Activity : FragmentActivity() {
                 keystoreStorage.setPendingCipher(authedCipher)
             }
 
-            if (store != null && callerId != "unknown") {
-                store.grantPermission(callerId, req.requestType, eventKind, duration)
-            }
-
             try {
+                if (store != null && callerId != "unknown") {
+                    store.grantPermission(callerId, req.requestType, eventKind, duration)
+                }
+
                 withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
                     .onSuccess { response ->
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
