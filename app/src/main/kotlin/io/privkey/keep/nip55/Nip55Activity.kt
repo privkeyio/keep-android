@@ -128,7 +128,10 @@ class Nip55Activity : FragmentActivity() {
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
-            if (needsBiometric && keystoreStorage != null) {
+            if (needsBiometric) {
+                if (keystoreStorage == null) {
+                    return@launch finishWithError("Storage unavailable")
+                }
                 val cipher = try {
                     keystoreStorage.getCipherForDecryption()
                 } catch (e: Exception) {
