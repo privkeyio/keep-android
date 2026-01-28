@@ -71,20 +71,41 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         )
     }
 
+    private fun sanitizeKey(key: String): String {
+        return key.map { c ->
+            if (c.isLetterOrDigit() || c == '_' || c == '.' || c == '-') c else '_'
+        }.joinToString("")
+    }
+
+    private fun migrateKeyIfNeeded(rawKey: String, sanitizedKey: String) {
+        if (rawKey == sanitizedKey) return
+
+        val oldAlias = "$KEYSTORE_PREFIX$rawKey"
+        val newAlias = "$KEYSTORE_PREFIX$sanitizedKey"
+        if (keyStore.containsAlias(oldAlias) && !keyStore.containsAlias(newAlias)) {
+            val oldKey = keyStore.getKey(oldAlias, null) as? SecretKey
+            if (oldKey != null) {
+                keyStore.deleteEntry(oldAlias)
+            }
+        }
+    }
+
     private fun getSharePrefs(key: String): SharedPreferences {
+        val sanitizedKey = sanitizeKey(key)
+        migrateKeyIfNeeded(key, sanitizedKey)
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
         return EncryptedSharedPreferences.create(
             context,
-            "$PREFS_PREFIX$key",
+            "$PREFS_PREFIX$sanitizedKey",
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     }
 
-    private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX$key"
+    private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
     @Synchronized
     private fun getOrCreateKey(): SecretKey {
@@ -362,7 +383,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         val updatedKeys = existingKeys + key
-        multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys).commit()
+        val registryUpdated = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys).commit()
+        if (!registryUpdated) {
+            throw KeepMobileException.StorageException("Failed to update share registry")
+        }
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
@@ -423,7 +447,15 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         val updatedKeys = existingKeys - key
-        multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys).commit()
+        val activeKey = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
+        val editor = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys)
+        if (activeKey == key) {
+            editor.remove(KEY_ACTIVE_SHARE)
+        }
+        val registryUpdated = editor.commit()
+        if (!registryUpdated) {
+            throw KeepMobileException.StorageException("Failed to update share registry")
+        }
     }
 
     override fun getActiveShareKey(): String? {
