@@ -69,7 +69,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
                 .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(30, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
                 .setInvalidatedByBiometricEnrollment(true)
 
             if (isStrongBoxAvailable()) {
@@ -187,7 +187,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShare(): ByteArray {
-        val cipher = getCipherForDecryption()
+        val cipher = pendingCipher.getAndSet(null)
+            ?: getCipherForDecryption()
             ?: throw KeepMobileException.StorageException("No share stored")
         return loadShareWithCipher(cipher)
     }
