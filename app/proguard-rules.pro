@@ -3,6 +3,13 @@
 -dontwarn javax.annotation.**
 -dontwarn java.awt.**
 
+# ZXing QR code generation
+-keep class com.google.zxing.qrcode.QRCodeWriter { *; }
+-keep class com.google.zxing.BarcodeFormat { *; }
+-keep class com.google.zxing.EncodeHintType { *; }
+-keep class com.google.zxing.qrcode.decoder.ErrorCorrectionLevel { *; }
+-keep class com.google.zxing.common.BitMatrix { *; }
+
 # Keep UniFFI generated code
 -keep class io.privkey.keep.uniffi.** { *; }
 

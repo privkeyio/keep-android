@@ -119,6 +119,8 @@ fun MainScreen(
     var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
     var pendingCount by remember { mutableStateOf(0) }
     var showImportScreen by remember { mutableStateOf(false) }
+    var showShareDetails by remember { mutableStateOf(false) }
+    var showExportScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
@@ -137,6 +139,33 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    val currentShareInfoForScreens = shareInfo
+    if (showExportScreen && currentShareInfoForScreens != null) {
+        ExportShareScreen(
+            keepMobile = keepMobile,
+            shareInfo = currentShareInfoForScreens,
+            storage = storage,
+            onGetCipher = { storage.getCipherForDecryption() },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
+            },
+            onDismiss = { showExportScreen = false }
+        )
+        return
+    }
+
+    if (showShareDetails && currentShareInfoForScreens != null) {
+        ShareDetailsScreen(
+            shareInfo = currentShareInfoForScreens,
+            onExport = {
+                showShareDetails = false
+                showExportScreen = true
+            },
+            onDismiss = { showShareDetails = false }
+        )
+        return
     }
 
     if (showImportScreen) {
@@ -239,7 +268,10 @@ fun MainScreen(
 
         val currentShareInfo = shareInfo
         if (hasShare && currentShareInfo != null) {
-            ShareInfoCard(currentShareInfo)
+            ShareInfoCard(
+                info = currentShareInfo,
+                onClick = { showShareDetails = true }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -275,9 +307,13 @@ fun MainScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ShareInfoCard(info: ShareInfo) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(info.name, style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
@@ -288,6 +324,12 @@ private fun ShareInfoCard(info: ShareInfo) {
                 "Group: ${info.groupPubkey.take(16)}...",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Tap for QR code",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }
