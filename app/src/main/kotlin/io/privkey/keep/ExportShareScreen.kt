@@ -39,7 +39,7 @@ fun ExportShareScreen(
     keepMobile: KeepMobile,
     shareInfo: ShareInfo,
     storage: AndroidKeystoreStorage,
-    onGetCipher: () -> Cipher,
+    onGetCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -150,8 +150,12 @@ fun ExportShareScreen(
                                 return@Button
                             }
                             cipherError = null
+                            val cipher = onGetCipher()
+                            if (cipher == null) {
+                                cipherError = "No encryption key available"
+                                return@Button
+                            }
                             try {
-                                val cipher = onGetCipher()
                                 onBiometricAuth(cipher) { authedCipher ->
                                     if (authedCipher != null) {
                                         storage.setPendingCipher(authedCipher)
@@ -168,6 +172,9 @@ fun ExportShareScreen(
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             }
                                         }
+                                    } else {
+                                        exportState = ExportState.Error("Authentication cancelled")
+                                        Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             } catch (e: Exception) {
@@ -237,9 +244,29 @@ fun ExportShareScreen(
 private fun generateFrames(data: String, maxBytes: Int): List<String> {
     if (data.length <= maxBytes) return listOf(data)
 
-    val chunks = data.chunked(maxBytes)
+    val dataBytes = data.toByteArray(Charsets.UTF_8)
+    val totalFramesEstimate = (dataBytes.size / ((maxBytes - 30) / 2)).coerceAtLeast(1)
+    val totalDigits = totalFramesEstimate.toString().length.coerceAtLeast(2)
+
+    fun jsonOverhead(frameIndex: Int, totalFrames: Int): Int {
+        return """{"f":$frameIndex,"t":$totalFrames,"d":""}""".length
+    }
+
+    val chunks = mutableListOf<ByteArray>()
+    var offset = 0
+    while (offset < dataBytes.size) {
+        val frameIndex = chunks.size
+        val estimatedTotal = ((dataBytes.size - offset) / ((maxBytes - 30) / 2) + frameIndex + 1)
+            .coerceAtLeast(frameIndex + 1)
+        val overhead = jsonOverhead(frameIndex, estimatedTotal)
+        val payloadBytes = (maxBytes - overhead) / 2
+        val end = (offset + payloadBytes).coerceAtMost(dataBytes.size)
+        chunks.add(dataBytes.copyOfRange(offset, end))
+        offset = end
+    }
+
     return chunks.mapIndexed { index, chunk ->
-        val hex = chunk.toByteArray().joinToString("") { "%02x".format(it) }
+        val hex = chunk.joinToString("") { "%02x".format(it) }
         """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
     }
 }

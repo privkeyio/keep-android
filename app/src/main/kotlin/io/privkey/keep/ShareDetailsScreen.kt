@@ -111,7 +111,12 @@ fun ShareDetailsScreen(
     }
 }
 
+private val HEX_REGEX = Regex("^[0-9a-fA-F]+$")
+
 private fun hexToNpub(hex: String): String {
+    if (hex.isEmpty() || hex.length % 2 != 0 || !HEX_REGEX.matches(hex)) {
+        return ""
+    }
     return try {
         val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         bytesToNpub(bytes)

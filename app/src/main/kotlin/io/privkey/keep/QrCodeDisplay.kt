@@ -112,12 +112,15 @@ fun AnimatedQrCodeDisplay(
     val context = LocalContext.current
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var currentFrame by remember { mutableStateOf(0) }
+    var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
         bitmaps.forEach { it.recycle() }
-        bitmaps = withContext(Dispatchers.Default) {
+        val generated = withContext(Dispatchers.Default) {
             frames.mapNotNull { generateQrCode(it) }
         }
+        generationError = generated.size != frames.size
+        bitmaps = generated
     }
 
     DisposableEffect(Unit) {
@@ -126,21 +129,22 @@ fun AnimatedQrCodeDisplay(
         }
     }
 
+    val frameCount = bitmaps.size.coerceAtLeast(1)
     val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
     val frameProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = frames.size.toFloat(),
+        targetValue = frameCount.toFloat(),
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = frames.size * FRAME_DURATION_MS,
+                durationMillis = frameCount * FRAME_DURATION_MS,
                 easing = LinearEasing
             )
         ),
         label = "frame_index"
     )
 
-    LaunchedEffect(frameProgress) {
-        currentFrame = frameProgress.toInt().coerceIn(0, frames.size - 1)
+    LaunchedEffect(frameProgress, bitmaps) {
+        currentFrame = frameProgress.toInt().coerceIn(0, (bitmaps.size - 1).coerceAtLeast(0))
     }
 
     Column(
@@ -171,14 +175,23 @@ fun AnimatedQrCodeDisplay(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (frames.size > 1) {
+        if (generationError) {
+            Text(
+                text = "Some frames failed to generate",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        if (bitmaps.size > 1) {
             LinearProgressIndicator(
-                progress = (currentFrame + 1).toFloat() / frames.size,
+                progress = (currentFrame + 1).toFloat() / bitmaps.size,
                 modifier = Modifier.width(QR_SIZE.dp)
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Frame ${currentFrame + 1} of ${frames.size}",
+                text = "Frame ${currentFrame + 1} of ${bitmaps.size}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

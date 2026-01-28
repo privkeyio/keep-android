@@ -147,7 +147,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             shareInfo = currentShareInfoForScreens,
             storage = storage,
-            onGetCipher = { storage.getCipherForDecryption()!! },
+            onGetCipher = { storage.getCipherForDecryption() },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
             },
