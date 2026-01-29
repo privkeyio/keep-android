@@ -142,7 +142,9 @@ fun AppPermissionsScreen(
                                 withContext(Dispatchers.IO) {
                                     val requestType = Nip55RequestType.entries
                                         .find { it.name == permission.requestType }
-                                    permissionStore.revokePermission(packageName, requestType)
+                                    if (requestType != null) {
+                                        permissionStore.revokePermission(packageName, requestType)
+                                    }
                                 }
                                 permissions = withContext(Dispatchers.IO) {
                                     permissionStore.getPermissionsForCaller(packageName)
