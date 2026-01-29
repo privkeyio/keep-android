@@ -388,20 +388,20 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+    override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         val cipher = pendingCipher.getAndSet(null)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available")
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
 
-    fun loadShareByKey(key: String): ByteArray {
+    override fun loadShareByKey(key: String): ByteArray {
         val cipher = pendingCipher.getAndSet(null)
             ?: getCipherForShareDecryption(key)
             ?: throw KeepMobileException.StorageException("No share stored for key: $key")
         return loadShareByKeyWithCipher(cipher, key)
     }
 
-    fun listAllShares(): List<ShareMetadataInfo> {
+    override fun listAllShares(): List<ShareMetadataInfo> {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         return keys.mapNotNull { key ->
             getShareMetadataByKey(key)
@@ -428,7 +428,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun deleteShareByKey(key: String) {
+    override fun deleteShareByKey(key: String) {
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
@@ -457,11 +457,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun getActiveShareKey(): String? {
+    override fun getActiveShareKey(): String? {
         return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
     }
 
-    fun setActiveShareKey(key: String?) {
+    override fun setActiveShareKey(key: String?) {
         val saved = if (key != null) {
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, key).commit()
         } else {
