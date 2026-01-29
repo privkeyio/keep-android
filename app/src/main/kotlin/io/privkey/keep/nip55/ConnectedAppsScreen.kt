@@ -121,9 +121,10 @@ private fun ConnectedAppItem(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (appIcon != null) {
+            val icon = appIcon
+            if (icon != null) {
                 Image(
-                    bitmap = appIcon!!.toBitmap(48, 48).asImageBitmap(),
+                    bitmap = icon.toBitmap(48, 48).asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier.size(48.dp)
                 )

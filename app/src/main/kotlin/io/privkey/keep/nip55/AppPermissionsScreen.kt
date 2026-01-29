@@ -141,12 +141,8 @@ fun AppPermissionsScreen(
                             coroutineScope.launch {
                                 withContext(Dispatchers.IO) {
                                     val requestType = Nip55RequestType.entries
-                                        .firstOrNull { it.name == permission.requestType }
-                                    if (requestType != null) {
-                                        permissionStore.revokePermission(packageName, requestType)
-                                    } else {
-                                        permissionStore.revokePermission(packageName)
-                                    }
+                                        .find { it.name == permission.requestType }
+                                    permissionStore.revokePermission(packageName, requestType)
                                 }
                                 permissions = withContext(Dispatchers.IO) {
                                     permissionStore.getPermissionsForCaller(packageName)
