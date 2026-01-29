@@ -25,6 +25,8 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
+private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppPermissionsScreen(
@@ -42,18 +44,28 @@ fun AppPermissionsScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        withContext(Dispatchers.IO) {
+        val (fetchedLabel, fetchedIcon, verified, perms) = withContext(Dispatchers.IO) {
+            var label: String? = null
+            var icon: Drawable? = null
+            var ver = true
             try {
                 val pm = context.packageManager
                 val info = pm.getApplicationInfo(packageName, 0)
-                appLabel = pm.getApplicationLabel(info).toString()
-                appIcon = pm.getApplicationIcon(info)
+                label = pm.getApplicationLabel(info).toString()
+                icon = pm.getApplicationIcon(info)
             } catch (e: PackageManager.NameNotFoundException) {
-                isVerified = false
+                ver = false
             }
-            permissions = permissionStore.getPermissionsForCaller(packageName)
+            val permsList = permissionStore.getPermissionsForCaller(packageName)
+            Tuple4(label, icon, ver, permsList)
         }
-        isLoading = false
+        withContext(Dispatchers.Main) {
+            appLabel = fetchedLabel
+            appIcon = fetchedIcon
+            isVerified = verified
+            permissions = perms
+            isLoading = false
+        }
     }
 
     if (showRevokeAllDialog) {
