@@ -42,23 +42,14 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
         } catch (e: JSONException) {
             throw KeepMobileException.StorageException("Invalid JSON format for audit entry")
         }
-        val entries = loadEntriesInternal()
-        entries.add(entryJson)
-        while (entries.size > MAX_ENTRIES) {
-            entries.removeAt(0)
-        }
-        saveEntries(entries)
+        val entries = loadEntriesInternal().apply { add(entryJson) }
+        saveEntries(entries.takeLast(MAX_ENTRIES))
     }
 
     @Synchronized
     override fun loadEntries(limit: UInt?): List<String> {
         val entries = loadEntriesInternal()
-        return if (limit != null) {
-            val n = limit.toInt()
-            if (n >= entries.size) entries else entries.subList(entries.size - n, entries.size)
-        } else {
-            entries
-        }
+        return if (limit != null) entries.takeLast(limit.toInt()) else entries
     }
 
     @Synchronized
@@ -70,11 +61,7 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
         val stored = prefs.getString(KEY_ENTRIES, null) ?: return mutableListOf()
         return try {
             val jsonArray = JSONArray(stored)
-            val result = mutableListOf<String>()
-            for (i in 0 until jsonArray.length()) {
-                result.add(jsonArray.getString(i))
-            }
-            result
+            (0 until jsonArray.length()).mapTo(mutableListOf()) { jsonArray.getString(it) }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to load audit entries")
         }
