@@ -48,7 +48,6 @@ private fun ErrorCard(message: String) {
             color = MaterialTheme.colorScheme.onErrorContainer
         )
     }
-    Spacer(modifier = Modifier.height(16.dp))
 }
 
 private enum class PassphraseStrength(val label: String) {
@@ -163,8 +162,13 @@ fun ExportShareScreen(
 
                 if (state is ExportState.Error) {
                     ErrorCard(state.message)
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
-                cipherError?.let { ErrorCard(it) }
+
+                cipherError?.let {
+                    ErrorCard(it)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 OutlinedTextField(
                     value = passphrase,
@@ -320,8 +324,9 @@ private fun ExportSuccessContent(
 ) {
     val context = LocalContext.current
     val showCopiedToast = { Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show() }
+    val isAnimated = frames.size > 1
 
-    if (frames.size > 1) {
+    if (isAnimated) {
         AnimatedQrCodeDisplay(
             frames = frames,
             label = "FROST Share Export",

@@ -69,9 +69,9 @@ private fun QrDisplayContainer(
             content = qrContent
         )
 
-        if (extraContent != null) {
+        extraContent?.let {
             Spacer(modifier = Modifier.height(8.dp))
-            extraContent()
+            it()
         }
 
         Spacer(modifier = Modifier.height(12.dp))
