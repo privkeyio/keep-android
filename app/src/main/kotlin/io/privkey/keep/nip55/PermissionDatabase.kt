@@ -60,7 +60,7 @@ interface Nip55PermissionDao {
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 
-    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
+@Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
     suspend fun getAllCallerPackages(now: Long): List<String>
 
     @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY createdAt DESC")
@@ -71,6 +71,12 @@ interface Nip55PermissionDao {
 
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType AND eventKind = :eventKind")
     suspend fun deleteForCallerAndTypeAndEventKind(callerPackage: String, requestType: String, eventKind: Int)
+
+    @Query("DELETE FROM nip55_permissions WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions ORDER BY callerPackage")
+    suspend fun getDistinctCallers(): List<String>
 }
 
 @Dao
@@ -87,8 +93,17 @@ interface Nip55AuditLogDao {
     @Query("DELETE FROM nip55_audit_log WHERE timestamp < :before")
     suspend fun deleteOlderThan(before: Long)
 
-    @Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
+@Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
     suspend fun getLastUsedTime(callerPackage: String): Long?
+
+    @Query("SELECT * FROM nip55_audit_log ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPage(limit: Int, offset: Int): List<Nip55AuditLog>
+
+    @Query("SELECT * FROM nip55_audit_log WHERE callerPackage = :callerPackage ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPageForCaller(callerPackage: String, limit: Int, offset: Int): List<Nip55AuditLog>
+
+    @Query("SELECT DISTINCT callerPackage FROM nip55_audit_log ORDER BY callerPackage")
+    suspend fun getDistinctCallers(): List<String>
 }
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class], version = 1)
@@ -214,7 +229,7 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun getAuditLog(limit: Int = 100): List<Nip55AuditLog> = auditDao.getRecent(limit)
 
-    suspend fun getConnectedApps(): List<ConnectedAppInfo> {
+suspend fun getConnectedApps(): List<ConnectedAppInfo> {
         val now = System.currentTimeMillis()
         val packages = dao.getAllCallerPackages(now)
         return packages.map { pkg ->
@@ -228,4 +243,24 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
         dao.getForCaller(callerPackage, System.currentTimeMillis())
+
+    suspend fun deletePermission(id: Long) = dao.deleteById(id)
+
+    suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
+
+    suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
+
+    suspend fun getAuditLogPage(
+        limit: Int,
+        offset: Int,
+        callerPackage: String? = null
+    ): List<Nip55AuditLog> {
+        return if (callerPackage != null) {
+            auditDao.getPageForCaller(callerPackage, limit, offset)
+        } else {
+            auditDao.getPage(limit, offset)
+        }
+    }
+
+    suspend fun getDistinctAuditCallers(): List<String> = auditDao.getDistinctCallers()
 }
