@@ -7,12 +7,16 @@ import androidx.security.crypto.MasterKey
 import io.privkey.keep.uniffi.AuditStorage
 import io.privkey.keep.uniffi.KeepMobileException
 import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
 
 class AndroidAuditStorage(context: Context) : AuditStorage {
 
     companion object {
         private const val PREFS_NAME = "keep_audit_log"
         private const val KEY_ENTRIES = "audit_entries"
+        private const val MAX_ENTRIES = 1000
+        private const val MAX_ENTRY_SIZE_BYTES = 64 * 1024
     }
 
     private val prefs: SharedPreferences = run {
@@ -30,11 +34,23 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
 
     @Synchronized
     override fun storeEntry(entryJson: String) {
+        if (entryJson.toByteArray(Charsets.UTF_8).size > MAX_ENTRY_SIZE_BYTES) {
+            throw KeepMobileException.StorageException("Audit entry exceeds maximum size limit")
+        }
+        try {
+            JSONObject(entryJson)
+        } catch (e: JSONException) {
+            throw KeepMobileException.StorageException("Invalid JSON format for audit entry")
+        }
         val entries = loadEntriesInternal()
         entries.add(entryJson)
+        while (entries.size > MAX_ENTRIES) {
+            entries.removeAt(0)
+        }
         saveEntries(entries)
     }
 
+    @Synchronized
     override fun loadEntries(limit: UInt?): List<String> {
         val entries = loadEntriesInternal()
         return if (limit != null) {
@@ -60,7 +76,7 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
             }
             result
         } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to load audit entries: ${e.message}")
+            throw KeepMobileException.StorageException("Failed to load audit entries")
         }
     }
 
