@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import android.util.Log
 import androidx.annotation.StringRes
 import androidx.room.*
 import io.privkey.keep.R
@@ -121,7 +122,7 @@ abstract class Nip55Database : RoomDatabase() {
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
             }
         }
     }
@@ -148,6 +149,10 @@ data class ConnectedAppInfo(
 class PermissionStore(db: Nip55Database) {
     private val dao = db.permissionDao()
     private val auditDao = db.auditLogDao()
+
+    companion object {
+        private const val TAG = "PermissionStore"
+    }
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
@@ -244,9 +249,15 @@ suspend fun getConnectedApps(): List<ConnectedAppInfo> {
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
         dao.getForCaller(callerPackage, System.currentTimeMillis())
 
-    suspend fun deletePermission(id: Long) = dao.deleteById(id)
+    suspend fun deletePermission(id: Long) {
+        Log.d(TAG, "Deleting permission id=$id")
+        dao.deleteById(id)
+    }
 
-    suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
+    suspend fun revokeAllForApp(callerPackage: String) {
+        Log.d(TAG, "Revoking all permissions for $callerPackage")
+        dao.deleteForCaller(callerPackage)
+    }
 
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 
@@ -255,10 +266,12 @@ suspend fun getConnectedApps(): List<ConnectedAppInfo> {
         offset: Int,
         callerPackage: String? = null
     ): List<Nip55AuditLog> {
+        val safeLimit = limit.coerceIn(1, 100)
+        val safeOffset = offset.coerceAtLeast(0)
         return if (callerPackage != null) {
-            auditDao.getPageForCaller(callerPackage, limit, offset)
+            auditDao.getPageForCaller(callerPackage, safeLimit, safeOffset)
         } else {
-            auditDao.getPage(limit, offset)
+            auditDao.getPage(safeLimit, safeOffset)
         }
     }
 
