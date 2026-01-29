@@ -254,19 +254,12 @@ private fun PermissionCard(
                         }
                     )
 
-                    permission.expiresAt?.let { expiresAt ->
-                        Text(
-                            text = " - Expires ${dateFormat.format(Date(expiresAt))}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } ?: run {
-                        Text(
-                            text = " - Forever",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    val expiryText = permission.expiresAt?.let { " - Expires ${dateFormat.format(Date(it))}" } ?: " - Forever"
+                    Text(
+                        text = expiryText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -279,8 +272,4 @@ private fun PermissionCard(
             }
         }
     }
-}
-
-private fun formatRequestType(type: String): String {
-    return type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
 }

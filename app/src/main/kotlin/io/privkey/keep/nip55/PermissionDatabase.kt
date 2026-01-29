@@ -122,7 +122,7 @@ abstract class Nip55Database : RoomDatabase() {
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration(dropAllTables = true).build().also { INSTANCE = it }
             }
         }
     }
@@ -277,3 +277,6 @@ suspend fun getConnectedApps(): List<ConnectedAppInfo> {
 
     suspend fun getDistinctAuditCallers(): List<String> = auditDao.getDistinctCallers()
 }
+
+fun formatRequestType(type: String): String =
+    type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }

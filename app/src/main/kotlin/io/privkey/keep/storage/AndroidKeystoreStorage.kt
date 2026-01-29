@@ -46,31 +46,22 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         load(null)
     }
 
-    private val prefs: SharedPreferences by lazy {
+    private fun createEncryptedPrefs(name: String): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             context,
-            PREFS_NAME,
+            name,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     }
 
-    private val multiSharePrefs: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            MULTI_PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs: SharedPreferences by lazy { createEncryptedPrefs(PREFS_NAME) }
+
+    private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs(MULTI_PREFS_NAME) }
 
     private fun sanitizeKey(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -85,19 +76,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return "$KEYSTORE_PREFIX$legacySanitized"
     }
 
-    private fun getSharePrefs(key: String): SharedPreferences {
-        val sanitizedKey = sanitizeKey(key)
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            "$PREFS_PREFIX$sanitizedKey",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private fun getSharePrefs(key: String): SharedPreferences =
+        createEncryptedPrefs("$PREFS_PREFIX${sanitizeKey(key)}")
 
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
@@ -462,12 +442,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun setActiveShareKey(key: String?) {
-        val saved = if (key != null) {
-            multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, key).commit()
-        } else {
-            multiSharePrefs.edit().remove(KEY_ACTIVE_SHARE).commit()
-        }
-        if (!saved) {
+        val editor = multiSharePrefs.edit()
+        val saved = if (key != null) editor.putString(KEY_ACTIVE_SHARE, key) else editor.remove(KEY_ACTIVE_SHARE)
+        if (!saved.commit()) {
             throw KeepMobileException.StorageException("Failed to save active share key")
         }
     }

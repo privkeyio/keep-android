@@ -298,7 +298,3 @@ private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
         }
     }
 }
-
-private fun formatRequestType(type: String): String {
-    return type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
-}
