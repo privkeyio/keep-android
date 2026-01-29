@@ -27,7 +27,7 @@ import javax.crypto.Cipher
 
 private const val MAX_SINGLE_QR_BYTES = 600
 private const val MAX_PASSPHRASE_LENGTH = 256
-private const val MIN_PASSPHRASE_LENGTH = 8
+private const val MIN_PASSPHRASE_LENGTH = 12
 
 sealed class ExportState {
     object Idle : ExportState()
@@ -40,9 +40,7 @@ sealed class ExportState {
 private fun ErrorCard(message: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
     ) {
         Text(
             text = message,
@@ -51,6 +49,38 @@ private fun ErrorCard(message: String) {
         )
     }
     Spacer(modifier = Modifier.height(16.dp))
+}
+
+private enum class PassphraseStrength(val label: String) {
+    WEAK("Weak"),
+    FAIR("Fair"),
+    GOOD("Good"),
+    STRONG("Strong")
+}
+
+@Composable
+private fun PassphraseStrength.color(): androidx.compose.ui.graphics.Color = when (this) {
+    PassphraseStrength.WEAK -> MaterialTheme.colorScheme.error
+    PassphraseStrength.FAIR -> MaterialTheme.colorScheme.tertiary
+    PassphraseStrength.GOOD, PassphraseStrength.STRONG -> MaterialTheme.colorScheme.primary
+}
+
+private fun calculatePassphraseStrength(passphrase: String): PassphraseStrength {
+    if (passphrase.length < MIN_PASSPHRASE_LENGTH) return PassphraseStrength.WEAK
+
+    var score = 0
+    if (passphrase.length >= 12) score++
+    if (passphrase.length >= 16) score++
+    if (passphrase.any { it.isUpperCase() } && passphrase.any { it.isLowerCase() }) score++
+    if (passphrase.any { it.isDigit() }) score++
+    if (passphrase.any { !it.isLetterOrDigit() }) score++
+
+    return when {
+        score >= 4 -> PassphraseStrength.STRONG
+        score >= 3 -> PassphraseStrength.GOOD
+        score >= 2 -> PassphraseStrength.FAIR
+        else -> PassphraseStrength.WEAK
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +94,7 @@ fun ExportShareScreen(
     onDismiss: () -> Unit
 ) {
     var passphrase by remember { mutableStateOf("") }
+    var confirmPassphrase by remember { mutableStateOf("") }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var cipherError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -76,6 +107,7 @@ fun ExportShareScreen(
             when (event) {
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     passphrase = ""
+                    confirmPassphrase = ""
                     exportState = ExportState.Idle
                 }
                 else -> {}
@@ -84,6 +116,7 @@ fun ExportShareScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             passphrase = ""
+            confirmPassphrase = ""
             exportState = ExportState.Idle
             setSecureScreen(context, false)
             lifecycleOwner.lifecycle.removeObserver(observer)
@@ -114,6 +147,20 @@ fun ExportShareScreen(
 
         when (val state = exportState) {
             is ExportState.Idle, is ExportState.Error -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                ) {
+                    Text(
+                        text = "Store this export securely. Anyone with this backup and passphrase can access your signing key share.",
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 if (state is ExportState.Error) {
                     ErrorCard(state.message)
                 }
@@ -128,6 +175,45 @@ fun ExportShareScreen(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true
+                )
+
+                if (passphrase.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val strength = calculatePassphraseStrength(passphrase)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        LinearProgressIndicator(
+                            progress = (strength.ordinal + 1) / 4f,
+                            modifier = Modifier.weight(1f).height(4.dp),
+                            color = strength.color(),
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = strength.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = strength.color()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = confirmPassphrase,
+                    onValueChange = { if (it.length <= MAX_PASSPHRASE_LENGTH) confirmPassphrase = it },
+                    label = { Text("Confirm Passphrase") },
+                    placeholder = { Text("Re-enter passphrase") },
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    isError = confirmPassphrase.isNotEmpty() && passphrase != confirmPassphrase,
+                    supportingText = if (confirmPassphrase.isNotEmpty() && passphrase != confirmPassphrase) {
+                        { Text("Passphrases do not match") }
+                    } else null
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -154,6 +240,14 @@ fun ExportShareScreen(
                         onClick = {
                             if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
                                 exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
+                                return@Button
+                            }
+                            if (passphrase != confirmPassphrase) {
+                                exportState = ExportState.Error("Passphrases do not match")
+                                return@Button
+                            }
+                            if (calculatePassphraseStrength(passphrase) == PassphraseStrength.WEAK) {
+                                exportState = ExportState.Error("Passphrase is too weak. Add length, mixed case, numbers, or symbols.")
                                 return@Button
                             }
                             cipherError = null
@@ -192,7 +286,9 @@ fun ExportShareScreen(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH
+                        enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH &&
+                            passphrase == confirmPassphrase &&
+                            calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
                     ) {
                         Text("Export")
                     }
@@ -206,44 +302,56 @@ fun ExportShareScreen(
             }
 
             is ExportState.Success -> {
-                val showCopiedToast = {
-                    Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show()
-                }
-
-                if (state.frames.size > 1) {
-                    AnimatedQrCodeDisplay(
-                        frames = state.frames,
-                        label = "FROST Share Export",
-                        fullData = state.data,
-                        onCopied = showCopiedToast
-                    )
-                } else {
-                    QrCodeDisplay(
-                        data = state.data,
-                        label = "FROST Share Export",
-                        onCopied = showCopiedToast
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                OutlinedButton(
-                    onClick = {
-                        copySensitiveText(context, state.data)
-                        showCopiedToast()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Copy to Clipboard")
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text("Done")
-                }
+                ExportSuccessContent(
+                    data = state.data,
+                    frames = state.frames,
+                    onDismiss = onDismiss
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun ExportSuccessContent(
+    data: String,
+    frames: List<String>,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val showCopiedToast = { Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show() }
+
+    if (frames.size > 1) {
+        AnimatedQrCodeDisplay(
+            frames = frames,
+            label = "FROST Share Export",
+            fullData = data,
+            onCopied = showCopiedToast
+        )
+    } else {
+        QrCodeDisplay(
+            data = data,
+            label = "FROST Share Export",
+            onCopied = showCopiedToast
+        )
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+
+    OutlinedButton(
+        onClick = {
+            copySensitiveText(context, data)
+            showCopiedToast()
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Copy to Clipboard")
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+        Text("Done")
     }
 }
 
@@ -273,4 +381,3 @@ private fun generateFrames(data: String, maxBytes: Int): List<String> {
         """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
     }
 }
-
