@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -116,13 +118,23 @@ abstract class Nip55Database : RoomDatabase() {
         @Volatile
         private var INSTANCE: Nip55Database? = null
 
+        // When bumping the database version, add a corresponding MIGRATION_X_Y object here.
+        // Example for version 2:
+        //   val MIGRATION_1_2 = object : Migration(1, 2) {
+        //       override fun migrate(db: SupportSQLiteDatabase) {
+        //           db.execSQL("ALTER TABLE nip55_permissions ADD COLUMN newColumn TEXT")
+        //       }
+        //   }
+        // Then add it to addMigrations() below.
+        private val MIGRATIONS = arrayOf<Migration>()
+
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).fallbackToDestructiveMigration(dropAllTables = true).build().also { INSTANCE = it }
+                ).addMigrations(*MIGRATIONS).build().also { INSTANCE = it }
             }
         }
     }
