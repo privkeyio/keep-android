@@ -59,6 +59,15 @@ interface Nip55PermissionDao {
 
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
+
+    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions")
+    suspend fun getAllCallerPackages(): List<String>
+
+    @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage ORDER BY createdAt DESC")
+    suspend fun getForCaller(callerPackage: String): List<Nip55Permission>
+
+    @Query("SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage")
+    suspend fun getPermissionCountForCaller(callerPackage: String): Int
 }
 
 @Dao
@@ -74,6 +83,9 @@ interface Nip55AuditLogDao {
 
     @Query("DELETE FROM nip55_audit_log WHERE timestamp < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
+    suspend fun getLastUsedTime(callerPackage: String): Long?
 }
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class], version = 1)
@@ -108,6 +120,12 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
     val shouldPersist: Boolean
         get() = this != JUST_THIS_TIME
 }
+
+data class ConnectedAppInfo(
+    val packageName: String,
+    val permissionCount: Int,
+    val lastUsedTime: Long?
+)
 
 class PermissionStore(db: Nip55Database) {
     private val dao = db.permissionDao()
@@ -193,4 +211,18 @@ class PermissionStore(db: Nip55Database) {
     suspend fun getAllPermissions(): List<Nip55Permission> = dao.getAll()
 
     suspend fun getAuditLog(limit: Int = 100): List<Nip55AuditLog> = auditDao.getRecent(limit)
+
+    suspend fun getConnectedApps(): List<ConnectedAppInfo> {
+        val packages = dao.getAllCallerPackages()
+        return packages.map { pkg ->
+            ConnectedAppInfo(
+                packageName = pkg,
+                permissionCount = dao.getPermissionCountForCaller(pkg),
+                lastUsedTime = auditDao.getLastUsedTime(pkg)
+            )
+        }.sortedByDescending { it.lastUsedTime ?: 0L }
+    }
+
+    suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
+        dao.getForCaller(callerPackage).filter { !it.isExpired() }
 }

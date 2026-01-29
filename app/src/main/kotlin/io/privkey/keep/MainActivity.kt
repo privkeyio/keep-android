@@ -26,6 +26,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.privkey.keep.nip55.AppPermissionsScreen
+import io.privkey.keep.nip55.ConnectedAppsScreen
+import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -42,6 +45,7 @@ class MainActivity : FragmentActivity() {
         val storage = app.getStorage()
         val relayConfigStore = app.getRelayConfigStore()
         val killSwitchStore = app.getKillSwitchStore()
+        val permissionStore = app.getPermissionStore()
 
         setContent {
             KeepAndroidTheme {
@@ -49,12 +53,13 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null) {
+                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && permissionStore != null) {
                         MainScreen(
                             keepMobile = keepMobile,
                             storage = storage,
                             relayConfigStore = relayConfigStore,
                             killSwitchStore = killSwitchStore,
+                            permissionStore = permissionStore,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
@@ -108,6 +113,7 @@ fun MainScreen(
     storage: AndroidKeystoreStorage,
     relayConfigStore: RelayConfigStore,
     killSwitchStore: KillSwitchStore,
+    permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
@@ -126,6 +132,8 @@ fun MainScreen(
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
+    var showConnectedApps by remember { mutableStateOf(false) }
+    var selectedAppPackage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -164,6 +172,24 @@ fun MainScreen(
                 showExportScreen = true
             },
             onDismiss = { showShareDetails = false }
+        )
+        return
+    }
+
+    if (showConnectedApps) {
+        selectedAppPackage?.let { pkg ->
+            AppPermissionsScreen(
+                packageName = pkg,
+                permissionStore = permissionStore,
+                onDismiss = { selectedAppPackage = null }
+            )
+            return
+        }
+
+        ConnectedAppsScreen(
+            permissionStore = permissionStore,
+            onAppClick = { selectedAppPackage = it },
+            onDismiss = { showConnectedApps = false }
         )
         return
     }
@@ -290,6 +316,10 @@ fun MainScreen(
                     onRelaysChanged(updated)
                 }
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ConnectedAppsCard(onClick = { showConnectedApps = true })
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -485,6 +515,30 @@ fun RelaysCard(
                 }
             }
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConnectedAppsCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Connected Apps", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Manage",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
     }
 }
 
