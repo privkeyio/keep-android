@@ -189,7 +189,7 @@ fun ExportShareScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         LinearProgressIndicator(
-                            progress = { (strength.ordinal + 1) / 4f },
+                            progress = (strength.ordinal + 1) / 4f,
                             modifier = Modifier.weight(1f).height(4.dp),
                             color = strength.color(),
                             trackColor = MaterialTheme.colorScheme.surfaceVariant
