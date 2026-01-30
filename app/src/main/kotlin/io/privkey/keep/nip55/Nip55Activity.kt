@@ -1,9 +1,11 @@
 package io.privkey.keep.nip55
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
+import java.security.MessageDigest
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,6 +36,7 @@ class Nip55Activity : FragmentActivity() {
     private var requestId: String? = null
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
+    private var callerSignatureHash: String? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -81,6 +84,30 @@ class Nip55Activity : FragmentActivity() {
     private fun identifyCaller() {
         callerPackage = callingActivity?.packageName
         callerVerified = callerPackage != null
+        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
+    }
+
+    private fun getCallerSignatureHash(packageName: String): String? {
+        return try {
+            val packageInfo = packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val signingInfo = packageInfo.signingInfo ?: return null
+            val signatures = if (signingInfo.hasMultipleSigners()) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo.signingCertificateHistory
+            }
+            signatures?.firstOrNull()?.let { signature ->
+                val digest = MessageDigest.getInstance("SHA-256")
+                val hash = digest.digest(signature.toByteArray())
+                hash.joinToString("") { "%02x".format(it) }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
+            null
+        }
     }
 
     private fun setupContent() {

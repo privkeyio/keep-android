@@ -21,3 +21,7 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# SQLCipher
+-keep class net.sqlcipher.** { *; }
+-keep class net.sqlcipher.database.** { *; }

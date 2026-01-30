@@ -23,11 +23,35 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Arrays
 import javax.crypto.Cipher
 
 private const val MAX_SINGLE_QR_BYTES = 600
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val MIN_PASSPHRASE_LENGTH = 12
+
+private class SecurePassphrase {
+    private var chars: CharArray = CharArray(0)
+
+    val length: Int get() = chars.size
+    val value: String get() = String(chars)
+
+    fun update(newValue: String) {
+        if (newValue.length <= MAX_PASSPHRASE_LENGTH) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.toCharArray()
+        }
+    }
+
+    fun clear() {
+        Arrays.fill(chars, '\u0000')
+        chars = CharArray(0)
+    }
+
+    fun toCharArray(): CharArray = chars.copyOf()
+
+    fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
+}
 
 sealed class ExportState {
     object Idle : ExportState()
@@ -64,7 +88,7 @@ private fun PassphraseStrength.color() = when (this) {
     PassphraseStrength.GOOD, PassphraseStrength.STRONG -> MaterialTheme.colorScheme.primary
 }
 
-private fun calculatePassphraseStrength(passphrase: String): PassphraseStrength {
+private fun calculatePassphraseStrength(passphrase: SecurePassphrase): PassphraseStrength {
     if (passphrase.length < MIN_PASSPHRASE_LENGTH) return PassphraseStrength.WEAK
 
     var score = 0
@@ -92,8 +116,10 @@ fun ExportShareScreen(
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var passphrase by remember { mutableStateOf("") }
-    var confirmPassphrase by remember { mutableStateOf("") }
+    val passphrase = remember { SecurePassphrase() }
+    val confirmPassphrase = remember { SecurePassphrase() }
+    var passphraseDisplay by remember { mutableStateOf("") }
+    var confirmPassphraseDisplay by remember { mutableStateOf("") }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var cipherError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
@@ -104,15 +130,19 @@ fun ExportShareScreen(
         setSecureScreen(context, true)
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                passphrase = ""
-                confirmPassphrase = ""
+                passphrase.clear()
+                confirmPassphrase.clear()
+                passphraseDisplay = ""
+                confirmPassphraseDisplay = ""
                 exportState = ExportState.Idle
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
-            passphrase = ""
-            confirmPassphrase = ""
+            passphrase.clear()
+            confirmPassphrase.clear()
+            passphraseDisplay = ""
+            confirmPassphraseDisplay = ""
             exportState = ExportState.Idle
             setSecureScreen(context, false)
             lifecycleOwner.lifecycle.removeObserver(observer)
@@ -168,8 +198,11 @@ fun ExportShareScreen(
                 }
 
                 OutlinedTextField(
-                    value = passphrase,
-                    onValueChange = { if (it.length <= MAX_PASSPHRASE_LENGTH) passphrase = it },
+                    value = passphraseDisplay,
+                    onValueChange = {
+                        passphrase.update(it)
+                        passphraseDisplay = it
+                    },
                     label = { Text("Export Passphrase") },
                     placeholder = { Text("Enter a passphrase to encrypt") },
                     modifier = Modifier.fillMaxWidth(),
@@ -178,7 +211,7 @@ fun ExportShareScreen(
                     singleLine = true
                 )
 
-                if (passphrase.isNotEmpty()) {
+                if (passphrase.length > 0) {
                     Spacer(modifier = Modifier.height(8.dp))
                     val strength = calculatePassphraseStrength(passphrase)
                     Row(
@@ -203,16 +236,19 @@ fun ExportShareScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 OutlinedTextField(
-                    value = confirmPassphrase,
-                    onValueChange = { if (it.length <= MAX_PASSPHRASE_LENGTH) confirmPassphrase = it },
+                    value = confirmPassphraseDisplay,
+                    onValueChange = {
+                        confirmPassphrase.update(it)
+                        confirmPassphraseDisplay = it
+                    },
                     label = { Text("Confirm Passphrase") },
                     placeholder = { Text("Re-enter passphrase") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true,
-                    isError = confirmPassphrase.isNotEmpty() && passphrase != confirmPassphrase,
-                    supportingText = if (confirmPassphrase.isNotEmpty() && passphrase != confirmPassphrase) {
+                    isError = confirmPassphrase.length > 0 && passphrase.value != confirmPassphrase.value,
+                    supportingText = if (confirmPassphrase.length > 0 && passphrase.value != confirmPassphrase.value) {
                         { Text("Passphrases do not match") }
                     } else null
                 )
@@ -243,7 +279,7 @@ fun ExportShareScreen(
                                 exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
                                 return@Button
                             }
-                            if (passphrase != confirmPassphrase) {
+                            if (passphrase.value != confirmPassphrase.value) {
                                 exportState = ExportState.Error("Passphrases do not match")
                                 return@Button
                             }
@@ -258,14 +294,16 @@ fun ExportShareScreen(
                                 return@Button
                             }
                             try {
+                                val passphraseChars = passphrase.toCharArray()
                                 onBiometricAuth(cipher) { authedCipher ->
                                     if (authedCipher != null) {
                                         storage.setPendingCipher(authedCipher)
                                         exportState = ExportState.Exporting
                                         coroutineScope.launch {
                                             try {
+                                                val passphraseStr = String(passphraseChars)
                                                 val data = withContext(Dispatchers.IO) {
-                                                    keepMobile.exportShare(passphrase)
+                                                    keepMobile.exportShare(passphraseStr)
                                                 }
                                                 val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
                                                 exportState = ExportState.Success(data, frames)
@@ -273,10 +311,12 @@ fun ExportShareScreen(
                                                 Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
+                                                Arrays.fill(passphraseChars, '\u0000')
                                                 storage.clearPendingCipher()
                                             }
                                         }
                                     } else {
+                                        Arrays.fill(passphraseChars, '\u0000')
                                         exportState = ExportState.Error("Authentication cancelled")
                                         Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
                                     }
@@ -288,7 +328,7 @@ fun ExportShareScreen(
                         },
                         modifier = Modifier.weight(1f),
                         enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH &&
-                            passphrase == confirmPassphrase &&
+                            passphrase.value == confirmPassphrase.value &&
                             calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
                     ) {
                         Text("Export")

@@ -32,9 +32,31 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import java.util.Arrays
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
+
+private class SecurePassphraseHolder {
+    private var chars: CharArray = CharArray(0)
+
+    val length: Int get() = chars.size
+    val value: String get() = String(chars)
+
+    fun update(newValue: String) {
+        if (newValue.length <= 256) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.toCharArray()
+        }
+    }
+
+    fun clear() {
+        Arrays.fill(chars, '\u0000')
+        chars = CharArray(0)
+    }
+
+    fun toCharArray(): CharArray = chars.copyOf()
+}
 
 private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private const val MAX_SHARE_LENGTH = 8192
@@ -63,7 +85,8 @@ fun ImportShareScreen(
     importState: ImportState
 ) {
     var shareData by remember { mutableStateOf("") }
-    var passphrase by remember { mutableStateOf("") }
+    val passphrase = remember { SecurePassphraseHolder() }
+    var passphraseDisplay by remember { mutableStateOf("") }
     var shareName by remember { mutableStateOf("Mobile Share") }
     var showScanner by remember { mutableStateOf(false) }
 
@@ -72,14 +95,16 @@ fun ImportShareScreen(
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {
             shareData = ""
-            passphrase = ""
+            passphrase.clear()
+            passphraseDisplay = ""
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
             shareData = ""
-            passphrase = ""
+            passphrase.clear()
+            passphraseDisplay = ""
         }
     }
 
@@ -132,8 +157,11 @@ fun ImportShareScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = passphrase,
-            onValueChange = { if (it.length <= 256) passphrase = it },
+            value = passphraseDisplay,
+            onValueChange = {
+                passphrase.update(it)
+                passphraseDisplay = it
+            },
             label = { Text("Passphrase") },
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
@@ -178,15 +206,18 @@ fun ImportShareScreen(
         } else {
             ImportButtons(
                 importState = importState,
-                canImport = shareData.isNotBlank() && passphrase.isNotBlank() && isInputEnabled,
+                canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = {
                     try {
+                        val passphraseChars = passphrase.toCharArray()
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
                             if (authedCipher != null) {
-                                onImport(shareData, passphrase, shareName, authedCipher)
+                                val passphraseStr = String(passphraseChars)
+                                onImport(shareData, passphraseStr, shareName, authedCipher)
                             }
+                            Arrays.fill(passphraseChars, '\u0000')
                         }
                         null
                     } catch (e: KeyPermanentlyInvalidatedException) {

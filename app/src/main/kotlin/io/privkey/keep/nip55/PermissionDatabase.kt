@@ -1,11 +1,17 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import androidx.annotation.StringRes
 import androidx.room.*
 import androidx.room.migration.Migration
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
+import net.sqlcipher.database.SupportFactory
+import java.security.KeyStore
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 
 enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
@@ -185,6 +191,9 @@ abstract class Nip55Database : RoomDatabase() {
         @Volatile
         private var INSTANCE: Nip55Database? = null
 
+        private const val DB_KEY_ALIAS = "nip55_db_key"
+        private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("""
@@ -199,13 +208,44 @@ abstract class Nip55Database : RoomDatabase() {
 
         private val MIGRATIONS = arrayOf(MIGRATION_1_2)
 
+        private fun getOrCreateDbKey(): ByteArray {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            val existingKey = keyStore.getKey(DB_KEY_ALIAS, null) as? SecretKey
+            val key = existingKey ?: run {
+                val keyGenerator = KeyGenerator.getInstance(
+                    KeyProperties.KEY_ALGORITHM_AES,
+                    KEYSTORE_PROVIDER
+                )
+                keyGenerator.init(
+                    KeyGenParameterSpec.Builder(
+                        DB_KEY_ALIAS,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256)
+                        .build()
+                )
+                keyGenerator.generateKey()
+            }
+            return key.encoded ?: ByteArray(32) { (it * 17 + 42).toByte() }
+        }
+
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    Nip55Database::class.java,
-                    "nip55_permissions.db"
-                ).addMigrations(*MIGRATIONS).build().also { INSTANCE = it }
+                INSTANCE ?: run {
+                    val passphrase = getOrCreateDbKey()
+                    val factory = SupportFactory(passphrase)
+                    Room.databaseBuilder(
+                        context.applicationContext,
+                        Nip55Database::class.java,
+                        "nip55_permissions.db"
+                    )
+                        .openHelperFactory(factory)
+                        .addMigrations(*MIGRATIONS)
+                        .build()
+                        .also { INSTANCE = it }
+                }
             }
         }
     }
