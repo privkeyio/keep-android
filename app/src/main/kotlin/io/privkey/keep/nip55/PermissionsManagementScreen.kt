@@ -112,6 +112,16 @@ fun PermissionsManagementScreen(
                         ) { permission ->
                             PermissionCard(
                                 permission = permission,
+                                onDecisionChange = { newDecision ->
+                                    coroutineScope.launch {
+                                        try {
+                                            permissionStore.updatePermissionDecision(permission.id, newDecision)
+                                            refreshPermissions()
+                                        } catch (e: Exception) {
+                                            loadError = "Failed to update permission"
+                                        }
+                                    }
+                                },
                                 onDelete = { showDeleteDialog = permission }
                             )
                         }
@@ -229,75 +239,79 @@ private fun AppPermissionHeader(
 @Composable
 private fun PermissionCard(
     permission: Nip55Permission,
+    onDecisionChange: (PermissionDecision) -> Unit,
     onDelete: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
     val isExpired = permission.isExpired()
-    val containerColor = if (isExpired) {
-        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-    } else if (permission.decision == "deny") {
-        MaterialTheme.colorScheme.errorContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    val currentDecision = permission.permissionDecision
+    val containerColor = when {
+        isExpired -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+        currentDecision == PermissionDecision.DENY -> MaterialTheme.colorScheme.errorContainer
+        currentDecision == PermissionDecision.ASK -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(12.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = formatRequestType(permission.requestType),
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    if (isExpired) {
-                        Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Expired",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error
+                            text = formatRequestType(permission.requestType),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        if (isExpired) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Expired",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
+                    permission.eventKind?.let { kind ->
+                        Text(
+                            text = "Event kind: $kind",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                }
 
-                permission.eventKind?.let { kind ->
                     Text(
-                        text = EventKind.displayName(kind),
+                        text = permission.expiresAt?.let { "Expires ${dateFormat.format(Date(it))}" } ?: "Permanent",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
-                Row {
-                    val isAllowed = permission.decision == "allow"
-                    Text(
-                        text = if (isAllowed) "Allowed" else "Denied",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isAllowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                    )
-                    Text(
-                        text = permission.expiresAt?.let { " - Expires ${dateFormat.format(Date(it))}" } ?: " - Forever",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete permission",
+                        tint = MaterialTheme.colorScheme.error
                     )
                 }
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete permission",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ThreeStateToggle(
+                currentDecision = currentDecision,
+                onDecisionChange = onDecisionChange
+            )
         }
     }
 }

@@ -152,7 +152,16 @@ fun AppPermissionsScreen(
                 items(permissions, key = { it.id }) { permission ->
                     PermissionItem(
                         permission = permission,
-                        permissionStore = permissionStore,
+                        onDecisionChange = { newDecision ->
+                            coroutineScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    permissionStore.updatePermissionDecision(permission.id, newDecision)
+                                }
+                                permissions = withContext(Dispatchers.IO) {
+                                    permissionStore.getPermissionsForCaller(packageName)
+                                }
+                            }
+                        },
                         onRevoke = {
                             coroutineScope.launch {
                                 withContext(Dispatchers.IO) {
@@ -253,74 +262,63 @@ private fun AppHeaderCard(
 @Composable
 private fun PermissionItem(
     permission: Nip55Permission,
-    permissionStore: PermissionStore,
+    onDecisionChange: (PermissionDecision) -> Unit,
     onRevoke: () -> Unit
 ) {
-    var lastUsedTime by remember { mutableStateOf<Long?>(null) }
-
-    LaunchedEffect(permission.id) {
-        lastUsedTime = withContext(Dispatchers.IO) {
-            permissionStore.getLastUsedTimeForPermission(
-                permission.callerPackage,
-                permission.requestType,
-                permission.eventKind
-            )
-        }
-    }
+    val currentDecision = permission.permissionDecision
 
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = formatRequestType(permission.requestType),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                permission.eventKind?.let { kind ->
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = EventKind.displayName(kind),
+                        text = formatRequestType(permission.requestType),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    permission.eventKind?.let { kind ->
+                        Text(
+                            text = "Event kind: $kind",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    val expiryText = permission.expiresAt?.let { "Expires: ${formatExpiry(it)}" } ?: "Permanent"
+                    Text(
+                        text = expiryText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    text = "Decision: ${permission.decision}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (permission.decision == "allow") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                )
-                val expiryText = permission.expiresAt?.let { "Expires: ${formatExpiry(it)}" } ?: "Permanent"
-                Text(
-                    text = expiryText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                lastUsedTime?.let { time ->
-                    Text(
-                        text = "Last used: ${formatRelativeTime(time)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                IconButton(onClick = onRevoke) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Revoke",
+                        tint = MaterialTheme.colorScheme.error
                     )
                 }
             }
 
-            IconButton(onClick = onRevoke) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Revoke",
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            ThreeStateToggle(
+                currentDecision = currentDecision,
+                onDecisionChange = onDecisionChange
+            )
         }
     }
 }
 
 private fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
-    if (remaining < 0) return "Expired"
-    if (remaining < 3600_000) return "${remaining / 60_000}m remaining"
-    if (remaining < 86400_000) return "${remaining / 3600_000}h remaining"
-    return SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    return when {
+        remaining < 0 -> "Expired"
+        remaining < 3600_000 -> "${remaining / 60_000}m remaining"
+        remaining < 86400_000 -> "${remaining / 3600_000}h remaining"
+        else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    }
 }
-

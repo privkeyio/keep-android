@@ -71,21 +71,28 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val permissionResult = runBlocking {
+        val decision = runBlocking {
             withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                store.hasPermission(callerPackage, requestType, eventKind)
+                store.getPermissionDecision(callerPackage, requestType, eventKind)
             }
-        } ?: return errorCursor("timeout", null)
-
-        if (!permissionResult) {
-            runBlocking {
-                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                    store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
-                }
-            }
-            return rejectedCursor(null)
         }
-        return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+
+        when (decision) {
+            PermissionDecision.ALLOW -> {
+                return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+            }
+            PermissionDecision.DENY -> {
+                runBlocking {
+                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                        store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
+                    }
+                }
+                return rejectedCursor(null)
+            }
+            PermissionDecision.ASK, null -> {
+                return null
+            }
+        }
     }
 
     private fun executeBackgroundRequest(

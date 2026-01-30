@@ -6,6 +6,23 @@ import androidx.room.*
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
+enum class PermissionDecision(@StringRes val displayNameRes: Int) {
+    ALLOW(R.string.permission_decision_allow),
+    DENY(R.string.permission_decision_deny),
+    ASK(R.string.permission_decision_ask);
+
+    companion object {
+        fun fromString(value: String): PermissionDecision = when (value.lowercase()) {
+            "allow" -> ALLOW
+            "deny" -> DENY
+            "ask" -> ASK
+            else -> ASK
+        }
+    }
+
+    override fun toString(): String = name.lowercase()
+}
+
 @Entity(
     tableName = "nip55_permissions",
     indices = [Index(value = ["callerPackage", "requestType", "eventKind"], unique = true)]
@@ -20,6 +37,9 @@ data class Nip55Permission(
     val createdAt: Long
 ) {
     fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+
+    val permissionDecision: PermissionDecision
+        get() = PermissionDecision.fromString(decision)
 }
 
 @Entity(tableName = "nip55_audit_log")
@@ -77,6 +97,9 @@ interface Nip55PermissionDao {
 
     @Query("SELECT DISTINCT callerPackage FROM nip55_permissions ORDER BY callerPackage")
     suspend fun getDistinctCallers(): List<String>
+
+    @Query("UPDATE nip55_permissions SET decision = :decision WHERE id = :id")
+    suspend fun updateDecision(id: Long, decision: String)
 }
 
 @Dao
@@ -163,15 +186,20 @@ class PermissionStore(db: Nip55Database) {
         auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
     }
 
-    suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
+    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
         val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
-        if (permission != null && !permission.isExpired()) return permission.decision == "allow"
+        if (permission != null && !permission.isExpired()) return permission.permissionDecision
 
         if (eventKind != null) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
-            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.decision == "allow"
+            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
         return null
+    }
+
+    @Deprecated("Use getPermissionDecision instead", ReplaceWith("getPermissionDecision(callerPackage, requestType, eventKind)?.let { it == PermissionDecision.ALLOW }"))
+    suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
+        return getPermissionDecision(callerPackage, requestType, eventKind)?.let { it == PermissionDecision.ALLOW }
     }
 
     suspend fun grantPermission(
@@ -254,6 +282,27 @@ class PermissionStore(db: Nip55Database) {
         dao.getForCaller(callerPackage, System.currentTimeMillis())
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
+
+    suspend fun updatePermissionDecision(id: Long, decision: PermissionDecision) {
+        dao.updateDecision(id, decision.toString())
+    }
+
+    suspend fun setPermissionToAsk(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ) {
+        dao.insertPermission(
+            Nip55Permission(
+                callerPackage = callerPackage,
+                requestType = requestType.name,
+                eventKind = eventKind,
+                decision = PermissionDecision.ASK.toString(),
+                expiresAt = null,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+    }
 
     suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
 
