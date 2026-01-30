@@ -71,6 +71,30 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
+        val isAppExpired = runBlocking {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                store.isAppExpired(callerPackage)
+            }
+        } ?: return errorCursor("timeout", null)
+
+        if (isAppExpired) {
+            runBlocking {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                    store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true)
+                }
+            }
+            runBlocking {
+                val cleanupResult = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                    store.cleanupExpired()
+                    true
+                }
+                if (cleanupResult == null) {
+                    Log.w(TAG, "Cleanup timed out for expired app: $callerPackage")
+                }
+            }
+            return rejectedCursor(null)
+        }
+
         val (decision, timedOut) = runBlocking {
             var result: PermissionDecision? = null
             val completed = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {

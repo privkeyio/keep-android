@@ -24,6 +24,8 @@ import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
 
 private data class AppInfoResult(
     val label: String?,
@@ -220,6 +222,14 @@ private fun ConnectedAppItem(
                         )
                     }
                 }
+                app.expiresAt?.let { expiry ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.app_expires_in, formatExpiry(expiry)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 if (!isVerified) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -233,3 +243,14 @@ private fun ConnectedAppItem(
     }
 }
 
+private fun formatExpiry(timestamp: Long): String {
+    val remaining = timestamp - System.currentTimeMillis()
+    return when {
+        remaining < 0 -> "expired"
+        remaining < 60_000 -> "<1m"
+        remaining < 3600_000 -> "in ${remaining / 60_000}m"
+        remaining < 86400_000 -> "in ${remaining / 3600_000}h"
+        remaining < 604800_000 -> "in ${remaining / 86400_000}d"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
+    }
+}

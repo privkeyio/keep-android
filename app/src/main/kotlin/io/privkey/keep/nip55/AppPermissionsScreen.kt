@@ -16,9 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import android.widget.Toast
+import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,9 +46,11 @@ fun AppPermissionsScreen(
     val coroutineScope = rememberCoroutineScope()
     var appState by remember { mutableStateOf(AppState()) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
+    var appSettings by remember { mutableStateOf<Nip55AppSettings?>(null) }
+    var expiryDropdownExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        appState = withContext(Dispatchers.IO) {
+        val (newAppState, settings) = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val (label, icon, verified) = try {
                 val appInfo = pm.getApplicationInfo(packageName, 0)
@@ -65,8 +69,11 @@ fun AppPermissionsScreen(
                 android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", e)
                 emptyList()
             }
-            AppState(label, icon, verified, permissions, isLoading = false)
+            val loadedSettings = permissionStore.getAppSettings(packageName)
+            Pair(AppState(label, icon, verified, permissions, isLoading = false), loadedSettings)
         }
+        appState = newAppState
+        appSettings = settings
     }
 
     if (showRevokeAllDialog) {
@@ -121,6 +128,24 @@ fun AppPermissionsScreen(
                     appLabel = appState.label,
                     appIcon = appState.icon,
                     isVerified = appState.isVerified
+                )
+            }
+
+            item {
+                AppExpirySelector(
+                    currentExpiry = appSettings?.expiresAt,
+                    expanded = expiryDropdownExpanded,
+                    onExpandedChange = { expiryDropdownExpanded = it },
+                    onDurationSelected = { duration ->
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) {
+                                permissionStore.setAppExpiry(packageName, duration)
+                            }
+                            appSettings = withContext(Dispatchers.IO) {
+                                permissionStore.getAppSettings(packageName)
+                            }
+                        }
+                    }
                 )
             }
 
@@ -352,5 +377,57 @@ private fun formatExpiry(timestamp: Long): String {
         remaining < 3600_000 -> "${remaining / 60_000}m remaining"
         remaining < 86400_000 -> "${remaining / 3600_000}h remaining"
         else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppExpirySelector(
+    currentExpiry: Long?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onDurationSelected: (AppExpiryDuration) -> Unit
+) {
+    val displayValue = if (currentExpiry == null) {
+        stringResource(R.string.app_expiry_never)
+    } else {
+        formatExpiry(currentExpiry)
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.app_expiry_label),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = onExpandedChange
+            ) {
+                OutlinedTextField(
+                    value = displayValue,
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { onExpandedChange(false) }
+                ) {
+                    AppExpiryDuration.entries.forEach { duration ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(duration.displayNameRes)) },
+                            onClick = {
+                                onDurationSelected(duration)
+                                onExpandedChange(false)
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
 }

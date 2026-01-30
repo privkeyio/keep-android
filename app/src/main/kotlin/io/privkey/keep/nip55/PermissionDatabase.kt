@@ -56,6 +56,15 @@ data class Nip55AuditLog(
     val wasAutomatic: Boolean
 )
 
+@Entity(tableName = "nip55_app_settings")
+data class Nip55AppSettings(
+    @PrimaryKey val callerPackage: String,
+    val expiresAt: Long?,
+    val createdAt: Long
+) {
+    fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+}
+
 @Dao
 interface Nip55PermissionDao {
     @Query("""
@@ -144,14 +153,50 @@ interface Nip55AuditLogDao {
     suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int?): Long?
 }
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class], version = 1)
+@Dao
+interface Nip55AppSettingsDao {
+    @Query("SELECT * FROM nip55_app_settings WHERE callerPackage = :callerPackage")
+    suspend fun getSettings(callerPackage: String): Nip55AppSettings?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(settings: Nip55AppSettings)
+
+    @Query("DELETE FROM nip55_app_settings WHERE callerPackage = :callerPackage")
+    suspend fun delete(callerPackage: String)
+
+    @Query("SELECT callerPackage FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt < :now")
+    suspend fun getExpiredPackages(now: Long = System.currentTimeMillis()): List<String>
+
+    @Query("DELETE FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt < :now")
+    suspend fun deleteExpired(now: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM nip55_app_settings")
+    suspend fun getAll(): List<Nip55AppSettings>
+}
+
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class], version = 2)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
+    abstract fun appSettingsDao(): Nip55AppSettingsDao
 
     companion object {
         @Volatile
         private var INSTANCE: Nip55Database? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS nip55_app_settings (
+                        callerPackage TEXT PRIMARY KEY NOT NULL,
+                        expiresAt INTEGER,
+                        createdAt INTEGER NOT NULL
+                    )
+                """)
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2)
 
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
@@ -159,7 +204,7 @@ abstract class Nip55Database : RoomDatabase() {
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).build().also { INSTANCE = it }
+                ).addMigrations(*MIGRATIONS).build().also { INSTANCE = it }
             }
         }
     }
@@ -167,8 +212,10 @@ abstract class Nip55Database : RoomDatabase() {
 
 enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
     JUST_THIS_TIME(null, R.string.permission_duration_just_this_time),
+    ONE_MINUTE(60 * 1000L, R.string.permission_duration_one_minute),
+    FIVE_MINUTES(5 * 60 * 1000L, R.string.permission_duration_five_minutes),
+    TEN_MINUTES(10 * 60 * 1000L, R.string.permission_duration_ten_minutes),
     ONE_HOUR(60 * 60 * 1000L, R.string.permission_duration_one_hour),
-    ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
     FOREVER(null, R.string.permission_duration_forever);
 
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
@@ -177,19 +224,36 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
         get() = this != JUST_THIS_TIME
 }
 
+enum class AppExpiryDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
+    FIVE_MINUTES(5 * 60 * 1000L, R.string.app_expiry_five_minutes),
+    ONE_HOUR(60 * 60 * 1000L, R.string.app_expiry_one_hour),
+    ONE_DAY(24 * 60 * 60 * 1000L, R.string.app_expiry_one_day),
+    ONE_WEEK(7 * 24 * 60 * 60 * 1000L, R.string.app_expiry_one_week),
+    NEVER(null, R.string.app_expiry_never);
+
+    fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
+}
+
 data class ConnectedAppInfo(
     val packageName: String,
     val permissionCount: Int,
-    val lastUsedTime: Long?
+    val lastUsedTime: Long?,
+    val expiresAt: Long?
 )
 
 class PermissionStore(private val database: Nip55Database) {
     private val dao = database.permissionDao()
     private val auditDao = database.auditLogDao()
+    private val appSettingsDao = database.appSettingsDao()
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
         auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
+        val expiredPackages = appSettingsDao.getExpiredPackages()
+        expiredPackages.forEach { pkg ->
+            dao.deleteForCaller(pkg)
+        }
+        appSettingsDao.deleteExpired()
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
@@ -280,12 +344,37 @@ class PermissionStore(private val database: Nip55Database) {
         val now = System.currentTimeMillis()
         val packages = dao.getAllCallerPackages(now)
         return packages.map { pkg ->
+            val appSettings = appSettingsDao.getSettings(pkg)
             ConnectedAppInfo(
                 packageName = pkg,
                 permissionCount = dao.getPermissionCountForCaller(pkg, now),
-                lastUsedTime = auditDao.getLastUsedTime(pkg)
+                lastUsedTime = auditDao.getLastUsedTime(pkg),
+                expiresAt = appSettings?.expiresAt
             )
         }.sortedByDescending { it.lastUsedTime ?: 0L }
+    }
+
+    suspend fun getAppSettings(callerPackage: String): Nip55AppSettings? =
+        appSettingsDao.getSettings(callerPackage)
+
+    suspend fun setAppExpiry(callerPackage: String, duration: AppExpiryDuration) {
+        val expiresAt = duration.expiresAt()
+        if (expiresAt == null) {
+            appSettingsDao.delete(callerPackage)
+        } else {
+            appSettingsDao.insertOrUpdate(
+                Nip55AppSettings(
+                    callerPackage = callerPackage,
+                    expiresAt = expiresAt,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    suspend fun isAppExpired(callerPackage: String): Boolean {
+        val settings = appSettingsDao.getSettings(callerPackage) ?: return false
+        return settings.isExpired()
     }
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
