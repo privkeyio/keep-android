@@ -453,18 +453,16 @@ private fun PeersCard(peers: List<PeerInfo>) {
 
 @Composable
 private fun PeerRow(peer: PeerInfo) {
-    val statusColor = if (peer.status.name == "Online") {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
+    val isOnline = peer.status.name == "Online"
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text("Share ${peer.shareIndex}")
-        Text(peer.status.name, color = statusColor)
+        Text(
+            peer.status.name,
+            color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -590,23 +588,14 @@ fun RelaysCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConnectedAppsCard(onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick
-    ) {
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Connected Apps", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Manage",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -635,21 +624,16 @@ private fun ErrorScreen(message: String) {
 }
 
 @Composable
-private fun KillSwitchCard(
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
-    val containerColor = if (enabled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
-    val contentColor = if (enabled) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
-
+private fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val containerColor = if (enabled) colors.errorContainer else colors.surfaceVariant
+    val contentColor = if (enabled) colors.onErrorContainer else colors.onSurfaceVariant
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -671,7 +655,7 @@ private fun KillSwitchCard(
                 checked = enabled,
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.error,
+                    checkedThumbColor = colors.error,
                     checkedTrackColor = containerColor
                 )
             )
@@ -732,33 +716,22 @@ private fun Nip55SettingsCard(
 }
 
 @Composable
-private fun AutoStartCard(
-    enabled: Boolean,
-    onToggle: (Boolean) -> Unit
-) {
+private fun AutoStartCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                Text("Auto-start", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "Auto-start",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = "Reconnect relays on boot and network changes",
+                    "Reconnect relays on boot and network changes",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
-                checked = enabled,
-                onCheckedChange = onToggle
-            )
+            Switch(checked = enabled, onCheckedChange = onToggle)
         }
     }
 }

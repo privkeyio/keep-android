@@ -18,21 +18,17 @@ class NetworkConnectivityManager(
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            var shouldReconnect = false
-            synchronized(lock) {
-                val previous = lastNetwork
-                if (previous == null || previous != network) {
-                    val now = System.currentTimeMillis()
-                    if (now - lastReconnectTime >= DEBOUNCE_INTERVAL_MS) {
-                        lastReconnectTime = now
-                        shouldReconnect = true
-                    }
-                }
+            val shouldReconnect = synchronized(lock) {
+                val isNewNetwork = lastNetwork != network
                 lastNetwork = network
+                if (!isNewNetwork) return@synchronized false
+                val now = System.currentTimeMillis()
+                val elapsed = now - lastReconnectTime
+                if (elapsed < DEBOUNCE_INTERVAL_MS) return@synchronized false
+                lastReconnectTime = now
+                true
             }
-            if (shouldReconnect) {
-                onNetworkChanged()
-            }
+            if (shouldReconnect) onNetworkChanged()
         }
 
         override fun onLost(network: Network) {

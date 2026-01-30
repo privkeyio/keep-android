@@ -137,10 +137,9 @@ class KeepMobileApp : Application() {
             networkManager?.unregister()
             return
         }
-        if (networkManager == null) {
-            networkManager = NetworkConnectivityManager(this) { reconnectRelays() }
-        }
-        networkManager?.register()
+        val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
+            .also { networkManager = it }
+        manager.register()
     }
 
     override fun onTerminate() {
