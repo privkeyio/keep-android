@@ -12,11 +12,16 @@ enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     ASK(R.string.permission_decision_ask);
 
     companion object {
+        private const val TAG = "PermissionDecision"
+
         fun fromString(value: String): PermissionDecision = when (value.lowercase()) {
             "allow" -> ALLOW
             "deny" -> DENY
             "ask" -> ASK
-            else -> ASK
+            else -> {
+                android.util.Log.w(TAG, "Unknown decision value '$value', defaulting to ASK")
+                ASK
+            }
         }
     }
 
@@ -283,8 +288,15 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
 
-    suspend fun updatePermissionDecision(id: Long, decision: PermissionDecision) {
+    suspend fun updatePermissionDecision(
+        id: Long,
+        decision: PermissionDecision,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ) {
         dao.updateDecision(id, decision.toString())
+        logOperation(callerPackage, requestType, eventKind, decision.toString(), wasAutomatic = false)
     }
 
     suspend fun setPermissionToAsk(

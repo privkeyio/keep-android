@@ -71,10 +71,17 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val decision = runBlocking {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                store.getPermissionDecision(callerPackage, requestType, eventKind)
+        val (decision, timedOut) = runBlocking {
+            var result: PermissionDecision? = null
+            val completed = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                result = store.getPermissionDecision(callerPackage, requestType, eventKind)
+                true
             }
+            Pair(result, completed == null)
+        }
+
+        if (timedOut) {
+            Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, falling back to ASK")
         }
 
         when (decision) {

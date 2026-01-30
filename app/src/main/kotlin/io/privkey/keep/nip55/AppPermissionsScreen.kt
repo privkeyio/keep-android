@@ -150,18 +150,36 @@ fun AppPermissionsScreen(
                     )
                 }
                 items(permissions, key = { it.id }) { permission ->
+                    var updateError by remember { mutableStateOf<String?>(null) }
                     PermissionItem(
                         permission = permission,
                         onDecisionChange = { newDecision ->
                             coroutineScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    permissionStore.updatePermissionDecision(permission.id, newDecision)
-                                }
-                                permissions = withContext(Dispatchers.IO) {
-                                    permissionStore.getPermissionsForCaller(packageName)
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        val requestType = Nip55RequestType.entries
+                                            .find { it.name == permission.requestType }
+                                        if (requestType != null) {
+                                            permissionStore.updatePermissionDecision(
+                                                permission.id,
+                                                newDecision,
+                                                packageName,
+                                                requestType,
+                                                permission.eventKind
+                                            )
+                                        }
+                                    }
+                                    permissions = withContext(Dispatchers.IO) {
+                                        permissionStore.getPermissionsForCaller(packageName)
+                                    }
+                                    updateError = null
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AppPermissions", "Failed to update permission", e)
+                                    updateError = "Failed to update permission"
                                 }
                             }
                         },
+                        errorMessage = updateError,
                         onRevoke = {
                             coroutineScope.launch {
                                 withContext(Dispatchers.IO) {
@@ -263,7 +281,8 @@ private fun AppHeaderCard(
 private fun PermissionItem(
     permission: Nip55Permission,
     onDecisionChange: (PermissionDecision) -> Unit,
-    onRevoke: () -> Unit
+    onRevoke: () -> Unit,
+    errorMessage: String? = null
 ) {
     val currentDecision = permission.permissionDecision
 
@@ -301,6 +320,15 @@ private fun PermissionItem(
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
+            }
+
+            errorMessage?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
