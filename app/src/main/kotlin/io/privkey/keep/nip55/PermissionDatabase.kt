@@ -39,7 +39,7 @@ interface Nip55PermissionDao {
         SELECT * FROM nip55_permissions
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
-        AND (eventKind IS NULL OR eventKind = :eventKind)
+        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
         ORDER BY eventKind DESC
         LIMIT 1
     """)

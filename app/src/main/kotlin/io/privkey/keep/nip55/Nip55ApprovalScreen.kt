@@ -32,7 +32,7 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
-    org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
+    org.json.JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
 
 @Composable

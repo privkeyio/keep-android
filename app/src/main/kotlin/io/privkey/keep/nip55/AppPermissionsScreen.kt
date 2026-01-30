@@ -59,7 +59,7 @@ fun AppPermissionsScreen(
                 label = pm.getApplicationLabel(info).toString()
                 icon = pm.getApplicationIcon(info)
             } catch (e: PackageManager.NameNotFoundException) {
-                android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
+                android.util.Log.w("AppPermissions", "Package not found")
                 verified = false
             }
             val perms = permissionStore.getPermissionsForCaller(packageName)

@@ -146,7 +146,7 @@ private fun ConnectedAppItem(
                     true
                 )
             } catch (e: PackageManager.NameNotFoundException) {
-                Log.e("ConnectedApps", "Failed to verify app package: ${app.packageName}", e)
+                Log.w("ConnectedApps", "Package not found")
                 Triple(null, null, false)
             }
         }
