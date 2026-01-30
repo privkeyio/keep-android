@@ -287,11 +287,9 @@ fun formatRequestType(type: String): String =
 
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
-    return when {
-        diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${diff / 60_000}m ago"
-        diff < 86400_000 -> "${diff / 3600_000}h ago"
-        diff < 604800_000 -> "${diff / 86400_000}d ago"
-        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-    }
+    if (diff < 60_000) return "just now"
+    if (diff < 3600_000) return "${diff / 60_000}m ago"
+    if (diff < 86400_000) return "${diff / 3600_000}h ago"
+    if (diff < 604800_000) return "${diff / 86400_000}d ago"
+    return java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
 }

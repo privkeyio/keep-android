@@ -207,11 +207,10 @@ private fun AuditLogCard(log: Nip55AuditLog) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm:ss", Locale.getDefault()) }
     val isAllowed = log.decision == "allow"
 
-    val containerColor = if (isAllowed) {
+    val containerColor = if (isAllowed)
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-    } else {
+    else
         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
-    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -266,11 +265,10 @@ private fun AuditLogCard(log: Nip55AuditLog) {
 @Composable
 private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
     val isAllowed = decision == "allow"
-    val backgroundColor = if (isAllowed) {
+    val backgroundColor = if (isAllowed)
         MaterialTheme.colorScheme.primary
-    } else {
+    else
         MaterialTheme.colorScheme.error
-    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (wasAutomatic) {
@@ -295,11 +293,10 @@ private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
                 text = if (isAllowed) "Allowed" else "Denied",
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isAllowed) {
+                color = if (isAllowed)
                     MaterialTheme.colorScheme.onPrimary
-                } else {
+                else
                     MaterialTheme.colorScheme.onError
-                }
             )
         }
     }

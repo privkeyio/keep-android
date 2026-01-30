@@ -164,9 +164,9 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val errorColor = MaterialTheme.colorScheme.error
-    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
-    val textColor = if (callerPackage == null || !callerVerified) errorColor else MaterialTheme.colorScheme.onSurfaceVariant
+    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
+    val isUntrusted = callerPackage == null || !callerVerified
+    val textColor = if (isUntrusted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
 
     Text(
         text = displayText,
@@ -207,9 +207,8 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val displayContent = if (!showFullContent && contentTruncated) {
-                    "${request.content.take(200)}..."
-                } else request.content
+                val shouldTruncate = !showFullContent && contentTruncated
+                val displayContent = if (shouldTruncate) "${request.content.take(200)}..." else request.content
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
                 if (contentTruncated) {

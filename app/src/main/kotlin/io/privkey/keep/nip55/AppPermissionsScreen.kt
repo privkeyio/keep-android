@@ -25,7 +25,12 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
-private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+private data class AppLoadResult(
+    val label: String?,
+    val icon: Drawable?,
+    val verified: Boolean,
+    val permissions: List<Nip55Permission>
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,10 +49,10 @@ fun AppPermissionsScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        val (fetchedLabel, fetchedIcon, verified, perms) = withContext(Dispatchers.IO) {
+        val result = withContext(Dispatchers.IO) {
             var label: String? = null
             var icon: Drawable? = null
-            var ver = true
+            var verified = true
             try {
                 val pm = context.packageManager
                 val info = pm.getApplicationInfo(packageName, 0)
@@ -55,18 +60,16 @@ fun AppPermissionsScreen(
                 icon = pm.getApplicationIcon(info)
             } catch (e: PackageManager.NameNotFoundException) {
                 android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
-                ver = false
+                verified = false
             }
-            val permsList = permissionStore.getPermissionsForCaller(packageName)
-            Tuple4(label, icon, ver, permsList)
+            val perms = permissionStore.getPermissionsForCaller(packageName)
+            AppLoadResult(label, icon, verified, perms)
         }
-        withContext(Dispatchers.Main) {
-            appLabel = fetchedLabel
-            appIcon = fetchedIcon
-            isVerified = verified
-            permissions = perms
-            isLoading = false
-        }
+        appLabel = result.label
+        appIcon = result.icon
+        isVerified = result.verified
+        permissions = result.permissions
+        isLoading = false
     }
 
     if (showRevokeAllDialog) {
@@ -320,11 +323,9 @@ private fun PermissionItem(
 
 private fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
-    return when {
-        remaining < 0 -> "Expired"
-        remaining < 3600_000 -> "${remaining / 60_000}m remaining"
-        remaining < 86400_000 -> "${remaining / 3600_000}h remaining"
-        else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
-    }
+    if (remaining < 0) return "Expired"
+    if (remaining < 3600_000) return "${remaining / 60_000}m remaining"
+    if (remaining < 86400_000) return "${remaining / 3600_000}h remaining"
+    return SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
