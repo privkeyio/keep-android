@@ -24,8 +24,6 @@ import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.*
 
 private data class AppState(
     val label: String? = null,
@@ -367,16 +365,6 @@ private fun PermissionItem(
                 onDecisionChange = onDecisionChange
             )
         }
-    }
-}
-
-private fun formatExpiry(timestamp: Long): String {
-    val remaining = timestamp - System.currentTimeMillis()
-    return when {
-        remaining < 0 -> "Expired"
-        remaining < 3600_000 -> "${remaining / 60_000}m remaining"
-        remaining < 86400_000 -> "${remaining / 3600_000}h remaining"
-        else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
     }
 }
 

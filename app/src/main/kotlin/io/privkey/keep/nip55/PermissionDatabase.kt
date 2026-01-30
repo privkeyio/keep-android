@@ -3,6 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.room.*
+import androidx.room.migration.Migration
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -467,3 +468,15 @@ fun formatRelativeTime(timestamp: Long): String {
 
 fun findRequestType(name: String): Nip55RequestType? =
     Nip55RequestType.entries.find { it.name == name }
+
+fun formatExpiry(timestamp: Long): String {
+    val remaining = timestamp - System.currentTimeMillis()
+    return when {
+        remaining < 0 -> "expired"
+        remaining < 60_000 -> "<1m"
+        remaining < 3600_000 -> "in ${remaining / 60_000}m"
+        remaining < 86400_000 -> "in ${remaining / 3600_000}h"
+        remaining < 604800_000 -> "in ${remaining / 86400_000}d"
+        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+    }
+}
