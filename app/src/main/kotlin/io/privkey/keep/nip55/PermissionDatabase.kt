@@ -178,9 +178,6 @@ interface Nip55AppSettingsDao {
 
     @Query("SELECT * FROM nip55_app_settings")
     suspend fun getAll(): List<Nip55AppSettings>
-
-    @Query("UPDATE nip55_app_settings SET signPolicyOverride = :signPolicyOverride WHERE callerPackage = :callerPackage")
-    suspend fun updateSignPolicyOverride(callerPackage: String, signPolicyOverride: Int?)
 }
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class], version = 3)

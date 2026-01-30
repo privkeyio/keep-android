@@ -28,8 +28,14 @@ fun SignPolicyScreen(
     signPolicyStore: SignPolicyStore,
     onDismiss: () -> Unit
 ) {
-    var selectedPolicy by remember { mutableStateOf(signPolicyStore.getGlobalPolicy()) }
+    var selectedPolicy by remember { mutableStateOf(SignPolicy.MANUAL) }
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            signPolicyStore.getGlobalPolicy()
+        }.let { selectedPolicy = it }
+    }
 
     Scaffold(
         topBar = {
