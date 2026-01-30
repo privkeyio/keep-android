@@ -12,7 +12,7 @@ enum class SignPolicy(@StringRes val displayNameRes: Int, @StringRes val descrip
     MANUAL(R.string.sign_policy_manual, R.string.sign_policy_manual_description);
 
     companion object {
-        fun fromOrdinal(ordinal: Int): SignPolicy = entries.getOrElse(ordinal) { BASIC }
+        fun fromOrdinal(ordinal: Int): SignPolicy = entries.getOrElse(ordinal) { MANUAL }
     }
 }
 
@@ -37,7 +37,7 @@ class SignPolicyStore(context: Context) {
     }
 
     fun getGlobalPolicy(): SignPolicy {
-        val ordinal = prefs.getInt(KEY_GLOBAL_POLICY, SignPolicy.BASIC.ordinal)
+        val ordinal = prefs.getInt(KEY_GLOBAL_POLICY, SignPolicy.MANUAL.ordinal)
         return SignPolicy.fromOrdinal(ordinal)
     }
 
