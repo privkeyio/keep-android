@@ -183,9 +183,9 @@ data class ConnectedAppInfo(
     val lastUsedTime: Long?
 )
 
-class PermissionStore(db: Nip55Database) {
-    private val dao = db.permissionDao()
-    private val auditDao = db.auditLogDao()
+class PermissionStore(private val database: Nip55Database) {
+    private val dao = database.permissionDao()
+    private val auditDao = database.auditLogDao()
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
@@ -300,8 +300,10 @@ class PermissionStore(db: Nip55Database) {
         }
         val storedRequestType = findRequestType(permission.requestType)
             ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
-        dao.updateDecision(id, decision.toString())
-        logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false)
+        database.withTransaction {
+            dao.updateDecision(id, decision.toString())
+            logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false)
+        }
     }
 
     suspend fun setPermissionToAsk(
@@ -319,6 +321,7 @@ class PermissionStore(db: Nip55Database) {
                 createdAt = System.currentTimeMillis()
             )
         )
+        logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
     }
 
     suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)

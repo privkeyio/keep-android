@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -179,14 +180,19 @@ fun AppPermissionsScreen(
                         errorMessage = updateError,
                         onRevoke = {
                             coroutineScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    permissionStore.deletePermission(permission.id)
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        permissionStore.deletePermission(permission.id)
+                                    }
+                                    val newPermissions = withContext(Dispatchers.IO) {
+                                        permissionStore.getPermissionsForCaller(packageName)
+                                    }
+                                    appState = appState.copy(permissions = newPermissions)
+                                    if (newPermissions.isEmpty()) onDismiss()
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AppPermissions", "Failed to revoke permission", e)
+                                    Toast.makeText(context, "Failed to revoke permission", Toast.LENGTH_SHORT).show()
                                 }
-                                val newPermissions = withContext(Dispatchers.IO) {
-                                    permissionStore.getPermissionsForCaller(packageName)
-                                }
-                                appState = appState.copy(permissions = newPermissions)
-                                if (newPermissions.isEmpty()) onDismiss()
                             }
                         }
                     )
