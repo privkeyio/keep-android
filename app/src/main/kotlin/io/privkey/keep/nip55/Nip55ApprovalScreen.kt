@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -150,7 +151,7 @@ private fun DurationSelector(
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .menuAnchor()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
             )
             ExposedDropdownMenu(
                 expanded = expanded,
