@@ -109,7 +109,7 @@ interface Nip55AuditLogDao {
         SELECT MAX(timestamp) FROM nip55_audit_log
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
-        AND (eventKind IS NULL OR eventKind = :eventKind)
+        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
         AND decision = 'allow'
     """)
     suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int?): Long?
