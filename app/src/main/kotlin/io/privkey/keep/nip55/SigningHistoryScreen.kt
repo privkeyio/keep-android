@@ -34,27 +34,38 @@ fun SigningHistoryScreen(
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    var loadError by remember { mutableStateOf<String?>(null) }
+
     fun loadLogs(reset: Boolean = false) {
         coroutineScope.launch {
-            if (reset) isLoading = true else isLoadingMore = true
-            val offset = if (reset) 0 else logs.size
+            try {
+                if (reset) isLoading = true else isLoadingMore = true
+                val offset = if (reset) 0 else logs.size
 
-            val newLogs = permissionStore.getAuditLogPage(
-                limit = PAGE_SIZE,
-                offset = offset,
-                callerPackage = selectedApp
-            )
+                val newLogs = permissionStore.getAuditLogPage(
+                    limit = PAGE_SIZE,
+                    offset = offset,
+                    callerPackage = selectedApp
+                )
 
-            logs = if (reset) newLogs else logs + newLogs
-            hasMore = newLogs.size == PAGE_SIZE
-            isLoading = false
-            isLoadingMore = false
+                logs = if (reset) newLogs else logs + newLogs
+                hasMore = newLogs.size == PAGE_SIZE
+                loadError = null
+            } catch (e: Exception) {
+                loadError = "Failed to load signing history"
+            } finally {
+                isLoading = false
+                isLoadingMore = false
+            }
         }
     }
 
     LaunchedEffect(Unit) {
-        availableApps = permissionStore.getDistinctAuditCallers()
-        loadLogs(reset = true)
+        try {
+            availableApps = permissionStore.getDistinctAuditCallers()
+        } catch (e: Exception) {
+            loadError = "Failed to load apps"
+        }
     }
 
     LaunchedEffect(selectedApp) {

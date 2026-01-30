@@ -416,9 +416,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
 
         val alias = getKeystoreAlias(key)
+        val legacyAlias = getLegacyKeystoreAlias(key)
         try {
             if (keyStore.containsAlias(alias)) {
                 keyStore.deleteEntry(alias)
+            }
+            if (keyStore.containsAlias(legacyAlias)) {
+                keyStore.deleteEntry(legacyAlias)
             }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
