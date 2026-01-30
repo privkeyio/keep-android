@@ -58,7 +58,7 @@ private enum class PassphraseStrength(val label: String) {
 }
 
 @Composable
-private fun PassphraseStrength.color(): androidx.compose.ui.graphics.Color = when (this) {
+private fun PassphraseStrength.color() = when (this) {
     PassphraseStrength.WEAK -> MaterialTheme.colorScheme.error
     PassphraseStrength.FAIR -> MaterialTheme.colorScheme.tertiary
     PassphraseStrength.GOOD, PassphraseStrength.STRONG -> MaterialTheme.colorScheme.primary
@@ -103,13 +103,10 @@ fun ExportShareScreen(
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    passphrase = ""
-                    confirmPassphrase = ""
-                    exportState = ExportState.Idle
-                }
-                else -> {}
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                passphrase = ""
+                confirmPassphrase = ""
+                exportState = ExportState.Idle
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

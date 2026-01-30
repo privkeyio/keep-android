@@ -69,9 +69,9 @@ private fun QrDisplayContainer(
             content = qrContent
         )
 
-        extraContent?.let {
+        if (extraContent != null) {
             Spacer(modifier = Modifier.height(8.dp))
-            it()
+            extraContent()
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -221,13 +221,10 @@ private fun generateQrCode(content: String): Bitmap? {
         val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
         val width = bitMatrix.width
         val height = bitMatrix.height
-        val pixels = IntArray(width * height)
         val black = Color.Black.toArgb()
         val white = Color.White.toArgb()
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                pixels[y * width + x] = if (bitMatrix[x, y]) black else white
-            }
+        val pixels = IntArray(width * height) { i ->
+            if (bitMatrix[i % width, i / width]) black else white
         }
         Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
     } catch (_: Exception) {
