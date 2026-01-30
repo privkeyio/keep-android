@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Binder
 import android.util.Log
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -98,6 +99,19 @@ class Nip55ContentProvider : ContentProvider() {
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
         if (store == null) return null
+
+        val effectivePolicy = runBlocking {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                store.getAppSignPolicyOverride(callerPackage)
+                    ?.let { SignPolicy.fromOrdinal(it) }
+                    ?: app?.getSignPolicyStore()?.getGlobalPolicy()
+                    ?: SignPolicy.MANUAL
+            } ?: SignPolicy.MANUAL
+        }
+
+        if (effectivePolicy == SignPolicy.MANUAL) {
+            return null
+        }
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {

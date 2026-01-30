@@ -7,6 +7,7 @@ import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
+import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +20,7 @@ class KeepMobileApp : Application() {
     private var storage: AndroidKeystoreStorage? = null
     private var relayConfigStore: RelayConfigStore? = null
     private var killSwitchStore: KillSwitchStore? = null
+    private var signPolicyStore: SignPolicyStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -34,10 +36,12 @@ class KeepMobileApp : Application() {
             val newStorage = AndroidKeystoreStorage(this)
             val newRelayConfig = RelayConfigStore(this)
             val newKillSwitch = KillSwitchStore(this)
+            val newSignPolicy = SignPolicyStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
             killSwitchStore = newKillSwitch
+            signPolicyStore = newSignPolicy
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
 
@@ -70,6 +74,8 @@ class KeepMobileApp : Application() {
     fun getRelayConfigStore(): RelayConfigStore? = relayConfigStore
 
     fun getKillSwitchStore(): KillSwitchStore? = killSwitchStore
+
+    fun getSignPolicyStore(): SignPolicyStore? = signPolicyStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 

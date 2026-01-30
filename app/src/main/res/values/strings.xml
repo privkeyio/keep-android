@@ -33,4 +33,13 @@
         <item quantity="one">%d permission</item>
         <item quantity="other">%d permissions</item>
     </plurals>
+
+    <string name="sign_policy">Sign Policy</string>
+    <string name="sign_policy_basic">Basic</string>
+    <string name="sign_policy_basic_description">Auto-approve requests for saved permissions. New permissions will prompt for approval.</string>
+    <string name="sign_policy_manual">Manual</string>
+    <string name="sign_policy_manual_description">Always show approval screen for every signing request, regardless of saved permissions.</string>
+    <string name="sign_policy_app_override">App Override</string>
+    <string name="sign_policy_use_global">Use global setting</string>
+    <string name="sign_policy_global_setting">Global Setting</string>
 </resources>

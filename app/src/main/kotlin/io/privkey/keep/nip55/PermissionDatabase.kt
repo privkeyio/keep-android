@@ -65,6 +65,7 @@ data class Nip55AuditLog(
 data class Nip55AppSettings(
     @PrimaryKey val callerPackage: String,
     val expiresAt: Long?,
+    val signPolicyOverride: Int?,
     val createdAt: Long
 ) {
     fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt)
@@ -177,9 +178,12 @@ interface Nip55AppSettingsDao {
 
     @Query("SELECT * FROM nip55_app_settings")
     suspend fun getAll(): List<Nip55AppSettings>
+
+    @Query("UPDATE nip55_app_settings SET signPolicyOverride = :signPolicyOverride WHERE callerPackage = :callerPackage")
+    suspend fun updateSignPolicyOverride(callerPackage: String, signPolicyOverride: Int?)
 }
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class], version = 2)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class], version = 3)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
@@ -204,7 +208,13 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2)
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE nip55_app_settings ADD COLUMN signPolicyOverride INTEGER")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         private fun getOrCreateDbKey(context: Context): ByteArray {
             val masterKey = MasterKey.Builder(context)
@@ -308,8 +318,6 @@ class PermissionStore(private val database: Nip55Database) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
             if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
-        // When eventKind is null (parse failure), never fall back to generic permissions
-        // as the actual event could be a sensitive kind
         return null
     }
 
@@ -403,13 +411,15 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun setAppExpiry(callerPackage: String, duration: AppExpiryDuration) {
         val expiresAt = duration.expiresAt()
-        if (expiresAt == null) {
+        val existing = appSettingsDao.getSettings(callerPackage)
+        if (expiresAt == null && existing?.signPolicyOverride == null) {
             appSettingsDao.delete(callerPackage)
         } else {
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
                     expiresAt = expiresAt,
+                    signPolicyOverride = existing?.signPolicyOverride,
                     createdAt = System.currentTimeMillis()
                 )
             )
@@ -493,6 +503,29 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: String,
         eventKind: Int?
     ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind)
+
+    suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
+        appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
+
+    suspend fun setAppSignPolicyOverride(callerPackage: String, signPolicyOrdinal: Int?) {
+        val existing = appSettingsDao.getSettings(callerPackage)
+        if (signPolicyOrdinal == null && existing?.expiresAt == null) {
+            appSettingsDao.delete(callerPackage)
+        } else {
+            appSettingsDao.insertOrUpdate(
+                Nip55AppSettings(
+                    callerPackage = callerPackage,
+                    expiresAt = existing?.expiresAt,
+                    signPolicyOverride = signPolicyOrdinal,
+                    createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    suspend fun clearAppSettings(callerPackage: String) {
+        appSettingsDao.delete(callerPackage)
+    }
 }
 
 private fun isTimestampExpired(expiresAt: Long?, createdAt: Long): Boolean {

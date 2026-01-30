@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import android.widget.Toast
 import io.privkey.keep.R
+import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.storage.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +33,7 @@ private data class AppState(
     val icon: Drawable? = null,
     val isVerified: Boolean = true,
     val permissions: List<Nip55Permission> = emptyList(),
+    val signPolicyOverride: Int? = null,
     val isLoading: Boolean = true
 )
 
@@ -39,6 +42,7 @@ private data class AppState(
 fun AppPermissionsScreen(
     packageName: String,
     permissionStore: PermissionStore,
+    signPolicyStore: SignPolicyStore? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -69,7 +73,13 @@ fun AppPermissionsScreen(
                 emptyList()
             }
             val loadedSettings = permissionStore.getAppSettings(packageName)
-            Pair(AppState(label, icon, verified, permissions, isLoading = false), loadedSettings)
+            val signPolicyOverride = try {
+                permissionStore.getAppSignPolicyOverride(packageName)
+            } catch (e: Exception) {
+                android.util.Log.e("AppPermissions", "Failed to load sign policy for: $packageName", e)
+                null
+            }
+            Pair(AppState(label, icon, verified, permissions, signPolicyOverride, isLoading = false), loadedSettings)
         }
         appState = newAppState
         appSettings = settings
@@ -146,6 +156,32 @@ fun AppPermissionsScreen(
                         }
                     }
                 )
+            }
+
+            if (signPolicyStore != null && !appState.isLoading) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            AppSignPolicySelector(
+                                currentOverride = appState.signPolicyOverride,
+                                globalPolicy = signPolicyStore.getGlobalPolicy(),
+                                onOverrideChange = { newOverride ->
+                                    coroutineScope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) {
+                                                permissionStore.setAppSignPolicyOverride(packageName, newOverride)
+                                            }
+                                            appState = appState.copy(signPolicyOverride = newOverride)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("AppPermissions", "Failed to update sign policy", e)
+                                            Toast.makeText(context, "Failed to update sign policy", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
             }
 
             if (appState.isLoading) {
