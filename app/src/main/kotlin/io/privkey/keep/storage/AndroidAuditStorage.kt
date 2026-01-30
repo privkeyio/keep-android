@@ -4,13 +4,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import io.privkey.keep.uniffi.AuditStorage
 import io.privkey.keep.uniffi.KeepMobileException
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-class AndroidAuditStorage(context: Context) : AuditStorage {
+class AndroidAuditStorage(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "keep_audit_log"
@@ -33,7 +32,7 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
     }
 
     @Synchronized
-    override fun storeEntry(entryJson: String) {
+    fun storeEntry(entryJson: String) {
         if (entryJson.toByteArray(Charsets.UTF_8).size > MAX_ENTRY_SIZE_BYTES) {
             throw KeepMobileException.StorageException("Audit entry exceeds maximum size limit")
         }
@@ -47,19 +46,15 @@ class AndroidAuditStorage(context: Context) : AuditStorage {
     }
 
     @Synchronized
-    override fun loadEntries(limit: UInt?): List<String> {
+    fun loadEntries(limit: UInt?): List<String> {
         val entries = loadEntriesInternal()
         if (limit == null) return entries
-        val safeIntLimit = if (limit > Int.MAX_VALUE.toUInt()) {
-            Int.MAX_VALUE
-        } else {
-            minOf(limit.toInt(), entries.size)
-        }
-        return entries.takeLast(safeIntLimit)
+        val safeLimit = minOf(limit.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        return entries.takeLast(safeLimit)
     }
 
     @Synchronized
-    override fun clearEntries() {
+    fun clearEntries() {
         prefs.edit().remove(KEY_ENTRIES).apply()
     }
 
