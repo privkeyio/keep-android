@@ -6,6 +6,26 @@ import androidx.room.*
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
+enum class PermissionDecision(@StringRes val displayNameRes: Int) {
+    ALLOW(R.string.permission_decision_allow),
+    DENY(R.string.permission_decision_deny),
+    ASK(R.string.permission_decision_ask);
+
+    companion object {
+        fun fromString(value: String): PermissionDecision = when (value.lowercase()) {
+            "allow" -> ALLOW
+            "deny" -> DENY
+            "ask" -> ASK
+            else -> {
+                android.util.Log.w("PermissionDecision", "Unknown decision value '$value', defaulting to DENY")
+                DENY
+            }
+        }
+    }
+
+    override fun toString(): String = name.lowercase()
+}
+
 @Entity(
     tableName = "nip55_permissions",
     indices = [Index(value = ["callerPackage", "requestType", "eventKind"], unique = true)]
@@ -20,6 +40,9 @@ data class Nip55Permission(
     val createdAt: Long
 ) {
     fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+
+    val permissionDecision: PermissionDecision
+        get() = PermissionDecision.fromString(decision)
 }
 
 @Entity(tableName = "nip55_audit_log")
@@ -77,6 +100,12 @@ interface Nip55PermissionDao {
 
     @Query("SELECT DISTINCT callerPackage FROM nip55_permissions ORDER BY callerPackage")
     suspend fun getDistinctCallers(): List<String>
+
+    @Query("UPDATE nip55_permissions SET decision = :decision WHERE id = :id")
+    suspend fun updateDecision(id: Long, decision: String)
+
+    @Query("SELECT * FROM nip55_permissions WHERE id = :id")
+    suspend fun getById(id: Long): Nip55Permission?
 }
 
 @Dao
@@ -154,22 +183,22 @@ data class ConnectedAppInfo(
     val lastUsedTime: Long?
 )
 
-class PermissionStore(db: Nip55Database) {
-    private val dao = db.permissionDao()
-    private val auditDao = db.auditLogDao()
+class PermissionStore(private val database: Nip55Database) {
+    private val dao = database.permissionDao()
+    private val auditDao = database.auditLogDao()
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
         auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
     }
 
-    suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
+    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
         val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
-        if (permission != null && !permission.isExpired()) return permission.decision == "allow"
+        if (permission != null && !permission.isExpired()) return permission.permissionDecision
 
         if (eventKind != null) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
-            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.decision == "allow"
+            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
         return null
     }
@@ -255,6 +284,48 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
 
+    suspend fun updatePermissionDecision(
+        id: Long,
+        decision: PermissionDecision,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ) {
+        val permission = dao.getById(id) ?: throw IllegalArgumentException("Permission not found: $id")
+        if (permission.callerPackage != callerPackage) {
+            throw IllegalArgumentException("CallerPackage mismatch for permission $id")
+        }
+        if (permission.requestType != requestType.name) {
+            throw IllegalArgumentException("RequestType mismatch for permission $id: expected ${permission.requestType}, got ${requestType.name}")
+        }
+        val storedRequestType = findRequestType(permission.requestType)
+            ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
+        database.withTransaction {
+            dao.updateDecision(id, decision.toString())
+            logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false)
+        }
+    }
+
+    suspend fun setPermissionToAsk(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ) {
+        database.withTransaction {
+            dao.insertPermission(
+                Nip55Permission(
+                    callerPackage = callerPackage,
+                    requestType = requestType.name,
+                    eventKind = eventKind,
+                    decision = PermissionDecision.ASK.toString(),
+                    expiresAt = null,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+            logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
+        }
+    }
+
     suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
 
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
@@ -287,9 +358,17 @@ fun formatRequestType(type: String): String =
 
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
-    if (diff < 60_000) return "just now"
-    if (diff < 3600_000) return "${diff / 60_000}m ago"
-    if (diff < 86400_000) return "${diff / 3600_000}h ago"
-    if (diff < 604800_000) return "${diff / 86400_000}d ago"
-    return java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+    val minutes = diff / 60_000
+    val hours = diff / 3600_000
+    val days = diff / 86400_000
+    return when {
+        diff < 60_000 -> "just now"
+        diff < 3600_000 -> "${minutes}m ago"
+        diff < 86400_000 -> "${hours}h ago"
+        diff < 604800_000 -> "${days}d ago"
+        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+    }
 }
+
+fun findRequestType(name: String): Nip55RequestType? =
+    Nip55RequestType.entries.find { it.name == name }

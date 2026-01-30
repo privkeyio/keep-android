@@ -71,21 +71,36 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val permissionResult = runBlocking {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                store.hasPermission(callerPackage, requestType, eventKind)
+        val (decision, timedOut) = runBlocking {
+            var result: PermissionDecision? = null
+            val completed = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                result = store.getPermissionDecision(callerPackage, requestType, eventKind)
+                true
             }
-        } ?: return errorCursor("timeout", null)
+            Pair(result, completed == null)
+        }
 
-        if (!permissionResult) {
-            runBlocking {
-                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                    store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
-                }
-            }
+        if (timedOut) {
+            Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
             return rejectedCursor(null)
         }
-        return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+
+        when (decision) {
+            PermissionDecision.ALLOW -> {
+                return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+            }
+            PermissionDecision.DENY -> {
+                runBlocking {
+                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                        store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
+                    }
+                }
+                return rejectedCursor(null)
+            }
+            PermissionDecision.ASK, null -> {
+                return null
+            }
+        }
     }
 
     private fun executeBackgroundRequest(
@@ -160,11 +175,7 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String {
-        val authority = when (uri.authority) {
-            AUTHORITY_GET_PUBLIC_KEY, AUTHORITY_SIGN_EVENT,
-            AUTHORITY_NIP44_ENCRYPT, AUTHORITY_NIP44_DECRYPT -> uri.authority
-            else -> "io.privkey.keep"
-        }
+        val authority = uri.authority ?: "io.privkey.keep"
         return "vnd.android.cursor.item/vnd.$authority"
     }
 

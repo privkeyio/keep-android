@@ -6,6 +6,10 @@
     <string name="permission_duration_one_day">For 24 hours</string>
     <string name="permission_duration_forever">Always</string>
 
+    <string name="permission_decision_allow">Allow</string>
+    <string name="permission_decision_deny">Deny</string>
+    <string name="permission_decision_ask">Ask</string>
+
     <string name="connected_apps">Connected Apps</string>
     <string name="back">Back</string>
     <string name="no_connected_apps">No connected apps</string>

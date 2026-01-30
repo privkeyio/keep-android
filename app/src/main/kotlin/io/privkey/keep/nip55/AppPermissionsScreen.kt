@@ -18,17 +18,19 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
-private data class AppLoadResult(
-    val label: String?,
-    val icon: Drawable?,
-    val verified: Boolean,
-    val permissions: List<Nip55Permission>
+private data class AppState(
+    val label: String? = null,
+    val icon: Drawable? = null,
+    val isVerified: Boolean = true,
+    val permissions: List<Nip55Permission> = emptyList(),
+    val isLoading: Boolean = true
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,42 +42,38 @@ fun AppPermissionsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var permissions by remember { mutableStateOf<List<Nip55Permission>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var appLabel by remember { mutableStateOf<String?>(null) }
-    var appIcon by remember { mutableStateOf<Drawable?>(null) }
-    var isVerified by remember { mutableStateOf(true) }
+    var appState by remember { mutableStateOf(AppState()) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        val result = withContext(Dispatchers.IO) {
-            var label: String? = null
-            var icon: Drawable? = null
-            var verified = true
-            try {
-                val pm = context.packageManager
-                val info = pm.getApplicationInfo(packageName, 0)
-                label = pm.getApplicationLabel(info).toString()
-                icon = pm.getApplicationIcon(info)
+        appState = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val (label, icon, verified) = try {
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                Triple(
+                    pm.getApplicationLabel(appInfo).toString(),
+                    pm.getApplicationIcon(appInfo),
+                    true
+                )
             } catch (e: PackageManager.NameNotFoundException) {
-                android.util.Log.w("AppPermissions", "Package not found")
-                verified = false
+                android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
+                Triple(null, null, false)
             }
-            val perms = permissionStore.getPermissionsForCaller(packageName)
-            AppLoadResult(label, icon, verified, perms)
+            val permissions = try {
+                permissionStore.getPermissionsForCaller(packageName)
+            } catch (e: Exception) {
+                android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", e)
+                emptyList()
+            }
+            AppState(label, icon, verified, permissions, isLoading = false)
         }
-        appLabel = result.label
-        appIcon = result.icon
-        isVerified = result.verified
-        permissions = result.permissions
-        isLoading = false
     }
 
     if (showRevokeAllDialog) {
         AlertDialog(
             onDismissRequest = { showRevokeAllDialog = false },
             title = { Text("Disconnect App?") },
-            text = { Text("This will remove all saved permissions for ${appLabel ?: packageName}. The app will need to request permission again.") },
+            text = { Text("This will remove all saved permissions for ${appState.label ?: packageName}. The app will need to request permission again.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -103,7 +101,7 @@ fun AppPermissionsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(appLabel ?: packageName) },
+                title = { Text(appState.label ?: packageName) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -120,13 +118,13 @@ fun AppPermissionsScreen(
             item {
                 AppHeaderCard(
                     packageName = packageName,
-                    appLabel = appLabel,
-                    appIcon = appIcon,
-                    isVerified = isVerified
+                    appLabel = appState.label,
+                    appIcon = appState.icon,
+                    isVerified = appState.isVerified
                 )
             }
 
-            if (isLoading) {
+            if (appState.isLoading) {
                 item {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
@@ -135,7 +133,7 @@ fun AppPermissionsScreen(
                         CircularProgressIndicator()
                     }
                 }
-            } else if (permissions.isEmpty()) {
+            } else if (appState.permissions.isEmpty()) {
                 item {
                     Text(
                         "No active permissions",
@@ -149,19 +147,52 @@ fun AppPermissionsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
-                items(permissions, key = { it.id }) { permission ->
+                items(appState.permissions, key = { it.id }) { permission ->
+                    var updateError by remember { mutableStateOf<String?>(null) }
+                    val requestType = findRequestType(permission.requestType)
+
                     PermissionItem(
                         permission = permission,
-                        permissionStore = permissionStore,
+                        onDecisionChange = { newDecision ->
+                            if (requestType == null) return@PermissionItem
+                            coroutineScope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        permissionStore.updatePermissionDecision(
+                                            permission.id,
+                                            newDecision,
+                                            packageName,
+                                            requestType,
+                                            permission.eventKind
+                                        )
+                                    }
+                                    val newPermissions = withContext(Dispatchers.IO) {
+                                        permissionStore.getPermissionsForCaller(packageName)
+                                    }
+                                    appState = appState.copy(permissions = newPermissions)
+                                    updateError = null
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AppPermissions", "Failed to update permission", e)
+                                    updateError = "Failed to update permission"
+                                }
+                            }
+                        },
+                        errorMessage = updateError,
                         onRevoke = {
                             coroutineScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    permissionStore.deletePermission(permission.id)
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        permissionStore.deletePermission(permission.id)
+                                    }
+                                    val newPermissions = withContext(Dispatchers.IO) {
+                                        permissionStore.getPermissionsForCaller(packageName)
+                                    }
+                                    appState = appState.copy(permissions = newPermissions)
+                                    if (newPermissions.isEmpty()) onDismiss()
+                                } catch (e: Exception) {
+                                    android.util.Log.e("AppPermissions", "Failed to revoke permission", e)
+                                    Toast.makeText(context, "Failed to revoke permission", Toast.LENGTH_SHORT).show()
                                 }
-                                permissions = withContext(Dispatchers.IO) {
-                                    permissionStore.getPermissionsForCaller(packageName)
-                                }
-                                if (permissions.isEmpty()) onDismiss()
                             }
                         }
                     )
@@ -253,74 +284,73 @@ private fun AppHeaderCard(
 @Composable
 private fun PermissionItem(
     permission: Nip55Permission,
-    permissionStore: PermissionStore,
-    onRevoke: () -> Unit
+    onDecisionChange: (PermissionDecision) -> Unit,
+    onRevoke: () -> Unit,
+    errorMessage: String? = null
 ) {
-    var lastUsedTime by remember { mutableStateOf<Long?>(null) }
-
-    LaunchedEffect(permission.id) {
-        lastUsedTime = withContext(Dispatchers.IO) {
-            permissionStore.getLastUsedTimeForPermission(
-                permission.callerPackage,
-                permission.requestType,
-                permission.eventKind
-            )
-        }
-    }
+    val currentDecision = permission.permissionDecision
 
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = formatRequestType(permission.requestType),
-                    style = MaterialTheme.typography.titleSmall
-                )
-                permission.eventKind?.let { kind ->
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = EventKind.displayName(kind),
+                        text = formatRequestType(permission.requestType),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    permission.eventKind?.let { kind ->
+                        Text(
+                            text = "Event kind: $kind",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    val expiryText = permission.expiresAt?.let { "Expires: ${formatExpiry(it)}" } ?: "Permanent"
+                    Text(
+                        text = expiryText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    text = "Decision: ${permission.decision}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (permission.decision == "allow") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                )
-                val expiryText = permission.expiresAt?.let { "Expires: ${formatExpiry(it)}" } ?: "Permanent"
-                Text(
-                    text = expiryText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                lastUsedTime?.let { time ->
-                    Text(
-                        text = "Last used: ${formatRelativeTime(time)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                IconButton(onClick = onRevoke) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Revoke",
+                        tint = MaterialTheme.colorScheme.error
                     )
                 }
             }
 
-            IconButton(onClick = onRevoke) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Revoke",
-                    tint = MaterialTheme.colorScheme.error
+            errorMessage?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
                 )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            ThreeStateToggle(
+                currentDecision = currentDecision,
+                onDecisionChange = onDecisionChange
+            )
         }
     }
 }
 
 private fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
-    if (remaining < 0) return "Expired"
-    if (remaining < 3600_000) return "${remaining / 60_000}m remaining"
-    if (remaining < 86400_000) return "${remaining / 3600_000}h remaining"
-    return SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    return when {
+        remaining < 0 -> "Expired"
+        remaining < 3600_000 -> "${remaining / 60_000}m remaining"
+        remaining < 86400_000 -> "${remaining / 3600_000}h remaining"
+        else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    }
 }
-
