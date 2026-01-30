@@ -29,12 +29,12 @@ fun SignPolicyScreen(
     onDismiss: () -> Unit
 ) {
     var selectedPolicy by remember { mutableStateOf(SignPolicy.MANUAL) }
+    var userInteracted by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            signPolicyStore.getGlobalPolicy()
-        }.let { selectedPolicy = it }
+        val loaded = withContext(Dispatchers.IO) { signPolicyStore.getGlobalPolicy() }
+        if (!userInteracted) selectedPolicy = loaded
     }
 
     Scaffold(
@@ -66,6 +66,7 @@ fun SignPolicyScreen(
                     policy = policy,
                     isSelected = selectedPolicy == policy,
                     onClick = {
+                        userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
