@@ -111,6 +111,10 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (effectivePolicy == SignPolicy.MANUAL) return null
 
+        if (effectivePolicy == SignPolicy.AUTO) {
+            return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+        }
+
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
             Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
@@ -120,9 +124,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (isAppExpired) {
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true) }
-            if (runWithTimeout { store.cleanupExpired(); true } == null) {
-                Log.w(TAG, "Cleanup timed out for expired app: $callerPackage")
-            }
+            runWithTimeout { store.cleanupExpired() }
             return rejectedCursor(null)
         }
 

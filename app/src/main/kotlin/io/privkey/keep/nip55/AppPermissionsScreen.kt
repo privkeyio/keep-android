@@ -1,7 +1,7 @@
 package io.privkey.keep.nip55
 
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,9 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
-import android.widget.Toast
 import io.privkey.keep.R
-import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

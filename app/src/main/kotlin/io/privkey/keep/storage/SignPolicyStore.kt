@@ -8,8 +8,9 @@ import androidx.security.crypto.MasterKey
 import io.privkey.keep.R
 
 enum class SignPolicy(@StringRes val displayNameRes: Int, @StringRes val descriptionRes: Int) {
+    MANUAL(R.string.sign_policy_manual, R.string.sign_policy_manual_description),
     BASIC(R.string.sign_policy_basic, R.string.sign_policy_basic_description),
-    MANUAL(R.string.sign_policy_manual, R.string.sign_policy_manual_description);
+    AUTO(R.string.sign_policy_auto, R.string.sign_policy_auto_description);
 
     companion object {
         fun fromOrdinal(ordinal: Int): SignPolicy = entries.getOrElse(ordinal) { MANUAL }
