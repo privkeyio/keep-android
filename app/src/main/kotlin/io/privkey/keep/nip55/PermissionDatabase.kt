@@ -60,14 +60,17 @@ interface Nip55PermissionDao {
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 
-    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions")
-    suspend fun getAllCallerPackages(): List<String>
+    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
+    suspend fun getAllCallerPackages(now: Long): List<String>
 
-    @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage ORDER BY createdAt DESC")
-    suspend fun getForCaller(callerPackage: String): List<Nip55Permission>
+    @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY createdAt DESC")
+    suspend fun getForCaller(callerPackage: String, now: Long): List<Nip55Permission>
 
-    @Query("SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage")
-    suspend fun getPermissionCountForCaller(callerPackage: String): Int
+    @Query("SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now)")
+    suspend fun getPermissionCountForCaller(callerPackage: String, now: Long): Int
+
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType AND eventKind = :eventKind")
+    suspend fun deleteForCallerAndTypeAndEventKind(callerPackage: String, requestType: String, eventKind: Int)
 }
 
 @Dao
@@ -181,9 +184,10 @@ class PermissionStore(db: Nip55Database) {
         )
     }
 
-    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null) =
-        when (requestType) {
-            null -> dao.deleteForCaller(callerPackage)
+    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null, eventKind: Int? = null) =
+        when {
+            requestType == null -> dao.deleteForCaller(callerPackage)
+            eventKind != null -> dao.deleteForCallerAndTypeAndEventKind(callerPackage, requestType.name, eventKind)
             else -> dao.deleteForCallerAndType(callerPackage, requestType.name)
         }
 
@@ -211,16 +215,17 @@ class PermissionStore(db: Nip55Database) {
     suspend fun getAuditLog(limit: Int = 100): List<Nip55AuditLog> = auditDao.getRecent(limit)
 
     suspend fun getConnectedApps(): List<ConnectedAppInfo> {
-        val packages = dao.getAllCallerPackages()
+        val now = System.currentTimeMillis()
+        val packages = dao.getAllCallerPackages(now)
         return packages.map { pkg ->
             ConnectedAppInfo(
                 packageName = pkg,
-                permissionCount = dao.getPermissionCountForCaller(pkg),
+                permissionCount = dao.getPermissionCountForCaller(pkg, now),
                 lastUsedTime = auditDao.getLastUsedTime(pkg)
             )
         }.sortedByDescending { it.lastUsedTime ?: 0L }
     }
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
-        dao.getForCaller(callerPackage).filter { !it.isExpired() }
+        dao.getForCaller(callerPackage, System.currentTimeMillis())
 }

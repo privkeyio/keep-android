@@ -17,8 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -33,19 +36,25 @@ fun ConnectedAppsScreen(
 ) {
     var connectedApps by remember { mutableStateOf<List<ConnectedAppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        connectedApps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
+        try {
+            connectedApps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
+        } catch (e: Exception) {
+            Log.e("ConnectedApps", "Failed to load connected apps", e)
+            loadError = e.message ?: "Failed to load connected apps"
+        }
         isLoading = false
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Connected Apps") },
+                title = { Text(stringResource(R.string.connected_apps)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -59,6 +68,32 @@ fun ConnectedAppsScreen(
             ) {
                 CircularProgressIndicator()
             }
+        } else if (loadError != null) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        stringResource(R.string.connected_apps_load_error),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        loadError!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         } else if (connectedApps.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
@@ -66,13 +101,13 @@ fun ConnectedAppsScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "No connected apps",
+                        stringResource(R.string.no_connected_apps),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Apps that request signing permissions will appear here",
+                        stringResource(R.string.connected_apps_description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -144,7 +179,7 @@ private fun ConnectedAppItem(
                     if (!isVerified) {
                         Icon(
                             Icons.Default.Warning,
-                            contentDescription = "Unverified",
+                            contentDescription = stringResource(R.string.connected_app_unverified),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(32.dp)
                         )
@@ -169,13 +204,13 @@ private fun ConnectedAppItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(
-                        text = "${app.permissionCount} permission${if (app.permissionCount != 1) "s" else ""}",
+                        text = pluralStringResource(R.plurals.connected_app_permission_count, app.permissionCount, app.permissionCount),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     app.lastUsedTime?.let { time ->
                         Text(
-                            text = "Last used: ${formatTime(time)}",
+                            text = stringResource(R.string.connected_app_last_used, formatTime(time)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -184,7 +219,7 @@ private fun ConnectedAppItem(
                 if (!isVerified) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "App not installed",
+                        text = stringResource(R.string.connected_app_not_installed),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
