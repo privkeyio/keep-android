@@ -90,6 +90,8 @@ fun ApprovalScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        val effectiveDuration = if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME
+
         if (isLoading) {
             CircularProgressIndicator()
         } else {
@@ -98,7 +100,7 @@ fun ApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = { onReject(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME) },
+                    onClick = { onReject(effectiveDuration) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Reject")
@@ -106,7 +108,7 @@ fun ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME)
+                        onApprove(effectiveDuration)
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -173,8 +175,8 @@ private fun DurationSelector(
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
     val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
-    val isUntrusted = callerPackage == null || !callerVerified
-    val textColor = if (isUntrusted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    val isTrusted = callerPackage != null && callerVerified
+    val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 
     Text(
         text = displayText,

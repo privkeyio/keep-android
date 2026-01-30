@@ -365,14 +365,11 @@ fun formatRequestType(type: String): String =
 
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
-    val minutes = diff / 60_000
-    val hours = diff / 3600_000
-    val days = diff / 86400_000
     return when {
         diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${minutes}m ago"
-        diff < 86400_000 -> "${hours}h ago"
-        diff < 604800_000 -> "${days}d ago"
+        diff < 3600_000 -> "${diff / 60_000}m ago"
+        diff < 86400_000 -> "${diff / 3600_000}h ago"
+        diff < 604800_000 -> "${diff / 86400_000}d ago"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
