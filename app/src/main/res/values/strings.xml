@@ -2,13 +2,24 @@
 <resources>
     <string name="app_name">Keep</string>
     <string name="permission_duration_just_this_time">Just this time</string>
+    <string name="permission_duration_one_minute">For 1 minute</string>
+    <string name="permission_duration_five_minutes">For 5 minutes</string>
+    <string name="permission_duration_ten_minutes">For 10 minutes</string>
     <string name="permission_duration_one_hour">For 1 hour</string>
-    <string name="permission_duration_one_day">For 24 hours</string>
+    <string name="permission_duration_one_day">For 1 day</string>
     <string name="permission_duration_forever">Always</string>
 
     <string name="permission_decision_allow">Allow</string>
     <string name="permission_decision_deny">Deny</string>
     <string name="permission_decision_ask">Ask</string>
+
+    <string name="app_expiry_five_minutes">5 minutes</string>
+    <string name="app_expiry_one_hour">1 hour</string>
+    <string name="app_expiry_one_day">1 day</string>
+    <string name="app_expiry_one_week">1 week</string>
+    <string name="app_expiry_never">Never</string>
+    <string name="app_expiry_label">Auto-disconnect after</string>
+    <string name="app_expires_in">Expires %1$s</string>
 
     <string name="connected_apps">Connected Apps</string>
     <string name="back">Back</string>

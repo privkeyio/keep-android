@@ -69,6 +69,10 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("signing_disabled")
         }
         identifyCaller()
+        if (callerPackage == null) {
+            Log.w(TAG, "Rejecting request from unverified caller")
+            return finishWithError("unknown_caller")
+        }
         requestId = intent.getStringExtra("id")
         parseAndSetRequest(intent)
         if (request != null) setupContent()
@@ -122,8 +126,9 @@ class Nip55Activity : FragmentActivity() {
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
-        val callerId = callerPackage ?: "unknown".also {
-            Log.w(TAG, "Unknown caller for ${req.requestType.name} request")
+        val callerId = callerPackage ?: run {
+            Log.w(TAG, "Rejecting request from unknown caller for ${req.requestType.name}")
+            return finishWithError("unknown_caller")
         }
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
@@ -133,7 +138,7 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                if (store != null && callerId != "unknown") {
+                if (store != null) {
                     store.grantPermission(callerId, req.requestType, eventKind, duration)
                 }
 
@@ -196,15 +201,12 @@ class Nip55Activity : FragmentActivity() {
 
     private fun handleReject(duration: PermissionDuration) {
         val req = request ?: return finishWithError("User rejected")
-        val callerId = callerPackage ?: run {
-            Log.w(TAG, "Unknown caller for rejected ${req.requestType.name} request")
-            "unknown"
-        }
+        val callerId = callerPackage
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
 
         lifecycleScope.launch {
-            if (store != null && callerId != "unknown") {
+            if (store != null && callerId != null) {
                 store.denyPermission(callerId, req.requestType, eventKind, duration)
                 store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
             }

@@ -220,6 +220,14 @@ private fun ConnectedAppItem(
                         )
                     }
                 }
+                app.expiresAt?.let { expiry ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.app_expires_in, formatExpiry(expiry)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 if (!isVerified) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
