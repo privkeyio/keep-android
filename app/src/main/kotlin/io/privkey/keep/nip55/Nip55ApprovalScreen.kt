@@ -19,7 +19,6 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
     Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
-    else -> name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
 }
 
 private fun Nip55RequestType.headerTitle(): String = when (this) {
@@ -28,7 +27,6 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
     Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
-    else -> "${displayName()} Request"
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
@@ -84,7 +82,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventKind?.let { isSensitiveKind(it) } ?: false
+                isSensitiveKind = eventKind != null && isSensitiveKind(eventKind)
             )
         }
 
@@ -213,7 +211,7 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
 
             eventKind?.let { kind ->
                 Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Event Kind", eventKindName(kind))
+                DetailRow("Event Kind", EventKind.displayName(kind))
                 sensitiveKindWarning(kind)?.let { warning ->
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(

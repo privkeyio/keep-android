@@ -304,7 +304,7 @@ private fun PermissionItem(
                     )
                     permission.eventKind?.let { kind ->
                         Text(
-                            text = eventKindName(kind),
+                            text = EventKind.displayName(kind),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

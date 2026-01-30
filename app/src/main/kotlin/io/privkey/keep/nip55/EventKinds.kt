@@ -13,8 +13,6 @@ private val SENSITIVE_KINDS = setOf(
 
 fun isSensitiveKind(kind: Int): Boolean = kind in SENSITIVE_KINDS
 
-fun eventKindName(kind: Int): String = EventKind.displayName(kind)
-
 fun sensitiveKindWarning(kind: Int): String? = when (kind) {
     0 -> "Modifying profile metadata can affect your identity across all Nostr clients"
     3 -> "Modifying contacts can affect who you follow across all Nostr clients"
