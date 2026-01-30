@@ -1,17 +1,15 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import androidx.annotation.StringRes
 import androidx.room.*
 import androidx.room.migration.Migration
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 import net.sqlcipher.database.SupportFactory
-import java.security.KeyStore
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
+import java.security.SecureRandom
 
 enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
@@ -191,8 +189,8 @@ abstract class Nip55Database : RoomDatabase() {
         @Volatile
         private var INSTANCE: Nip55Database? = null
 
-        private const val DB_KEY_ALIAS = "nip55_db_key"
-        private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
+        private const val PREFS_NAME = "nip55_db_prefs"
+        private const val KEY_DB_PASSPHRASE = "db_passphrase"
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -208,33 +206,36 @@ abstract class Nip55Database : RoomDatabase() {
 
         private val MIGRATIONS = arrayOf(MIGRATION_1_2)
 
-        private fun getOrCreateDbKey(): ByteArray {
-            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            val existingKey = keyStore.getKey(DB_KEY_ALIAS, null) as? SecretKey
-            val key = existingKey ?: run {
-                val keyGenerator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_AES,
-                    KEYSTORE_PROVIDER
-                )
-                keyGenerator.init(
-                    KeyGenParameterSpec.Builder(
-                        DB_KEY_ALIAS,
-                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                    )
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setKeySize(256)
-                        .build()
-                )
-                keyGenerator.generateKey()
+        private fun getOrCreateDbKey(context: Context): ByteArray {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+
+            val prefs = EncryptedSharedPreferences.create(
+                context,
+                PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+
+            val existingKey = prefs.getString(KEY_DB_PASSPHRASE, null)
+            if (existingKey != null) {
+                return android.util.Base64.decode(existingKey, android.util.Base64.NO_WRAP)
             }
-            return key.encoded ?: ByteArray(32) { (it * 17 + 42).toByte() }
+
+            val newKey = ByteArray(32)
+            SecureRandom().nextBytes(newKey)
+            prefs.edit()
+                .putString(KEY_DB_PASSPHRASE, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
+                .apply()
+            return newKey
         }
 
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
-                    val passphrase = getOrCreateDbKey()
+                    val passphrase = getOrCreateDbKey(context.applicationContext)
                     val factory = SupportFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,

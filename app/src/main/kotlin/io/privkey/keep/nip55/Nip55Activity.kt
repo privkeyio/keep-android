@@ -82,9 +82,10 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun identifyCaller() {
-        callerPackage = callingActivity?.packageName
-        callerVerified = callerPackage != null
-        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
+        val pkg = callingActivity?.packageName
+        callerPackage = pkg
+        callerVerified = pkg != null
+        callerSignatureHash = pkg?.let { getCallerSignatureHash(it) }
     }
 
     private fun getCallerSignatureHash(packageName: String): String? {

@@ -37,27 +37,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
-private class SecurePassphraseHolder {
-    private var chars: CharArray = CharArray(0)
-
-    val length: Int get() = chars.size
-    val value: String get() = String(chars)
-
-    fun update(newValue: String) {
-        if (newValue.length <= 256) {
-            Arrays.fill(chars, '\u0000')
-            chars = newValue.toCharArray()
-        }
-    }
-
-    fun clear() {
-        Arrays.fill(chars, '\u0000')
-        chars = CharArray(0)
-    }
-
-    fun toCharArray(): CharArray = chars.copyOf()
-}
-
 private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private const val MAX_SHARE_LENGTH = 8192
 
@@ -85,7 +64,7 @@ fun ImportShareScreen(
     importState: ImportState
 ) {
     var shareData by remember { mutableStateOf("") }
-    val passphrase = remember { SecurePassphraseHolder() }
+    val passphrase = remember { SecurePassphrase() }
     var passphraseDisplay by remember { mutableStateOf("") }
     var shareName by remember { mutableStateOf("Mobile Share") }
     var showScanner by remember { mutableStateOf(false) }

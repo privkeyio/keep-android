@@ -27,31 +27,7 @@ import java.util.Arrays
 import javax.crypto.Cipher
 
 private const val MAX_SINGLE_QR_BYTES = 600
-private const val MAX_PASSPHRASE_LENGTH = 256
 private const val MIN_PASSPHRASE_LENGTH = 12
-
-private class SecurePassphrase {
-    private var chars: CharArray = CharArray(0)
-
-    val length: Int get() = chars.size
-    val value: String get() = String(chars)
-
-    fun update(newValue: String) {
-        if (newValue.length <= MAX_PASSPHRASE_LENGTH) {
-            Arrays.fill(chars, '\u0000')
-            chars = newValue.toCharArray()
-        }
-    }
-
-    fun clear() {
-        Arrays.fill(chars, '\u0000')
-        chars = CharArray(0)
-    }
-
-    fun toCharArray(): CharArray = chars.copyOf()
-
-    fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
-}
 
 sealed class ExportState {
     object Idle : ExportState()

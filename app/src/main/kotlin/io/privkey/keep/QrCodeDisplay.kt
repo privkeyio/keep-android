@@ -36,10 +36,35 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Arrays
 
+private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
 private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
+
+internal class SecurePassphrase {
+    private var chars: CharArray = CharArray(0)
+
+    val length: Int get() = chars.size
+    val value: String get() = String(chars)
+
+    fun update(newValue: String) {
+        if (newValue.length <= MAX_PASSPHRASE_LENGTH) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.toCharArray()
+        }
+    }
+
+    fun clear() {
+        Arrays.fill(chars, '\u0000')
+        chars = CharArray(0)
+    }
+
+    fun toCharArray(): CharArray = chars.copyOf()
+
+    fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
+}
 
 @Composable
 private fun QrDisplayContainer(

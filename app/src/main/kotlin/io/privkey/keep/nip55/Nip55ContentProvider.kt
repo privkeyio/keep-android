@@ -52,6 +52,10 @@ class Nip55ContentProvider : ContentProvider() {
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
+    private fun <T> runWithTimeout(block: suspend () -> T): T? = runBlocking {
+        withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+    }
+
     override fun onCreate(): Boolean = true
 
     override fun query(
@@ -95,69 +99,38 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val isAppExpired = runBlocking {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                store.isAppExpired(callerPackage)
-            }
-        }
-
+        val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
             Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
-            runBlocking {
-                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                    store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true)
-                }
-            }
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true) }
             return rejectedCursor(null)
         }
 
         if (isAppExpired) {
-            runBlocking {
-                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                    store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true)
-                }
-            }
-            runBlocking {
-                val cleanupResult = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                    store.cleanupExpired()
-                    true
-                }
-                if (cleanupResult == null) {
-                    Log.w(TAG, "Cleanup timed out for expired app: $callerPackage")
-                }
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true) }
+            if (runWithTimeout { store.cleanupExpired(); true } == null) {
+                Log.w(TAG, "Cleanup timed out for expired app: $callerPackage")
             }
             return rejectedCursor(null)
         }
 
-        val (decision, timedOut) = runBlocking {
-            var result: PermissionDecision? = null
-            val completed = withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                result = store.getPermissionDecision(callerPackage, requestType, eventKind)
-                true
-            }
-            Pair(result, completed == null)
+        var decision: PermissionDecision? = null
+        val decisionLoaded = runWithTimeout {
+            decision = store.getPermissionDecision(callerPackage, requestType, eventKind)
+            true
         }
-
-        if (timedOut) {
+        if (decisionLoaded == null) {
             Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
             return rejectedCursor(null)
         }
 
-        when (decision) {
-            PermissionDecision.ALLOW -> {
-                return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
-            }
+        return when (decision) {
+            PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
             PermissionDecision.DENY -> {
-                runBlocking {
-                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                        store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true)
-                    }
-                }
-                return rejectedCursor(null)
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+                rejectedCursor(null)
             }
-            PermissionDecision.ASK, null -> {
-                return null
-            }
+            PermissionDecision.ASK, null -> null
         }
     }
 
@@ -186,11 +159,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runBlocking {
-                    withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                        store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
-                    }
-                }
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
