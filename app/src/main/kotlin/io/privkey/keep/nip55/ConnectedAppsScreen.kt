@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -102,16 +103,23 @@ private fun ConnectedAppItem(
     var isVerified by remember { mutableStateOf(true) }
 
     LaunchedEffect(app.packageName) {
-        withContext(Dispatchers.IO) {
+        val (fetchedLabel, fetchedIcon, verified) = withContext(Dispatchers.IO) {
             try {
                 val pm = context.packageManager
                 val info = pm.getApplicationInfo(app.packageName, 0)
-                appLabel = pm.getApplicationLabel(info).toString()
-                appIcon = pm.getApplicationIcon(info)
+                Triple(
+                    pm.getApplicationLabel(info).toString(),
+                    pm.getApplicationIcon(info),
+                    true
+                )
             } catch (e: PackageManager.NameNotFoundException) {
-                isVerified = false
+                Log.e("ConnectedApps", "Failed to verify app package: ${app.packageName}", e)
+                Triple(null, null, false)
             }
         }
+        appLabel = fetchedLabel
+        appIcon = fetchedIcon
+        isVerified = verified
     }
 
     Card(

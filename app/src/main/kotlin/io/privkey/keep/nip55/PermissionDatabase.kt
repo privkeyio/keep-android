@@ -181,13 +181,11 @@ class PermissionStore(db: Nip55Database) {
         )
     }
 
-    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null) {
-        if (requestType == null) {
-            dao.deleteForCaller(callerPackage)
-        } else {
-            dao.deleteForCallerAndType(callerPackage, requestType.name)
+    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null) =
+        when (requestType) {
+            null -> dao.deleteForCaller(callerPackage)
+            else -> dao.deleteForCallerAndType(callerPackage, requestType.name)
         }
-    }
 
     suspend fun logOperation(
         callerPackage: String,

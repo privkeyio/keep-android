@@ -49,12 +49,8 @@ class AndroidAuditStorage(context: Context) {
     fun loadEntries(limit: UInt?): List<String> {
         val entries = loadEntriesInternal()
         if (limit == null) return entries
-        val safeIntLimit = if (limit > Int.MAX_VALUE.toUInt()) {
-            Int.MAX_VALUE
-        } else {
-            minOf(limit.toInt(), entries.size)
-        }
-        return entries.takeLast(safeIntLimit)
+        val safeLimit = minOf(limit.toLong(), Int.MAX_VALUE.toLong()).toInt()
+        return entries.takeLast(safeLimit)
     }
 
     @Synchronized
