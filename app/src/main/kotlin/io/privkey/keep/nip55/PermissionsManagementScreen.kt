@@ -233,10 +233,12 @@ private fun PermissionCard(
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
     val isExpired = permission.isExpired()
-    val containerColor = when {
-        isExpired -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-        permission.decision == "deny" -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+    val containerColor = if (isExpired) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+    } else if (permission.decision == "deny") {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
     }
 
     Card(
@@ -268,7 +270,7 @@ private fun PermissionCard(
 
                 permission.eventKind?.let { kind ->
                     Text(
-                        text = "Event kind: $kind",
+                        text = EventKind.displayName(kind),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -32,22 +32,8 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
-    org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
+    org.json.JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
-
-private fun eventKindDescription(kind: Int): String = when (kind) {
-    0 -> "Profile Metadata"
-    1 -> "Short Text Note"
-    3 -> "Contact List"
-    4 -> "Encrypted DM"
-    5 -> "Event Deletion"
-    6 -> "Repost"
-    7 -> "Reaction"
-    in 10000..19999 -> "Replaceable Event"
-    in 20000..29999 -> "Ephemeral Event"
-    in 30000..39999 -> "Parameterized Replaceable"
-    else -> "Kind $kind"
-}
 
 @Composable
 fun ApprovalScreen(
@@ -178,9 +164,9 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val errorColor = MaterialTheme.colorScheme.error
-    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
-    val textColor = if (callerPackage == null || !callerVerified) errorColor else MaterialTheme.colorScheme.onSurfaceVariant
+    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
+    val isUntrusted = callerPackage == null || !callerVerified
+    val textColor = if (isUntrusted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
 
     Text(
         text = displayText,
@@ -217,13 +203,12 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
 
             eventKind?.let { kind ->
                 Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Event Kind", eventKindDescription(kind))
+                DetailRow("Event Kind", EventKind.displayName(kind))
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val displayContent = if (!showFullContent && contentTruncated) {
-                    "${request.content.take(200)}..."
-                } else request.content
+                val shouldTruncate = !showFullContent && contentTruncated
+                val displayContent = if (shouldTruncate) "${request.content.take(200)}..." else request.content
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
                 if (contentTruncated) {

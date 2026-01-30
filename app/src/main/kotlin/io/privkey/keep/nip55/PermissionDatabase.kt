@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.room.*
-import androidx.room.migration.Migration
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -40,7 +39,7 @@ interface Nip55PermissionDao {
         SELECT * FROM nip55_permissions
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
-        AND (eventKind IS NULL OR eventKind = :eventKind)
+        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
         ORDER BY eventKind DESC
         LIMIT 1
     """)
@@ -105,6 +104,15 @@ interface Nip55AuditLogDao {
 
     @Query("SELECT DISTINCT callerPackage FROM nip55_audit_log ORDER BY callerPackage")
     suspend fun getDistinctCallers(): List<String>
+
+    @Query("""
+        SELECT MAX(timestamp) FROM nip55_audit_log
+        WHERE callerPackage = :callerPackage
+        AND requestType = :requestType
+        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
+        AND decision = 'allow'
+    """)
+    suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int?): Long?
 }
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class], version = 1)
@@ -115,7 +123,6 @@ abstract class Nip55Database : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: Nip55Database? = null
-        private val MIGRATIONS = arrayOf<Migration>()
 
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
@@ -123,7 +130,7 @@ abstract class Nip55Database : RoomDatabase() {
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).addMigrations(*MIGRATIONS).build().also { INSTANCE = it }
+                ).build().also { INSTANCE = it }
             }
         }
     }
@@ -267,7 +274,22 @@ class PermissionStore(db: Nip55Database) {
     }
 
     suspend fun getDistinctAuditCallers(): List<String> = auditDao.getDistinctCallers()
+
+    suspend fun getLastUsedTimeForPermission(
+        callerPackage: String,
+        requestType: String,
+        eventKind: Int?
+    ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind)
 }
 
 fun formatRequestType(type: String): String =
     type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
+
+fun formatRelativeTime(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    if (diff < 60_000) return "just now"
+    if (diff < 3600_000) return "${diff / 60_000}m ago"
+    if (diff < 86400_000) return "${diff / 3600_000}h ago"
+    if (diff < 604800_000) return "${diff / 86400_000}d ago"
+    return java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+}
