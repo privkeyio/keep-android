@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
-import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -157,11 +156,7 @@ fun AppPermissionsScreen(
                         onRevoke = {
                             coroutineScope.launch {
                                 withContext(Dispatchers.IO) {
-                                    val requestType = Nip55RequestType.entries
-                                        .find { it.name == permission.requestType }
-                                    if (requestType != null) {
-                                        permissionStore.revokePermission(packageName, requestType)
-                                    }
+                                    permissionStore.deletePermission(permission.id)
                                 }
                                 permissions = withContext(Dispatchers.IO) {
                                     permissionStore.getPermissionsForCaller(packageName)

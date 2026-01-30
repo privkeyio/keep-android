@@ -204,7 +204,7 @@ object EventKind {
     }
 
     fun displayName(kind: Int): String {
-        val name = name(kind)
-        return if (name == "Kind $kind") name else "$name (kind $kind)"
+        val kindName = name(kind)
+        return if (kindName.startsWith("Kind ")) kindName else "$kindName (kind $kind)"
     }
 }
