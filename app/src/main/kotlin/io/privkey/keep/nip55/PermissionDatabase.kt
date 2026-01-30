@@ -311,17 +311,19 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?
     ) {
-        dao.insertPermission(
-            Nip55Permission(
-                callerPackage = callerPackage,
-                requestType = requestType.name,
-                eventKind = eventKind,
-                decision = PermissionDecision.ASK.toString(),
-                expiresAt = null,
-                createdAt = System.currentTimeMillis()
+        database.withTransaction {
+            dao.insertPermission(
+                Nip55Permission(
+                    callerPackage = callerPackage,
+                    requestType = requestType.name,
+                    eventKind = eventKind,
+                    decision = PermissionDecision.ASK.toString(),
+                    expiresAt = null,
+                    createdAt = System.currentTimeMillis()
+                )
             )
-        )
-        logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
+            logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
+        }
     }
 
     suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
