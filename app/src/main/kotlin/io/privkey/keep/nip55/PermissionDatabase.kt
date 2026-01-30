@@ -40,12 +40,7 @@ data class Nip55Permission(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean {
-        if (expiresAt == null) return false
-        val now = System.currentTimeMillis()
-        if (now < createdAt) return true
-        return expiresAt <= now
-    }
+    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt)
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
@@ -68,12 +63,7 @@ data class Nip55AppSettings(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean {
-        if (expiresAt == null) return false
-        val now = System.currentTimeMillis()
-        if (now < createdAt) return true
-        return expiresAt <= now
-    }
+    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt)
 }
 
 @Dao
@@ -461,6 +451,13 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: String,
         eventKind: Int?
     ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind)
+}
+
+private fun isTimestampExpired(expiresAt: Long?, createdAt: Long): Boolean {
+    if (expiresAt == null) return false
+    val now = System.currentTimeMillis()
+    val clockManipulated = now < createdAt
+    return clockManipulated || expiresAt <= now
 }
 
 fun formatRequestType(type: String): String =
