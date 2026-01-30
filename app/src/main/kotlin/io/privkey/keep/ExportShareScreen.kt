@@ -375,7 +375,7 @@ private fun generateFrames(data: String, maxBytes: Int): List<String> {
         val estimatedTotal = ((dataBytes.size - offset) / ((maxBytes - 30) / 2) + frameIndex + 1)
             .coerceAtLeast(frameIndex + 1)
         val overhead = jsonOverhead(frameIndex, estimatedTotal)
-        val payloadBytes = (maxBytes - overhead) / 2
+        val payloadBytes = ((maxBytes - overhead) / 2).coerceAtLeast(1)
         val end = (offset + payloadBytes).coerceAtMost(dataBytes.size)
         chunks.add(dataBytes.copyOfRange(offset, end))
         offset = end
