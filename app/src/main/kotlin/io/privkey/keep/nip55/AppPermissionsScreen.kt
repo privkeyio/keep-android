@@ -24,11 +24,12 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
-private data class AppInfo(
-    val label: String?,
-    val icon: Drawable?,
-    val isVerified: Boolean,
-    val permissions: List<Nip55Permission>
+private data class AppState(
+    val label: String? = null,
+    val icon: Drawable? = null,
+    val isVerified: Boolean = true,
+    val permissions: List<Nip55Permission> = emptyList(),
+    val isLoading: Boolean = true
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,15 +41,11 @@ fun AppPermissionsScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var permissions by remember { mutableStateOf<List<Nip55Permission>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var appLabel by remember { mutableStateOf<String?>(null) }
-    var appIcon by remember { mutableStateOf<Drawable?>(null) }
-    var isVerified by remember { mutableStateOf(true) }
+    var appState by remember { mutableStateOf(AppState()) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        val info = withContext(Dispatchers.IO) {
+        appState = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             val (label, icon, verified) = try {
                 val appInfo = pm.getApplicationInfo(packageName, 0)
@@ -61,20 +58,15 @@ fun AppPermissionsScreen(
                 android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
                 Triple(null, null, false)
             }
-            AppInfo(label, icon, verified, permissionStore.getPermissionsForCaller(packageName))
+            AppState(label, icon, verified, permissionStore.getPermissionsForCaller(packageName), isLoading = false)
         }
-        appLabel = info.label
-        appIcon = info.icon
-        isVerified = info.isVerified
-        permissions = info.permissions
-        isLoading = false
     }
 
     if (showRevokeAllDialog) {
         AlertDialog(
             onDismissRequest = { showRevokeAllDialog = false },
             title = { Text("Disconnect App?") },
-            text = { Text("This will remove all saved permissions for ${appLabel ?: packageName}. The app will need to request permission again.") },
+            text = { Text("This will remove all saved permissions for ${appState.label ?: packageName}. The app will need to request permission again.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -102,7 +94,7 @@ fun AppPermissionsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(appLabel ?: packageName) },
+                title = { Text(appState.label ?: packageName) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
@@ -119,13 +111,13 @@ fun AppPermissionsScreen(
             item {
                 AppHeaderCard(
                     packageName = packageName,
-                    appLabel = appLabel,
-                    appIcon = appIcon,
-                    isVerified = isVerified
+                    appLabel = appState.label,
+                    appIcon = appState.icon,
+                    isVerified = appState.isVerified
                 )
             }
 
-            if (isLoading) {
+            if (appState.isLoading) {
                 item {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(32.dp),
@@ -134,7 +126,7 @@ fun AppPermissionsScreen(
                         CircularProgressIndicator()
                     }
                 }
-            } else if (permissions.isEmpty()) {
+            } else if (appState.permissions.isEmpty()) {
                 item {
                     Text(
                         "No active permissions",
@@ -148,7 +140,7 @@ fun AppPermissionsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                 }
-                items(permissions, key = { it.id }) { permission ->
+                items(appState.permissions, key = { it.id }) { permission ->
                     var updateError by remember { mutableStateOf<String?>(null) }
                     val requestType = findRequestType(permission.requestType)
 
@@ -167,9 +159,10 @@ fun AppPermissionsScreen(
                                             permission.eventKind
                                         )
                                     }
-                                    permissions = withContext(Dispatchers.IO) {
+                                    val newPermissions = withContext(Dispatchers.IO) {
                                         permissionStore.getPermissionsForCaller(packageName)
                                     }
+                                    appState = appState.copy(permissions = newPermissions)
                                     updateError = null
                                 } catch (e: Exception) {
                                     android.util.Log.e("AppPermissions", "Failed to update permission", e)
@@ -183,10 +176,11 @@ fun AppPermissionsScreen(
                                 withContext(Dispatchers.IO) {
                                     permissionStore.deletePermission(permission.id)
                                 }
-                                permissions = withContext(Dispatchers.IO) {
+                                val newPermissions = withContext(Dispatchers.IO) {
                                     permissionStore.getPermissionsForCaller(packageName)
                                 }
-                                if (permissions.isEmpty()) onDismiss()
+                                appState = appState.copy(permissions = newPermissions)
+                                if (newPermissions.isEmpty()) onDismiss()
                             }
                         }
                     )

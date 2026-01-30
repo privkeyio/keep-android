@@ -175,11 +175,7 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String {
-        val authority = when (uri.authority) {
-            AUTHORITY_GET_PUBLIC_KEY, AUTHORITY_SIGN_EVENT,
-            AUTHORITY_NIP44_ENCRYPT, AUTHORITY_NIP44_DECRYPT -> uri.authority
-            else -> "io.privkey.keep"
-        }
+        val authority = uri.authority ?: "io.privkey.keep"
         return "vnd.android.cursor.item/vnd.$authority"
     }
 
