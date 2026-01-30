@@ -196,10 +196,12 @@ class PermissionStore(private val database: Nip55Database) {
         val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
         if (permission != null && !permission.isExpired()) return permission.permissionDecision
 
-        if (eventKind != null) {
+        if (eventKind != null && !isSensitiveKind(eventKind)) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
             if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
+        // When eventKind is null (parse failure), never fall back to generic permissions
+        // as the actual event could be a sensitive kind
         return null
     }
 
@@ -208,7 +210,14 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
-    ) = savePermission(callerPackage, requestType, eventKind, duration, "allow")
+    ) {
+        val effectiveDuration = if (eventKind != null && isSensitiveKind(eventKind) && duration == PermissionDuration.FOREVER) {
+            PermissionDuration.ONE_DAY
+        } else {
+            duration
+        }
+        savePermission(callerPackage, requestType, eventKind, effectiveDuration, "allow")
+    }
 
     suspend fun denyPermission(
         callerPackage: String,
@@ -358,14 +367,11 @@ fun formatRequestType(type: String): String =
 
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
-    val minutes = diff / 60_000
-    val hours = diff / 3600_000
-    val days = diff / 86400_000
     return when {
         diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${minutes}m ago"
-        diff < 86400_000 -> "${hours}h ago"
-        diff < 604800_000 -> "${days}d ago"
+        diff < 3600_000 -> "${diff / 60_000}m ago"
+        diff < 86400_000 -> "${diff / 3600_000}h ago"
+        diff < 604800_000 -> "${diff / 86400_000}d ago"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }

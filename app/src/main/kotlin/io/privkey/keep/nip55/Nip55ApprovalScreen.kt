@@ -19,7 +19,6 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
     Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
-    else -> name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
 }
 
 private fun Nip55RequestType.headerTitle(): String = when (this) {
@@ -28,7 +27,6 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
     Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
-    else -> "${displayName()} Request"
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
@@ -83,11 +81,14 @@ fun ApprovalScreen(
                 selectedDuration = selectedDuration,
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
-                onDurationSelected = { selectedDuration = it }
+                onDurationSelected = { selectedDuration = it },
+                isSensitiveKind = eventKind != null && isSensitiveKind(eventKind)
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        val effectiveDuration = if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME
 
         if (isLoading) {
             CircularProgressIndicator()
@@ -97,7 +98,7 @@ fun ApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = { onReject(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME) },
+                    onClick = { onReject(effectiveDuration) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Reject")
@@ -105,7 +106,7 @@ fun ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove(if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME)
+                        onApprove(effectiveDuration)
                     },
                     modifier = Modifier.weight(1f)
                 ) {
@@ -122,8 +123,15 @@ private fun DurationSelector(
     selectedDuration: PermissionDuration,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onDurationSelected: (PermissionDuration) -> Unit
+    onDurationSelected: (PermissionDuration) -> Unit,
+    isSensitiveKind: Boolean = false
 ) {
+    val availableDurations = if (isSensitiveKind) {
+        PermissionDuration.entries.filter { it != PermissionDuration.FOREVER }
+    } else {
+        PermissionDuration.entries
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Remember this choice",
@@ -148,7 +156,7 @@ private fun DurationSelector(
                 expanded = expanded,
                 onDismissRequest = { onExpandedChange(false) }
             ) {
-                PermissionDuration.entries.forEach { duration ->
+                availableDurations.forEach { duration ->
                     DropdownMenuItem(
                         text = { Text(stringResource(duration.displayNameRes)) },
                         onClick = {
@@ -165,8 +173,8 @@ private fun DurationSelector(
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
     val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
-    val isUntrusted = callerPackage == null || !callerVerified
-    val textColor = if (isUntrusted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    val isTrusted = callerPackage != null && callerVerified
+    val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 
     Text(
         text = displayText,
@@ -204,6 +212,21 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
             eventKind?.let { kind ->
                 Spacer(modifier = Modifier.height(16.dp))
                 DetailRow("Event Kind", EventKind.displayName(kind))
+                sensitiveKindWarning(kind)?.let { warning ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Text(
+                            text = warning,
+                            modifier = Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
