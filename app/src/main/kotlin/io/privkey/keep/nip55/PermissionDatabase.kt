@@ -81,7 +81,7 @@ interface Nip55PermissionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)
 
-    @Query("DELETE FROM nip55_permissions WHERE expiresAt IS NOT NULL AND expiresAt < :now")
+    @Query("DELETE FROM nip55_permissions WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
     suspend fun deleteExpired(now: Long = System.currentTimeMillis())
 
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
@@ -165,10 +165,10 @@ interface Nip55AppSettingsDao {
     @Query("DELETE FROM nip55_app_settings WHERE callerPackage = :callerPackage")
     suspend fun delete(callerPackage: String)
 
-    @Query("SELECT callerPackage FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt < :now")
+    @Query("SELECT callerPackage FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
     suspend fun getExpiredPackages(now: Long = System.currentTimeMillis()): List<String>
 
-    @Query("DELETE FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt < :now")
+    @Query("DELETE FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
     suspend fun deleteExpired(now: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM nip55_app_settings")
