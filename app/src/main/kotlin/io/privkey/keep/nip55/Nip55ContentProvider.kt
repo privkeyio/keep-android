@@ -75,7 +75,17 @@ class Nip55ContentProvider : ContentProvider() {
             withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
                 store.isAppExpired(callerPackage)
             }
-        } ?: return errorCursor("timeout", null)
+        }
+
+        if (isAppExpired == null) {
+            Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
+            runBlocking {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                    store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true)
+                }
+            }
+            return rejectedCursor(null)
+        }
 
         if (isAppExpired) {
             runBlocking {
