@@ -15,7 +15,6 @@ import io.privkey.keep.uniffi.Nip55Handler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class KeepMobileApp : Application() {
@@ -140,12 +139,6 @@ class KeepMobileApp : Application() {
         val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
             .also { networkManager = it }
         manager.register()
-    }
-
-    override fun onTerminate() {
-        applicationScope.cancel()
-        networkManager?.unregister()
-        super.onTerminate()
     }
 
     companion object {
