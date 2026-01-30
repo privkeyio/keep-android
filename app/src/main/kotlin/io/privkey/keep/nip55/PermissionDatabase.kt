@@ -200,6 +200,8 @@ class PermissionStore(private val database: Nip55Database) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
             if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
+        // When eventKind is null (parse failure), never fall back to generic permissions
+        // as the actual event could be a sensitive kind
         return null
     }
 
