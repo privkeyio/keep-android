@@ -28,6 +28,7 @@ import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.nip55.SignPolicyScreen
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -52,6 +53,7 @@ class MainActivity : FragmentActivity() {
         val relayConfigStore = app.getRelayConfigStore()
         val killSwitchStore = app.getKillSwitchStore()
         val signPolicyStore = app.getSignPolicyStore()
+        val autoStartStore = app.getAutoStartStore()
         val permissionStore = app.getPermissionStore()
 
         setContent {
@@ -60,13 +62,14 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && signPolicyStore != null && permissionStore != null) {
+                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && signPolicyStore != null && autoStartStore != null && permissionStore != null) {
                         MainScreen(
                             keepMobile = keepMobile,
                             storage = storage,
                             relayConfigStore = relayConfigStore,
                             killSwitchStore = killSwitchStore,
                             signPolicyStore = signPolicyStore,
+                            autoStartStore = autoStartStore,
                             permissionStore = permissionStore,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -103,6 +106,9 @@ class MainActivity : FragmentActivity() {
                                     title = "Disable Kill Switch",
                                     subtitle = "Authenticate to re-enable signing"
                                 )
+                            },
+                            onAutoStartChanged = { enabled ->
+                                app.updateNetworkMonitoring(enabled)
                             }
                         )
                     } else {
@@ -122,12 +128,14 @@ fun MainScreen(
     relayConfigStore: RelayConfigStore,
     killSwitchStore: KillSwitchStore,
     signPolicyStore: SignPolicyStore,
+    autoStartStore: AutoStartStore,
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
-    onBiometricAuth: (suspend () -> Boolean)? = null
+    onBiometricAuth: (suspend () -> Boolean)? = null,
+    onAutoStartChanged: (Boolean) -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -143,6 +151,7 @@ fun MainScreen(
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
+    var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
@@ -375,11 +384,25 @@ fun MainScreen(
                 onPermissionsClick = { showPermissionsScreen = true },
                 onHistoryClick = { showHistoryScreen = true }
             )
+
         } else {
             NoShareCard(
                 onImport = { showImportScreen = true }
             )
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        AutoStartCard(
+            enabled = autoStartEnabled,
+            onToggle = { newValue ->
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) { autoStartStore.setEnabled(newValue) }
+                    autoStartEnabled = newValue
+                    onAutoStartChanged(newValue)
+                }
+            }
+        )
     }
 }
 
@@ -704,6 +727,38 @@ private fun Nip55SettingsCard(
                     Text("History")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AutoStartCard(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Auto-start",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = "Reconnect relays on boot and network changes",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle
+            )
         }
     }
 }
