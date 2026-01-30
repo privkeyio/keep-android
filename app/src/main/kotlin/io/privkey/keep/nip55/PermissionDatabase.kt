@@ -217,6 +217,7 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
     FIVE_MINUTES(5 * 60 * 1000L, R.string.permission_duration_five_minutes),
     TEN_MINUTES(10 * 60 * 1000L, R.string.permission_duration_ten_minutes),
     ONE_HOUR(60 * 60 * 1000L, R.string.permission_duration_one_hour),
+    ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
     FOREVER(null, R.string.permission_duration_forever);
 
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }

@@ -6,6 +6,7 @@
     <string name="permission_duration_five_minutes">For 5 minutes</string>
     <string name="permission_duration_ten_minutes">For 10 minutes</string>
     <string name="permission_duration_one_hour">For 1 hour</string>
+    <string name="permission_duration_one_day">For 1 day</string>
     <string name="permission_duration_forever">Always</string>
 
     <string name="permission_decision_allow">Allow</string>
