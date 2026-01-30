@@ -245,7 +245,7 @@ private fun AuditLogCard(log: Nip55AuditLog) {
 
             log.eventKind?.let { kind ->
                 Text(
-                    text = EventKind.displayName(kind),
+                    text = eventKindName(kind),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

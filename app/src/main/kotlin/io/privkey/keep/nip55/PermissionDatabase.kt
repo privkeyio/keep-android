@@ -196,7 +196,7 @@ class PermissionStore(private val database: Nip55Database) {
         val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
         if (permission != null && !permission.isExpired()) return permission.permissionDecision
 
-        if (eventKind != null) {
+        if (eventKind != null && !isSensitiveKind(eventKind)) {
             val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
             if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
@@ -208,7 +208,14 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
-    ) = savePermission(callerPackage, requestType, eventKind, duration, "allow")
+    ) {
+        val effectiveDuration = if (eventKind != null && isSensitiveKind(eventKind) && duration == PermissionDuration.FOREVER) {
+            PermissionDuration.ONE_DAY
+        } else {
+            duration
+        }
+        savePermission(callerPackage, requestType, eventKind, effectiveDuration, "allow")
+    }
 
     suspend fun denyPermission(
         callerPackage: String,

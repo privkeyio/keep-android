@@ -83,7 +83,8 @@ fun ApprovalScreen(
                 selectedDuration = selectedDuration,
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
-                onDurationSelected = { selectedDuration = it }
+                onDurationSelected = { selectedDuration = it },
+                isSensitiveKind = eventKind?.let { isSensitiveKind(it) } ?: false
             )
         }
 
@@ -122,8 +123,15 @@ private fun DurationSelector(
     selectedDuration: PermissionDuration,
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    onDurationSelected: (PermissionDuration) -> Unit
+    onDurationSelected: (PermissionDuration) -> Unit,
+    isSensitiveKind: Boolean = false
 ) {
+    val availableDurations = if (isSensitiveKind) {
+        PermissionDuration.entries.filter { it != PermissionDuration.FOREVER }
+    } else {
+        PermissionDuration.entries
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "Remember this choice",
@@ -148,7 +156,7 @@ private fun DurationSelector(
                 expanded = expanded,
                 onDismissRequest = { onExpandedChange(false) }
             ) {
-                PermissionDuration.entries.forEach { duration ->
+                availableDurations.forEach { duration ->
                     DropdownMenuItem(
                         text = { Text(stringResource(duration.displayNameRes)) },
                         onClick = {
@@ -203,7 +211,22 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
 
             eventKind?.let { kind ->
                 Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Event Kind", EventKind.displayName(kind))
+                DetailRow("Event Kind", eventKindName(kind))
+                sensitiveKindWarning(kind)?.let { warning ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Text(
+                            text = warning,
+                            modifier = Modifier.padding(8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
