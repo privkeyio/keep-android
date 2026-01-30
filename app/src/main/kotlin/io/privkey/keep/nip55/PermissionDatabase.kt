@@ -40,7 +40,12 @@ data class Nip55Permission(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean = expiresAt != null && expiresAt <= System.currentTimeMillis()
+    fun isExpired(): Boolean {
+        if (expiresAt == null) return false
+        val now = System.currentTimeMillis()
+        if (now < createdAt) return true
+        return expiresAt <= now
+    }
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
@@ -63,7 +68,12 @@ data class Nip55AppSettings(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean = expiresAt != null && expiresAt <= System.currentTimeMillis()
+    fun isExpired(): Boolean {
+        if (expiresAt == null) return false
+        val now = System.currentTimeMillis()
+        if (now < createdAt) return true
+        return expiresAt <= now
+    }
 }
 
 @Dao
