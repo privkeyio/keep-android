@@ -249,13 +249,14 @@ class PermissionStore(private val database: Nip55Database) {
     private val appSettingsDao = database.appSettingsDao()
 
     suspend fun cleanupExpired() {
-        dao.deleteExpired()
-        auditDao.deleteOlderThan(System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000)
-        val expiredPackages = appSettingsDao.getExpiredPackages()
+        val now = System.currentTimeMillis()
+        dao.deleteExpired(now)
+        auditDao.deleteOlderThan(now - 30L * 24 * 60 * 60 * 1000)
+        val expiredPackages = appSettingsDao.getExpiredPackages(now)
         expiredPackages.forEach { pkg ->
             dao.deleteForCaller(pkg)
         }
-        appSettingsDao.deleteExpired()
+        appSettingsDao.deleteExpired(now)
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
