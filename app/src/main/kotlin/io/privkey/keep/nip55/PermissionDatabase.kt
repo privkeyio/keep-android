@@ -19,8 +19,8 @@ enum class PermissionDecision(@StringRes val displayNameRes: Int) {
             "deny" -> DENY
             "ask" -> ASK
             else -> {
-                android.util.Log.w(TAG, "Unknown decision value '$value', defaulting to ASK")
-                ASK
+                android.util.Log.w(TAG, "Unknown decision value '$value', defaulting to DENY")
+                DENY
             }
         }
     }
@@ -105,6 +105,9 @@ interface Nip55PermissionDao {
 
     @Query("UPDATE nip55_permissions SET decision = :decision WHERE id = :id")
     suspend fun updateDecision(id: Long, decision: String)
+
+    @Query("SELECT * FROM nip55_permissions WHERE id = :id")
+    suspend fun getById(id: Long): Nip55Permission?
 }
 
 @Dao
@@ -290,8 +293,12 @@ class PermissionStore(db: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?
     ) {
+        val permission = dao.getById(id) ?: throw IllegalArgumentException("Permission not found: $id")
+        if (permission.callerPackage != callerPackage) {
+            throw IllegalArgumentException("CallerPackage mismatch for permission $id")
+        }
         dao.updateDecision(id, decision.toString())
-        logOperation(callerPackage, requestType, eventKind, decision.toString(), wasAutomatic = false)
+        logOperation(permission.callerPackage, requestType, permission.eventKind, decision.toString(), wasAutomatic = false)
     }
 
     suspend fun setPermissionToAsk(

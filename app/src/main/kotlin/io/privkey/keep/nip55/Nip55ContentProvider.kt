@@ -81,7 +81,8 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (timedOut) {
-            Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, falling back to ASK")
+            Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
+            return rejectedCursor(null)
         }
 
         when (decision) {
