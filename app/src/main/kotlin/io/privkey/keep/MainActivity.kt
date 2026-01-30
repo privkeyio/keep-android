@@ -25,6 +25,8 @@ import io.privkey.keep.nip55.ConnectedAppsScreen
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
+import io.privkey.keep.nip55.SignPolicyScreen
+import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
@@ -49,6 +51,7 @@ class MainActivity : FragmentActivity() {
         val storage = app.getStorage()
         val relayConfigStore = app.getRelayConfigStore()
         val killSwitchStore = app.getKillSwitchStore()
+        val signPolicyStore = app.getSignPolicyStore()
         val permissionStore = app.getPermissionStore()
 
         setContent {
@@ -57,12 +60,13 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && permissionStore != null) {
+                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && signPolicyStore != null && permissionStore != null) {
                         MainScreen(
                             keepMobile = keepMobile,
                             storage = storage,
                             relayConfigStore = relayConfigStore,
                             killSwitchStore = killSwitchStore,
+                            signPolicyStore = signPolicyStore,
                             permissionStore = permissionStore,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -117,6 +121,7 @@ fun MainScreen(
     storage: AndroidKeystoreStorage,
     relayConfigStore: RelayConfigStore,
     killSwitchStore: KillSwitchStore,
+    signPolicyStore: SignPolicyStore,
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -133,6 +138,7 @@ fun MainScreen(
     var showExportScreen by remember { mutableStateOf(false) }
     var showPermissionsScreen by remember { mutableStateOf(false) }
     var showHistoryScreen by remember { mutableStateOf(false) }
+    var showSignPolicyScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
@@ -153,6 +159,14 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    if (showSignPolicyScreen) {
+        SignPolicyScreen(
+            signPolicyStore = signPolicyStore,
+            onDismiss = { showSignPolicyScreen = false }
+        )
+        return
     }
 
     if (showPermissionsScreen) {
@@ -203,6 +217,7 @@ fun MainScreen(
             AppPermissionsScreen(
                 packageName = pkg,
                 permissionStore = permissionStore,
+                signPolicyStore = signPolicyStore,
                 onDismiss = { selectedAppPackage = null }
             )
             return
@@ -356,6 +371,7 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Nip55SettingsCard(
+                onSignPolicyClick = { showSignPolicyScreen = true },
                 onPermissionsClick = { showPermissionsScreen = true },
                 onHistoryClick = { showHistoryScreen = true }
             )
@@ -656,6 +672,7 @@ private fun SecurityLevelBadge(securityLevel: String) {
 
 @Composable
 private fun Nip55SettingsCard(
+    onSignPolicyClick: () -> Unit,
     onPermissionsClick: () -> Unit,
     onHistoryClick: () -> Unit
 ) {
@@ -663,6 +680,13 @@ private fun Nip55SettingsCard(
         Column(modifier = Modifier.padding(16.dp)) {
             Text("NIP-55 Settings", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onSignPolicyClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Sign Policy")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)

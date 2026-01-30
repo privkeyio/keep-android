@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Binder
 import android.util.Log
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -99,6 +100,21 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
+        val effectivePolicy = runBlocking {
+            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
+                store.getAppSignPolicyOverride(callerPackage)
+                    ?.let { SignPolicy.fromOrdinal(it) }
+                    ?: app?.getSignPolicyStore()?.getGlobalPolicy()
+                    ?: SignPolicy.MANUAL
+            } ?: SignPolicy.MANUAL
+        }
+
+        if (effectivePolicy == SignPolicy.MANUAL) return null
+
+        if (effectivePolicy == SignPolicy.AUTO) {
+            return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+        }
+
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
             Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
@@ -108,9 +124,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (isAppExpired) {
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true) }
-            if (runWithTimeout { store.cleanupExpired(); true } == null) {
-                Log.w(TAG, "Cleanup timed out for expired app: $callerPackage")
-            }
+            runWithTimeout { store.cleanupExpired() }
             return rejectedCursor(null)
         }
 

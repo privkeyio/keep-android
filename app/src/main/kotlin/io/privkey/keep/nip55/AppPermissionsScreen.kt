@@ -1,7 +1,7 @@
 package io.privkey.keep.nip55
 
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,8 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
-import android.widget.Toast
 import io.privkey.keep.R
+import io.privkey.keep.storage.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,6 +31,7 @@ private data class AppState(
     val icon: Drawable? = null,
     val isVerified: Boolean = true,
     val permissions: List<Nip55Permission> = emptyList(),
+    val signPolicyOverride: Int? = null,
     val isLoading: Boolean = true
 )
 
@@ -39,6 +40,7 @@ private data class AppState(
 fun AppPermissionsScreen(
     packageName: String,
     permissionStore: PermissionStore,
+    signPolicyStore: SignPolicyStore? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -51,25 +53,25 @@ fun AppPermissionsScreen(
     LaunchedEffect(packageName) {
         val (newAppState, settings) = withContext(Dispatchers.IO) {
             val pm = context.packageManager
-            val (label, icon, verified) = try {
-                val appInfo = pm.getApplicationInfo(packageName, 0)
-                Triple(
-                    pm.getApplicationLabel(appInfo).toString(),
-                    pm.getApplicationIcon(appInfo),
-                    true
-                )
-            } catch (e: PackageManager.NameNotFoundException) {
-                android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
-                Triple(null, null, false)
-            }
-            val permissions = try {
-                permissionStore.getPermissionsForCaller(packageName)
-            } catch (e: Exception) {
-                android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", e)
-                emptyList()
-            }
+            val pkgHash = packageName.hashCode().toString(16).takeLast(8)
+            val appInfo = runCatching { pm.getApplicationInfo(packageName, 0) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to verify app package [hash:$pkgHash]", it) }
+                .getOrNull()
+
+            val label = appInfo?.let { pm.getApplicationLabel(it).toString() }
+            val icon = appInfo?.let { pm.getApplicationIcon(it) }
+            val verified = appInfo != null
+
+            val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to load permissions [hash:$pkgHash]", it) }
+                .getOrDefault(emptyList())
+
             val loadedSettings = permissionStore.getAppSettings(packageName)
-            Pair(AppState(label, icon, verified, permissions, isLoading = false), loadedSettings)
+            val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to load sign policy [hash:$pkgHash]", it) }
+                .getOrNull()
+
+            Pair(AppState(label, icon, verified, permissions, signPolicyOverride, isLoading = false), loadedSettings)
         }
         appState = newAppState
         appSettings = settings
@@ -146,6 +148,32 @@ fun AppPermissionsScreen(
                         }
                     }
                 )
+            }
+
+            if (signPolicyStore != null && !appState.isLoading) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            AppSignPolicySelector(
+                                currentOverride = appState.signPolicyOverride,
+                                globalPolicy = signPolicyStore.getGlobalPolicy(),
+                                onOverrideChange = { newOverride ->
+                                    coroutineScope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) {
+                                                permissionStore.setAppSignPolicyOverride(packageName, newOverride)
+                                            }
+                                            appState = appState.copy(signPolicyOverride = newOverride)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("AppPermissions", "Failed to update sign policy", e)
+                                            Toast.makeText(context, "Failed to update sign policy", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
             }
 
             if (appState.isLoading) {
