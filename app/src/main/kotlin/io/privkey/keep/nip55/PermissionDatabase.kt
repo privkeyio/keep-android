@@ -40,7 +40,7 @@ data class Nip55Permission(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+    fun isExpired(): Boolean = expiresAt != null && expiresAt <= System.currentTimeMillis()
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
@@ -63,7 +63,7 @@ data class Nip55AppSettings(
     val expiresAt: Long?,
     val createdAt: Long
 ) {
-    fun isExpired(): Boolean = expiresAt != null && expiresAt < System.currentTimeMillis()
+    fun isExpired(): Boolean = expiresAt != null && expiresAt <= System.currentTimeMillis()
 }
 
 @Dao
@@ -473,7 +473,7 @@ fun findRequestType(name: String): Nip55RequestType? =
 fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
     return when {
-        remaining < 0 -> "expired"
+        remaining <= 0 -> "expired"
         remaining < 60_000 -> "<1m"
         remaining < 3600_000 -> "in ${remaining / 60_000}m"
         remaining < 86400_000 -> "in ${remaining / 3600_000}h"
