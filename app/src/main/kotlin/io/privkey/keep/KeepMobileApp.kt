@@ -129,7 +129,6 @@ class KeepMobileApp : Application() {
         applicationScope.launch {
             runCatching { mobile.initialize(relays) }
                 .onFailure { Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
-                .onSuccess { Log.d(TAG, "Relays reconnected successfully") }
         }
     }
 
