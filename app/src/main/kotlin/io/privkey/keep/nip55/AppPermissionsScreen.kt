@@ -24,10 +24,10 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
-private data class AppLoadResult(
+private data class AppInfo(
     val label: String?,
     val icon: Drawable?,
-    val verified: Boolean,
+    val isVerified: Boolean,
     val permissions: List<Nip55Permission>
 )
 
@@ -48,26 +48,25 @@ fun AppPermissionsScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
-        val result = withContext(Dispatchers.IO) {
-            var label: String? = null
-            var icon: Drawable? = null
-            var verified = true
-            try {
-                val pm = context.packageManager
-                val info = pm.getApplicationInfo(packageName, 0)
-                label = pm.getApplicationLabel(info).toString()
-                icon = pm.getApplicationIcon(info)
+        val info = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            val (label, icon, verified) = try {
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                Triple(
+                    pm.getApplicationLabel(appInfo).toString(),
+                    pm.getApplicationIcon(appInfo),
+                    true
+                )
             } catch (e: PackageManager.NameNotFoundException) {
-                android.util.Log.w("AppPermissions", "Package not found")
-                verified = false
+                android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
+                Triple(null, null, false)
             }
-            val perms = permissionStore.getPermissionsForCaller(packageName)
-            AppLoadResult(label, icon, verified, perms)
+            AppInfo(label, icon, verified, permissionStore.getPermissionsForCaller(packageName))
         }
-        appLabel = result.label
-        appIcon = result.icon
-        isVerified = result.verified
-        permissions = result.permissions
+        appLabel = info.label
+        appIcon = info.icon
+        isVerified = info.isVerified
+        permissions = info.permissions
         isLoading = false
     }
 
@@ -151,23 +150,22 @@ fun AppPermissionsScreen(
                 }
                 items(permissions, key = { it.id }) { permission ->
                     var updateError by remember { mutableStateOf<String?>(null) }
+                    val requestType = findRequestType(permission.requestType)
+
                     PermissionItem(
                         permission = permission,
                         onDecisionChange = { newDecision ->
+                            if (requestType == null) return@PermissionItem
                             coroutineScope.launch {
                                 try {
                                     withContext(Dispatchers.IO) {
-                                        val requestType = Nip55RequestType.entries
-                                            .find { it.name == permission.requestType }
-                                        if (requestType != null) {
-                                            permissionStore.updatePermissionDecision(
-                                                permission.id,
-                                                newDecision,
-                                                packageName,
-                                                requestType,
-                                                permission.eventKind
-                                            )
-                                        }
+                                        permissionStore.updatePermissionDecision(
+                                            permission.id,
+                                            newDecision,
+                                            packageName,
+                                            requestType,
+                                            permission.eventKind
+                                        )
                                     }
                                     permissions = withContext(Dispatchers.IO) {
                                         permissionStore.getPermissionsForCaller(packageName)

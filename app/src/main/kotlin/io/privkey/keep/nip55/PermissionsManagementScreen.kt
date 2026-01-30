@@ -11,7 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -111,22 +110,21 @@ fun PermissionsManagementScreen(
                             items = appPermissions,
                             key = { it.id }
                         ) { permission ->
+                            val requestType = findRequestType(permission.requestType)
+
                             PermissionCard(
                                 permission = permission,
                                 onDecisionChange = { newDecision ->
+                                    if (requestType == null) return@PermissionCard
                                     coroutineScope.launch {
                                         try {
-                                            val requestType = Nip55RequestType.entries
-                                                .find { it.name == permission.requestType }
-                                            if (requestType != null) {
-                                                permissionStore.updatePermissionDecision(
-                                                    permission.id,
-                                                    newDecision,
-                                                    permission.callerPackage,
-                                                    requestType,
-                                                    permission.eventKind
-                                                )
-                                            }
+                                            permissionStore.updatePermissionDecision(
+                                                permission.id,
+                                                newDecision,
+                                                permission.callerPackage,
+                                                requestType,
+                                                permission.eventKind
+                                            )
                                             refreshPermissions()
                                         } catch (e: Exception) {
                                             loadError = "Failed to update permission"

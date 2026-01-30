@@ -202,11 +202,6 @@ class PermissionStore(db: Nip55Database) {
         return null
     }
 
-    @Deprecated("Use getPermissionDecision instead", ReplaceWith("getPermissionDecision(callerPackage, requestType, eventKind)?.let { it == PermissionDecision.ALLOW }"))
-    suspend fun hasPermission(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): Boolean? {
-        return getPermissionDecision(callerPackage, requestType, eventKind)?.let { it == PermissionDecision.ALLOW }
-    }
-
     suspend fun grantPermission(
         callerPackage: String,
         requestType: Nip55RequestType,
@@ -354,3 +349,6 @@ fun formatRelativeTime(timestamp: Long): String {
     if (diff < 604800_000) return "${diff / 86400_000}d ago"
     return java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
 }
+
+fun findRequestType(name: String): Nip55RequestType? =
+    Nip55RequestType.entries.find { it.name == name }
