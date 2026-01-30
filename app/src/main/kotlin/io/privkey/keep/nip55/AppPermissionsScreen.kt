@@ -297,11 +297,6 @@ private fun PermissionItem(
     }
 }
 
-private fun formatRequestType(type: String): String = type
-    .replace("_", " ")
-    .lowercase()
-    .replaceFirstChar { it.uppercase() }
-
 private fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
     return when {

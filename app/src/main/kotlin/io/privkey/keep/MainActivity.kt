@@ -5,6 +5,8 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -18,6 +20,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import io.privkey.keep.nip55.AppPermissionsScreen
+import io.privkey.keep.nip55.ConnectedAppsScreen
+import io.privkey.keep.nip55.PermissionStore
+import io.privkey.keep.nip55.PermissionsManagementScreen
+import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
@@ -26,9 +33,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import io.privkey.keep.nip55.AppPermissionsScreen
-import io.privkey.keep.nip55.ConnectedAppsScreen
-import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -127,6 +131,8 @@ fun MainScreen(
     var showImportScreen by remember { mutableStateOf(false) }
     var showShareDetails by remember { mutableStateOf(false) }
     var showExportScreen by remember { mutableStateOf(false) }
+    var showPermissionsScreen by remember { mutableStateOf(false) }
+    var showHistoryScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
@@ -147,6 +153,22 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    if (showPermissionsScreen) {
+        PermissionsManagementScreen(
+            permissionStore = permissionStore,
+            onDismiss = { showPermissionsScreen = false }
+        )
+        return
+    }
+
+    if (showHistoryScreen) {
+        SigningHistoryScreen(
+            permissionStore = permissionStore,
+            onDismiss = { showHistoryScreen = false }
+        )
+        return
     }
 
     val currentShareInfoForScreens = shareInfo
@@ -235,7 +257,8 @@ fun MainScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -329,6 +352,13 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 Badge { Text("$pendingCount pending") }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Nip55SettingsCard(
+                onPermissionsClick = { showPermissionsScreen = true },
+                onHistoryClick = { showHistoryScreen = true }
+            )
         } else {
             NoShareCard(
                 onImport = { showImportScreen = true }
@@ -622,4 +652,34 @@ private fun SecurityLevelBadge(securityLevel: String) {
         style = MaterialTheme.typography.bodySmall,
         color = color
     )
+}
+
+@Composable
+private fun Nip55SettingsCard(
+    onPermissionsClick: () -> Unit,
+    onHistoryClick: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("NIP-55 Settings", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onPermissionsClick,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Permissions")
+                }
+                OutlinedButton(
+                    onClick = onHistoryClick,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("History")
+                }
+            }
+        }
+    }
 }

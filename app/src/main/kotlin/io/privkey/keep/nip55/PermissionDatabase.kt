@@ -3,6 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.room.*
+import androidx.room.migration.Migration
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -71,6 +72,12 @@ interface Nip55PermissionDao {
 
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType AND eventKind = :eventKind")
     suspend fun deleteForCallerAndTypeAndEventKind(callerPackage: String, requestType: String, eventKind: Int)
+
+    @Query("DELETE FROM nip55_permissions WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions ORDER BY callerPackage")
+    suspend fun getDistinctCallers(): List<String>
 }
 
 @Dao
@@ -89,6 +96,15 @@ interface Nip55AuditLogDao {
 
     @Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
     suspend fun getLastUsedTime(callerPackage: String): Long?
+
+    @Query("SELECT * FROM nip55_audit_log ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPage(limit: Int, offset: Int): List<Nip55AuditLog>
+
+    @Query("SELECT * FROM nip55_audit_log WHERE callerPackage = :callerPackage ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun getPageForCaller(callerPackage: String, limit: Int, offset: Int): List<Nip55AuditLog>
+
+    @Query("SELECT DISTINCT callerPackage FROM nip55_audit_log ORDER BY callerPackage")
+    suspend fun getDistinctCallers(): List<String>
 }
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class], version = 1)
@@ -99,6 +115,7 @@ abstract class Nip55Database : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: Nip55Database? = null
+        private val MIGRATIONS = arrayOf<Migration>()
 
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
@@ -106,7 +123,7 @@ abstract class Nip55Database : RoomDatabase() {
                     context.applicationContext,
                     Nip55Database::class.java,
                     "nip55_permissions.db"
-                ).build().also { INSTANCE = it }
+                ).addMigrations(*MIGRATIONS).build().also { INSTANCE = it }
             }
         }
     }
@@ -228,4 +245,29 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
         dao.getForCaller(callerPackage, System.currentTimeMillis())
+
+    suspend fun deletePermission(id: Long) = dao.deleteById(id)
+
+    suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
+
+    suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
+
+    suspend fun getAuditLogPage(
+        limit: Int,
+        offset: Int,
+        callerPackage: String? = null
+    ): List<Nip55AuditLog> {
+        val safeLimit = limit.coerceIn(1, 100)
+        val safeOffset = offset.coerceAtLeast(0)
+        return if (callerPackage != null) {
+            auditDao.getPageForCaller(callerPackage, safeLimit, safeOffset)
+        } else {
+            auditDao.getPage(safeLimit, safeOffset)
+        }
+    }
+
+    suspend fun getDistinctAuditCallers(): List<String> = auditDao.getDistinctCallers()
 }
+
+fun formatRequestType(type: String): String =
+    type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
