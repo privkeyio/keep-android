@@ -122,7 +122,10 @@ class Nip55Activity : FragmentActivity() {
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
-        val callerId = callerPackage ?: "unknown"
+        val callerId = callerPackage ?: run {
+            Log.w(TAG, "Unknown caller for ${req.requestType.name} request")
+            "unknown"
+        }
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
@@ -180,7 +183,10 @@ class Nip55Activity : FragmentActivity() {
 
     private fun handleReject(duration: PermissionDuration) {
         val req = request ?: return finishWithError("User rejected")
-        val callerId = callerPackage ?: "unknown"
+        val callerId = callerPackage ?: run {
+            Log.w(TAG, "Unknown caller for rejected ${req.requestType.name} request")
+            "unknown"
+        }
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
 

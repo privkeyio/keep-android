@@ -63,7 +63,7 @@ interface Nip55PermissionDao {
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 
-@Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
+    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
     suspend fun getAllCallerPackages(now: Long): List<String>
 
     @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY createdAt DESC")
@@ -96,7 +96,7 @@ interface Nip55AuditLogDao {
     @Query("DELETE FROM nip55_audit_log WHERE timestamp < :before")
     suspend fun deleteOlderThan(before: Long)
 
-@Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
+    @Query("SELECT MAX(timestamp) FROM nip55_audit_log WHERE callerPackage = :callerPackage AND decision = 'allow'")
     suspend fun getLastUsedTime(callerPackage: String): Long?
 
     @Query("SELECT * FROM nip55_audit_log ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
@@ -246,7 +246,7 @@ class PermissionStore(db: Nip55Database) {
 
     suspend fun getAuditLog(limit: Int = 100): List<Nip55AuditLog> = auditDao.getRecent(limit)
 
-suspend fun getConnectedApps(): List<ConnectedAppInfo> {
+    suspend fun getConnectedApps(): List<ConnectedAppInfo> {
         val now = System.currentTimeMillis()
         val packages = dao.getAllCallerPackages(now)
         return packages.map { pkg ->
