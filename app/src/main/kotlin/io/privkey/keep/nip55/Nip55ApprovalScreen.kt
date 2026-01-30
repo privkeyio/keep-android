@@ -35,20 +35,6 @@ internal fun parseEventKind(content: String): Int? = runCatching {
     org.json.JSONObject(content).optInt("kind", -1).takeIf { it >= 0 }
 }.getOrNull()
 
-private fun eventKindDescription(kind: Int): String = when (kind) {
-    0 -> "Profile Metadata"
-    1 -> "Short Text Note"
-    3 -> "Contact List"
-    4 -> "Encrypted DM"
-    5 -> "Event Deletion"
-    6 -> "Repost"
-    7 -> "Reaction"
-    in 10000..19999 -> "Replaceable Event"
-    in 20000..29999 -> "Ephemeral Event"
-    in 30000..39999 -> "Parameterized Replaceable"
-    else -> "Kind $kind"
-}
-
 @Composable
 fun ApprovalScreen(
     request: Nip55Request,
@@ -217,7 +203,7 @@ private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
 
             eventKind?.let { kind ->
                 Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Event Kind", eventKindDescription(kind))
+                DetailRow("Event Kind", EventKind.displayName(kind))
             }
 
             if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {

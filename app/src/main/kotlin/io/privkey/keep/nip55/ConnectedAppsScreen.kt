@@ -24,8 +24,6 @@ import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -210,7 +208,7 @@ private fun ConnectedAppItem(
                     )
                     app.lastUsedTime?.let { time ->
                         Text(
-                            text = stringResource(R.string.connected_app_last_used, formatTime(time)),
+                            text = stringResource(R.string.connected_app_last_used, formatRelativeTime(time)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -229,14 +227,3 @@ private fun ConnectedAppItem(
     }
 }
 
-private fun formatTime(timestamp: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = now - timestamp
-    return when {
-        diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${diff / 60_000}m ago"
-        diff < 86400_000 -> "${diff / 3600_000}h ago"
-        diff < 604800_000 -> "${diff / 86400_000}d ago"
-        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
-    }
-}

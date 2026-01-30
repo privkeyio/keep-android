@@ -150,6 +150,7 @@ fun AppPermissionsScreen(
                 items(permissions, key = { it.id }) { permission ->
                     PermissionItem(
                         permission = permission,
+                        permissionStore = permissionStore,
                         onRevoke = {
                             coroutineScope.launch {
                                 withContext(Dispatchers.IO) {
@@ -254,8 +255,21 @@ private fun AppHeaderCard(
 @Composable
 private fun PermissionItem(
     permission: Nip55Permission,
+    permissionStore: PermissionStore,
     onRevoke: () -> Unit
 ) {
+    var lastUsedTime by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(permission.id) {
+        lastUsedTime = withContext(Dispatchers.IO) {
+            permissionStore.getLastUsedTimeForPermission(
+                permission.callerPackage,
+                permission.requestType,
+                permission.eventKind
+            )
+        }
+    }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -268,7 +282,7 @@ private fun PermissionItem(
                 )
                 permission.eventKind?.let { kind ->
                     Text(
-                        text = "Event kind: $kind",
+                        text = EventKind.displayName(kind),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -284,6 +298,13 @@ private fun PermissionItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                lastUsedTime?.let { time ->
+                    Text(
+                        text = "Last used: ${formatRelativeTime(time)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             IconButton(onClick = onRevoke) {
@@ -306,3 +327,4 @@ private fun formatExpiry(timestamp: Long): String {
         else -> SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(timestamp))
     }
 }
+
