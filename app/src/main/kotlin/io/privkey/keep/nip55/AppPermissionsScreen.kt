@@ -58,7 +58,13 @@ fun AppPermissionsScreen(
                 android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
                 Triple(null, null, false)
             }
-            AppState(label, icon, verified, permissionStore.getPermissionsForCaller(packageName), isLoading = false)
+            val permissions = try {
+                permissionStore.getPermissionsForCaller(packageName)
+            } catch (e: Exception) {
+                android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", e)
+                emptyList()
+            }
+            AppState(label, icon, verified, permissions, isLoading = false)
         }
     }
 

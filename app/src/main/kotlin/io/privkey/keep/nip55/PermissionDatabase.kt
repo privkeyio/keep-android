@@ -295,8 +295,13 @@ class PermissionStore(db: Nip55Database) {
         if (permission.callerPackage != callerPackage) {
             throw IllegalArgumentException("CallerPackage mismatch for permission $id")
         }
+        if (permission.requestType != requestType.name) {
+            throw IllegalArgumentException("RequestType mismatch for permission $id: expected ${permission.requestType}, got ${requestType.name}")
+        }
+        val storedRequestType = findRequestType(permission.requestType)
+            ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
         dao.updateDecision(id, decision.toString())
-        logOperation(permission.callerPackage, requestType, permission.eventKind, decision.toString(), wasAutomatic = false)
+        logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false)
     }
 
     suspend fun setPermissionToAsk(

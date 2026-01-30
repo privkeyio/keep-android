@@ -61,6 +61,8 @@ private fun DecisionChip(
         label = { Text(stringResource(decision.displayNameRes)) },
         modifier = modifier,
         colors = FilterChipDefaults.filterChipColors(
+            containerColor = containerColor,
+            labelColor = contentColor,
             selectedContainerColor = containerColor,
             selectedLabelColor = contentColor
         )
