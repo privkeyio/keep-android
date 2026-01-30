@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +33,10 @@ fun SignPolicyScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(io.privkey.keep.R.string.sign_policy)) },
+                title = { Text(stringResource(R.string.sign_policy)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(io.privkey.keep.R.string.back))
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -49,7 +50,7 @@ fun SignPolicyScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = stringResource(io.privkey.keep.R.string.sign_policy_global_setting),
+                text = stringResource(R.string.sign_policy_global_setting),
                 style = MaterialTheme.typography.titleMedium
             )
 
@@ -72,7 +73,7 @@ fun SignPolicyScreen(
 }
 
 @Composable
-fun SignPolicyOption(
+private fun SignPolicyOption(
     policy: SignPolicy,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -124,15 +125,16 @@ fun AppSignPolicySelector(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val displayText = when (currentOverride) {
-        null -> stringResource(io.privkey.keep.R.string.sign_policy_use_global) +
-                " (${stringResource(globalPolicy.displayNameRes)})"
-        else -> stringResource(SignPolicy.fromOrdinal(currentOverride).displayNameRes)
+    val globalPolicyName = stringResource(globalPolicy.displayNameRes)
+    val displayText = if (currentOverride == null) {
+        stringResource(R.string.sign_policy_use_global) + " ($globalPolicyName)"
+    } else {
+        stringResource(SignPolicy.fromOrdinal(currentOverride).displayNameRes)
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = stringResource(io.privkey.keep.R.string.sign_policy_app_override),
+            text = stringResource(R.string.sign_policy_app_override),
             style = MaterialTheme.typography.titleSmall
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -157,8 +159,7 @@ fun AppSignPolicySelector(
             ) {
                 DropdownMenuItem(
                     text = {
-                        Text(stringResource(io.privkey.keep.R.string.sign_policy_use_global) +
-                                " (${stringResource(globalPolicy.displayNameRes)})")
+                        Text(stringResource(R.string.sign_policy_use_global) + " ($globalPolicyName)")
                     },
                     onClick = {
                         onOverrideChange(null)

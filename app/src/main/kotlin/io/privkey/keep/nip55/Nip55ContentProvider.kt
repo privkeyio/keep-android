@@ -109,9 +109,7 @@ class Nip55ContentProvider : ContentProvider() {
             } ?: SignPolicy.MANUAL
         }
 
-        if (effectivePolicy == SignPolicy.MANUAL) {
-            return null
-        }
+        if (effectivePolicy == SignPolicy.MANUAL) return null
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {

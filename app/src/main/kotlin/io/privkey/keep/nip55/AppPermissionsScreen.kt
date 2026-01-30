@@ -55,30 +55,23 @@ fun AppPermissionsScreen(
     LaunchedEffect(packageName) {
         val (newAppState, settings) = withContext(Dispatchers.IO) {
             val pm = context.packageManager
-            val (label, icon, verified) = try {
-                val appInfo = pm.getApplicationInfo(packageName, 0)
-                Triple(
-                    pm.getApplicationLabel(appInfo).toString(),
-                    pm.getApplicationIcon(appInfo),
-                    true
-                )
-            } catch (e: PackageManager.NameNotFoundException) {
-                android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", e)
-                Triple(null, null, false)
-            }
-            val permissions = try {
-                permissionStore.getPermissionsForCaller(packageName)
-            } catch (e: Exception) {
-                android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", e)
-                emptyList()
-            }
+            val appInfo = runCatching { pm.getApplicationInfo(packageName, 0) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to verify app package: $packageName", it) }
+                .getOrNull()
+
+            val label = appInfo?.let { pm.getApplicationLabel(it).toString() }
+            val icon = appInfo?.let { pm.getApplicationIcon(it) }
+            val verified = appInfo != null
+
+            val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to load permissions for: $packageName", it) }
+                .getOrDefault(emptyList())
+
             val loadedSettings = permissionStore.getAppSettings(packageName)
-            val signPolicyOverride = try {
-                permissionStore.getAppSignPolicyOverride(packageName)
-            } catch (e: Exception) {
-                android.util.Log.e("AppPermissions", "Failed to load sign policy for: $packageName", e)
-                null
-            }
+            val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                .onFailure { android.util.Log.e("AppPermissions", "Failed to load sign policy for: $packageName", it) }
+                .getOrNull()
+
             Pair(AppState(label, icon, verified, permissions, signPolicyOverride, isLoading = false), loadedSettings)
         }
         appState = newAppState
