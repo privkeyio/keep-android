@@ -244,19 +244,14 @@ private fun PermissionCard(
                 }
 
                 Row {
+                    val isAllowed = permission.decision == "allow"
                     Text(
-                        text = if (permission.decision == "allow") "Allowed" else "Denied",
+                        text = if (isAllowed) "Allowed" else "Denied",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (permission.decision == "allow") {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        }
+                        color = if (isAllowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                     )
-
-                    val expiryText = permission.expiresAt?.let { " - Expires ${dateFormat.format(Date(it))}" } ?: " - Forever"
                     Text(
-                        text = expiryText,
+                        text = permission.expiresAt?.let { " - Expires ${dateFormat.format(Date(it))}" } ?: " - Forever",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

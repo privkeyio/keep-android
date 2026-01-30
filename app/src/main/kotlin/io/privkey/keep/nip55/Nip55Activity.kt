@@ -122,37 +122,15 @@ class Nip55Activity : FragmentActivity() {
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
-        val callerId = callerPackage ?: run {
+        val callerId = callerPackage ?: "unknown".also {
             Log.w(TAG, "Unknown caller for ${req.requestType.name} request")
-            "unknown"
         }
         val store = permissionStore
         val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
-            if (needsBiometric) {
-                if (keystoreStorage == null) {
-                    return@launch finishWithError("Storage unavailable")
-                }
-                val cipher = try {
-                    keystoreStorage.getCipherForDecryption()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to get cipher: ${e::class.simpleName}")
-                    return@launch finishWithError("Storage error")
-                } ?: return@launch finishWithError("No share stored")
-                val authedCipher = try {
-                    biometricHelper.authenticateWithCrypto(
-                        cipher = cipher,
-                        title = "Approve Request",
-                        subtitle = req.requestType.displayName()
-                    )
-                } catch (e: Exception) {
-                    Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
-                    null
-                } ?: return@launch finishWithError("Authentication failed")
-                keystoreStorage.setPendingCipher(authedCipher)
-            }
+            if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
                 if (store != null && callerId != "unknown") {
@@ -166,19 +144,54 @@ class Nip55Activity : FragmentActivity() {
                     }
                     .onFailure { e ->
                         Log.e(TAG, "Request failed: ${e::class.simpleName}")
-                        val errorMsg = when (e) {
-                            is KeepMobileException.RateLimited -> "rate_limited"
-                            is KeepMobileException.NotInitialized -> "not_initialized"
-                            is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
-                            is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
-                            else -> "request_failed"
-                        }
-                        finishWithError(errorMsg)
+                        finishWithError(mapExceptionToError(e))
                     }
             } finally {
                 keystoreStorage?.clearPendingCipher()
             }
         }
+    }
+
+    private suspend fun authenticateForRequest(keystoreStorage: AndroidKeystoreStorage?, req: Nip55Request): Boolean {
+        if (keystoreStorage == null) {
+            finishWithError("Storage unavailable")
+            return false
+        }
+        val cipher = try {
+            keystoreStorage.getCipherForDecryption()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get cipher: ${e::class.simpleName}")
+            finishWithError("Storage error")
+            return false
+        }
+        if (cipher == null) {
+            finishWithError("No share stored")
+            return false
+        }
+        val authedCipher = try {
+            biometricHelper.authenticateWithCrypto(
+                cipher = cipher,
+                title = "Approve Request",
+                subtitle = req.requestType.displayName()
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
+            null
+        }
+        if (authedCipher == null) {
+            finishWithError("Authentication failed")
+            return false
+        }
+        keystoreStorage.setPendingCipher(authedCipher)
+        return true
+    }
+
+    private fun mapExceptionToError(e: Throwable): String = when (e) {
+        is KeepMobileException.RateLimited -> "rate_limited"
+        is KeepMobileException.NotInitialized -> "not_initialized"
+        is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
+        is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
+        else -> "request_failed"
     }
 
     private fun handleReject(duration: PermissionDuration) {

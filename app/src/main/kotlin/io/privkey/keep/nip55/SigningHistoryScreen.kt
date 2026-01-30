@@ -36,14 +36,9 @@ fun SigningHistoryScreen(
 
     fun loadLogs(reset: Boolean = false) {
         coroutineScope.launch {
-            if (reset) {
-                isLoading = true
-                logs = emptyList()
-            } else {
-                isLoadingMore = true
-            }
-
+            if (reset) isLoading = true else isLoadingMore = true
             val offset = if (reset) 0 else logs.size
+
             val newLogs = permissionStore.getAuditLogPage(
                 limit = PAGE_SIZE,
                 offset = offset,

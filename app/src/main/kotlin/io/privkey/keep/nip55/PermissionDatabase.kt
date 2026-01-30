@@ -1,11 +1,9 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
-import android.util.Log
 import androidx.annotation.StringRes
 import androidx.room.*
 import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -117,15 +115,6 @@ abstract class Nip55Database : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: Nip55Database? = null
-
-        // When bumping the database version, add a corresponding MIGRATION_X_Y object here.
-        // Example for version 2:
-        //   val MIGRATION_1_2 = object : Migration(1, 2) {
-        //       override fun migrate(db: SupportSQLiteDatabase) {
-        //           db.execSQL("ALTER TABLE nip55_permissions ADD COLUMN newColumn TEXT")
-        //       }
-        //   }
-        // Then add it to addMigrations() below.
         private val MIGRATIONS = arrayOf<Migration>()
 
         fun getInstance(context: Context): Nip55Database {
@@ -161,10 +150,6 @@ data class ConnectedAppInfo(
 class PermissionStore(db: Nip55Database) {
     private val dao = db.permissionDao()
     private val auditDao = db.auditLogDao()
-
-    companion object {
-        private const val TAG = "PermissionStore"
-    }
 
     suspend fun cleanupExpired() {
         dao.deleteExpired()
@@ -261,15 +246,9 @@ class PermissionStore(db: Nip55Database) {
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
         dao.getForCaller(callerPackage, System.currentTimeMillis())
 
-    suspend fun deletePermission(id: Long) {
-        Log.d(TAG, "Deleting permission id=$id")
-        dao.deleteById(id)
-    }
+    suspend fun deletePermission(id: Long) = dao.deleteById(id)
 
-    suspend fun revokeAllForApp(callerPackage: String) {
-        Log.d(TAG, "Revoking all permissions for $callerPackage")
-        dao.deleteForCaller(callerPackage)
-    }
+    suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
 
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 
