@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
+import io.privkey.keep.storage.ForegroundServiceStore
 
 class KeepAliveService : Service() {
 
@@ -42,6 +43,12 @@ class KeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val foregroundServiceStore = ForegroundServiceStore(this)
+        if (!foregroundServiceStore.isEnabled()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         startForeground(NOTIFICATION_ID, createNotification())
 
         val app = applicationContext as? KeepMobileApp ?: return START_STICKY
