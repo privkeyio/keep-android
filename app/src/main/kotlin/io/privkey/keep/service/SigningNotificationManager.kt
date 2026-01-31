@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.privkey.keep.R
+import io.privkey.keep.nip55.headerTitle
 import io.privkey.keep.uniffi.Nip55RequestType
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -69,7 +70,7 @@ class SigningNotificationManager(private val context: Context) {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(requestType.notificationTitle())
+            .setContentTitle(requestType.headerTitle())
             .setContentText("Request from $callerLabel")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -111,14 +112,6 @@ class SigningNotificationManager(private val context: Context) {
         } catch (e: PackageManager.NameNotFoundException) {
             null
         }
-    }
-
-    private fun Nip55RequestType.notificationTitle(): String = when (this) {
-        Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
-        Nip55RequestType.SIGN_EVENT -> "Signing Request"
-        Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
-        Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
-        Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
     }
 
     data class PendingRequestInfo(

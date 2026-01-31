@@ -22,7 +22,7 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
-private fun Nip55RequestType.headerTitle(): String = when (this) {
+internal fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
     Nip55RequestType.SIGN_EVENT -> "Signing Request"
     Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"

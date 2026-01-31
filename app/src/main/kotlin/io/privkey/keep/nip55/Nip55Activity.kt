@@ -70,9 +70,8 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (killSwitchStore?.isEnabled() == true) {
-            finishWithError("signing_disabled")
-        }
+        // Re-check kill switch in case it was enabled while the activity was paused
+        if (killSwitchStore?.isEnabled() == true) finishWithError("signing_disabled")
     }
 
     private fun handleIntent(intent: Intent) {
@@ -95,10 +94,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun identifyCaller() {
-        val pkg = callingActivity?.packageName
-        callerPackage = pkg
-        callerVerified = pkg != null
-        callerSignatureHash = pkg?.let { getCallerSignatureHash(it) }
+        callerPackage = callingActivity?.packageName
+        callerVerified = callerPackage != null
+        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
     }
 
     private fun getCallerSignatureHash(packageName: String): String? {
