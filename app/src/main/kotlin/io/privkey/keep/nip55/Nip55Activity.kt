@@ -74,7 +74,7 @@ class Nip55Activity : FragmentActivity() {
         if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
 
         val ps = pinStore
-        if (ps != null && ps.isPinEnabled() && !ps.isSessionValid()) return finishWithError("locked")
+        if (ps != null && ps.requiresAuthentication()) return finishWithError("locked")
 
         identifyCaller()
         if (callerPackage == null) {

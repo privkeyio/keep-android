@@ -23,7 +23,7 @@ fun PinUnlockScreen(
     onUnlocked: () -> Unit,
     onBiometricFallback: (() -> Unit)? = null
 ) {
-    var pin by remember { mutableStateOf("") }
+    var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
@@ -34,7 +34,7 @@ fun PinUnlockScreen(
             lockoutRemaining = pinStore.getLockoutRemainingMs()
             if (lockoutRemaining <= 0) {
                 isLockedOut = false
-                error = null  // Clear stale "Too many attempts" error when lockout ends
+                error = null
             }
             delay(1000)
         }
@@ -45,14 +45,16 @@ fun PinUnlockScreen(
     }
 
     fun verifyAndUnlock() {
-        if (pin.isEmpty()) return
+        if (pinInput.isEmpty()) return
 
-        if (pinStore.verifyPin(pin)) {
+        val verified = pinStore.verifyPin(pinInput)
+        pinInput = ""
+
+        if (verified) {
             onUnlocked()
             return
         }
 
-        pin = ""
         if (pinStore.isLockedOut()) {
             isLockedOut = true
             error = "Too many attempts. Try again later."
@@ -102,10 +104,10 @@ fun PinUnlockScreen(
                 )
             } else {
                 OutlinedTextField(
-                    value = pin,
+                    value = pinInput,
                     onValueChange = { newValue ->
                         if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
-                            pin = newValue
+                            pinInput = newValue
                             error = null
                         }
                     },
@@ -139,7 +141,7 @@ fun PinUnlockScreen(
 
                 Button(
                     onClick = { verifyAndUnlock() },
-                    enabled = pin.length >= PinStore.MIN_PIN_LENGTH,
+                    enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Unlock")

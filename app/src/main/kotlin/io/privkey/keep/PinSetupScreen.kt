@@ -25,17 +25,17 @@ fun PinSetupScreen(
     onDismiss: () -> Unit
 ) {
     var step by remember { mutableStateOf(SetupStep.ENTER_PIN) }
-    var pin by remember { mutableStateOf("") }
-    var confirmPin by remember { mutableStateOf("") }
+    var pinInput by remember { mutableStateOf("") }
+    var confirmPinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
 
     fun validateAndProceed(): Boolean {
-        if (pin.length < PinStore.MIN_PIN_LENGTH) {
+        if (pinInput.length < PinStore.MIN_PIN_LENGTH) {
             error = "PIN must be at least ${PinStore.MIN_PIN_LENGTH} digits"
             return false
         }
-        if (pinStore.isWeakPin(pin)) {
+        if (pinStore.isWeakPin(pinInput)) {
             error = "PIN is too simple. Avoid patterns like 1234 or 0000."
             return false
         }
@@ -44,19 +44,22 @@ fun PinSetupScreen(
     }
 
     fun confirmAndSetPin(): Boolean {
-        if (confirmPin != pin) {
+        if (confirmPinInput != pinInput) {
             error = "PINs don't match"
-            confirmPin = ""
+            confirmPinInput = ""
             return false
         }
-        if (pinStore.isWeakPin(pin)) {
+        if (pinStore.isWeakPin(pinInput)) {
             error = "PIN is too simple"
             step = SetupStep.ENTER_PIN
-            pin = ""
-            confirmPin = ""
+            pinInput = ""
+            confirmPinInput = ""
             return false
         }
-        if (pinStore.setPin(pin)) {
+        val result = pinStore.setPin(pinInput)
+        pinInput = ""
+        confirmPinInput = ""
+        if (result) {
             onPinSet()
             return true
         }
@@ -98,10 +101,10 @@ fun PinSetupScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     OutlinedTextField(
-                        value = pin,
+                        value = pinInput,
                         onValueChange = { newValue ->
                             if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
-                                pin = newValue
+                                pinInput = newValue
                                 error = null
                             }
                         },
@@ -134,7 +137,7 @@ fun PinSetupScreen(
 
                     Button(
                         onClick = { validateAndProceed() },
-                        enabled = pin.length >= PinStore.MIN_PIN_LENGTH,
+                        enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Next")
@@ -150,10 +153,10 @@ fun PinSetupScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     OutlinedTextField(
-                        value = confirmPin,
+                        value = confirmPinInput,
                         onValueChange = { newValue ->
                             if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
-                                confirmPin = newValue
+                                confirmPinInput = newValue
                                 error = null
                             }
                         },
@@ -191,7 +194,7 @@ fun PinSetupScreen(
                         OutlinedButton(
                             onClick = {
                                 step = SetupStep.ENTER_PIN
-                                confirmPin = ""
+                                confirmPinInput = ""
                                 error = null
                             },
                             modifier = Modifier.weight(1f)
@@ -201,7 +204,7 @@ fun PinSetupScreen(
 
                         Button(
                             onClick = { confirmAndSetPin() },
-                            enabled = confirmPin.length >= PinStore.MIN_PIN_LENGTH,
+                            enabled = confirmPinInput.length >= PinStore.MIN_PIN_LENGTH,
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Set PIN")

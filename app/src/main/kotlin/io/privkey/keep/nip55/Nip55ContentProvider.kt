@@ -66,22 +66,22 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        val currentApp = app ?: return errorCursor("not_initialized", null)
+        val currentApp = app ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
         if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
         val pinStore = currentApp.getPinStore()
-        if (pinStore != null && pinStore.isPinEnabled() && !pinStore.isSessionValid()) {
-            return errorCursor("locked", null)
+        if (pinStore != null && pinStore.requiresAuthentication()) {
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
-        val h = currentApp.getNip55Handler() ?: return errorCursor("not_initialized", null)
+        val h = currentApp.getNip55Handler() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
         val store = currentApp.getPermissionStore()
 
-        val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
+        val callerPackage = getCallerPackage() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         if (!checkRateLimit(callerPackage)) {
             Log.w(TAG, "Rate limit exceeded for $callerPackage")
-            return errorCursor("rate_limited", null)
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
         val requestType = when (uri.authority) {
@@ -89,7 +89,7 @@ class Nip55ContentProvider : ContentProvider() {
             AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
-            else -> return errorCursor("invalid_uri", null)
+            else -> return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
         val rawContent = projection?.getOrNull(0) ?: ""
@@ -97,9 +97,9 @@ class Nip55ContentProvider : ContentProvider() {
         val currentUser = projection?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
         if (rawContent.length > MAX_CONTENT_LENGTH)
-            return errorCursor("invalid input length", null)
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
-            return errorCursor("invalid input length", null)
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
@@ -188,7 +188,7 @@ class Nip55ContentProvider : ContentProvider() {
             }
             .getOrElse { e ->
                 Log.e(TAG, "Background request failed: ${e::class.simpleName}")
-                errorCursor("request_failed", id)
+                errorCursor(GENERIC_ERROR_MESSAGE, id)
             }
     }
 
