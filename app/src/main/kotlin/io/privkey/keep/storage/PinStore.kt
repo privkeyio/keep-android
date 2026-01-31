@@ -97,7 +97,7 @@ class PinStore(context: Context) {
             val salt = generateSalt()
             val hash = hashPinFromChars(pinChars, salt)
 
-            return prefs.edit()
+            val success = prefs.edit()
                 .putString(KEY_PIN_HASH, hash)
                 .putString(KEY_PIN_SALT, salt)
                 .putBoolean(KEY_PIN_ENABLED, true)
@@ -108,6 +108,8 @@ class PinStore(context: Context) {
                 .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
                 .putLong(KEY_LOCKOUT_DURATION, 0)
                 .commit()
+            if (success) refreshSession()
+            return success
         } finally {
             pinChars.fill('0')
         }
@@ -199,28 +201,19 @@ class PinStore(context: Context) {
     fun getLockoutRemainingMs(): Long {
         val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val lockoutDuration = prefs.getLong(KEY_LOCKOUT_DURATION, 0)
-
-        if (lockoutWallClock != 0L && lockoutDuration != 0L) {
-            val remaining = lockoutWallClock + lockoutDuration - System.currentTimeMillis()
-            if (remaining <= 0) {
-                clearLockoutTimestamps()
-                return 0
-            }
-            return remaining
-        }
-
         val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
-        if (lockoutUntil == 0L) return 0
-
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
         val currentElapsed = SystemClock.elapsedRealtime()
 
-        if (savedSetElapsed == 0L || currentElapsed < savedSetElapsed) {
-            clearLockoutTimestamps()
-            return 0
-        }
+        val remainingWallClock = if (lockoutWallClock != 0L && lockoutDuration != 0L) {
+            lockoutWallClock + lockoutDuration - System.currentTimeMillis()
+        } else 0L
 
-        val remaining = lockoutUntil - currentElapsed
+        val remainingElapsed = if (lockoutUntil != 0L && savedSetElapsed != 0L && currentElapsed >= savedSetElapsed) {
+            lockoutUntil - currentElapsed
+        } else 0L
+
+        val remaining = maxOf(remainingWallClock, remainingElapsed)
         if (remaining <= 0) {
             clearLockoutTimestamps()
             return 0
