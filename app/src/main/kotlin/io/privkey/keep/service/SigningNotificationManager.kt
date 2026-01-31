@@ -1,5 +1,6 @@
 package io.privkey.keep.service
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -40,6 +41,7 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.createNotificationChannel(channel)
     }
 
+    @SuppressLint("MissingPermission") // Permission is checked at function entry
     fun showSigningRequest(
         requestType: Nip55RequestType,
         callerPackage: String?,
