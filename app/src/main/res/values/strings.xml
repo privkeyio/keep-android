@@ -44,4 +44,9 @@
     <string name="sign_policy_app_override">App Override</string>
     <string name="sign_policy_use_global">Use global setting</string>
     <string name="sign_policy_global_setting">Global Setting</string>
+
+    <string name="foreground_service_channel_name">Background Service</string>
+    <string name="foreground_service_channel_description">Persistent notification for relay connections</string>
+    <string name="foreground_service_title">Keep</string>
+    <string name="foreground_service_text">Relay connections active</string>
 </resources>

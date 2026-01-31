@@ -4,9 +4,11 @@ import android.app.Application
 import android.util.Log
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
+import io.privkey.keep.service.KeepAliveService
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
@@ -17,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+private const val TAG = "KeepMobileApp"
+
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
     private var storage: AndroidKeystoreStorage? = null
@@ -24,6 +28,7 @@ class KeepMobileApp : Application() {
     private var killSwitchStore: KillSwitchStore? = null
     private var signPolicyStore: SignPolicyStore? = null
     private var autoStartStore: AutoStartStore? = null
+    private var foregroundServiceStore: ForegroundServiceStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var networkManager: NetworkConnectivityManager? = null
@@ -34,6 +39,7 @@ class KeepMobileApp : Application() {
         initializeKeepMobile()
         initializePermissionStore()
         initializeNetworkMonitoring()
+        initializeForegroundService()
     }
 
     private fun initializeKeepMobile() {
@@ -43,12 +49,14 @@ class KeepMobileApp : Application() {
             val newKillSwitch = KillSwitchStore(this)
             val newSignPolicy = SignPolicyStore(this)
             val newAutoStart = AutoStartStore(this)
+            val newForegroundService = ForegroundServiceStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
             killSwitchStore = newKillSwitch
             signPolicyStore = newSignPolicy
             autoStartStore = newAutoStart
+            foregroundServiceStore = newForegroundService
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
 
@@ -65,9 +73,17 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNetworkMonitoring() {
-        if (autoStartStore?.isEnabled() != true) return
-        networkManager = NetworkConnectivityManager(this) { reconnectRelays() }
-        networkManager?.register()
+        val autoStartEnabled = autoStartStore?.isEnabled() == true
+        val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
+        if (autoStartEnabled && !foregroundServiceEnabled) {
+            ensureNetworkManagerRegistered()
+        }
+    }
+
+    private fun initializeForegroundService() {
+        if (foregroundServiceStore?.isEnabled() == true) {
+            KeepAliveService.start(this)
+        }
     }
 
     private fun initializePermissionStore() {
@@ -91,6 +107,8 @@ class KeepMobileApp : Application() {
     fun getSignPolicyStore(): SignPolicyStore? = signPolicyStore
 
     fun getAutoStartStore(): AutoStartStore? = autoStartStore
+
+    fun getForegroundServiceStore(): ForegroundServiceStore? = foregroundServiceStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
@@ -136,12 +154,25 @@ class KeepMobileApp : Application() {
             networkManager?.unregister()
             return
         }
+        if (foregroundServiceStore?.isEnabled() == true) return
+        ensureNetworkManagerRegistered()
+    }
+
+    fun updateForegroundService(enabled: Boolean) {
+        if (enabled) {
+            networkManager?.unregister()
+            KeepAliveService.start(this)
+        } else {
+            KeepAliveService.stop(this)
+            if (autoStartStore?.isEnabled() == true) {
+                ensureNetworkManagerRegistered()
+            }
+        }
+    }
+
+    private fun ensureNetworkManagerRegistered() {
         val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
             .also { networkManager = it }
         manager.register()
-    }
-
-    companion object {
-        private const val TAG = "KeepMobileApp"
     }
 }
