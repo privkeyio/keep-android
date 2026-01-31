@@ -35,6 +35,7 @@ import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
+import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -484,14 +485,19 @@ private fun PeersCard(peers: List<PeerInfo>) {
 
 @Composable
 private fun PeerRow(peer: PeerInfo) {
-    val isOnline = peer.status.name == "Online"
+    val isOnline = peer.status == PeerStatus.ONLINE
+    val statusText = when (peer.status) {
+        PeerStatus.ONLINE -> "Online"
+        PeerStatus.OFFLINE -> "Offline"
+        PeerStatus.UNKNOWN -> "Unknown"
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text("Share ${peer.shareIndex}")
         Text(
-            peer.status.name,
+            statusText,
             color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }

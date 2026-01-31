@@ -77,7 +77,7 @@ class KeepMobileApp : Application() {
         val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
         if (!autoStartEnabled || foregroundServiceEnabled) return
 
-        networkManager = NetworkConnectivityManager(this) { reconnectRelays() }.also { it.register() }
+        ensureNetworkManagerRegistered()
     }
 
     private fun initializeForegroundService() {
@@ -155,9 +155,7 @@ class KeepMobileApp : Application() {
             return
         }
         if (foregroundServiceStore?.isEnabled() == true) return
-        val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
-            .also { networkManager = it }
-        manager.register()
+        ensureNetworkManagerRegistered()
     }
 
     fun updateForegroundService(enabled: Boolean) {
@@ -167,10 +165,14 @@ class KeepMobileApp : Application() {
         } else {
             KeepAliveService.stop(this)
             if (autoStartStore?.isEnabled() == true) {
-                val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
-                    .also { networkManager = it }
-                manager.register()
+                ensureNetworkManagerRegistered()
             }
         }
+    }
+
+    private fun ensureNetworkManagerRegistered() {
+        val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
+            .also { networkManager = it }
+        manager.register()
     }
 }
