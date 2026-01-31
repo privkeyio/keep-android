@@ -48,15 +48,15 @@ fun PinUnlockScreen(
 
         if (pinStore.verifyPin(pin)) {
             onUnlocked()
+            return
+        }
+
+        pin = ""
+        if (pinStore.isLockedOut()) {
+            isLockedOut = true
+            error = "Too many attempts. Try again later."
         } else {
-            error = if (pinStore.isLockedOut()) {
-                isLockedOut = true
-                "Too many attempts. Try again later."
-            } else {
-                val remaining = pinStore.getRemainingAttempts()
-                "Incorrect PIN. $remaining attempts remaining."
-            }
-            pin = ""
+            error = "Incorrect PIN. ${pinStore.getRemainingAttempts()} attempts remaining."
         }
     }
 

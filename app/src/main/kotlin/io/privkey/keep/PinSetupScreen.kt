@@ -30,6 +30,40 @@ fun PinSetupScreen(
     var error by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
 
+    fun validateAndProceed(): Boolean {
+        if (pin.length < PinStore.MIN_PIN_LENGTH) {
+            error = "PIN must be at least ${PinStore.MIN_PIN_LENGTH} digits"
+            return false
+        }
+        if (pinStore.isWeakPin(pin)) {
+            error = "PIN is too simple. Avoid patterns like 1234 or 0000."
+            return false
+        }
+        step = SetupStep.CONFIRM_PIN
+        return true
+    }
+
+    fun confirmAndSetPin(): Boolean {
+        if (confirmPin != pin) {
+            error = "PINs don't match"
+            confirmPin = ""
+            return false
+        }
+        if (pinStore.isWeakPin(pin)) {
+            error = "PIN is too simple"
+            step = SetupStep.ENTER_PIN
+            pin = ""
+            confirmPin = ""
+            return false
+        }
+        if (pinStore.setPin(pin)) {
+            onPinSet()
+            return true
+        }
+        error = "Failed to set PIN"
+        return false
+    }
+
     LaunchedEffect(step) {
         focusRequester.requestFocus()
     }
@@ -79,13 +113,7 @@ fun PinSetupScreen(
                             imeAction = ImeAction.Next
                         ),
                         keyboardActions = KeyboardActions(
-                            onNext = {
-                                if (pin.length >= PinStore.MIN_PIN_LENGTH && !pinStore.isWeakPin(pin)) {
-                                    step = SetupStep.CONFIRM_PIN
-                                } else if (pinStore.isWeakPin(pin)) {
-                                    error = "PIN is too simple. Avoid patterns like 1234 or 0000."
-                                }
-                            }
+                            onNext = { validateAndProceed() }
                         ),
                         isError = error != null,
                         modifier = Modifier
@@ -105,15 +133,7 @@ fun PinSetupScreen(
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
-                        onClick = {
-                            if (pin.length < PinStore.MIN_PIN_LENGTH) {
-                                error = "PIN must be at least ${PinStore.MIN_PIN_LENGTH} digits"
-                            } else if (pinStore.isWeakPin(pin)) {
-                                error = "PIN is too simple. Avoid patterns like 1234 or 0000."
-                            } else {
-                                step = SetupStep.CONFIRM_PIN
-                            }
-                        },
+                        onClick = { validateAndProceed() },
                         enabled = pin.length >= PinStore.MIN_PIN_LENGTH,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -145,23 +165,7 @@ fun PinSetupScreen(
                             imeAction = ImeAction.Done
                         ),
                         keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (confirmPin == pin) {
-                                    if (pinStore.isWeakPin(pin)) {
-                                        error = "PIN is too simple"
-                                        step = SetupStep.ENTER_PIN
-                                        pin = ""
-                                        confirmPin = ""
-                                    } else if (pinStore.setPin(pin)) {
-                                        onPinSet()
-                                    } else {
-                                        error = "Failed to set PIN"
-                                    }
-                                } else {
-                                    error = "PINs don't match"
-                                    confirmPin = ""
-                                }
-                            }
+                            onDone = { confirmAndSetPin() }
                         ),
                         isError = error != null,
                         modifier = Modifier
@@ -196,21 +200,7 @@ fun PinSetupScreen(
                         }
 
                         Button(
-                            onClick = {
-                                if (confirmPin != pin) {
-                                    error = "PINs don't match"
-                                    confirmPin = ""
-                                } else if (pinStore.isWeakPin(pin)) {
-                                    error = "PIN is too simple"
-                                    step = SetupStep.ENTER_PIN
-                                    pin = ""
-                                    confirmPin = ""
-                                } else if (pinStore.setPin(pin)) {
-                                    onPinSet()
-                                } else {
-                                    error = "Failed to set PIN"
-                                }
-                            },
+                            onClick = { confirmAndSetPin() },
                             enabled = confirmPin.length >= PinStore.MIN_PIN_LENGTH,
                             modifier = Modifier.weight(1f)
                         ) {

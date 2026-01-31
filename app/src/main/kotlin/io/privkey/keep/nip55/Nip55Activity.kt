@@ -71,18 +71,17 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (killSwitchStore?.isEnabled() == true) {
-            return finishWithError("signing_disabled")
-        }
+        if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
+
         val ps = pinStore
-        if (ps != null && ps.isPinEnabled() && !ps.isSessionValid()) {
-            return finishWithError("locked")
-        }
+        if (ps != null && ps.isPinEnabled() && !ps.isSessionValid()) return finishWithError("locked")
+
         identifyCaller()
         if (callerPackage == null) {
             Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
         }
+
         requestId = intent.getStringExtra("id")
         parseAndSetRequest(intent)
         if (request != null) setupContent()
@@ -197,31 +196,30 @@ class Nip55Activity : FragmentActivity() {
             finishWithError("Storage unavailable")
             return false
         }
-        val cipher = try {
-            keystoreStorage.getCipherForDecryption()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get cipher: ${e::class.simpleName}")
-            finishWithError("Storage error")
-            return false
-        }
+
+        val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
+            .onFailure { Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
+            .getOrNull()
+
         if (cipher == null) {
-            finishWithError("No share stored")
+            finishWithError(if (keystoreStorage.hasShare()) "Storage error" else "No share stored")
             return false
         }
-        val authedCipher = try {
+
+        val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
                 cipher = cipher,
                 title = "Approve Request",
                 subtitle = req.requestType.displayName()
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
-            null
-        }
+        }.onFailure { Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
+            .getOrNull()
+
         if (authedCipher == null) {
             finishWithError("Authentication failed")
             return false
         }
+
         keystoreStorage.setPendingCipher(authedCipher)
         return true
     }

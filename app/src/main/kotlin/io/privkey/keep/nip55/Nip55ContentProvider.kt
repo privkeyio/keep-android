@@ -66,15 +66,16 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        if (app?.getKillSwitchStore()?.isEnabled() == true) {
+        val currentApp = app ?: return errorCursor("not_initialized", null)
+        if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
-        val pinStore = app?.getPinStore()
+        val pinStore = currentApp.getPinStore()
         if (pinStore != null && pinStore.isPinEnabled() && !pinStore.isSessionValid()) {
             return errorCursor("locked", null)
         }
-        val h = app?.getNip55Handler() ?: return errorCursor("not_initialized", null)
-        val store = app?.getPermissionStore()
+        val h = currentApp.getNip55Handler() ?: return errorCursor("not_initialized", null)
+        val store = currentApp.getPermissionStore()
 
         val callerPackage = getCallerPackage() ?: return errorCursor("unknown_caller", null)
 
@@ -108,7 +109,7 @@ class Nip55ContentProvider : ContentProvider() {
             withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
                 store.getAppSignPolicyOverride(callerPackage)
                     ?.let { SignPolicy.fromOrdinal(it) }
-                    ?: app?.getSignPolicyStore()?.getGlobalPolicy()
+                    ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
                     ?: SignPolicy.MANUAL
             } ?: SignPolicy.MANUAL
         }

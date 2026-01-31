@@ -80,9 +80,15 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked) {
+                    val requiresPin = pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked
+                    val allDependenciesAvailable = keepMobile != null && storage != null &&
+                        relayConfigStore != null && killSwitchStore != null &&
+                        signPolicyStore != null && autoStartStore != null &&
+                        pinStore != null && permissionStore != null
+
+                    if (requiresPin) {
                         PinUnlockScreen(
-                            pinStore = pinStore,
+                            pinStore = pinStore!!,
                             onUnlocked = { isPinUnlocked = true }
                         )
                     } else if (allDependenciesAvailable) {
@@ -469,12 +475,9 @@ fun MainScreen(
             enabled = pinEnabled,
             onSetupPin = { showPinSetup = true },
             onDisablePin = { currentPin ->
-                if (pinStore.disablePin(currentPin)) {
-                    pinEnabled = false
-                    true
-                } else {
-                    false
-                }
+                val disabled = pinStore.disablePin(currentPin)
+                if (disabled) pinEnabled = false
+                disabled
             }
         )
     }
