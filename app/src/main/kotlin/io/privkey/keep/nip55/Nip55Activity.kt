@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
-import java.security.MessageDigest
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -14,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
@@ -23,6 +23,7 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +40,8 @@ class Nip55Activity : FragmentActivity() {
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
     private var callerSignatureHash: String? = null
+    private var notificationManager: SigningNotificationManager? = null
+    private var intentUri: String? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -54,6 +57,7 @@ class Nip55Activity : FragmentActivity() {
         permissionStore = app?.getPermissionStore()
         killSwitchStore = app?.getKillSwitchStore()
         pinStore = app?.getPinStore()
+        notificationManager = app?.getSigningNotificationManager()
         handleIntent(intent)
     }
 
@@ -81,8 +85,12 @@ class Nip55Activity : FragmentActivity() {
         }
 
         requestId = intent.getStringExtra("id")
+        intentUri = intent.data?.toString()
         parseAndSetRequest(intent)
-        if (request != null) setupContent()
+        if (request != null) {
+            showNotification()
+            setupContent()
+        }
     }
 
     private fun identifyCaller() {
@@ -113,6 +121,17 @@ class Nip55Activity : FragmentActivity() {
             Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
             null
         }
+    }
+
+    private fun showNotification() {
+        val req = request ?: return
+        val uri = intentUri ?: return
+        notificationManager?.showSigningRequest(
+            requestType = req.requestType,
+            callerPackage = callerPackage,
+            intentUri = uri,
+            requestId = requestId
+        )
     }
 
     private fun setupContent() {
@@ -244,6 +263,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithResult(response: Nip55Response) {
+        notificationManager?.cancelNotification(requestId)
         val req = request
         val resultIntent = Intent().apply {
             putExtra("result", response.result)
@@ -259,6 +279,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithError(error: String) {
+        notificationManager?.cancelNotification(requestId)
         val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
         Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
         val resultIntent = Intent().apply {
