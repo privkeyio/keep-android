@@ -47,8 +47,10 @@ class KeepAliveService : Service() {
         val app = applicationContext as? KeepMobileApp ?: return START_STICKY
         app.reconnectRelays()
 
-        networkManager = NetworkConnectivityManager(this) { app.reconnectRelays() }
-        networkManager?.register()
+        if (networkManager == null) {
+            networkManager = NetworkConnectivityManager(this) { app.reconnectRelays() }
+            networkManager?.register()
+        }
 
         return START_STICKY
     }
