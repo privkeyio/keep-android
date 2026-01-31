@@ -23,6 +23,7 @@ class PinStore(context: Context) {
         private const val KEY_SESSION_VALID_UNTIL = "session_valid_until"
         private const val KEY_SESSION_STARTED_AT_REALTIME = "session_started_at_realtime"
         private const val KEY_LOCKOUT_LEVEL = "lockout_level"
+        private const val KEY_LOCKOUT_SET_AT_ELAPSED = "lockout_set_at_elapsed"
 
         const val MIN_PIN_LENGTH = 4
         const val MAX_PIN_LENGTH = 8
@@ -91,6 +92,7 @@ class PinStore(context: Context) {
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putLong(KEY_LOCKOUT_UNTIL, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .commit()
 
         return true
@@ -128,6 +130,7 @@ class PinStore(context: Context) {
             .putLong(KEY_SESSION_VALID_UNTIL, 0)
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .commit()
         return true
     }
@@ -154,17 +157,42 @@ class PinStore(context: Context) {
 
     fun isLockedOut(): Boolean {
         val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
+        if (lockoutUntil == 0L) return false
+
+        val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+        if (SystemClock.elapsedRealtime() < savedSetElapsed) {
+            // Reboot detected: elapsedRealtime reset, clear stale lockout state
+            clearLockoutState()
+            return false
+        }
+
         if (SystemClock.elapsedRealtime() >= lockoutUntil) {
-            if (lockoutUntil > 0) {
-                prefs.edit().putLong(KEY_LOCKOUT_UNTIL, 0).commit()
-            }
+            prefs.edit().putLong(KEY_LOCKOUT_UNTIL, 0).commit()
             return false
         }
         return true
     }
 
+    private fun clearLockoutState() {
+        prefs.edit()
+            .putLong(KEY_LOCKOUT_UNTIL, 0)
+            .putInt(KEY_FAILED_ATTEMPTS, 0)
+            .putInt(KEY_LOCKOUT_LEVEL, 0)
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+            .commit()
+    }
+
     fun getLockoutRemainingMs(): Long {
         val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
+        if (lockoutUntil == 0L) return 0
+
+        val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+        if (SystemClock.elapsedRealtime() < savedSetElapsed) {
+            // Reboot detected: elapsedRealtime reset, clear stale lockout state
+            clearLockoutState()
+            return 0
+        }
+
         return maxOf(0, lockoutUntil - SystemClock.elapsedRealtime())
     }
 
@@ -180,7 +208,9 @@ class PinStore(context: Context) {
             val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
             val lockoutDuration = LOCKOUT_DURATIONS_MS[currentLevel.coerceIn(0, LOCKOUT_DURATIONS_MS.size - 1)]
             val newLevel = (currentLevel + 1).coerceAtMost(LOCKOUT_DURATIONS_MS.size - 1)
-            editor.putLong(KEY_LOCKOUT_UNTIL, SystemClock.elapsedRealtime() + lockoutDuration)
+            val currentElapsed = SystemClock.elapsedRealtime()
+            editor.putLong(KEY_LOCKOUT_UNTIL, currentElapsed + lockoutDuration)
+            editor.putLong(KEY_LOCKOUT_SET_AT_ELAPSED, currentElapsed)
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
         }
@@ -193,6 +223,7 @@ class PinStore(context: Context) {
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putLong(KEY_LOCKOUT_UNTIL, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .commit()
     }
 
