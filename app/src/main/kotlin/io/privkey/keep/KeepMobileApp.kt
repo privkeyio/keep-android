@@ -104,7 +104,9 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNotifications() {
-        signingNotificationManager = SigningNotificationManager(this)
+        val manager = SigningNotificationManager(this)
+        signingNotificationManager = manager
+        applicationScope.launch { manager.cleanupStaleEntries() }
     }
 
     fun getKeepMobile(): KeepMobile? = keepMobile
