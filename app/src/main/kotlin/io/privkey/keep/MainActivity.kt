@@ -26,19 +26,20 @@ import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.nip55.SignPolicyScreen
-import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.RelayConfigStore
+import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.PeerInfo
+import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.PeerInfo
-import io.privkey.keep.uniffi.ShareInfo
 import javax.crypto.Cipher
 
 class MainActivity : FragmentActivity() {
@@ -54,7 +55,17 @@ class MainActivity : FragmentActivity() {
         val killSwitchStore = app.getKillSwitchStore()
         val signPolicyStore = app.getSignPolicyStore()
         val autoStartStore = app.getAutoStartStore()
+        val foregroundServiceStore = app.getForegroundServiceStore()
         val permissionStore = app.getPermissionStore()
+
+        val allDependenciesAvailable = keepMobile != null &&
+            storage != null &&
+            relayConfigStore != null &&
+            killSwitchStore != null &&
+            signPolicyStore != null &&
+            autoStartStore != null &&
+            foregroundServiceStore != null &&
+            permissionStore != null
 
         setContent {
             KeepAndroidTheme {
@@ -62,15 +73,16 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (keepMobile != null && storage != null && relayConfigStore != null && killSwitchStore != null && signPolicyStore != null && autoStartStore != null && permissionStore != null) {
+                    if (allDependenciesAvailable) {
                         MainScreen(
-                            keepMobile = keepMobile,
-                            storage = storage,
-                            relayConfigStore = relayConfigStore,
-                            killSwitchStore = killSwitchStore,
-                            signPolicyStore = signPolicyStore,
-                            autoStartStore = autoStartStore,
-                            permissionStore = permissionStore,
+                            keepMobile = keepMobile!!,
+                            storage = storage!!,
+                            relayConfigStore = relayConfigStore!!,
+                            killSwitchStore = killSwitchStore!!,
+                            signPolicyStore = signPolicyStore!!,
+                            autoStartStore = autoStartStore!!,
+                            foregroundServiceStore = foregroundServiceStore!!,
+                            permissionStore = permissionStore!!,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
@@ -109,6 +121,9 @@ class MainActivity : FragmentActivity() {
                             },
                             onAutoStartChanged = { enabled ->
                                 app.updateNetworkMonitoring(enabled)
+                            },
+                            onForegroundServiceChanged = { enabled ->
+                                app.updateForegroundService(enabled)
                             }
                         )
                     } else {
@@ -129,13 +144,15 @@ fun MainScreen(
     killSwitchStore: KillSwitchStore,
     signPolicyStore: SignPolicyStore,
     autoStartStore: AutoStartStore,
+    foregroundServiceStore: ForegroundServiceStore,
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     onBiometricAuth: (suspend () -> Boolean)? = null,
-    onAutoStartChanged: (Boolean) -> Unit = {}
+    onAutoStartChanged: (Boolean) -> Unit = {},
+    onForegroundServiceChanged: (Boolean) -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -152,6 +169,7 @@ fun MainScreen(
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
+    var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
@@ -400,6 +418,19 @@ fun MainScreen(
                     withContext(Dispatchers.IO) { autoStartStore.setEnabled(newValue) }
                     autoStartEnabled = newValue
                     onAutoStartChanged(newValue)
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        ForegroundServiceCard(
+            enabled = foregroundServiceEnabled,
+            onToggle = { newValue ->
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) { foregroundServiceStore.setEnabled(newValue) }
+                    foregroundServiceEnabled = newValue
+                    onForegroundServiceChanged(newValue)
                 }
             }
         )
@@ -727,6 +758,27 @@ private fun AutoStartCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 Text("Auto-start", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Reconnect relays on boot and network changes",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onToggle)
+        }
+    }
+}
+
+@Composable
+private fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Background Service", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Keep relay connections alive persistently",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
