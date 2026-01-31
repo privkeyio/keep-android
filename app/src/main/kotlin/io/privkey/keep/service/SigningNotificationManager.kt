@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import io.privkey.keep.R
 import io.privkey.keep.nip55.headerTitle
 import io.privkey.keep.uniffi.Nip55RequestType
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -84,7 +85,7 @@ class SigningNotificationManager(private val context: Context) {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(requestType.headerTitle())
-            .setContentText("Request from $callerLabel")
+            .setContentText(context.getString(R.string.notification_request_from, callerLabel))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
@@ -110,7 +111,7 @@ class SigningNotificationManager(private val context: Context) {
     }
 
     private fun generateRequestId(): String {
-        return "generated-${System.nanoTime()}"
+        return UUID.randomUUID().toString()
     }
 
     private fun hasNotificationPermission(): Boolean {
