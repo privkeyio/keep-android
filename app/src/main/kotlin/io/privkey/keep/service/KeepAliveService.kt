@@ -43,8 +43,7 @@ class KeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val foregroundServiceStore = ForegroundServiceStore(this)
-        if (!foregroundServiceStore.isEnabled()) {
+        if (!ForegroundServiceStore(this).isEnabled()) {
             stopSelf()
             return START_NOT_STICKY
         }

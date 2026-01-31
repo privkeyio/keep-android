@@ -75,9 +75,9 @@ class KeepMobileApp : Application() {
     private fun initializeNetworkMonitoring() {
         val autoStartEnabled = autoStartStore?.isEnabled() == true
         val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
-        if (!autoStartEnabled || foregroundServiceEnabled) return
-
-        ensureNetworkManagerRegistered()
+        if (autoStartEnabled && !foregroundServiceEnabled) {
+            ensureNetworkManagerRegistered()
+        }
     }
 
     private fun initializeForegroundService() {

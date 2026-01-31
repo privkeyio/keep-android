@@ -10,12 +10,9 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         val app = context.applicationContext as? KeepMobileApp ?: return
 
-        if (app.getForegroundServiceStore()?.isEnabled() == true) {
-            KeepAliveService.start(context)
-            return
+        when {
+            app.getForegroundServiceStore()?.isEnabled() == true -> KeepAliveService.start(context)
+            app.getAutoStartStore()?.isEnabled() == true -> app.reconnectRelays()
         }
-
-        if (app.getAutoStartStore()?.isEnabled() != true) return
-        app.reconnectRelays()
     }
 }
