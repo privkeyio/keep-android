@@ -75,6 +75,20 @@ class MainActivity : FragmentActivity() {
             var isPinUnlocked by remember {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
+
+            // Re-check session validity on resume to re-lock UI when session times out
+            androidx.compose.runtime.DisposableEffect(pinStore) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        isPinUnlocked = pinStore?.isSessionValid() ?: true
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycle.removeObserver(observer)
+                }
+            }
+
             KeepAndroidTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

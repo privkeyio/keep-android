@@ -34,6 +34,7 @@ fun PinUnlockScreen(
             lockoutRemaining = pinStore.getLockoutRemainingMs()
             if (lockoutRemaining <= 0) {
                 isLockedOut = false
+                error = null  // Clear stale "Too many attempts" error when lockout ends
             }
             delay(1000)
         }

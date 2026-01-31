@@ -63,6 +63,8 @@ class PinStore(context: Context) {
     fun isPinEnabled(): Boolean = prefs.getBoolean(KEY_PIN_ENABLED, false)
 
     fun isWeakPin(pin: String): Boolean {
+        // Non-digit PINs are treated as weak/invalid to avoid digitToInt() exceptions
+        if (!pin.all { it.isDigit() }) return true
         if (WEAK_PINS.contains(pin)) return true
         if (pin.length >= 3 && pin.all { it == pin[0] }) return true
         val digits = pin.map { it.digitToInt() }
@@ -152,7 +154,7 @@ class PinStore(context: Context) {
 
     fun isLockedOut(): Boolean {
         val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
-        if (System.currentTimeMillis() >= lockoutUntil) {
+        if (SystemClock.elapsedRealtime() >= lockoutUntil) {
             if (lockoutUntil > 0) {
                 prefs.edit().putLong(KEY_LOCKOUT_UNTIL, 0).commit()
             }
@@ -163,7 +165,7 @@ class PinStore(context: Context) {
 
     fun getLockoutRemainingMs(): Long {
         val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
-        return maxOf(0, lockoutUntil - System.currentTimeMillis())
+        return maxOf(0, lockoutUntil - SystemClock.elapsedRealtime())
     }
 
     fun getFailedAttempts(): Int = prefs.getInt(KEY_FAILED_ATTEMPTS, 0)
@@ -178,7 +180,7 @@ class PinStore(context: Context) {
             val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
             val lockoutDuration = LOCKOUT_DURATIONS_MS[currentLevel.coerceIn(0, LOCKOUT_DURATIONS_MS.size - 1)]
             val newLevel = (currentLevel + 1).coerceAtMost(LOCKOUT_DURATIONS_MS.size - 1)
-            editor.putLong(KEY_LOCKOUT_UNTIL, System.currentTimeMillis() + lockoutDuration)
+            editor.putLong(KEY_LOCKOUT_UNTIL, SystemClock.elapsedRealtime() + lockoutDuration)
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
         }
