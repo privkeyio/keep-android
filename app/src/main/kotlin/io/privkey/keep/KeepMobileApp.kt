@@ -10,6 +10,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
@@ -29,6 +30,7 @@ class KeepMobileApp : Application() {
     private var signPolicyStore: SignPolicyStore? = null
     private var autoStartStore: AutoStartStore? = null
     private var foregroundServiceStore: ForegroundServiceStore? = null
+    private var pinStore: PinStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var networkManager: NetworkConnectivityManager? = null
@@ -50,6 +52,7 @@ class KeepMobileApp : Application() {
             val newSignPolicy = SignPolicyStore(this)
             val newAutoStart = AutoStartStore(this)
             val newForegroundService = ForegroundServiceStore(this)
+            val newPinStore = PinStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
@@ -57,6 +60,7 @@ class KeepMobileApp : Application() {
             signPolicyStore = newSignPolicy
             autoStartStore = newAutoStart
             foregroundServiceStore = newForegroundService
+            pinStore = newPinStore
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
 
@@ -109,6 +113,8 @@ class KeepMobileApp : Application() {
     fun getAutoStartStore(): AutoStartStore? = autoStartStore
 
     fun getForegroundServiceStore(): ForegroundServiceStore? = foregroundServiceStore
+
+    fun getPinStore(): PinStore? = pinStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 

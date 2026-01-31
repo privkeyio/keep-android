@@ -30,6 +30,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -57,6 +58,7 @@ class MainActivity : FragmentActivity() {
         val signPolicyStore = app.getSignPolicyStore()
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
+        val pinStore = app.getPinStore()
         val permissionStore = app.getPermissionStore()
 
         val allDependenciesAvailable = keepMobile != null &&
@@ -66,15 +68,24 @@ class MainActivity : FragmentActivity() {
             signPolicyStore != null &&
             autoStartStore != null &&
             foregroundServiceStore != null &&
+            pinStore != null &&
             permissionStore != null
 
         setContent {
+            var isPinUnlocked by remember {
+                mutableStateOf(pinStore?.isSessionValid() ?: true)
+            }
             KeepAndroidTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (allDependenciesAvailable) {
+                    if (pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked) {
+                        PinUnlockScreen(
+                            pinStore = pinStore,
+                            onUnlocked = { isPinUnlocked = true }
+                        )
+                    } else if (allDependenciesAvailable) {
                         MainScreen(
                             keepMobile = keepMobile!!,
                             storage = storage!!,
@@ -83,6 +94,7 @@ class MainActivity : FragmentActivity() {
                             signPolicyStore = signPolicyStore!!,
                             autoStartStore = autoStartStore!!,
                             foregroundServiceStore = foregroundServiceStore!!,
+                            pinStore = pinStore!!,
                             permissionStore = permissionStore!!,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -146,6 +158,7 @@ fun MainScreen(
     signPolicyStore: SignPolicyStore,
     autoStartStore: AutoStartStore,
     foregroundServiceStore: ForegroundServiceStore,
+    pinStore: PinStore,
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -174,6 +187,8 @@ fun MainScreen(
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
+    var showPinSetup by remember { mutableStateOf(false) }
+    var pinEnabled by remember { mutableStateOf(pinStore.isPinEnabled()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -187,6 +202,18 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    if (showPinSetup) {
+        PinSetupScreen(
+            pinStore = pinStore,
+            onPinSet = {
+                pinEnabled = true
+                showPinSetup = false
+            },
+            onDismiss = { showPinSetup = false }
+        )
+        return
     }
 
     if (showSignPolicyScreen) {
@@ -432,6 +459,73 @@ fun MainScreen(
                     withContext(Dispatchers.IO) { foregroundServiceStore.setEnabled(newValue) }
                     foregroundServiceEnabled = newValue
                     onForegroundServiceChanged(newValue)
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        PinSettingsCard(
+            enabled = pinEnabled,
+            onSetupPin = { showPinSetup = true },
+            onDisablePin = {
+                pinStore.disablePin()
+                pinEnabled = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun PinSettingsCard(
+    enabled: Boolean,
+    onSetupPin: () -> Unit,
+    onDisablePin: () -> Unit
+) {
+    var showDisableDialog by remember { mutableStateOf(false) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("PIN Protection", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (enabled) "PIN is enabled" else "Secure app with PIN",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (enabled) {
+                TextButton(onClick = { showDisableDialog = true }) {
+                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                TextButton(onClick = onSetupPin) {
+                    Text("Set Up")
+                }
+            }
+        }
+    }
+
+    if (showDisableDialog) {
+        AlertDialog(
+            onDismissRequest = { showDisableDialog = false },
+            title = { Text("Disable PIN?") },
+            text = { Text("This will remove PIN protection from the app.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDisablePin()
+                    showDisableDialog = false
+                }) {
+                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisableDialog = false }) {
+                    Text("Cancel")
                 }
             }
         )
