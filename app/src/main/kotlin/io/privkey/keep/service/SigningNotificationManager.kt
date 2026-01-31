@@ -68,6 +68,17 @@ class SigningNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val deleteIntent = Intent(context, SigningNotificationReceiver::class.java).apply {
+            action = ACTION_DISMISS_REQUEST
+            putExtra(EXTRA_REQUEST_ID, effectiveRequestId)
+        }
+        val deletePendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId + DISMISS_REQUEST_CODE_OFFSET,
+            deleteIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(requestType.headerTitle())
@@ -76,6 +87,7 @@ class SigningNotificationManager(private val context: Context) {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(deletePendingIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
 
@@ -91,6 +103,7 @@ class SigningNotificationManager(private val context: Context) {
     }
 
     fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
+        requestIdToNotificationId.remove(requestId)
         return pendingRequestData.remove(requestId)
     }
 
@@ -116,13 +129,35 @@ class SigningNotificationManager(private val context: Context) {
 
     data class PendingRequestInfo(
         val intentUri: String,
-        val originalRequestId: String?
+        val originalRequestId: String?,
+        val createdAt: Long = System.currentTimeMillis()
     )
+
+    fun removeRequest(requestId: String) {
+        requestIdToNotificationId.remove(requestId)
+        pendingRequestData.remove(requestId)
+    }
+
+    fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
+        val now = System.currentTimeMillis()
+        val staleRequestIds = pendingRequestData.entries
+            .filter { now - it.value.createdAt > maxAgeMillis }
+            .map { it.key }
+
+        staleRequestIds.forEach { requestId ->
+            val notificationId = requestIdToNotificationId.remove(requestId)
+            pendingRequestData.remove(requestId)
+            notificationId?.let { notificationManager.cancel(it) }
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "signing_requests"
         const val ACTION_OPEN_SIGNING_REQUEST = "io.privkey.keep.action.OPEN_SIGNING_REQUEST"
+        const val ACTION_DISMISS_REQUEST = "io.privkey.keep.action.DISMISS_REQUEST"
         const val EXTRA_REQUEST_ID = "extra_request_id"
         private const val NOTIFICATION_ID_START = 1000
+        private const val DISMISS_REQUEST_CODE_OFFSET = 100000
+        private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
     }
 }
