@@ -26,11 +26,13 @@ class PinStore(context: Context) {
         private const val KEY_LOCKOUT_SET_AT_ELAPSED = "lockout_set_at_elapsed"
         private const val KEY_LOCKOUT_WALL_CLOCK = "lockout_wall_clock"
         private const val KEY_LOCKOUT_DURATION = "lockout_duration"
+        private const val KEY_SESSION_TIMEOUT = "session_timeout"
 
         const val MIN_PIN_LENGTH = 4
         const val MAX_PIN_LENGTH = 8
         const val MAX_FAILED_ATTEMPTS = 5
-        const val SESSION_TIMEOUT_MS = 5 * 60_000L // 5 minutes
+        const val DEFAULT_SESSION_TIMEOUT_MS = 300_000L
+        val SESSION_TIMEOUT_OPTIONS_MS = longArrayOf(0L, 60_000L, 300_000L, 600_000L)
         private const val PBKDF2_ITERATIONS = 120_000
         private const val PBKDF2_KEY_LENGTH = 256
 
@@ -161,8 +163,19 @@ class PinStore(context: Context) {
         if (!isPinEnabled()) return true
         val sessionStartedAt = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
         if (sessionStartedAt == 0L) return false
+        val timeout = getSessionTimeout()
+        if (timeout == 0L) return false
         val elapsed = SystemClock.elapsedRealtime() - sessionStartedAt
-        return elapsed in 0..SESSION_TIMEOUT_MS
+        return elapsed in 0..timeout
+    }
+
+    @Synchronized
+    fun getSessionTimeout(): Long = prefs.getLong(KEY_SESSION_TIMEOUT, DEFAULT_SESSION_TIMEOUT_MS)
+
+    @Synchronized
+    fun setSessionTimeout(timeoutMs: Long): Boolean {
+        if (timeoutMs !in SESSION_TIMEOUT_OPTIONS_MS) return false
+        return prefs.edit().putLong(KEY_SESSION_TIMEOUT, timeoutMs).commit()
     }
 
     @Synchronized
@@ -180,39 +193,39 @@ class PinStore(context: Context) {
     }
 
     @Synchronized
-    fun isLockedOut(): Boolean {
+    fun isLockedOut(): Boolean = getLockoutRemainingMs() > 0
+
+    @Synchronized
+    fun getLockoutRemainingMs(): Long {
         val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val lockoutDuration = prefs.getLong(KEY_LOCKOUT_DURATION, 0)
 
-        if (lockoutWallClock == 0L || lockoutDuration == 0L) {
-            val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
-            if (lockoutUntil == 0L) return false
-
-            val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-            if (savedSetElapsed == 0L) {
+        if (lockoutWallClock != 0L && lockoutDuration != 0L) {
+            val remaining = lockoutWallClock + lockoutDuration - System.currentTimeMillis()
+            if (remaining <= 0) {
                 clearLockoutTimestamps()
-                return false
+                return 0
             }
-
-            if (SystemClock.elapsedRealtime() < savedSetElapsed) {
-                clearLockoutTimestamps()
-                return false
-            }
-
-            if (SystemClock.elapsedRealtime() >= lockoutUntil) {
-                clearLockoutTimestamps()
-                return false
-            }
-            return true
+            return remaining
         }
 
-        val now = System.currentTimeMillis()
-        val lockoutEndWall = lockoutWallClock + lockoutDuration
-        if (now >= lockoutEndWall) {
+        val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
+        if (lockoutUntil == 0L) return 0
+
+        val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+        val currentElapsed = SystemClock.elapsedRealtime()
+
+        if (savedSetElapsed == 0L || currentElapsed < savedSetElapsed) {
             clearLockoutTimestamps()
-            return false
+            return 0
         }
-        return true
+
+        val remaining = lockoutUntil - currentElapsed
+        if (remaining <= 0) {
+            clearLockoutTimestamps()
+            return 0
+        }
+        return remaining
     }
 
     private fun clearLockoutTimestamps() {
@@ -222,49 +235,6 @@ class PinStore(context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .commit()
-    }
-
-    private fun clearLockoutState() {
-        prefs.edit()
-            .putLong(KEY_LOCKOUT_UNTIL, 0)
-            .putInt(KEY_FAILED_ATTEMPTS, 0)
-            .putInt(KEY_LOCKOUT_LEVEL, 0)
-            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-            .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
-            .putLong(KEY_LOCKOUT_DURATION, 0)
-            .commit()
-    }
-
-    @Synchronized
-    fun getLockoutRemainingMs(): Long {
-        val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
-        val lockoutDuration = prefs.getLong(KEY_LOCKOUT_DURATION, 0)
-
-        if (lockoutWallClock != 0L && lockoutDuration != 0L) {
-            val now = System.currentTimeMillis()
-            val lockoutEndWall = lockoutWallClock + lockoutDuration
-            if (now >= lockoutEndWall) {
-                clearLockoutTimestamps()
-                return 0
-            }
-            return lockoutEndWall - now
-        }
-
-        val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
-        if (lockoutUntil == 0L) return 0
-
-        val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-        if (savedSetElapsed == 0L) {
-            clearLockoutTimestamps()
-            return 0
-        }
-
-        if (SystemClock.elapsedRealtime() < savedSetElapsed) {
-            clearLockoutTimestamps()
-            return 0
-        }
-
-        return maxOf(0, lockoutUntil - SystemClock.elapsedRealtime())
     }
 
     @Synchronized
@@ -295,13 +265,10 @@ class PinStore(context: Context) {
     }
 
     private fun clearFailedAttempts() {
+        clearLockoutTimestamps()
         prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
-            .putLong(KEY_LOCKOUT_UNTIL, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
-            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-            .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
-            .putLong(KEY_LOCKOUT_DURATION, 0)
             .commit()
     }
 

@@ -70,8 +70,7 @@ class Nip55ContentProvider : ContentProvider() {
         if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
-        val pinStore = currentApp.getPinStore()
-        if (pinStore != null && pinStore.requiresAuthentication()) {
+        if (currentApp.getPinStore()?.requiresAuthentication() == true) {
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
         val h = currentApp.getNip55Handler() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
@@ -105,14 +104,12 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val effectivePolicy = runBlocking {
-            withTimeoutOrNull(OPERATION_TIMEOUT_MS) {
-                store.getAppSignPolicyOverride(callerPackage)
-                    ?.let { SignPolicy.fromOrdinal(it) }
-                    ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
-                    ?: SignPolicy.MANUAL
-            } ?: SignPolicy.MANUAL
-        }
+        val effectivePolicy = runWithTimeout {
+            store.getAppSignPolicyOverride(callerPackage)
+                ?.let { SignPolicy.fromOrdinal(it) }
+                ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
+                ?: SignPolicy.MANUAL
+        } ?: SignPolicy.MANUAL
 
         if (effectivePolicy == SignPolicy.MANUAL) return null
 

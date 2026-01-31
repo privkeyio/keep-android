@@ -49,17 +49,10 @@ fun PinSetupScreen(
             confirmPinInput = ""
             return false
         }
-        if (pinStore.isWeakPin(pinInput)) {
-            error = "PIN is too simple"
-            step = SetupStep.ENTER_PIN
-            pinInput = ""
-            confirmPinInput = ""
-            return false
-        }
-        val result = pinStore.setPin(pinInput)
+        val success = pinStore.setPin(pinInput)
         pinInput = ""
         confirmPinInput = ""
-        if (result) {
+        if (success) {
             onPinSet()
             return true
         }

@@ -72,9 +72,7 @@ class Nip55Activity : FragmentActivity() {
 
     private fun handleIntent(intent: Intent) {
         if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
-
-        val ps = pinStore
-        if (ps != null && ps.requiresAuthentication()) return finishWithError("locked")
+        if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
 
         identifyCaller()
         if (callerPackage == null) {
@@ -172,9 +170,7 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                if (store != null) {
-                    store.grantPermission(callerId, req.requestType, eventKind, duration)
-                }
+                store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
                 withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
                     .onSuccess { response ->
