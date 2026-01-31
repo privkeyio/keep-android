@@ -104,9 +104,13 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNotifications() {
-        val manager = SigningNotificationManager(this)
-        signingNotificationManager = manager
-        applicationScope.launch { manager.cleanupStaleEntries() }
+        try {
+            val manager = SigningNotificationManager(this)
+            signingNotificationManager = manager
+            applicationScope.launch { manager.cleanupStaleEntries() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
+        }
     }
 
     fun getKeepMobile(): KeepMobile? = keepMobile
