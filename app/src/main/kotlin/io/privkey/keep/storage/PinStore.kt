@@ -85,7 +85,7 @@ class PinStore(context: Context) {
         val salt = generateSalt()
         val hash = hashPin(pin, salt)
 
-        prefs.edit()
+        return prefs.edit()
             .putString(KEY_PIN_HASH, hash)
             .putString(KEY_PIN_SALT, salt)
             .putBoolean(KEY_PIN_ENABLED, true)
@@ -94,8 +94,6 @@ class PinStore(context: Context) {
             .putInt(KEY_LOCKOUT_LEVEL, 0)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .commit()
-
-        return true
     }
 
     fun verifyPin(pin: String): Boolean {
@@ -121,7 +119,7 @@ class PinStore(context: Context) {
 
     fun disablePin(currentPin: String): Boolean {
         if (!verifyPin(currentPin)) return false
-        prefs.edit()
+        return prefs.edit()
             .remove(KEY_PIN_HASH)
             .remove(KEY_PIN_SALT)
             .putBoolean(KEY_PIN_ENABLED, false)
@@ -132,7 +130,6 @@ class PinStore(context: Context) {
             .putInt(KEY_LOCKOUT_LEVEL, 0)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .commit()
-        return true
     }
 
     fun isSessionValid(): Boolean {
@@ -160,6 +157,13 @@ class PinStore(context: Context) {
         if (lockoutUntil == 0L) return false
 
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+
+        // Legacy/stale state: lockoutUntil set but no savedSetElapsed timestamp
+        if (savedSetElapsed == 0L) {
+            clearLockoutState()
+            return false
+        }
+
         if (SystemClock.elapsedRealtime() < savedSetElapsed) {
             // Reboot detected: elapsedRealtime reset, clear stale lockout state
             clearLockoutState()
@@ -187,6 +191,13 @@ class PinStore(context: Context) {
         if (lockoutUntil == 0L) return 0
 
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+
+        // Legacy/stale state: lockoutUntil set but no savedSetElapsed timestamp
+        if (savedSetElapsed == 0L) {
+            clearLockoutState()
+            return 0
+        }
+
         if (SystemClock.elapsedRealtime() < savedSetElapsed) {
             // Reboot detected: elapsedRealtime reset, clear stale lockout state
             clearLockoutState()
