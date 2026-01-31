@@ -16,6 +16,7 @@ import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.PinStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
@@ -32,6 +33,7 @@ class Nip55Activity : FragmentActivity() {
     private var storage: AndroidKeystoreStorage? = null
     private var permissionStore: PermissionStore? = null
     private var killSwitchStore: KillSwitchStore? = null
+    private var pinStore: PinStore? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
@@ -51,6 +53,7 @@ class Nip55Activity : FragmentActivity() {
         storage = app?.getStorage()
         permissionStore = app?.getPermissionStore()
         killSwitchStore = app?.getKillSwitchStore()
+        pinStore = app?.getPinStore()
         handleIntent(intent)
     }
 
@@ -70,6 +73,10 @@ class Nip55Activity : FragmentActivity() {
     private fun handleIntent(intent: Intent) {
         if (killSwitchStore?.isEnabled() == true) {
             return finishWithError("signing_disabled")
+        }
+        val ps = pinStore
+        if (ps != null && ps.isPinEnabled() && !ps.isSessionValid()) {
+            return finishWithError("locked")
         }
         identifyCaller()
         if (callerPackage == null) {

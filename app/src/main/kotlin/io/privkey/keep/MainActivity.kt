@@ -468,9 +468,13 @@ fun MainScreen(
         PinSettingsCard(
             enabled = pinEnabled,
             onSetupPin = { showPinSetup = true },
-            onDisablePin = {
-                pinStore.disablePin()
-                pinEnabled = false
+            onDisablePin = { currentPin ->
+                if (pinStore.disablePin(currentPin)) {
+                    pinEnabled = false
+                    true
+                } else {
+                    false
+                }
             }
         )
     }
@@ -480,9 +484,11 @@ fun MainScreen(
 private fun PinSettingsCard(
     enabled: Boolean,
     onSetupPin: () -> Unit,
-    onDisablePin: () -> Unit
+    onDisablePin: (String) -> Boolean
 ) {
     var showDisableDialog by remember { mutableStateOf(false) }
+    var pinInput by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -512,19 +518,66 @@ private fun PinSettingsCard(
 
     if (showDisableDialog) {
         AlertDialog(
-            onDismissRequest = { showDisableDialog = false },
+            onDismissRequest = {
+                showDisableDialog = false
+                pinInput = ""
+                error = null
+            },
             title = { Text("Disable PIN?") },
-            text = { Text("This will remove PIN protection from the app.") },
+            text = {
+                Column {
+                    Text("Enter your current PIN to disable protection.")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { newValue ->
+                            if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
+                                pinInput = newValue
+                                error = null
+                            }
+                        },
+                        label = { Text("Current PIN") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                        ),
+                        isError = error != null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    error?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    onDisablePin()
-                    showDisableDialog = false
-                }) {
+                TextButton(
+                    onClick = {
+                        if (onDisablePin(pinInput)) {
+                            showDisableDialog = false
+                            pinInput = ""
+                            error = null
+                        } else {
+                            error = "Incorrect PIN"
+                            pinInput = ""
+                        }
+                    },
+                    enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
+                ) {
                     Text("Disable", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDisableDialog = false }) {
+                TextButton(onClick = {
+                    showDisableDialog = false
+                    pinInput = ""
+                    error = null
+                }) {
                     Text("Cancel")
                 }
             }

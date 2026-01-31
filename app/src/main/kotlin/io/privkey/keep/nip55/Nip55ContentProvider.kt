@@ -69,6 +69,10 @@ class Nip55ContentProvider : ContentProvider() {
         if (app?.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
+        val pinStore = app?.getPinStore()
+        if (pinStore != null && pinStore.isPinEnabled() && !pinStore.isSessionValid()) {
+            return errorCursor("locked", null)
+        }
         val h = app?.getNip55Handler() ?: return errorCursor("not_initialized", null)
         val store = app?.getPermissionStore()
 

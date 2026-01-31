@@ -80,8 +80,10 @@ fun PinSetupScreen(
                         ),
                         keyboardActions = KeyboardActions(
                             onNext = {
-                                if (pin.length >= PinStore.MIN_PIN_LENGTH) {
+                                if (pin.length >= PinStore.MIN_PIN_LENGTH && !pinStore.isWeakPin(pin)) {
                                     step = SetupStep.CONFIRM_PIN
+                                } else if (pinStore.isWeakPin(pin)) {
+                                    error = "PIN is too simple. Avoid patterns like 1234 or 0000."
                                 }
                             }
                         ),
@@ -106,6 +108,8 @@ fun PinSetupScreen(
                         onClick = {
                             if (pin.length < PinStore.MIN_PIN_LENGTH) {
                                 error = "PIN must be at least ${PinStore.MIN_PIN_LENGTH} digits"
+                            } else if (pinStore.isWeakPin(pin)) {
+                                error = "PIN is too simple. Avoid patterns like 1234 or 0000."
                             } else {
                                 step = SetupStep.CONFIRM_PIN
                             }
@@ -143,7 +147,12 @@ fun PinSetupScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 if (confirmPin == pin) {
-                                    if (pinStore.setPin(pin)) {
+                                    if (pinStore.isWeakPin(pin)) {
+                                        error = "PIN is too simple"
+                                        step = SetupStep.ENTER_PIN
+                                        pin = ""
+                                        confirmPin = ""
+                                    } else if (pinStore.setPin(pin)) {
                                         onPinSet()
                                     } else {
                                         error = "Failed to set PIN"
@@ -190,6 +199,11 @@ fun PinSetupScreen(
                             onClick = {
                                 if (confirmPin != pin) {
                                     error = "PINs don't match"
+                                    confirmPin = ""
+                                } else if (pinStore.isWeakPin(pin)) {
+                                    error = "PIN is too simple"
+                                    step = SetupStep.ENTER_PIN
+                                    pin = ""
                                     confirmPin = ""
                                 } else if (pinStore.setPin(pin)) {
                                     onPinSet()
