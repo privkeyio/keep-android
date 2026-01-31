@@ -42,6 +42,7 @@ class Nip55Activity : FragmentActivity() {
     private var callerSignatureHash: String? = null
     private var notificationManager: SigningNotificationManager? = null
     private var intentUri: String? = null
+    private var notificationRequestId: String? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -126,7 +127,7 @@ class Nip55Activity : FragmentActivity() {
     private fun showNotification() {
         val req = request ?: return
         val uri = intentUri ?: return
-        notificationManager?.showSigningRequest(
+        notificationRequestId = notificationManager?.showSigningRequest(
             requestType = req.requestType,
             callerPackage = callerPackage,
             intentUri = uri,
@@ -263,7 +264,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithResult(response: Nip55Response) {
-        notificationManager?.cancelNotification(requestId)
+        notificationManager?.cancelNotification(notificationRequestId)
         val req = request
         val resultIntent = Intent().apply {
             putExtra("result", response.result)
@@ -279,7 +280,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithError(error: String) {
-        notificationManager?.cancelNotification(requestId)
+        notificationManager?.cancelNotification(notificationRequestId)
         val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
         Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
         val resultIntent = Intent().apply {

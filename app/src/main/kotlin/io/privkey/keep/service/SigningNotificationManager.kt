@@ -7,15 +7,19 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class SigningNotificationManager(private val context: Context) {
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID_START)
+    private val requestIdToNotificationId = ConcurrentHashMap<String, Int>()
+    private val pendingRequestData = ConcurrentHashMap<String, PendingRequestInfo>()
 
     init {
         createNotificationChannel()
@@ -40,19 +44,23 @@ class SigningNotificationManager(private val context: Context) {
         callerPackage: String?,
         intentUri: String,
         requestId: String?
-    ) {
-        if (!hasNotificationPermission()) return
+    ): String? {
+        if (!hasNotificationPermission()) return null
 
-        val notificationId = requestId?.hashCode() ?: System.currentTimeMillis().toInt()
+        val effectiveRequestId = requestId ?: generateRequestId()
+        val notificationId = notificationIdCounter.getAndIncrement()
+        requestIdToNotificationId[effectiveRequestId] = notificationId
+
+        pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+
         val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
 
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(intentUri)).apply {
-            setPackage(context.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            requestId?.let { putExtra("id", it) }
+        val intent = Intent(context, SigningNotificationReceiver::class.java).apply {
+            action = ACTION_OPEN_SIGNING_REQUEST
+            putExtra(EXTRA_REQUEST_ID, effectiveRequestId)
         }
 
-        val pendingIntent = PendingIntent.getActivity(
+        val pendingIntent = PendingIntent.getBroadcast(
             context,
             notificationId,
             intent,
@@ -71,11 +79,22 @@ class SigningNotificationManager(private val context: Context) {
             .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
+        return effectiveRequestId
     }
 
     fun cancelNotification(requestId: String?) {
-        val notificationId = requestId?.hashCode() ?: return
+        if (requestId == null) return
+        val notificationId = requestIdToNotificationId.remove(requestId) ?: return
+        pendingRequestData.remove(requestId)
         notificationManager.cancel(notificationId)
+    }
+
+    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
+        return pendingRequestData.remove(requestId)
+    }
+
+    private fun generateRequestId(): String {
+        return "generated-${System.nanoTime()}"
     }
 
     private fun hasNotificationPermission(): Boolean {
@@ -102,7 +121,15 @@ class SigningNotificationManager(private val context: Context) {
         Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
     }
 
+    data class PendingRequestInfo(
+        val intentUri: String,
+        val originalRequestId: String?
+    )
+
     companion object {
         const val CHANNEL_ID = "signing_requests"
+        const val ACTION_OPEN_SIGNING_REQUEST = "io.privkey.keep.action.OPEN_SIGNING_REQUEST"
+        const val EXTRA_REQUEST_ID = "extra_request_id"
+        private const val NOTIFICATION_ID_START = 1000
     }
 }
