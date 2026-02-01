@@ -2,6 +2,7 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -24,6 +25,7 @@ import javax.crypto.spec.GCMParameterSpec
 class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     companion object {
+        private const val TAG = "AndroidKeystoreStorage"
         private const val KEYSTORE_ALIAS = "keep_frost_share"
         private const val KEYSTORE_PREFIX = "keep_frost_"
         private const val PREFS_NAME = "keep_secure_prefs"
@@ -82,34 +84,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
     @Synchronized
-    private fun getOrCreateKey(): SecretKey {
-        if (!keyStore.containsAlias(KEYSTORE_ALIAS)) {
-            val keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                "AndroidKeyStore"
-            )
-
-            val builder = KeyGenParameterSpec.Builder(
-                KEYSTORE_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-                .setInvalidatedByBiometricEnrollment(true)
-
-            if (isStrongBoxAvailable()) {
-                builder.setIsStrongBoxBacked(true)
-            }
-
-            keyGenerator.init(builder.build())
-            keyGenerator.generateKey()
-        }
-
-        return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
-    }
+    private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS)
 
     private fun isStrongBoxAvailable(): Boolean {
         return try {
@@ -143,9 +118,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return initCipher(Cipher.DECRYPT_MODE, iv)
     }
 
-    private fun initCipher(mode: Int, ivBase64: String?): Cipher {
+    private fun initCipher(mode: Int, ivBase64: String?): Cipher =
+        initCipherWithKey(getOrCreateKey(), mode, ivBase64)
+
+    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher {
         try {
-            val key = getOrCreateKey()
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             if (ivBase64 != null) {
                 val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
@@ -197,17 +174,23 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     private fun saveShareData(encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
-        val saved = prefs.edit()
+        writeShareToPrefs(prefs, encrypted, iv, metadata)
+    }
+
+    private fun writeShareToPrefs(
+        sharePrefs: SharedPreferences,
+        encrypted: ByteArray,
+        iv: ByteArray,
+        metadata: ShareMetadataInfo
+    ) {
+        val saved = sharePrefs.edit()
             .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
             .putString(KEY_SHARE_NAME, metadata.name)
             .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
-            .putString(
-                KEY_SHARE_GROUP_PUBKEY,
-                Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
-            )
+            .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
             .commit()
         if (!saved) {
             throw KeepMobileException.StorageException("Failed to save share data")
@@ -221,27 +204,45 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return loadShareWithCipher(cipher)
     }
 
+    @Synchronized
     override fun hasShare(): Boolean {
-        return prefs.contains(KEY_SHARE_DATA)
+        if (prefs.contains(KEY_SHARE_DATA)) return true
+
+        val activeKey = getActiveShareKey()
+        if (activeKey != null && getSharePrefs(activeKey).contains(KEY_SHARE_DATA)) {
+            return true
+        }
+
+        val registryKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        val hasRegistryShares = registryKeys.isNotEmpty()
+
+        if (activeKey != null && !hasRegistryShares) {
+            multiSharePrefs.edit().remove(KEY_ACTIVE_SHARE).commit()
+        }
+
+        return hasRegistryShares
     }
 
     override fun getShareMetadata(): ShareMetadataInfo? {
-        if (!hasShare()) return null
-
-        return try {
-            val groupPubkeyB64 = prefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
-            val groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
-
-            ShareMetadataInfo(
-                name = prefs.getString(KEY_SHARE_NAME, "") ?: "",
-                identifier = prefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-                threshold = prefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-                totalShares = prefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
-                groupPubkey = groupPubkey
-            )
-        } catch (e: Exception) {
-            null
+        if (prefs.contains(KEY_SHARE_DATA)) {
+            return readMetadataFromPrefs(prefs)
         }
+        val activeKey = getActiveShareKey() ?: return null
+        return getShareMetadataByKey(activeKey)
+    }
+
+    private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
+        val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
+        ShareMetadataInfo(
+            name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
+            identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
+            threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
+            totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
+            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
+        )
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to parse stored key metadata", e)
+        null
     }
 
     override fun deleteShare() {
@@ -264,8 +265,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         if (keyStore.containsAlias(legacyAlias)) {
             return keyStore.getKey(legacyAlias, null) as SecretKey
         }
+        return getOrCreateKeyWithAlias(getKeystoreAlias(key))
+    }
 
-        val alias = getKeystoreAlias(key)
+    @Synchronized
+    private fun getOrCreateKeyWithAlias(alias: String): SecretKey {
         if (!keyStore.containsAlias(alias)) {
             val keyGenerator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES,
@@ -294,24 +298,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return keyStore.getKey(alias, null) as SecretKey
     }
 
-    private fun initCipherForShare(key: String, mode: Int, ivBase64: String?): Cipher {
-        try {
-            val secretKey = getOrCreateKeyForShare(key)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            if (ivBase64 != null) {
-                val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
-                cipher.init(mode, secretKey, spec)
-            } else {
-                cipher.init(mode, secretKey)
-            }
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
-        } catch (e: Throwable) {
-            val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
-            throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
-        }
-    }
+    private fun initCipherForShare(key: String, mode: Int, ivBase64: String?): Cipher =
+        initCipherWithKey(getOrCreateKeyForShare(key), mode, ivBase64)
 
     fun getCipherForShareEncryption(key: String): Cipher = initCipherForShare(key, Cipher.ENCRYPT_MODE, null)
 
@@ -343,26 +331,15 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     private fun saveShareDataByKey(key: String, encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
-        val sharePrefs = getSharePrefs(key)
-        val saved = sharePrefs.edit()
-            .putString(KEY_SHARE_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .putString(KEY_SHARE_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
-            .putString(KEY_SHARE_NAME, metadata.name)
-            .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
-            .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
-            .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
-            .putString(
-                KEY_SHARE_GROUP_PUBKEY,
-                Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP)
-            )
-            .commit()
-        if (!saved) {
-            throw KeepMobileException.StorageException("Failed to save share data")
-        }
+        writeShareToPrefs(getSharePrefs(key), encrypted, iv, metadata)
+        addKeyToRegistry(key)
+    }
 
+    private fun addKeyToRegistry(key: String) {
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        val updatedKeys = existingKeys + key
-        val registryUpdated = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys).commit()
+        val registryUpdated = multiSharePrefs.edit()
+            .putStringSet(KEY_ALL_SHARE_KEYS, existingKeys + key)
+            .commit()
         if (!registryUpdated) {
             throw KeepMobileException.StorageException("Failed to update share registry")
         }
@@ -383,29 +360,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun listAllShares(): List<ShareMetadataInfo> {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        return keys.mapNotNull { key ->
-            getShareMetadataByKey(key)
-        }
+        return keys.mapNotNull(::getShareMetadataByKey)
     }
 
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return null
-
-        return try {
-            val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
-            val groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
-
-            ShareMetadataInfo(
-                name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
-                identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-                threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-                totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
-                groupPubkey = groupPubkey
-            )
-        } catch (e: Exception) {
-            null
-        }
+        return readMetadataFromPrefs(sharePrefs)
     }
 
     override fun deleteShareByKey(key: String) {
