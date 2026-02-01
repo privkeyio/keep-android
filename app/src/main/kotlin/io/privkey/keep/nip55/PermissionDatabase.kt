@@ -790,12 +790,9 @@ private fun calculateEntryHash(
 ): String {
     val content = "$previousHash|$callerPackage|$requestType|$eventKind|$decision|$timestamp|$wasAutomatic"
     val hmacKey = Nip55Database.getHmacKey()
-    return if (hmacKey != null) {
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
-        val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
-        hashBytes.joinToString("") { "%02x".format(it) }
-    } else {
-        ""
-    }
+        ?: throw IllegalStateException("HMAC key not initialized - cannot compute audit entry hash")
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
+    val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
+    return hashBytes.joinToString("") { "%02x".format(it) }
 }
