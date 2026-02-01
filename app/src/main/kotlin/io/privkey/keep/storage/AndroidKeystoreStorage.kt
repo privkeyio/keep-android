@@ -221,6 +221,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return loadShareWithCipher(cipher)
     }
 
+    @Synchronized
     override fun hasShare(): Boolean {
         if (prefs.contains(KEY_SHARE_DATA)) return true
 
@@ -229,13 +230,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             return true
         }
 
-        // Check registry for any shares when active key is missing or stale
         val registryKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         val hasRegistryShares = registryKeys.isNotEmpty()
 
-        // Only clear stale active key when registry is empty
         if (activeKey != null && !hasRegistryShares) {
-            multiSharePrefs.edit().remove(KEY_ACTIVE_SHARE).apply()
+            multiSharePrefs.edit().remove(KEY_ACTIVE_SHARE).commit()
         }
 
         return hasRegistryShares

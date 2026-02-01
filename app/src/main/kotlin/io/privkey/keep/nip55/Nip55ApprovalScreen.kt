@@ -54,8 +54,12 @@ internal data class EventPreview(
 private val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
 private const val MAX_TAG_COUNT = 500
 private const val MAX_TAG_VALUE_LENGTH = 1024
+private const val MAX_CONTENT_LENGTH = 10_000
 
 private fun isValidHex64(value: String): Boolean = HEX_64_REGEX.matches(value)
+
+private fun sanitizeTTag(value: String): String =
+    value.filterNot { it.isISOControl() || it in '\u2000'..'\u200F' || it in '\u2028'..'\u202F' || it in '\uFFF0'..'\uFFFF' }
 
 internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
     val json = JSONObject(eventJson)
@@ -74,13 +78,13 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
         when (tag.optString(0)) {
             "p" -> if (isValidHex64(tagValue)) pTags.add(tagValue)
             "e" -> if (isValidHex64(tagValue)) eTags.add(tagValue)
-            "t" -> tTags.add(tagValue)
+            "t" -> sanitizeTTag(tagValue).takeIf { it.isNotEmpty() }?.let { tTags.add(it) }
         }
     }
 
     EventPreview(
         kind = kind,
-        content = json.optString("content", ""),
+        content = json.optString("content", "").take(MAX_CONTENT_LENGTH),
         pTags = pTags,
         eTags = eTags,
         tTags = tTags,
