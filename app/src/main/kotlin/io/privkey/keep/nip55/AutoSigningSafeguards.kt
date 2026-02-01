@@ -154,8 +154,8 @@ class AutoSigningSafeguards(context: Context) {
         now: Long,
         windowMs: Long
     ): Int {
-        val usage = map[packageName] ?: loadPersistedUsage(persistKeyPrefix, packageName)
-        return usage?.let { if (now - it.windowStart < windowMs) it.count else 0 } ?: 0
+        val usage = map[packageName] ?: loadPersistedUsage(persistKeyPrefix, packageName) ?: return 0
+        return if (now - usage.windowStart < windowMs) usage.count else 0
     }
 
     data class UsageStats(

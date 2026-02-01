@@ -280,9 +280,9 @@ class Nip55ContentProvider : ContentProvider() {
         if (BuildConfig.DEBUG) {
             val reason = when (result) {
                 is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval ->
-                    "First use requires approval (sig: ${result.signatureHash.take(8)}...)"
+                    "First use requires approval"
                 is CallerVerificationStore.VerificationResult.SignatureMismatch ->
-                    "Signature mismatch: expected ${result.expected.take(8)}..., got ${result.actual.take(8)}..."
+                    "Signature mismatch"
                 is CallerVerificationStore.VerificationResult.NotInstalled ->
                     "Package not installed"
                 is CallerVerificationStore.VerificationResult.Verified -> error("unreachable")

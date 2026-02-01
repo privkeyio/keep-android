@@ -101,19 +101,20 @@ class Nip55Activity : FragmentActivity() {
 
         val nonce = intent.getStringExtra("nip55_nonce")
         if (nonce != null && verificationStore != null) {
-            val nonceResult = verificationStore.consumeNonce(nonce)
-            if (nonceResult is CallerVerificationStore.NonceResult.Valid) {
-                val result = verificationStore.verifyOrTrust(nonceResult.packageName)
-                if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
-                    clearCallerState()
-                } else {
-                    isNotificationOriginated = true
-                    applyVerificationResult(nonceResult.packageName, result)
+            when (val nonceResult = verificationStore.consumeNonce(nonce)) {
+                is CallerVerificationStore.NonceResult.Valid -> {
+                    val result = verificationStore.verifyOrTrust(nonceResult.packageName)
+                    if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
+                        clearCallerState()
+                    } else {
+                        isNotificationOriginated = true
+                        applyVerificationResult(nonceResult.packageName, result)
+                    }
+                    return
                 }
-                return
+                else -> if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
             }
-            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
         }
 
         val directCallerPackage = callingActivity?.packageName
@@ -212,8 +213,9 @@ class Nip55Activity : FragmentActivity() {
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         if (callerPendingFirstUse && callerSignatureHash != null) {
-            if (callerVerificationStore != null) {
-                callerVerificationStore?.trustPackage(callerId, callerSignatureHash!!)
+            val verificationStore = callerVerificationStore
+            if (verificationStore != null) {
+                verificationStore.trustPackage(callerId, callerSignatureHash!!)
                 callerPendingFirstUse = false
                 callerVerified = true
             } else {

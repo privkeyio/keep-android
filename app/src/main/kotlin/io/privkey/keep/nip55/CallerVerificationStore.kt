@@ -86,8 +86,7 @@ class CallerVerificationStore(context: Context) {
     fun consumeNonce(nonce: String): NonceResult {
         val value = synchronized(nonceLock) {
             val v = prefs.getString(KEY_PREFIX_NONCE + nonce, null) ?: return NonceResult.Invalid
-            val removed = prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()
-            if (!removed) return NonceResult.Invalid
+            if (!prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()) return NonceResult.Invalid
             v
         }
 
@@ -97,11 +96,7 @@ class CallerVerificationStore(context: Context) {
         val packageName = value.substring(0, separatorIndex)
         val expiresAt = value.substring(separatorIndex + 1).toLongOrNull() ?: return NonceResult.Invalid
 
-        if (System.currentTimeMillis() > expiresAt) {
-            return NonceResult.Expired
-        }
-
-        return NonceResult.Valid(packageName)
+        return if (System.currentTimeMillis() > expiresAt) NonceResult.Expired else NonceResult.Valid(packageName)
     }
 
     fun cleanupExpiredNonces() {
@@ -110,10 +105,8 @@ class CallerVerificationStore(context: Context) {
         prefs.all.entries
             .filter { it.key.startsWith(KEY_PREFIX_NONCE) }
             .forEach { (key, value) ->
-                val expiresAt = (value as? String)?.split(":")?.getOrNull(1)?.toLongOrNull()
-                if (expiresAt != null && now > expiresAt) {
-                    editor.remove(key)
-                }
+                val expiresAt = (value as? String)?.substringAfterLast(':')?.toLongOrNull()
+                if (expiresAt != null && now > expiresAt) editor.remove(key)
             }
         editor.apply()
     }
