@@ -88,6 +88,9 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
 private fun formatPubkey(pubkey: String): String =
     if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey
 
+private fun pluralize(count: Int, singular: String, plural: String): String =
+    if (count == 1) "1 $singular" else "$count $plural"
+
 @Composable
 fun ApprovalScreen(
     request: Nip55Request,
@@ -136,7 +139,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventPreview?.kind?.let { isSensitiveKind(it) } == true
+                isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
             )
         }
 
@@ -329,8 +332,9 @@ private fun EventPreviewSection(preview: EventPreview) {
 
 @Composable
 private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
-    var showFullContent by remember { mutableStateOf(false) }
-    val contentTruncated = content.length > maxLength
+    var expanded by remember { mutableStateOf(false) }
+    val needsTruncation = content.length > maxLength
+    val displayText = if (expanded || !needsTruncation) content else "${content.take(maxLength)}..."
 
     Text(
         text = "Content",
@@ -339,19 +343,19 @@ private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
     )
     Spacer(modifier = Modifier.height(4.dp))
     Text(
-        text = if (showFullContent || !contentTruncated) content else "${content.take(maxLength)}...",
+        text = displayText,
         style = MaterialTheme.typography.bodyMedium,
-        maxLines = if (showFullContent) Int.MAX_VALUE else 5,
+        maxLines = if (expanded) Int.MAX_VALUE else 5,
         overflow = TextOverflow.Ellipsis
     )
-    if (contentTruncated) {
+    if (needsTruncation) {
         TextButton(
-            onClick = { showFullContent = !showFullContent },
+            onClick = { expanded = !expanded },
             contentPadding = PaddingValues(0.dp),
             modifier = Modifier.height(32.dp)
         ) {
             Text(
-                text = if (showFullContent) "Show less" else "Show more",
+                text = if (expanded) "Show less" else "Show more",
                 style = MaterialTheme.typography.labelMedium
             )
         }
@@ -373,13 +377,11 @@ private fun TagsSummarySection(
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
-            val label = if (eTags.size == 1) "1 event" else "${eTags.size} events"
-            TagSummaryRow("Events:", label)
+            TagSummaryRow("Events:", pluralize(eTags.size, "event", "events"))
         }
 
         if (otherPubkeys.isNotEmpty()) {
-            val label = if (otherPubkeys.size == 1) "1 pubkey" else "${otherPubkeys.size} pubkeys"
-            TagSummaryRow("Mentions:", label)
+            TagSummaryRow("Mentions:", pluralize(otherPubkeys.size, "pubkey", "pubkeys"))
         }
 
         if (tTags.isNotEmpty()) {
