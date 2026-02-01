@@ -25,7 +25,10 @@ class SigningNotificationManager(private val context: Context) {
     private val requestIdToNotificationId = object : LinkedHashMap<String, Int>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean {
             if (size > MAX_PENDING_REQUESTS) {
-                eldest?.let { pendingRequestData.remove(it.key) }
+                eldest?.let { entry ->
+                    val removed = pendingRequestData.remove(entry.key)
+                    removed?.callerPackage?.let { decrementPackageCount(it) }
+                }
                 return true
             }
             return false
@@ -107,7 +110,7 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingLock) {
+    fun popPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingLock) {
         removeRequestInternal(requestId).first
     }
 

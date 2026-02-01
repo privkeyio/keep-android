@@ -14,7 +14,7 @@ class SigningNotificationReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             SigningNotificationManager.ACTION_OPEN_SIGNING_REQUEST -> {
-                val requestInfo = notificationManager.getPendingRequestInfo(requestId) ?: return
+                val requestInfo = notificationManager.popPendingRequestInfo(requestId) ?: return
 
                 val uri = Uri.parse(requestInfo.intentUri)
                 if (uri.scheme != "nostrsigner") return
