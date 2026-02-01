@@ -39,6 +39,9 @@ internal fun parseEventKind(content: String): Int? = runCatching {
     JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
 
+internal fun Nip55Request.eventKind(): Int? =
+    if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
+
 internal data class EventPreview(
     val kind: Int,
     val content: String,
