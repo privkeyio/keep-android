@@ -103,12 +103,9 @@ class SigningNotificationManager(private val context: Context) {
 
     private fun generateRequestId(): String = UUID.randomUUID().toString()
 
-    private fun hasNotificationPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
-    }
+    private fun hasNotificationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun getAppLabel(packageName: String): String? {
         return try {
@@ -139,22 +136,20 @@ class SigningNotificationManager(private val context: Context) {
         deleteIntent: PendingIntent? = null,
         visibility: Int = NotificationCompat.VISIBILITY_PUBLIC,
         publicVersion: Notification? = null
-    ): Notification {
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setAutoCancel(true)
-            .setContentIntent(contentIntent)
-            .setVisibility(visibility)
-
-        deleteIntent?.let { builder.setDeleteIntent(it) }
-        publicVersion?.let { builder.setPublicVersion(it) }
-
-        return builder.build()
-    }
+    ): Notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        .setAutoCancel(true)
+        .setContentIntent(contentIntent)
+        .setVisibility(visibility)
+        .apply {
+            deleteIntent?.let { setDeleteIntent(it) }
+            publicVersion?.let { setPublicVersion(it) }
+        }
+        .build()
 
     data class PendingRequestInfo(
         val intentUri: String,
