@@ -22,6 +22,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.Nip55Response
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +118,7 @@ class Nip55Activity : FragmentActivity() {
                 hash.joinToString("") { "%02x".format(it) }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
             null
         }
     }
@@ -177,7 +178,7 @@ class Nip55Activity : FragmentActivity() {
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
         val callerId = callerPackage ?: run {
-            Log.w(TAG, "Rejecting request from unknown caller for ${req.requestType.name}")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from unknown caller for ${req.requestType.name}")
             return finishWithError("unknown_caller")
         }
         val store = permissionStore
@@ -279,8 +280,10 @@ class Nip55Activity : FragmentActivity() {
 
     private fun finishWithError(error: String) {
         notificationManager?.cancelNotification(notificationRequestId)
-        val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
-        Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
+        if (BuildConfig.DEBUG) {
+            val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
+            Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
+        }
         val resultIntent = Intent().apply {
             putExtra("error", GENERIC_ERROR_MESSAGE)
         }

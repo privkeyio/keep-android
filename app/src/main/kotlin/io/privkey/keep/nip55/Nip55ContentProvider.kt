@@ -7,6 +7,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
 import android.util.Log
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
@@ -79,7 +80,7 @@ class Nip55ContentProvider : ContentProvider() {
         val callerPackage = getCallerPackage() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         if (!checkRateLimit(callerPackage)) {
-            Log.w(TAG, "Rate limit exceeded for $callerPackage")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $callerPackage")
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
@@ -119,7 +120,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
-            Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true) }
             return rejectedCursor(null)
         }
@@ -136,7 +137,7 @@ class Nip55ContentProvider : ContentProvider() {
             true
         }
         if (decisionLoaded == null) {
-            Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
             return rejectedCursor(null)
         }
 
@@ -199,7 +200,7 @@ class Nip55ContentProvider : ContentProvider() {
             packages.isNullOrEmpty() -> null
             packages.size == 1 -> packages[0]
             else -> {
-                Log.w(TAG, "Rejecting request from multi-package UID (count=${packages.size})")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from multi-package UID (count=${packages.size})")
                 null
             }
         }

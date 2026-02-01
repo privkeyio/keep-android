@@ -16,7 +16,10 @@ class SigningNotificationReceiver : BroadcastReceiver() {
             SigningNotificationManager.ACTION_OPEN_SIGNING_REQUEST -> {
                 val requestInfo = notificationManager.getPendingRequestInfo(requestId) ?: return
 
-                val activityIntent = Intent(Intent.ACTION_VIEW, Uri.parse(requestInfo.intentUri)).apply {
+                val uri = Uri.parse(requestInfo.intentUri)
+                if (uri.scheme != "nostrsigner") return
+
+                val activityIntent = Intent(Intent.ACTION_VIEW, uri).apply {
                     setPackage(context.packageName)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     requestInfo.originalRequestId?.let { putExtra("id", it) }
