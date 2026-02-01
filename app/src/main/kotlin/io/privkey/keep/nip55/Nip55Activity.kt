@@ -16,6 +16,7 @@ import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.PinStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
@@ -32,6 +33,7 @@ class Nip55Activity : FragmentActivity() {
     private var storage: AndroidKeystoreStorage? = null
     private var permissionStore: PermissionStore? = null
     private var killSwitchStore: KillSwitchStore? = null
+    private var pinStore: PinStore? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
@@ -51,6 +53,7 @@ class Nip55Activity : FragmentActivity() {
         storage = app?.getStorage()
         permissionStore = app?.getPermissionStore()
         killSwitchStore = app?.getKillSwitchStore()
+        pinStore = app?.getPinStore()
         handleIntent(intent)
     }
 
@@ -68,14 +71,15 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (killSwitchStore?.isEnabled() == true) {
-            return finishWithError("signing_disabled")
-        }
+        if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
+        if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
+
         identifyCaller()
         if (callerPackage == null) {
             Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
         }
+
         requestId = intent.getStringExtra("id")
         parseAndSetRequest(intent)
         if (request != null) setupContent()
@@ -166,9 +170,7 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                if (store != null) {
-                    store.grantPermission(callerId, req.requestType, eventKind, duration)
-                }
+                store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
                 withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
                     .onSuccess { response ->
@@ -190,31 +192,30 @@ class Nip55Activity : FragmentActivity() {
             finishWithError("Storage unavailable")
             return false
         }
-        val cipher = try {
-            keystoreStorage.getCipherForDecryption()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get cipher: ${e::class.simpleName}")
-            finishWithError("Storage error")
-            return false
-        }
+
+        val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
+            .onFailure { Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
+            .getOrNull()
+
         if (cipher == null) {
-            finishWithError("No share stored")
+            finishWithError(if (keystoreStorage.hasShare()) "Storage error" else "No share stored")
             return false
         }
-        val authedCipher = try {
+
+        val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
                 cipher = cipher,
                 title = "Approve Request",
                 subtitle = req.requestType.displayName()
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Biometric authentication failed: ${e::class.simpleName}")
-            null
-        }
+        }.onFailure { Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
+            .getOrNull()
+
         if (authedCipher == null) {
             finishWithError("Authentication failed")
             return false
         }
+
         keystoreStorage.setPendingCipher(authedCipher)
         return true
     }

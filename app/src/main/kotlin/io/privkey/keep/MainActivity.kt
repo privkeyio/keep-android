@@ -30,6 +30,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -57,6 +58,7 @@ class MainActivity : FragmentActivity() {
         val signPolicyStore = app.getSignPolicyStore()
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
+        val pinStore = app.getPinStore()
         val permissionStore = app.getPermissionStore()
 
         val allDependenciesAvailable = keepMobile != null &&
@@ -66,15 +68,44 @@ class MainActivity : FragmentActivity() {
             signPolicyStore != null &&
             autoStartStore != null &&
             foregroundServiceStore != null &&
+            pinStore != null &&
             permissionStore != null
 
         setContent {
+            var isPinUnlocked by remember {
+                mutableStateOf(pinStore?.isSessionValid() ?: true)
+            }
+
+            // Re-check session validity on resume to re-lock UI when session times out
+            androidx.compose.runtime.DisposableEffect(pinStore) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        isPinUnlocked = pinStore?.isSessionValid() ?: true
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycle.removeObserver(observer)
+                }
+            }
+
             KeepAndroidTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (allDependenciesAvailable) {
+                    val requiresPin = pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked
+                    val allDependenciesAvailable = keepMobile != null && storage != null &&
+                        relayConfigStore != null && killSwitchStore != null &&
+                        signPolicyStore != null && autoStartStore != null &&
+                        pinStore != null && permissionStore != null
+
+                    if (requiresPin) {
+                        PinUnlockScreen(
+                            pinStore = pinStore!!,
+                            onUnlocked = { isPinUnlocked = true }
+                        )
+                    } else if (allDependenciesAvailable) {
                         MainScreen(
                             keepMobile = keepMobile!!,
                             storage = storage!!,
@@ -83,6 +114,7 @@ class MainActivity : FragmentActivity() {
                             signPolicyStore = signPolicyStore!!,
                             autoStartStore = autoStartStore!!,
                             foregroundServiceStore = foregroundServiceStore!!,
+                            pinStore = pinStore!!,
                             permissionStore = permissionStore!!,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -146,6 +178,7 @@ fun MainScreen(
     signPolicyStore: SignPolicyStore,
     autoStartStore: AutoStartStore,
     foregroundServiceStore: ForegroundServiceStore,
+    pinStore: PinStore,
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -174,6 +207,8 @@ fun MainScreen(
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
+    var showPinSetup by remember { mutableStateOf(false) }
+    var pinEnabled by remember { mutableStateOf(pinStore.isPinEnabled()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -187,6 +222,18 @@ fun MainScreen(
                 delay(2000)
             }
         }
+    }
+
+    if (showPinSetup) {
+        PinSetupScreen(
+            pinStore = pinStore,
+            onPinSet = {
+                pinEnabled = true
+                showPinSetup = false
+            },
+            onDismiss = { showPinSetup = false }
+        )
+        return
     }
 
     if (showSignPolicyScreen) {
@@ -432,6 +479,123 @@ fun MainScreen(
                     withContext(Dispatchers.IO) { foregroundServiceStore.setEnabled(newValue) }
                     foregroundServiceEnabled = newValue
                     onForegroundServiceChanged(newValue)
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        PinSettingsCard(
+            enabled = pinEnabled,
+            onSetupPin = { showPinSetup = true },
+            onDisablePin = { currentPin ->
+                val disabled = pinStore.disablePin(currentPin)
+                if (disabled) pinEnabled = false
+                disabled
+            }
+        )
+    }
+}
+
+@Composable
+private fun PinSettingsCard(
+    enabled: Boolean,
+    onSetupPin: () -> Unit,
+    onDisablePin: (String) -> Boolean
+) {
+    var showDisableDialog by remember { mutableStateOf(false) }
+    var pinInput by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("PIN Protection", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (enabled) "PIN is enabled" else "Secure app with PIN",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (enabled) {
+                TextButton(onClick = { showDisableDialog = true }) {
+                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                TextButton(onClick = onSetupPin) {
+                    Text("Set Up")
+                }
+            }
+        }
+    }
+
+    if (showDisableDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showDisableDialog = false
+                pinInput = ""
+                error = null
+            },
+            title = { Text("Disable PIN?") },
+            text = {
+                Column {
+                    Text("Enter your current PIN to disable protection.")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { newValue ->
+                            if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
+                                pinInput = newValue
+                                error = null
+                            }
+                        },
+                        label = { Text("Current PIN") },
+                        singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                        ),
+                        isError = error != null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    error?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (onDisablePin(pinInput)) {
+                            showDisableDialog = false
+                            pinInput = ""
+                            error = null
+                        } else {
+                            error = "Incorrect PIN"
+                            pinInput = ""
+                        }
+                    },
+                    enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
+                ) {
+                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDisableDialog = false
+                    pinInput = ""
+                    error = null
+                }) {
+                    Text("Cancel")
                 }
             }
         )
