@@ -15,8 +15,6 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.ConcurrentHashMap
-
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -30,27 +28,11 @@ class Nip55ContentProvider : ContentProvider() {
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val OPERATION_TIMEOUT_MS = 5000L
-        private const val RATE_LIMIT_WINDOW_MS = 1000L
-        private const val RATE_LIMIT_MAX_REQUESTS = 10
 
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
 
-    private data class RateLimitEntry(var count: Int, var windowStart: Long)
-    private val rateLimitMap = ConcurrentHashMap<String, RateLimitEntry>()
-
-    private fun checkRateLimit(callerPackage: String): Boolean {
-        val now = System.currentTimeMillis()
-        val entry = rateLimitMap.compute(callerPackage) { _, existing ->
-            if (existing == null || now - existing.windowStart >= RATE_LIMIT_WINDOW_MS) {
-                RateLimitEntry(1, now)
-            } else {
-                existing.count++
-                existing
-            }
-        }
-        return entry != null && entry.count <= RATE_LIMIT_MAX_REQUESTS
-    }
+    private val rateLimiter = RateLimiter()
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
@@ -79,7 +61,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         val callerPackage = getCallerPackage() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
-        if (!checkRateLimit(callerPackage)) {
+        if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $callerPackage")
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
