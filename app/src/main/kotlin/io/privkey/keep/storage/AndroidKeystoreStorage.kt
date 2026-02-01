@@ -2,6 +2,7 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -24,6 +25,7 @@ import javax.crypto.spec.GCMParameterSpec
 class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     companion object {
+        private const val TAG = "AndroidKeystoreStorage"
         private const val KEYSTORE_ALIAS = "keep_frost_share"
         private const val KEYSTORE_PREFIX = "keep_frost_"
         private const val PREFS_NAME = "keep_secure_prefs"
@@ -239,6 +241,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
         )
     } catch (e: Exception) {
+        Log.e(TAG, "Failed to parse stored key metadata", e)
         null
     }
 

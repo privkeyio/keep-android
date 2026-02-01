@@ -282,7 +282,7 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
 
             if (eventPreview != null) {
                 EventPreviewSection(eventPreview)
-            } else if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
+            } else if (request.content.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 ExpandableContentSection(request.content)
             }
