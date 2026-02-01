@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-# Path to keep repo (adjust as needed)
 KEEP_REPO="${KEEP_REPO:-./keep}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUST_PROJECT="$KEEP_REPO/keep-mobile"
@@ -9,7 +8,6 @@ JNILIBS_DIR="$SCRIPT_DIR/app/src/main/jniLibs"
 
 echo "Building keep-mobile for Android..."
 
-# Build for Android targets (can override with TARGETS env var)
 if [ -n "$TARGETS" ]; then
     IFS=',' read -ra TARGETS <<< "$TARGETS"
 else
@@ -28,13 +26,12 @@ for target in "${TARGETS[@]}"; do
     cargo ndk -t "$target" -o "$JNILIBS_DIR" build --release
 done
 
-# Remove unnecessary redb cdylib artifacts (redb is statically linked)
 rm -f "$JNILIBS_DIR"/*/libredb-*.so
 
-# Generate Kotlin bindings
-echo "Generating Kotlin bindings..."
+BINDING_LIB=$(find "$JNILIBS_DIR" -name "libkeep_mobile.so" | head -1)
+echo "Generating Kotlin bindings from $BINDING_LIB..."
 cargo run --bin uniffi-bindgen generate \
-    --library "$JNILIBS_DIR/arm64-v8a/libkeep_mobile.so" \
+    --library "$BINDING_LIB" \
     --language kotlin \
     --out-dir "$SCRIPT_DIR/app/src/main/kotlin"
 
