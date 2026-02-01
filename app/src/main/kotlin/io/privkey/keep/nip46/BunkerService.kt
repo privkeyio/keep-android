@@ -106,13 +106,13 @@ class BunkerService : Service() {
 
         fun getPendingApproval(requestId: String): PendingApproval? = pendingApprovals[requestId]
 
-        private fun checkRateLimit(clientPubkey: String): Boolean {
+        internal fun isRateLimited(clientPubkey: String): Boolean {
             val now = System.currentTimeMillis()
 
             val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
             if (now < backoffUntil) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Client $clientPubkey in backoff until $backoffUntil")
-                return false
+                return true
             }
 
             val history = clientRequestHistory.computeIfAbsent(clientPubkey) { mutableListOf() }
@@ -125,15 +125,13 @@ class BunkerService : Service() {
                         .coerceAtMost(BACKOFF_MAX_MS)
                     clientBackoffUntil[clientPubkey] = now + backoffMs
                     if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $clientPubkey, backoff ${backoffMs}ms")
-                    return false
+                    return true
                 }
 
                 history.add(now)
             }
-            return true
+            return false
         }
-
-        internal fun isRateLimited(clientPubkey: String): Boolean = !checkRateLimit(clientPubkey)
 
         internal fun clearRateLimitState() {
             clientRequestHistory.clear()
@@ -241,7 +239,7 @@ class BunkerService : Service() {
                 store.logOperation(
                     callerPackage = "nip46:${event.app}",
                     requestType = requestType,
-                    eventKind = event.eventKind?.toInt(),
+                    eventKind = null,
                     decision = if (event.success) "allow" else "deny",
                     wasAutomatic = false
                 )
@@ -310,7 +308,7 @@ class BunkerService : Service() {
         return approved
     }
 
-    private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean = false) {
+    private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
         val intent = Intent(this, Nip46ApprovalActivity::class.java).apply {
             putExtra(Nip46ApprovalActivity.EXTRA_REQUEST_ID, requestId)
             putExtra(Nip46ApprovalActivity.EXTRA_APP_PUBKEY, request.appPubkey)

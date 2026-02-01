@@ -230,17 +230,11 @@ fun BunkerScreen(
 
 @Composable
 private fun StatusBadge(status: BunkerStatus) {
-    val text = when (status) {
-        BunkerStatus.RUNNING -> "Running"
-        BunkerStatus.STARTING -> "Starting..."
-        BunkerStatus.ERROR -> "Error"
-        BunkerStatus.STOPPED -> "Stopped"
-    }
-    val color = when (status) {
-        BunkerStatus.RUNNING -> MaterialTheme.colorScheme.primary
-        BunkerStatus.STARTING -> MaterialTheme.colorScheme.secondary
-        BunkerStatus.ERROR -> MaterialTheme.colorScheme.error
-        BunkerStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+    val (text, color) = when (status) {
+        BunkerStatus.RUNNING -> "Running" to MaterialTheme.colorScheme.primary
+        BunkerStatus.STARTING -> "Starting..." to MaterialTheme.colorScheme.secondary
+        BunkerStatus.ERROR -> "Error" to MaterialTheme.colorScheme.error
+        BunkerStatus.STOPPED -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(
         text = text,
