@@ -49,4 +49,8 @@
     <string name="foreground_service_channel_description">Persistent notification for relay connections</string>
     <string name="foreground_service_title">Keep</string>
     <string name="foreground_service_text">Relay connections active</string>
+
+    <string name="notification_channel_signing_requests">Signing Requests</string>
+    <string name="notification_channel_signing_requests_description">Notifications for NIP-55 signing requests</string>
+    <string name="notification_request_from">Request from %1$s</string>
 </resources>

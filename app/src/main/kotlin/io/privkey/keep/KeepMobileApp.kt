@@ -6,6 +6,7 @@ import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.KeepAliveService
 import io.privkey.keep.service.NetworkConnectivityManager
+import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
@@ -34,6 +35,7 @@ class KeepMobileApp : Application() {
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var networkManager: NetworkConnectivityManager? = null
+    private var signingNotificationManager: SigningNotificationManager? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -42,6 +44,7 @@ class KeepMobileApp : Application() {
         initializePermissionStore()
         initializeNetworkMonitoring()
         initializeForegroundService()
+        initializeNotifications()
     }
 
     private fun initializeKeepMobile() {
@@ -100,6 +103,16 @@ class KeepMobileApp : Application() {
         }
     }
 
+    private fun initializeNotifications() {
+        try {
+            val manager = SigningNotificationManager(this)
+            signingNotificationManager = manager
+            applicationScope.launch { manager.cleanupStaleEntries() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
+        }
+    }
+
     fun getKeepMobile(): KeepMobile? = keepMobile
 
     fun getStorage(): AndroidKeystoreStorage? = storage
@@ -119,6 +132,8 @@ class KeepMobileApp : Application() {
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
     fun getPermissionStore(): PermissionStore? = permissionStore
+
+    fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
         val mobile = keepMobile ?: run {

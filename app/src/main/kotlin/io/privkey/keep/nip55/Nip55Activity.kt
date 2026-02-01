@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
-import java.security.MessageDigest
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -14,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
@@ -22,7 +22,9 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.Nip55Response
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +41,9 @@ class Nip55Activity : FragmentActivity() {
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
     private var callerSignatureHash: String? = null
+    private var notificationManager: SigningNotificationManager? = null
+    private var intentUri: String? = null
+    private var notificationRequestId: String? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -54,6 +59,7 @@ class Nip55Activity : FragmentActivity() {
         permissionStore = app?.getPermissionStore()
         killSwitchStore = app?.getKillSwitchStore()
         pinStore = app?.getPinStore()
+        notificationManager = app?.getSigningNotificationManager()
         handleIntent(intent)
     }
 
@@ -65,9 +71,8 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (killSwitchStore?.isEnabled() == true) {
-            finishWithError("signing_disabled")
-        }
+        // Re-check kill switch in case it was enabled while the activity was paused
+        if (killSwitchStore?.isEnabled() == true) finishWithError("signing_disabled")
     }
 
     private fun handleIntent(intent: Intent) {
@@ -81,15 +86,18 @@ class Nip55Activity : FragmentActivity() {
         }
 
         requestId = intent.getStringExtra("id")
+        intentUri = intent.data?.toString()
         parseAndSetRequest(intent)
-        if (request != null) setupContent()
+        if (request != null) {
+            showNotification()
+            setupContent()
+        }
     }
 
     private fun identifyCaller() {
-        val pkg = callingActivity?.packageName
-        callerPackage = pkg
-        callerVerified = pkg != null
-        callerSignatureHash = pkg?.let { getCallerSignatureHash(it) }
+        callerPackage = callingActivity?.packageName
+        callerVerified = callerPackage != null
+        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
     }
 
     private fun getCallerSignatureHash(packageName: String): String? {
@@ -110,9 +118,20 @@ class Nip55Activity : FragmentActivity() {
                 hash.joinToString("") { "%02x".format(it) }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
             null
         }
+    }
+
+    private fun showNotification() {
+        val req = request ?: return
+        val uri = intentUri ?: return
+        notificationRequestId = notificationManager?.showSigningRequest(
+            requestType = req.requestType,
+            callerPackage = callerPackage,
+            intentUri = uri,
+            requestId = requestId
+        )
     }
 
     private fun setupContent() {
@@ -159,11 +178,11 @@ class Nip55Activity : FragmentActivity() {
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
         val callerId = callerPackage ?: run {
-            Log.w(TAG, "Rejecting request from unknown caller for ${req.requestType.name}")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from unknown caller for ${req.requestType.name}")
             return finishWithError("unknown_caller")
         }
         val store = permissionStore
-        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
+        val eventKind = req.eventKind()
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
@@ -232,7 +251,7 @@ class Nip55Activity : FragmentActivity() {
         val req = request ?: return finishWithError("User rejected")
         val callerId = callerPackage
         val store = permissionStore
-        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
+        val eventKind = req.eventKind()
 
         lifecycleScope.launch {
             if (store != null && callerId != null) {
@@ -244,6 +263,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithResult(response: Nip55Response) {
+        notificationManager?.cancelNotification(notificationRequestId)
         val req = request
         val resultIntent = Intent().apply {
             putExtra("result", response.result)
@@ -259,8 +279,11 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithError(error: String) {
-        val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
-        Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
+        notificationManager?.cancelNotification(notificationRequestId)
+        if (BuildConfig.DEBUG) {
+            val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
+            Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
+        }
         val resultIntent = Intent().apply {
             putExtra("error", GENERIC_ERROR_MESSAGE)
         }

@@ -22,7 +22,7 @@ internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
 }
 
-private fun Nip55RequestType.headerTitle(): String = when (this) {
+internal fun Nip55RequestType.headerTitle(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
     Nip55RequestType.SIGN_EVENT -> "Signing Request"
     Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
@@ -33,6 +33,9 @@ private fun Nip55RequestType.headerTitle(): String = when (this) {
 internal fun parseEventKind(content: String): Int? = runCatching {
     org.json.JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
+
+internal fun Nip55Request.eventKind(): Int? =
+    if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
 
 @Composable
 fun ApprovalScreen(
@@ -46,9 +49,7 @@ fun ApprovalScreen(
     val canRememberChoice = callerVerified && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
-    val eventKind = remember(request) {
-        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(request.content) else null
-    }
+    val eventKind = remember(request) { request.eventKind() }
 
     Column(
         modifier = Modifier
