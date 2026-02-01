@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  NDK_VERSION: "29.0.13113456"
+  NDK_VERSION: "29.0.14206865"
   RUST_VERSION: "1.85.0"
   RUST_TARGETS: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
@@ -38,7 +38,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ env.RUST_TARGETS }}
@@ -93,7 +93,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ env.RUST_TARGETS }}
