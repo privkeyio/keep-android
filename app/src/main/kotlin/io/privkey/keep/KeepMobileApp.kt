@@ -14,10 +14,12 @@ import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.nip46.BunkerService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +42,7 @@ class KeepMobileApp : Application() {
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
+    private var bunkerConfigStore: BunkerConfigStore? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -49,6 +52,7 @@ class KeepMobileApp : Application() {
         initializeNetworkMonitoring()
         initializeForegroundService()
         initializeNotifications()
+        initializeBunkerService()
     }
 
     private fun initializeKeepMobile() {
@@ -122,6 +126,17 @@ class KeepMobileApp : Application() {
         }
     }
 
+    private fun initializeBunkerService() {
+        try {
+            bunkerConfigStore = BunkerConfigStore(this)
+            if (bunkerConfigStore?.isEnabled() == true) {
+                BunkerService.start(this)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
+        }
+    }
+
     fun getKeepMobile(): KeepMobile? = keepMobile
 
     fun getStorage(): AndroidKeystoreStorage? = storage
@@ -147,6 +162,17 @@ class KeepMobileApp : Application() {
     fun getAutoSigningSafeguards(): AutoSigningSafeguards? = autoSigningSafeguards
 
     fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
+
+    fun getBunkerConfigStore(): BunkerConfigStore? = bunkerConfigStore
+
+    fun updateBunkerService(enabled: Boolean) {
+        bunkerConfigStore?.setEnabled(enabled)
+        if (enabled) {
+            BunkerService.start(this)
+        } else {
+            BunkerService.stop(this)
+        }
+    }
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
         val mobile = keepMobile ?: run {

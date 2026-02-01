@@ -77,6 +77,18 @@
             android:enabled="true"
             android:exported="false" />
 
+        <service
+            android:name=".nip46.BunkerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <activity
+            android:name=".nip46.Nip46ApprovalActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.KeepAndroid" />
+
     </application>
 
 </manifest>
