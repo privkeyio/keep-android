@@ -53,4 +53,5 @@
     <string name="notification_channel_signing_requests">Signing Requests</string>
     <string name="notification_channel_signing_requests_description">Notifications for NIP-55 signing requests</string>
     <string name="notification_request_from">Request from %1$s</string>
+    <string name="notification_signing_request_pending">Signing request pending</string>
 </resources>

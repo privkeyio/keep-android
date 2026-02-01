@@ -1,7 +1,8 @@
 package io.privkey.keep.service
 
-import android.annotation.SuppressLint
 import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -38,6 +39,7 @@ class SigningNotificationManager(private val context: Context) {
             setShowBadge(true)
             enableVibration(true)
             enableLights(true)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
         notificationManager.createNotificationChannel(channel)
     }
@@ -53,72 +55,58 @@ class SigningNotificationManager(private val context: Context) {
 
         val effectiveRequestId = requestId ?: generateRequestId()
         val notificationId = notificationIdCounter.getAndIncrement()
-        requestIdToNotificationId[effectiveRequestId] = notificationId
 
-        pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+        // Synchronize the size check, cleanup, and insertion to prevent races
+        synchronized(pendingRequestData) {
+            if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+                cleanupStaleEntries()
+                if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+                    return null
+                }
+            }
+            requestIdToNotificationId[effectiveRequestId] = notificationId
+            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+        }
 
         val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
 
-        val intent = Intent(context, SigningNotificationReceiver::class.java).apply {
-            action = ACTION_OPEN_SIGNING_REQUEST
-            putExtra(EXTRA_REQUEST_ID, effectiveRequestId)
-        }
+        val contentIntent = createBroadcastIntent(ACTION_OPEN_SIGNING_REQUEST, effectiveRequestId, notificationId)
+        val deleteIntent = createBroadcastIntent(ACTION_DISMISS_REQUEST, effectiveRequestId, notificationId + DISMISS_REQUEST_CODE_OFFSET)
 
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            notificationId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val publicNotification = buildNotification(
+            title = context.getString(R.string.app_name),
+            text = context.getString(R.string.notification_signing_request_pending),
+            contentIntent = contentIntent
         )
 
-        val deleteIntent = Intent(context, SigningNotificationReceiver::class.java).apply {
-            action = ACTION_DISMISS_REQUEST
-            putExtra(EXTRA_REQUEST_ID, effectiveRequestId)
-        }
-        val deletePendingIntent = PendingIntent.getBroadcast(
-            context,
-            notificationId + DISMISS_REQUEST_CODE_OFFSET,
-            deleteIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val notification = buildNotification(
+            title = requestType.headerTitle(),
+            text = context.getString(R.string.notification_request_from, callerLabel),
+            contentIntent = contentIntent,
+            deleteIntent = deleteIntent,
+            visibility = NotificationCompat.VISIBILITY_SECRET,
+            publicVersion = publicNotification
         )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(requestType.headerTitle())
-            .setContentText(context.getString(R.string.notification_request_from, callerLabel))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .setDeleteIntent(deletePendingIntent)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .build()
 
         NotificationManagerCompat.from(context).notify(notificationId, notification)
         return effectiveRequestId
     }
 
     fun cancelNotification(requestId: String?) {
-        if (requestId == null) return
-        val notificationId = removeRequest(requestId) ?: return
+        val notificationId = requestId?.let { removeRequest(it) } ?: return
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
+    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingRequestData) {
         requestIdToNotificationId.remove(requestId)
-        return pendingRequestData.remove(requestId)
+        pendingRequestData.remove(requestId)
     }
 
-    private fun generateRequestId(): String {
-        return UUID.randomUUID().toString()
-    }
+    private fun generateRequestId(): String = UUID.randomUUID().toString()
 
-    private fun hasNotificationPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
-    }
+    private fun hasNotificationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun getAppLabel(packageName: String): String? {
         return try {
@@ -129,24 +117,62 @@ class SigningNotificationManager(private val context: Context) {
         }
     }
 
+    private fun createBroadcastIntent(action: String, requestId: String, requestCode: Int): PendingIntent {
+        val intent = Intent(context, SigningNotificationReceiver::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_REQUEST_ID, requestId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun buildNotification(
+        title: String,
+        text: String,
+        contentIntent: PendingIntent,
+        deleteIntent: PendingIntent? = null,
+        visibility: Int = NotificationCompat.VISIBILITY_PUBLIC,
+        publicVersion: Notification? = null
+    ): Notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentText(text)
+        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        .setAutoCancel(true)
+        .setContentIntent(contentIntent)
+        .setVisibility(visibility)
+        .apply {
+            deleteIntent?.let { setDeleteIntent(it) }
+            publicVersion?.let { setPublicVersion(it) }
+        }
+        .build()
+
     data class PendingRequestInfo(
         val intentUri: String,
         val originalRequestId: String?,
         val createdAt: Long = System.currentTimeMillis()
     )
 
-    fun removeRequest(requestId: String): Int? {
+    fun removeRequest(requestId: String): Int? = synchronized(pendingRequestData) {
         pendingRequestData.remove(requestId)
-        return requestIdToNotificationId.remove(requestId)
+        requestIdToNotificationId.remove(requestId)
     }
 
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()
-        pendingRequestData.entries
-            .filter { now - it.value.createdAt > maxAgeMillis }
-            .forEach { (requestId, _) ->
-                removeRequest(requestId)?.let { notificationManager.cancel(it) }
-            }
+        synchronized(pendingRequestData) {
+            pendingRequestData.entries
+                .filter { now - it.value.createdAt > maxAgeMillis }
+                .forEach { (requestId, _) ->
+                    pendingRequestData.remove(requestId)
+                    requestIdToNotificationId.remove(requestId)?.let { notificationManager.cancel(it) }
+                }
+        }
     }
 
     companion object {
@@ -157,5 +183,6 @@ class SigningNotificationManager(private val context: Context) {
         private const val NOTIFICATION_ID_START = 1000
         private const val DISMISS_REQUEST_CODE_OFFSET = 100000
         private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
+        private const val MAX_PENDING_REQUESTS = 100
     }
 }
