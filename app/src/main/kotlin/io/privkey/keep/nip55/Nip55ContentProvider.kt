@@ -231,11 +231,15 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runWithTimeout {
-                    store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
-                    store.recordVelocity(callerPackage, eventKind)
+                try {
+                    runWithTimeout {
+                        store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+                        store.recordVelocity(callerPackage, eventKind)
+                    }
+                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to log operation or show notification: ${e.message}")
                 }
-                showBackgroundSigningNotification(callerPackage, requestType, eventKind)
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)

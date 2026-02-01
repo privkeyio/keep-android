@@ -58,8 +58,8 @@ data class Nip55AuditLog(
     val eventKind: Int?,
     val decision: String,
     val wasAutomatic: Boolean,
-    val previousHash: String?,
-    val entryHash: String
+    val previousHash: String? = null,
+    val entryHash: String = ""
 )
 
 @Entity(
@@ -559,12 +559,28 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun verifyAuditChain(): ChainVerificationResult {
         val entries = auditDao.getAllOrdered()
-        val hashedEntries = entries.filter { it.entryHash.isNotEmpty() }
-        var expectedPrevHash: String? = hashedEntries.firstOrNull()?.previousHash
+        var inLegacyPhase = true
+        var expectedPrevHash: String? = null
 
-        for (entry in hashedEntries) {
-            if (entry.previousHash != expectedPrevHash) {
-                return ChainVerificationResult.Broken(entry.id)
+        for (entry in entries) {
+            if (inLegacyPhase) {
+                if (entry.entryHash.isEmpty()) {
+                    // Legacy entry without hash - skip validation
+                    continue
+                }
+                // First hashed entry - validate genesis (previousHash should be null/empty)
+                inLegacyPhase = false
+                if (!entry.previousHash.isNullOrEmpty()) {
+                    return ChainVerificationResult.Broken(entry.id)
+                }
+            } else {
+                // Post-legacy: every entry must have a hash and link properly
+                if (entry.entryHash.isEmpty()) {
+                    return ChainVerificationResult.Broken(entry.id)
+                }
+                if (entry.previousHash != expectedPrevHash) {
+                    return ChainVerificationResult.Broken(entry.id)
+                }
             }
 
             val calculated = calculateEntryHash(
