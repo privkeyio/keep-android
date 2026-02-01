@@ -146,7 +146,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
+                isSensitiveKind = eventPreview?.let { isSensitiveKind(it.kind) } == true
             )
         }
 
