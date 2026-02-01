@@ -114,11 +114,12 @@ fun ApprovalScreen(
     request: Nip55Request,
     callerPackage: String?,
     callerVerified: Boolean,
+    showFirstUseWarning: Boolean = false,
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    val canRememberChoice = callerVerified && callerPackage != null
+    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventPreview = remember(request) {
@@ -140,7 +141,10 @@ fun ApprovalScreen(
 
         CallerLabel(callerPackage, callerVerified)
 
-        if (!callerVerified) {
+        if (showFirstUseWarning) {
+            Spacer(modifier = Modifier.height(8.dp))
+            FirstUseWarning()
+        } else if (!callerVerified) {
             Spacer(modifier = Modifier.height(8.dp))
             UnverifiedCallerWarning()
         }
@@ -271,6 +275,23 @@ private fun UnverifiedCallerWarning() {
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer
+        )
+    }
+}
+
+@Composable
+private fun FirstUseWarning() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Text(
+            text = "First connection from this app. Approving will trust this app for future requests.",
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer
         )
     }
 }

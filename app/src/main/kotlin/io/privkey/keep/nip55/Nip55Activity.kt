@@ -40,6 +40,7 @@ class Nip55Activity : FragmentActivity() {
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
     private var callerSignatureHash: String? = null
+    private var callerPendingFirstUse: Boolean = false
     private var notificationManager: SigningNotificationManager? = null
     private var intentUri: String? = null
     private var notificationRequestId: String? = null
@@ -105,9 +106,9 @@ class Nip55Activity : FragmentActivity() {
                     callerPackage = result.packageName
                     isNotificationOriginated = true
                     val verifyResult = verificationStore.verifyOrTrust(result.packageName)
-                    callerVerified = verifyResult is CallerVerificationStore.VerificationResult.Verified ||
-                        verifyResult is CallerVerificationStore.VerificationResult.TrustedOnFirstUse
+                    callerVerified = verifyResult is CallerVerificationStore.VerificationResult.Verified
                     callerSignatureHash = verifyResult.signatureHash
+                    callerPendingFirstUse = verifyResult is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval
                     return
                 }
                 is CallerVerificationStore.NonceResult.Expired,
@@ -121,22 +122,30 @@ class Nip55Activity : FragmentActivity() {
         if (directCallerPackage != null && verificationStore != null) {
             val result = verificationStore.verifyOrTrust(directCallerPackage)
             when (result) {
-                is CallerVerificationStore.VerificationResult.Verified,
-                is CallerVerificationStore.VerificationResult.TrustedOnFirstUse -> {
+                is CallerVerificationStore.VerificationResult.Verified -> {
                     callerPackage = directCallerPackage
                     callerVerified = true
                     callerSignatureHash = result.signatureHash
+                    callerPendingFirstUse = false
+                }
+                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> {
+                    callerPackage = directCallerPackage
+                    callerVerified = false
+                    callerSignatureHash = result.signatureHash
+                    callerPendingFirstUse = true
                 }
                 is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $directCallerPackage")
                     callerPackage = null
                     callerVerified = false
                     callerSignatureHash = null
+                    callerPendingFirstUse = false
                 }
                 is CallerVerificationStore.VerificationResult.NotInstalled -> {
                     callerPackage = directCallerPackage
                     callerVerified = false
                     callerSignatureHash = null
+                    callerPendingFirstUse = false
                 }
             }
             return
@@ -145,6 +154,7 @@ class Nip55Activity : FragmentActivity() {
         callerPackage = null
         callerVerified = false
         callerSignatureHash = null
+        callerPendingFirstUse = false
     }
 
     private fun showNotification() {
@@ -162,6 +172,7 @@ class Nip55Activity : FragmentActivity() {
         val currentRequest = request ?: return
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
+        val currentPendingFirstUse = callerPendingFirstUse
 
         setContent {
             KeepAndroidTheme {
@@ -173,6 +184,7 @@ class Nip55Activity : FragmentActivity() {
                         request = currentRequest,
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
+                        showFirstUseWarning = currentPendingFirstUse,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
                     )
@@ -208,6 +220,12 @@ class Nip55Activity : FragmentActivity() {
         val store = permissionStore
         val eventKind = req.eventKind()
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
+
+        if (callerPendingFirstUse && callerSignatureHash != null) {
+            callerVerificationStore?.trustPackage(callerId, callerSignatureHash!!)
+            callerPendingFirstUse = false
+            callerVerified = true
+        }
 
         lifecycleScope.launch {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch

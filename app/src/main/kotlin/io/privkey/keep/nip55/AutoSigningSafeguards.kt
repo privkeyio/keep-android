@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import java.util.concurrent.ConcurrentHashMap
 
 class AutoSigningSafeguards(context: Context) {
 
@@ -11,6 +10,8 @@ class AutoSigningSafeguards(context: Context) {
         private const val PREFS_NAME = "nip55_auto_signing"
         private const val KEY_PREFIX_OPTED_IN = "opted_in_"
         private const val KEY_PREFIX_COOLED_OFF_UNTIL = "cooled_off_"
+        private const val KEY_PREFIX_HOURLY = "hourly_"
+        private const val KEY_PREFIX_DAILY = "daily_"
 
         private const val HOUR_MS = 60 * 60 * 1000L
         private const val DAY_MS = 24 * 60 * 60 * 1000L
@@ -20,6 +21,8 @@ class AutoSigningSafeguards(context: Context) {
         const val COOLING_OFF_PERIOD_MS = 15 * 60 * 1000L
         const val UNUSUAL_ACTIVITY_THRESHOLD = 50
         const val UNUSUAL_ACTIVITY_WINDOW_MS = 60 * 1000L
+
+        private const val MAX_TRACKED_PACKAGES = 500
     }
 
     private val prefs = run {
@@ -36,9 +39,22 @@ class AutoSigningSafeguards(context: Context) {
     }
 
     private data class UsageWindow(var count: Int, var windowStart: Long)
-    private val hourlyUsage = ConcurrentHashMap<String, UsageWindow>()
-    private val dailyUsage = ConcurrentHashMap<String, UsageWindow>()
-    private val recentActivity = ConcurrentHashMap<String, UsageWindow>()
+    private val usageLock = Any()
+    private val hourlyUsage = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
+            return size > MAX_TRACKED_PACKAGES
+        }
+    }
+    private val dailyUsage = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
+            return size > MAX_TRACKED_PACKAGES
+        }
+    }
+    private val recentActivity = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
+            return size > MAX_TRACKED_PACKAGES
+        }
+    }
 
     fun isOptedIn(packageName: String): Boolean =
         prefs.getBoolean(KEY_PREFIX_OPTED_IN + packageName, false)
@@ -70,54 +86,82 @@ class AutoSigningSafeguards(context: Context) {
         }
 
         val now = System.currentTimeMillis()
-        val hourly = incrementUsage(hourlyUsage, packageName, now, HOUR_MS)
-        if (hourly.count > HOURLY_LIMIT) {
-            setCooledOff(packageName)
-            return UsageCheckResult.HourlyLimitExceeded
-        }
+        synchronized(usageLock) {
+            val hourly = incrementUsage(hourlyUsage, KEY_PREFIX_HOURLY, packageName, now, HOUR_MS)
+            if (hourly.count > HOURLY_LIMIT) {
+                setCooledOff(packageName)
+                return UsageCheckResult.HourlyLimitExceeded
+            }
 
-        val daily = incrementUsage(dailyUsage, packageName, now, DAY_MS)
-        if (daily.count > DAILY_LIMIT) {
-            setCooledOff(packageName)
-            return UsageCheckResult.DailyLimitExceeded
-        }
+            val daily = incrementUsage(dailyUsage, KEY_PREFIX_DAILY, packageName, now, DAY_MS)
+            if (daily.count > DAILY_LIMIT) {
+                setCooledOff(packageName)
+                return UsageCheckResult.DailyLimitExceeded
+            }
 
-        val recent = incrementUsage(recentActivity, packageName, now, UNUSUAL_ACTIVITY_WINDOW_MS)
-        if (recent.count > UNUSUAL_ACTIVITY_THRESHOLD) {
-            setCooledOff(packageName)
-            return UsageCheckResult.UnusualActivity
-        }
+            val recent = incrementUsage(recentActivity, null, packageName, now, UNUSUAL_ACTIVITY_WINDOW_MS)
+            if (recent.count > UNUSUAL_ACTIVITY_THRESHOLD) {
+                setCooledOff(packageName)
+                return UsageCheckResult.UnusualActivity
+            }
 
-        return UsageCheckResult.Allowed(hourly.count, daily.count)
+            return UsageCheckResult.Allowed(hourly.count, daily.count)
+        }
     }
 
     private fun incrementUsage(
-        map: ConcurrentHashMap<String, UsageWindow>,
+        map: LinkedHashMap<String, UsageWindow>,
+        persistKeyPrefix: String?,
         packageName: String,
         now: Long,
         windowMs: Long
-    ): UsageWindow = map.compute(packageName) { _, existing ->
-        if (existing == null || now - existing.windowStart >= windowMs) {
+    ): UsageWindow {
+        val existing = map[packageName] ?: persistKeyPrefix?.let { loadPersistedUsage(it, packageName) }
+        val entry = if (existing == null || now - existing.windowStart >= windowMs) {
             UsageWindow(1, now)
         } else {
             existing.count++
             existing
         }
-    }!!
+        map[packageName] = entry
+        persistKeyPrefix?.let { persistUsage(it, packageName, entry) }
+        return entry
+    }
+
+    private fun loadPersistedUsage(keyPrefix: String, packageName: String): UsageWindow? {
+        val key = keyPrefix + packageName
+        val value = prefs.getString(key, null) ?: return null
+        val parts = value.split(":")
+        if (parts.size != 2) return null
+        val count = parts[0].toIntOrNull() ?: return null
+        val windowStart = parts[1].toLongOrNull() ?: return null
+        return UsageWindow(count, windowStart)
+    }
+
+    private fun persistUsage(keyPrefix: String, packageName: String, usage: UsageWindow) {
+        val key = keyPrefix + packageName
+        prefs.edit().putString(key, "${usage.count}:${usage.windowStart}").apply()
+    }
 
     fun getUsageStats(packageName: String): UsageStats {
         val now = System.currentTimeMillis()
-        val hourly = getUsageCount(hourlyUsage, packageName, now, HOUR_MS)
-        val daily = getUsageCount(dailyUsage, packageName, now, DAY_MS)
-        return UsageStats(hourly, daily, HOURLY_LIMIT, DAILY_LIMIT)
+        synchronized(usageLock) {
+            val hourly = getUsageCount(hourlyUsage, KEY_PREFIX_HOURLY, packageName, now, HOUR_MS)
+            val daily = getUsageCount(dailyUsage, KEY_PREFIX_DAILY, packageName, now, DAY_MS)
+            return UsageStats(hourly, daily, HOURLY_LIMIT, DAILY_LIMIT)
+        }
     }
 
     private fun getUsageCount(
-        map: ConcurrentHashMap<String, UsageWindow>,
+        map: LinkedHashMap<String, UsageWindow>,
+        persistKeyPrefix: String,
         packageName: String,
         now: Long,
         windowMs: Long
-    ): Int = map[packageName]?.let { if (now - it.windowStart < windowMs) it.count else 0 } ?: 0
+    ): Int {
+        val usage = map[packageName] ?: loadPersistedUsage(persistKeyPrefix, packageName)
+        return usage?.let { if (now - it.windowStart < windowMs) it.count else 0 } ?: 0
+    }
 
     data class UsageStats(
         val hourlyCount: Int,

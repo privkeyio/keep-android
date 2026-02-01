@@ -16,14 +16,23 @@ import io.privkey.keep.R
 import io.privkey.keep.nip55.headerTitle
 import io.privkey.keep.uniffi.Nip55RequestType
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class SigningNotificationManager(private val context: Context) {
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID_START)
-    private val requestIdToNotificationId = ConcurrentHashMap<String, Int>()
-    private val pendingRequestData = ConcurrentHashMap<String, PendingRequestInfo>()
+    private val pendingLock = Any()
+    private val requestIdToNotificationId = object : LinkedHashMap<String, Int>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean {
+            if (size > MAX_PENDING_REQUESTS) {
+                eldest?.let { pendingRequestData.remove(it.key) }
+                return true
+            }
+            return false
+        }
+    }
+    private val pendingRequestData = LinkedHashMap<String, PendingRequestInfo>(16, 0.75f, true)
+    private val pendingRequestsPerPackage = HashMap<String, Int>()
 
     init {
         createNotificationChannel()
@@ -56,14 +65,15 @@ class SigningNotificationManager(private val context: Context) {
         val effectiveRequestId = requestId ?: generateRequestId()
         val notificationId = notificationIdCounter.getAndIncrement()
 
-        // Synchronize the size check, cleanup, and insertion to prevent races
-        synchronized(pendingRequestData) {
-            if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
-                cleanupStaleEntries()
-                if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+        synchronized(pendingLock) {
+            if (callerPackage != null) {
+                val packageCount = pendingRequestsPerPackage[callerPackage] ?: 0
+                if (packageCount >= MAX_PENDING_REQUESTS_PER_PACKAGE) {
                     return null
                 }
+                pendingRequestsPerPackage[callerPackage] = packageCount + 1
             }
+
             requestIdToNotificationId[effectiveRequestId] = notificationId
             pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId, callerPackage)
         }
@@ -97,9 +107,22 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingRequestData) {
-        requestIdToNotificationId.remove(requestId)
-        pendingRequestData.remove(requestId)
+    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
+        synchronized(pendingLock) {
+            requestIdToNotificationId.remove(requestId)
+            val info = pendingRequestData.remove(requestId)
+            if (info != null) {
+                info.callerPackage?.let { pkg ->
+                    val count = pendingRequestsPerPackage[pkg]
+                    if (count != null && count > 1) {
+                        pendingRequestsPerPackage[pkg] = count - 1
+                    } else {
+                        pendingRequestsPerPackage.remove(pkg)
+                    }
+                }
+            }
+            return info
+        }
     }
 
     private fun generateRequestId(): String = UUID.randomUUID().toString()
@@ -159,20 +182,32 @@ class SigningNotificationManager(private val context: Context) {
         val createdAt: Long = System.currentTimeMillis()
     )
 
-    fun removeRequest(requestId: String): Int? = synchronized(pendingRequestData) {
-        pendingRequestData.remove(requestId)
-        requestIdToNotificationId.remove(requestId)
+    fun removeRequest(requestId: String): Int? {
+        synchronized(pendingLock) {
+            val info = pendingRequestData.remove(requestId)
+            if (info != null) {
+                info.callerPackage?.let { pkg ->
+                    val count = pendingRequestsPerPackage[pkg]
+                    if (count != null && count > 1) {
+                        pendingRequestsPerPackage[pkg] = count - 1
+                    } else {
+                        pendingRequestsPerPackage.remove(pkg)
+                    }
+                }
+            }
+            return requestIdToNotificationId.remove(requestId)
+        }
     }
 
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()
-        synchronized(pendingRequestData) {
+        val staleRequestIds = synchronized(pendingLock) {
             pendingRequestData.entries
                 .filter { now - it.value.createdAt > maxAgeMillis }
-                .forEach { (requestId, _) ->
-                    pendingRequestData.remove(requestId)
-                    requestIdToNotificationId.remove(requestId)?.let { notificationManager.cancel(it) }
-                }
+                .map { it.key }
+        }
+        staleRequestIds.forEach { requestId ->
+            removeRequest(requestId)?.let { notificationManager.cancel(it) }
         }
     }
 
@@ -184,6 +219,7 @@ class SigningNotificationManager(private val context: Context) {
         private const val NOTIFICATION_ID_START = 1000
         private const val DISMISS_REQUEST_CODE_OFFSET = 100000
         private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
-        private const val MAX_PENDING_REQUESTS = 100
+        private const val MAX_PENDING_REQUESTS = 1000
+        private const val MAX_PENDING_REQUESTS_PER_PACKAGE = 50
     }
 }

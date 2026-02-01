@@ -70,13 +70,20 @@ class CallerVerificationStore(context: Context) {
 
         val trustedSignature = getTrustedSignature(packageName)
         return when {
-            trustedSignature == null -> {
-                setTrustedSignature(packageName, currentSignature)
-                VerificationResult.TrustedOnFirstUse(currentSignature)
-            }
+            trustedSignature == null -> VerificationResult.FirstUseRequiresApproval(currentSignature)
             trustedSignature == currentSignature -> VerificationResult.Verified(currentSignature)
             else -> VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
         }
+    }
+
+    fun trustPackage(packageName: String, signatureHash: String) {
+        prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
+    }
+
+    fun isPendingTrust(packageName: String): Boolean {
+        val currentSignature = getPackageSignatureHash(packageName) ?: return false
+        val trustedSignature = getTrustedSignature(packageName)
+        return trustedSignature == null
     }
 
     fun generateNonce(packageName: String): String {
@@ -84,7 +91,7 @@ class CallerVerificationStore(context: Context) {
         SecureRandom().nextBytes(bytes)
         val nonce = bytes.joinToString("") { "%02x".format(it) }
         val expiresAt = System.currentTimeMillis() + NONCE_EXPIRY_MS
-        prefs.edit().putString(KEY_PREFIX_NONCE + nonce, "$packageName:$expiresAt").apply()
+        prefs.edit().putString(KEY_PREFIX_NONCE + nonce, "$packageName:$expiresAt").commit()
         return nonce
     }
 
@@ -92,7 +99,8 @@ class CallerVerificationStore(context: Context) {
         val value = prefs.getString(KEY_PREFIX_NONCE + nonce, null)
             ?: return NonceResult.Invalid
 
-        prefs.edit().remove(KEY_PREFIX_NONCE + nonce).apply()
+        val removed = prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()
+        if (!removed) return NonceResult.Invalid
 
         val parts = value.split(":")
         if (parts.size != 2) return NonceResult.Invalid
@@ -125,7 +133,7 @@ class CallerVerificationStore(context: Context) {
         abstract val signatureHash: String?
 
         data class Verified(override val signatureHash: String) : VerificationResult()
-        data class TrustedOnFirstUse(override val signatureHash: String) : VerificationResult()
+        data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult()
         data class SignatureMismatch(val expected: String, val actual: String) : VerificationResult() {
             override val signatureHash: String? = null
         }

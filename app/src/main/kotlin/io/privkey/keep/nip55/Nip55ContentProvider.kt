@@ -127,6 +127,11 @@ class Nip55ContentProvider : ContentProvider() {
         if (effectivePolicy == SignPolicy.MANUAL) return null
 
         if (effectivePolicy == SignPolicy.AUTO) {
+            if (eventKind != null && isSensitiveKind(eventKind)) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from $callerPackage")
+                return null
+            }
+
             val safeguards = currentApp.getAutoSigningSafeguards()
             if (safeguards != null) {
                 if (!safeguards.isOptedIn(callerPackage)) {
@@ -279,10 +284,13 @@ class Nip55ContentProvider : ContentProvider() {
 
         val verificationStore = app?.getCallerVerificationStore() ?: return packageName
         return when (val result = verificationStore.verifyOrTrust(packageName)) {
-            is CallerVerificationStore.VerificationResult.Verified,
-            is CallerVerificationStore.VerificationResult.TrustedOnFirstUse -> packageName
+            is CallerVerificationStore.VerificationResult.Verified -> packageName
+            is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> {
+                if (BuildConfig.DEBUG) Log.d(TAG, "First use for $packageName requires user approval (sig: ${result.signatureHash.take(8)}...)")
+                null
+            }
             is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $packageName: expected ${result.expected}, got ${result.actual}")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $packageName: expected ${result.expected.take(8)}..., got ${result.actual.take(8)}...")
                 null
             }
             is CallerVerificationStore.VerificationResult.NotInstalled -> {
