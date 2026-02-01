@@ -30,11 +30,7 @@ class PermissionDecisionTest {
 
     @Test
     fun `fromString defaults to DENY for unknown values`() {
-        try {
-            assertEquals(PermissionDecision.DENY, PermissionDecision.fromString("invalid"))
-        } catch (e: RuntimeException) {
-            // Android Log.w throws on JVM; behavior verified in instrumented tests
-        }
+        assertEquals(PermissionDecision.DENY, PermissionDecision.fromString("invalid"))
     }
 
     @Test

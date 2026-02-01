@@ -38,7 +38,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ env.RUST_TARGETS }}
@@ -91,7 +91,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@f7ccc83f9ed1e5b9c81d8a67d7ad1a747e22a561
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ env.RUST_TARGETS }}
