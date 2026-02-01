@@ -65,7 +65,7 @@ class SigningNotificationManager(private val context: Context) {
                 }
             }
             requestIdToNotificationId[effectiveRequestId] = notificationId
-            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId, callerPackage)
         }
 
         val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
@@ -155,6 +155,7 @@ class SigningNotificationManager(private val context: Context) {
     data class PendingRequestInfo(
         val intentUri: String,
         val originalRequestId: String?,
+        val callerPackage: String?,
         val createdAt: Long = System.currentTimeMillis()
     )
 

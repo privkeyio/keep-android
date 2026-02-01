@@ -1,7 +1,6 @@
 package io.privkey.keep.nip55
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
@@ -24,7 +23,6 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.Nip55Response
-import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +34,7 @@ class Nip55Activity : FragmentActivity() {
     private var permissionStore: PermissionStore? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var pinStore: PinStore? = null
+    private var callerVerificationStore: CallerVerificationStore? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
@@ -44,6 +43,7 @@ class Nip55Activity : FragmentActivity() {
     private var notificationManager: SigningNotificationManager? = null
     private var intentUri: String? = null
     private var notificationRequestId: String? = null
+    private var isNotificationOriginated: Boolean = false
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -60,6 +60,7 @@ class Nip55Activity : FragmentActivity() {
         killSwitchStore = app?.getKillSwitchStore()
         pinStore = app?.getPinStore()
         notificationManager = app?.getSigningNotificationManager()
+        callerVerificationStore = app?.getCallerVerificationStore()
         handleIntent(intent)
     }
 
@@ -71,7 +72,6 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-check kill switch in case it was enabled while the activity was paused
         if (killSwitchStore?.isEnabled() == true) finishWithError("signing_disabled")
     }
 
@@ -79,7 +79,7 @@ class Nip55Activity : FragmentActivity() {
         if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
 
-        identifyCaller()
+        identifyCaller(intent)
         if (callerPackage == null) {
             Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
@@ -94,33 +94,57 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun identifyCaller() {
-        callerPackage = callingActivity?.packageName
-        callerVerified = callerPackage != null
-        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
-    }
+    private fun identifyCaller(intent: Intent) {
+        val verificationStore = callerVerificationStore
+        isNotificationOriginated = false
 
-    private fun getCallerSignatureHash(packageName: String): String? {
-        return try {
-            val packageInfo = packageManager.getPackageInfo(
-                packageName,
-                PackageManager.GET_SIGNING_CERTIFICATES
-            )
-            val signingInfo = packageInfo.signingInfo ?: return null
-            val signatures = if (signingInfo.hasMultipleSigners()) {
-                signingInfo.apkContentsSigners
-            } else {
-                signingInfo.signingCertificateHistory
+        val nonce = intent.getStringExtra("nip55_nonce")
+        if (nonce != null && verificationStore != null) {
+            when (val result = verificationStore.consumeNonce(nonce)) {
+                is CallerVerificationStore.NonceResult.Valid -> {
+                    callerPackage = result.packageName
+                    isNotificationOriginated = true
+                    val verifyResult = verificationStore.verifyOrTrust(result.packageName)
+                    callerVerified = verifyResult is CallerVerificationStore.VerificationResult.Verified ||
+                        verifyResult is CallerVerificationStore.VerificationResult.TrustedOnFirstUse
+                    callerSignatureHash = verifyResult.signatureHash
+                    return
+                }
+                is CallerVerificationStore.NonceResult.Expired,
+                is CallerVerificationStore.NonceResult.Invalid -> {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
+                }
             }
-            signatures?.firstOrNull()?.let { signature ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                val hash = digest.digest(signature.toByteArray())
-                hash.joinToString("") { "%02x".format(it) }
-            }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
-            null
         }
+
+        val directCallerPackage = callingActivity?.packageName
+        if (directCallerPackage != null && verificationStore != null) {
+            val result = verificationStore.verifyOrTrust(directCallerPackage)
+            when (result) {
+                is CallerVerificationStore.VerificationResult.Verified,
+                is CallerVerificationStore.VerificationResult.TrustedOnFirstUse -> {
+                    callerPackage = directCallerPackage
+                    callerVerified = true
+                    callerSignatureHash = result.signatureHash
+                }
+                is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $directCallerPackage")
+                    callerPackage = null
+                    callerVerified = false
+                    callerSignatureHash = null
+                }
+                is CallerVerificationStore.VerificationResult.NotInstalled -> {
+                    callerPackage = directCallerPackage
+                    callerVerified = false
+                    callerSignatureHash = null
+                }
+            }
+            return
+        }
+
+        callerPackage = null
+        callerVerified = false
+        callerSignatureHash = null
     }
 
     private fun showNotification() {

@@ -54,4 +54,14 @@
     <string name="notification_channel_signing_requests_description">Notifications for NIP-55 signing requests</string>
     <string name="notification_request_from">Request from %1$s</string>
     <string name="notification_signing_request_pending">Signing request pending</string>
+
+    <string name="notification_channel_background_signing">Background Signing</string>
+    <string name="notification_channel_background_signing_description">Notifications when apps sign events in the background</string>
+    <string name="notification_background_signing_title">Background Signing</string>
+    <string name="notification_background_signing_text">%1$s: %2$s</string>
+
+    <string name="auto_signing_opt_in">Enable AUTO signing</string>
+    <string name="auto_signing_opt_in_description">Allow this app to sign events without prompts</string>
+    <string name="auto_signing_cooling_off">Cooling off until %1$s</string>
+    <string name="auto_signing_usage_stats">Usage: %1$d/%2$d hourly, %3$d/%4$d daily</string>
 </resources>

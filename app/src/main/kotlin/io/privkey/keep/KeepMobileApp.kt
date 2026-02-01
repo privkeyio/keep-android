@@ -2,6 +2,8 @@ package io.privkey.keep
 
 import android.app.Application
 import android.util.Log
+import io.privkey.keep.nip55.AutoSigningSafeguards
+import io.privkey.keep.nip55.CallerVerificationStore
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.KeepAliveService
@@ -34,6 +36,8 @@ class KeepMobileApp : Application() {
     private var pinStore: PinStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
+    private var callerVerificationStore: CallerVerificationStore? = null
+    private var autoSigningSafeguards: AutoSigningSafeguards? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -97,7 +101,12 @@ class KeepMobileApp : Application() {
         try {
             val store = PermissionStore(Nip55Database.getInstance(this))
             permissionStore = store
-            applicationScope.launch { store.cleanupExpired() }
+            callerVerificationStore = CallerVerificationStore(this)
+            autoSigningSafeguards = AutoSigningSafeguards(this)
+            applicationScope.launch {
+                store.cleanupExpired()
+                callerVerificationStore?.cleanupExpiredNonces()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
@@ -132,6 +141,10 @@ class KeepMobileApp : Application() {
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
     fun getPermissionStore(): PermissionStore? = permissionStore
+
+    fun getCallerVerificationStore(): CallerVerificationStore? = callerVerificationStore
+
+    fun getAutoSigningSafeguards(): AutoSigningSafeguards? = autoSigningSafeguards
 
     fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
 

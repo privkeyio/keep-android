@@ -1,20 +1,30 @@
 package io.privkey.keep.nip55
 
+import android.annotation.SuppressLint
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicInteger
 
 class Nip55ContentProvider : ContentProvider() {
     companion object {
@@ -30,10 +40,13 @@ class Nip55ContentProvider : ContentProvider() {
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val OPERATION_TIMEOUT_MS = 5000L
 
+        private const val BACKGROUND_SIGNING_CHANNEL_ID = "background_signing"
+
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
     }
 
     private val rateLimiter = RateLimiter()
+    private val backgroundNotificationId = AtomicInteger(2000)
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
@@ -41,7 +54,23 @@ class Nip55ContentProvider : ContentProvider() {
         withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
     }
 
-    override fun onCreate(): Boolean = true
+    override fun onCreate(): Boolean {
+        createBackgroundSigningChannel()
+        return true
+    }
+
+    private fun createBackgroundSigningChannel() {
+        val ctx = context ?: return
+        val channel = NotificationChannel(
+            BACKGROUND_SIGNING_CHANNEL_ID,
+            ctx.getString(R.string.notification_channel_background_signing),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = ctx.getString(R.string.notification_channel_background_signing_description)
+        }
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
+            ?.createNotificationChannel(channel)
+    }
 
     override fun query(
         uri: Uri,
@@ -98,6 +127,36 @@ class Nip55ContentProvider : ContentProvider() {
         if (effectivePolicy == SignPolicy.MANUAL) return null
 
         if (effectivePolicy == SignPolicy.AUTO) {
+            val safeguards = currentApp.getAutoSigningSafeguards()
+            if (safeguards != null) {
+                if (!safeguards.isOptedIn(callerPackage)) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
+                    return null
+                }
+                when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
+                    is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Hourly limit exceeded for $callerPackage")
+                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_hourly_limit", wasAutomatic = true) }
+                        return rejectedCursor(null)
+                    }
+                    is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Daily limit exceeded for $callerPackage")
+                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_daily_limit", wasAutomatic = true) }
+                        return rejectedCursor(null)
+                    }
+                    is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Unusual activity detected for $callerPackage, cooling off")
+                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_unusual_activity", wasAutomatic = true) }
+                        return rejectedCursor(null)
+                    }
+                    is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> {
+                        if (BuildConfig.DEBUG) Log.d(TAG, "$callerPackage is in cooling-off period until ${usageResult.until}")
+                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_cooling_off", wasAutomatic = true) }
+                        return rejectedCursor(null)
+                    }
+                    is AutoSigningSafeguards.UsageCheckResult.Allowed -> Unit
+                }
+            }
             return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
         }
 
@@ -160,6 +219,7 @@ class Nip55ContentProvider : ContentProvider() {
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                showBackgroundSigningNotification(callerPackage, requestType, eventKind)
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
@@ -173,17 +233,60 @@ class Nip55ContentProvider : ContentProvider() {
             }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun showBackgroundSigningNotification(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ) {
+        val ctx = context ?: return
+        if (ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) return
+
+        val appLabel = try {
+            val appInfo = ctx.packageManager.getApplicationInfo(callerPackage, 0)
+            ctx.packageManager.getApplicationLabel(appInfo).toString()
+        } catch (_: PackageManager.NameNotFoundException) {
+            callerPackage
+        }
+
+        val kindText = eventKind?.let { " (kind $it)" } ?: ""
+        val notification = NotificationCompat.Builder(ctx, BACKGROUND_SIGNING_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(ctx.getString(R.string.notification_background_signing_title))
+            .setContentText(ctx.getString(R.string.notification_background_signing_text, appLabel, requestType.headerTitle() + kindText))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .build()
+
+        NotificationManagerCompat.from(ctx).notify(backgroundNotificationId.getAndIncrement(), notification)
+    }
+
     private fun getCallerPackage(): String? {
         val callingUid = Binder.getCallingUid()
         if (callingUid == android.os.Process.myUid()) {
             return null
         }
         val packages = context?.packageManager?.getPackagesForUid(callingUid)
-        return when {
-            packages.isNullOrEmpty() -> null
+        val packageName = when {
+            packages.isNullOrEmpty() -> return null
             packages.size == 1 -> packages[0]
             else -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from multi-package UID (count=${packages.size})")
+                return null
+            }
+        }
+
+        val verificationStore = app?.getCallerVerificationStore() ?: return packageName
+        return when (val result = verificationStore.verifyOrTrust(packageName)) {
+            is CallerVerificationStore.VerificationResult.Verified,
+            is CallerVerificationStore.VerificationResult.TrustedOnFirstUse -> packageName
+            is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $packageName: expected ${result.expected}, got ${result.actual}")
+                null
+            }
+            is CallerVerificationStore.VerificationResult.NotInstalled -> {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Package $packageName not installed")
                 null
             }
         }
