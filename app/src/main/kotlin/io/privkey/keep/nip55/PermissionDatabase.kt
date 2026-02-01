@@ -88,6 +88,7 @@ sealed class VelocityResult {
 
 sealed class ChainVerificationResult {
     data object Valid : ChainVerificationResult()
+    data class PartiallyVerified(val legacyEntriesSkipped: Int) : ChainVerificationResult()
     data class Broken(val entryId: Long) : ChainVerificationResult()
     data class Tampered(val entryId: Long) : ChainVerificationResult()
 }
@@ -560,21 +561,20 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun verifyAuditChain(): ChainVerificationResult {
         val entries = auditDao.getAllOrdered()
         var inLegacyPhase = true
+        var legacyEntriesSkipped = 0
         var expectedPrevHash: String? = null
 
         for (entry in entries) {
             if (inLegacyPhase) {
                 if (entry.entryHash.isEmpty()) {
-                    // Legacy entry without hash - skip validation
+                    legacyEntriesSkipped++
                     continue
                 }
-                // First hashed entry - validate genesis (previousHash should be null/empty)
                 inLegacyPhase = false
                 if (!entry.previousHash.isNullOrEmpty()) {
                     return ChainVerificationResult.Broken(entry.id)
                 }
             } else {
-                // Post-legacy: every entry must have a hash and link properly
                 if (entry.entryHash.isEmpty()) {
                     return ChainVerificationResult.Broken(entry.id)
                 }
@@ -598,7 +598,12 @@ class PermissionStore(private val database: Nip55Database) {
 
             expectedPrevHash = entry.entryHash
         }
-        return ChainVerificationResult.Valid
+
+        return if (legacyEntriesSkipped > 0) {
+            ChainVerificationResult.PartiallyVerified(legacyEntriesSkipped)
+        } else {
+            ChainVerificationResult.Valid
+        }
     }
 
     suspend fun getAuditLogCount(): Int = auditDao.getCount()
