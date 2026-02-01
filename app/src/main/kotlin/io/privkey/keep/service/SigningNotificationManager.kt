@@ -100,8 +100,7 @@ class SigningNotificationManager(private val context: Context) {
 
     fun cancelNotification(requestId: String?) {
         if (requestId == null) return
-        val notificationId = requestIdToNotificationId.remove(requestId) ?: return
-        pendingRequestData.remove(requestId)
+        val notificationId = removeRequest(requestId) ?: return
         notificationManager.cancel(notificationId)
     }
 
@@ -136,22 +135,18 @@ class SigningNotificationManager(private val context: Context) {
         val createdAt: Long = System.currentTimeMillis()
     )
 
-    fun removeRequest(requestId: String) {
-        requestIdToNotificationId.remove(requestId)
+    fun removeRequest(requestId: String): Int? {
         pendingRequestData.remove(requestId)
+        return requestIdToNotificationId.remove(requestId)
     }
 
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()
-        val staleRequestIds = pendingRequestData.entries
+        pendingRequestData.entries
             .filter { now - it.value.createdAt > maxAgeMillis }
-            .map { it.key }
-
-        staleRequestIds.forEach { requestId ->
-            val notificationId = requestIdToNotificationId.remove(requestId)
-            pendingRequestData.remove(requestId)
-            notificationId?.let { notificationManager.cancel(it) }
-        }
+            .forEach { (requestId, _) ->
+                removeRequest(requestId)?.let { notificationManager.cancel(it) }
+            }
     }
 
     companion object {

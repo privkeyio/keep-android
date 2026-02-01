@@ -182,7 +182,7 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("unknown_caller")
         }
         val store = permissionStore
-        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
+        val eventKind = req.eventKind()
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         lifecycleScope.launch {
@@ -251,7 +251,7 @@ class Nip55Activity : FragmentActivity() {
         val req = request ?: return finishWithError("User rejected")
         val callerId = callerPackage
         val store = permissionStore
-        val eventKind = if (req.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(req.content) else null
+        val eventKind = req.eventKind()
 
         lifecycleScope.launch {
             if (store != null && callerId != null) {

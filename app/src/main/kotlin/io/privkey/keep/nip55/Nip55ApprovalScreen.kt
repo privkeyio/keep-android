@@ -34,6 +34,9 @@ internal fun parseEventKind(content: String): Int? = runCatching {
     org.json.JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
 
+internal fun Nip55Request.eventKind(): Int? =
+    if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
+
 @Composable
 fun ApprovalScreen(
     request: Nip55Request,
@@ -46,9 +49,7 @@ fun ApprovalScreen(
     val canRememberChoice = callerVerified && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
-    val eventKind = remember(request) {
-        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(request.content) else null
-    }
+    val eventKind = remember(request) { request.eventKind() }
 
     Column(
         modifier = Modifier
