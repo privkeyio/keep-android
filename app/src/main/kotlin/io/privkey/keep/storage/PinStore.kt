@@ -76,17 +76,14 @@ class PinStore(context: Context) {
 
     @Synchronized
     fun isWeakPin(pin: String): Boolean {
-        // Non-digit PINs are treated as weak/invalid to avoid digitToInt() exceptions
         if (!pin.all { it.isDigit() }) return true
-        if (WEAK_PINS.contains(pin)) return true
+        if (pin in WEAK_PINS) return true
         if (pin.length >= 3 && pin.all { it == pin[0] }) return true
+        if (pin.length < 3) return false
         val digits = pin.map { it.digitToInt() }
-        if (digits.size >= 3) {
-            val isAscending = digits.zipWithNext().all { (a, b) -> b == a + 1 }
-            val isDescending = digits.zipWithNext().all { (a, b) -> b == a - 1 }
-            if (isAscending || isDescending) return true
-        }
-        return false
+        val isSequential = digits.zipWithNext().all { (a, b) -> b == a + 1 } ||
+            digits.zipWithNext().all { (a, b) -> b == a - 1 }
+        return isSequential
     }
 
     @Synchronized
@@ -229,25 +226,18 @@ class PinStore(context: Context) {
         val currentElapsed = SystemClock.elapsedRealtime()
 
         val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
-
-        // After reboot, elapsed time resets so we can only trust wall clock
         val rebootDetected = currentElapsed < savedSetElapsed
-        val remainingByElapsed = if (rebootDetected) {
-            Long.MIN_VALUE
-        } else {
-            lockoutDuration - (currentElapsed - savedSetElapsed)
-        }
+        val remainingByElapsed = if (rebootDetected) Long.MIN_VALUE
+            else lockoutDuration - (currentElapsed - savedSetElapsed)
 
         val remaining = maxOf(remainingByWallClock, remainingByElapsed)
         if (remaining <= 0) {
             clearLockoutTimestampsInternal()
             return 0
         }
-
         return remaining
     }
 
-    @Synchronized
     private fun maybeDecayLockoutLevel() {
         val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
         if (currentLevel == 0) return
@@ -261,17 +251,16 @@ class PinStore(context: Context) {
             prefs.edit().putLong(KEY_LAST_LOCKOUT_CLEARED, now).commit()
             return
         }
-        if (elapsed >= LOCKOUT_LEVEL_DECAY_MS) {
-            val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
-            val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
-            if (newLevel != currentLevel) {
-                val newLastCleared = lastCleared + decaySteps * LOCKOUT_LEVEL_DECAY_MS
-                prefs.edit()
-                    .putInt(KEY_LOCKOUT_LEVEL, newLevel)
-                    .putLong(KEY_LAST_LOCKOUT_CLEARED, newLastCleared)
-                    .commit()
-            }
-        }
+
+        val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
+        if (decaySteps == 0) return
+
+        val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
+        val newLastCleared = lastCleared + decaySteps * LOCKOUT_LEVEL_DECAY_MS
+        prefs.edit()
+            .putInt(KEY_LOCKOUT_LEVEL, newLevel)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, newLastCleared)
+            .commit()
     }
 
     private fun clearLockoutTimestampsInternal() {
