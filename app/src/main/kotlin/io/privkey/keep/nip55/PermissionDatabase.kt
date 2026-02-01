@@ -89,6 +89,7 @@ sealed class VelocityResult {
 sealed class ChainVerificationResult {
     data object Valid : ChainVerificationResult()
     data class PartiallyVerified(val legacyEntriesSkipped: Int) : ChainVerificationResult()
+    data class Truncated(val entryId: Long) : ChainVerificationResult()
     data class Broken(val entryId: Long) : ChainVerificationResult()
     data class Tampered(val entryId: Long) : ChainVerificationResult()
 }
@@ -520,8 +521,10 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun verifyAuditChain(): ChainVerificationResult {
         val entries = auditDao.getAllOrdered()
+        val knownHashes = entries.mapNotNullTo(mutableSetOf()) { it.entryHash.takeIf { h -> h.isNotEmpty() } }
         var inLegacyPhase = true
         var legacyEntriesSkipped = 0
+        var truncated = false
         var expectedPrevHash: String? = null
 
         for (entry in entries) {
@@ -532,7 +535,11 @@ class PermissionStore(private val database: Nip55Database) {
                 }
                 inLegacyPhase = false
                 if (!entry.previousHash.isNullOrEmpty()) {
-                    return ChainVerificationResult.Broken(entry.id)
+                    if (entry.previousHash !in knownHashes) {
+                        truncated = true
+                    } else {
+                        return ChainVerificationResult.Broken(entry.id)
+                    }
                 }
             } else {
                 if (entry.entryHash.isEmpty()) {
@@ -559,10 +566,10 @@ class PermissionStore(private val database: Nip55Database) {
             expectedPrevHash = entry.entryHash
         }
 
-        return if (legacyEntriesSkipped > 0) {
-            ChainVerificationResult.PartiallyVerified(legacyEntriesSkipped)
-        } else {
-            ChainVerificationResult.Valid
+        return when {
+            truncated -> ChainVerificationResult.Truncated(entries.first { it.entryHash.isNotEmpty() }.id)
+            legacyEntriesSkipped > 0 -> ChainVerificationResult.PartiallyVerified(legacyEntriesSkipped)
+            else -> ChainVerificationResult.Valid
         }
     }
 

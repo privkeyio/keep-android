@@ -313,13 +313,14 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
     val icon = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle
     val color = when (status) {
         is ChainVerificationResult.Valid -> MaterialTheme.colorScheme.primary
-        is ChainVerificationResult.PartiallyVerified -> MaterialTheme.colorScheme.tertiary
+        is ChainVerificationResult.PartiallyVerified, is ChainVerificationResult.Truncated -> MaterialTheme.colorScheme.tertiary
         is ChainVerificationResult.Broken, is ChainVerificationResult.Tampered -> MaterialTheme.colorScheme.error
         null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val text = when (status) {
         is ChainVerificationResult.Valid -> "Chain verified ($entryCount entries)"
         is ChainVerificationResult.PartiallyVerified -> "Verified (${status.legacyEntriesSkipped} legacy entries)"
+        is ChainVerificationResult.Truncated -> "Verified (older entries pruned)"
         is ChainVerificationResult.Broken -> "Chain integrity issue detected"
         is ChainVerificationResult.Tampered -> "Tampering detected in audit log"
         null -> "Verifying..."
