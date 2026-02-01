@@ -14,20 +14,12 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class Nip46ApprovalActivity : FragmentActivity() {
-
-    companion object {
-        private const val TAG = "Nip46ApprovalActivity"
-        const val EXTRA_REQUEST_ID = "request_id"
-        const val EXTRA_APP_PUBKEY = "app_pubkey"
-        const val EXTRA_APP_NAME = "app_name"
-        const val EXTRA_METHOD = "method"
-        const val EXTRA_EVENT_KIND = "event_kind"
-        const val EXTRA_EVENT_CONTENT = "event_content"
-        const val EXTRA_IS_CONNECT = "is_connect"
-    }
 
     private lateinit var biometricHelper: BiometricHelper
     private var storage: AndroidKeystoreStorage? = null
@@ -123,10 +115,32 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 return@launch
             }
 
-            keystoreStorage.setPendingCipher(authedCipher)
-            respond(true)
-            keystoreStorage.clearPendingCipher()
+            try {
+                keystoreStorage.setPendingCipher(authedCipher)
+                respond(true)
+            } finally {
+                // Clear cipher after delay to allow FFI signing to complete.
+                // The signing happens asynchronously in the Rust FFI after respond() triggers
+                // the callback and handleApprovalRequest returns. We use NonCancellable to ensure
+                // cleanup runs even when the activity finishes and cancels the coroutine.
+                withContext(NonCancellable) {
+                    delay(CIPHER_CLEANUP_DELAY_MS)
+                    keystoreStorage.clearPendingCipher()
+                }
+            }
         }
+    }
+
+    companion object {
+        private const val TAG = "Nip46ApprovalActivity"
+        private const val CIPHER_CLEANUP_DELAY_MS = 5000L
+        const val EXTRA_REQUEST_ID = "request_id"
+        const val EXTRA_APP_PUBKEY = "app_pubkey"
+        const val EXTRA_APP_NAME = "app_name"
+        const val EXTRA_METHOD = "method"
+        const val EXTRA_EVENT_KIND = "event_kind"
+        const val EXTRA_EVENT_CONTENT = "event_content"
+        const val EXTRA_IS_CONNECT = "is_connect"
     }
 
     private fun handleReject() {

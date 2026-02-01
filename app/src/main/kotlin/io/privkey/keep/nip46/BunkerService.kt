@@ -32,9 +32,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 
 class BunkerService : Service() {
 
@@ -49,6 +52,7 @@ class BunkerService : Service() {
         private const val MAX_REQUESTS_PER_WINDOW = 30
         private const val BACKOFF_BASE_MS = 1000L
         private const val BACKOFF_MAX_MS = 60_000L
+        private const val APPROVAL_TIMEOUT_MS = 60_000L
 
         private val _bunkerUrl = MutableStateFlow<String?>(null)
         val bunkerUrl: StateFlow<String?> = _bunkerUrl.asStateFlow()
@@ -267,6 +271,14 @@ class BunkerService : Service() {
         else -> Nip55RequestType.SIGN_EVENT
     }
 
+    /**
+     * Handle an approval request from the FFI.
+     *
+     * Note: This method uses runBlocking to bridge between the synchronous FFI callback
+     * and coroutine-based waiting. The FFI callback thread will be blocked until the user
+     * responds or the timeout expires, but the actual waiting happens in coroutine
+     * infrastructure with proper timeout handling.
+     */
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         val clientPubkey = request.appPubkey
 
@@ -285,39 +297,50 @@ class BunkerService : Service() {
         }
 
         val requestId = java.util.UUID.randomUUID().toString()
-        val result = AtomicReference<Boolean?>(null)
-        val latch = java.util.concurrent.CountDownLatch(1)
 
-        val pendingApproval = PendingApproval(request, isConnectRequest = isConnectRequest) { approved ->
-            result.set(approved)
-            latch.countDown()
-        }
+        // Use runBlocking to bridge the synchronous FFI callback with coroutine-based waiting.
+        // This moves the timeout/cleanup logic into structured concurrency while still
+        // providing the synchronous return value the FFI requires.
+        return runBlocking {
+            val approved = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) {
+                suspendCancellableCoroutine { continuation ->
+                    val pendingApproval = PendingApproval(
+                        request,
+                        isConnectRequest = isConnectRequest
+                    ) { result ->
+                        continuation.resume(result)
+                    }
 
-        if (!addPendingApproval(requestId, pendingApproval)) {
-            return false
-        }
+                    if (!addPendingApproval(requestId, pendingApproval)) {
+                        continuation.resume(false)
+                        return@suspendCancellableCoroutine
+                    }
 
-        startApprovalActivity(requestId, request, isConnectRequest)
+                    continuation.invokeOnCancellation {
+                        // Cleanup on timeout/cancellation
+                        pendingApprovals.remove(requestId)?.let {
+                            globalPendingCount.decrementAndGet()
+                            clientPendingCounts[clientPubkey]?.decrementAndGet()
+                        }
+                    }
 
-        val received = runCatching { latch.await(60, java.util.concurrent.TimeUnit.SECONDS) }
-            .getOrDefault(false)
-
-        if (!received) {
-            pendingApprovals.remove(requestId)?.let {
-                globalPendingCount.decrementAndGet()
-                clientPendingCounts[clientPubkey]?.decrementAndGet()
+                    startApprovalActivity(requestId, request, isConnectRequest)
+                }
             }
-            return false
+
+            // Timeout case: cleanup already handled by invokeOnCancellation
+            if (approved == null) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
+                return@runBlocking false
+            }
+
+            if (approved && isConnectRequest && store != null) {
+                store.authorizeClient(clientPubkey)
+                if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: $clientPubkey")
+            }
+
+            approved
         }
-
-        val approved = result.get() ?: false
-
-        if (approved && isConnectRequest && store != null) {
-            store.authorizeClient(clientPubkey)
-            if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: $clientPubkey")
-        }
-
-        return approved
     }
 
     private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
