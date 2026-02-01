@@ -53,19 +53,20 @@ class SigningNotificationManager(private val context: Context) {
     ): String? {
         if (!hasNotificationPermission()) return null
 
-        // Enforce maximum pending requests to prevent memory exhaustion
-        if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
-            cleanupStaleEntries()
-            if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
-                return null
-            }
-        }
-
         val effectiveRequestId = requestId ?: generateRequestId()
         val notificationId = notificationIdCounter.getAndIncrement()
-        requestIdToNotificationId[effectiveRequestId] = notificationId
 
-        pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+        // Synchronize the size check, cleanup, and insertion to prevent races
+        synchronized(pendingRequestData) {
+            if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+                cleanupStaleEntries()
+                if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+                    return null
+                }
+            }
+            requestIdToNotificationId[effectiveRequestId] = notificationId
+            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+        }
 
         val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
 
@@ -96,9 +97,9 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
+    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingRequestData) {
         requestIdToNotificationId.remove(requestId)
-        return pendingRequestData.remove(requestId)
+        pendingRequestData.remove(requestId)
     }
 
     private fun generateRequestId(): String = UUID.randomUUID().toString()
@@ -157,18 +158,21 @@ class SigningNotificationManager(private val context: Context) {
         val createdAt: Long = System.currentTimeMillis()
     )
 
-    fun removeRequest(requestId: String): Int? {
+    fun removeRequest(requestId: String): Int? = synchronized(pendingRequestData) {
         pendingRequestData.remove(requestId)
-        return requestIdToNotificationId.remove(requestId)
+        requestIdToNotificationId.remove(requestId)
     }
 
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()
-        pendingRequestData.entries
-            .filter { now - it.value.createdAt > maxAgeMillis }
-            .forEach { (requestId, _) ->
-                removeRequest(requestId)?.let { notificationManager.cancel(it) }
-            }
+        synchronized(pendingRequestData) {
+            pendingRequestData.entries
+                .filter { now - it.value.createdAt > maxAgeMillis }
+                .forEach { (requestId, _) ->
+                    pendingRequestData.remove(requestId)
+                    requestIdToNotificationId.remove(requestId)?.let { notificationManager.cancel(it) }
+                }
+        }
     }
 
     companion object {
