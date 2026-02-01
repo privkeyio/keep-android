@@ -101,56 +101,38 @@ class Nip55Activity : FragmentActivity() {
 
         val nonce = intent.getStringExtra("nip55_nonce")
         if (nonce != null && verificationStore != null) {
-            when (val result = verificationStore.consumeNonce(nonce)) {
-                is CallerVerificationStore.NonceResult.Valid -> {
-                    callerPackage = result.packageName
-                    isNotificationOriginated = true
-                    val verifyResult = verificationStore.verifyOrTrust(result.packageName)
-                    callerVerified = verifyResult is CallerVerificationStore.VerificationResult.Verified
-                    callerSignatureHash = verifyResult.signatureHash
-                    callerPendingFirstUse = verifyResult is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval
-                    return
-                }
-                is CallerVerificationStore.NonceResult.Expired,
-                is CallerVerificationStore.NonceResult.Invalid -> {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
-                }
+            val nonceResult = verificationStore.consumeNonce(nonce)
+            if (nonceResult is CallerVerificationStore.NonceResult.Valid) {
+                isNotificationOriginated = true
+                applyVerificationResult(nonceResult.packageName, verificationStore.verifyOrTrust(nonceResult.packageName))
+                return
             }
+            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
         }
 
         val directCallerPackage = callingActivity?.packageName
         if (directCallerPackage != null && verificationStore != null) {
             val result = verificationStore.verifyOrTrust(directCallerPackage)
-            when (result) {
-                is CallerVerificationStore.VerificationResult.Verified -> {
-                    callerPackage = directCallerPackage
-                    callerVerified = true
-                    callerSignatureHash = result.signatureHash
-                    callerPendingFirstUse = false
-                }
-                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> {
-                    callerPackage = directCallerPackage
-                    callerVerified = false
-                    callerSignatureHash = result.signatureHash
-                    callerPendingFirstUse = true
-                }
-                is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $directCallerPackage")
-                    callerPackage = null
-                    callerVerified = false
-                    callerSignatureHash = null
-                    callerPendingFirstUse = false
-                }
-                is CallerVerificationStore.VerificationResult.NotInstalled -> {
-                    callerPackage = directCallerPackage
-                    callerVerified = false
-                    callerSignatureHash = null
-                    callerPendingFirstUse = false
-                }
+            if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $directCallerPackage")
+                clearCallerState()
+            } else {
+                applyVerificationResult(directCallerPackage, result)
             }
             return
         }
 
+        clearCallerState()
+    }
+
+    private fun applyVerificationResult(packageName: String, result: CallerVerificationStore.VerificationResult) {
+        callerPackage = packageName
+        callerVerified = result is CallerVerificationStore.VerificationResult.Verified
+        callerSignatureHash = result.signatureHash
+        callerPendingFirstUse = result is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval
+    }
+
+    private fun clearCallerState() {
         callerPackage = null
         callerVerified = false
         callerSignatureHash = null

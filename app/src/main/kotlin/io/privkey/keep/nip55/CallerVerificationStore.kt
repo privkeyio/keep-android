@@ -53,16 +53,8 @@ class CallerVerificationStore(context: Context) {
         }
     }
 
-    fun getTrustedSignature(packageName: String): String? =
+    private fun getTrustedSignature(packageName: String): String? =
         prefs.getString(KEY_PREFIX_SIGNATURE + packageName, null)
-
-    fun setTrustedSignature(packageName: String, signatureHash: String) {
-        prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).apply()
-    }
-
-    fun clearTrustedSignature(packageName: String) {
-        prefs.edit().remove(KEY_PREFIX_SIGNATURE + packageName).apply()
-    }
 
     fun verifyOrTrust(packageName: String): VerificationResult {
         val currentSignature = getPackageSignatureHash(packageName)
@@ -78,12 +70,6 @@ class CallerVerificationStore(context: Context) {
 
     fun trustPackage(packageName: String, signatureHash: String) {
         prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
-    }
-
-    fun isPendingTrust(packageName: String): Boolean {
-        val currentSignature = getPackageSignatureHash(packageName) ?: return false
-        val trustedSignature = getTrustedSignature(packageName)
-        return trustedSignature == null
     }
 
     fun generateNonce(packageName: String): String {

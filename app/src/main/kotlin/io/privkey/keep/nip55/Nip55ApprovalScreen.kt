@@ -161,7 +161,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventPreview?.let { isSensitiveKind(it.kind) } == true
+                isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
             )
         }
 
@@ -264,34 +264,37 @@ private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
 
 @Composable
 private fun UnverifiedCallerWarning() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
-    ) {
-        Text(
-            text = "Warning: Unable to verify the requesting app. Only approve if you initiated this action.",
-            modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onErrorContainer
-        )
-    }
+    WarningCard(
+        text = "Warning: Unable to verify the requesting app. Only approve if you initiated this action.",
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
+    )
 }
 
 @Composable
 private fun FirstUseWarning() {
+    WarningCard(
+        text = "First connection from this app. Approving will trust this app for future requests.",
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    )
+}
+
+@Composable
+private fun WarningCard(
+    text: String,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer
-        )
+        colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Text(
-            text = "First connection from this app. Approving will trust this app for future requests.",
+            text = text,
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer
+            color = contentColor
         )
     }
 }

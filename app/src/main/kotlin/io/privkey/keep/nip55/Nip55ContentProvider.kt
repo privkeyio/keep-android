@@ -138,28 +138,18 @@ class Nip55ContentProvider : ContentProvider() {
                     if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
                     return null
                 }
-                when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
-                    is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Hourly limit exceeded for $callerPackage")
-                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_hourly_limit", wasAutomatic = true) }
-                        return rejectedCursor(null)
+                val usageResult = safeguards.checkAndRecordUsage(callerPackage)
+                if (usageResult !is AutoSigningSafeguards.UsageCheckResult.Allowed) {
+                    val denyReason = when (usageResult) {
+                        is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
+                        is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
+                        is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
+                        is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
+                        is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
                     }
-                    is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Daily limit exceeded for $callerPackage")
-                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_daily_limit", wasAutomatic = true) }
-                        return rejectedCursor(null)
-                    }
-                    is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Unusual activity detected for $callerPackage, cooling off")
-                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_unusual_activity", wasAutomatic = true) }
-                        return rejectedCursor(null)
-                    }
-                    is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> {
-                        if (BuildConfig.DEBUG) Log.d(TAG, "$callerPackage is in cooling-off period until ${usageResult.until}")
-                        runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_cooling_off", wasAutomatic = true) }
-                        return rejectedCursor(null)
-                    }
-                    is AutoSigningSafeguards.UsageCheckResult.Allowed -> Unit
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
+                    return rejectedCursor(null)
                 }
             }
             return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
@@ -269,35 +259,34 @@ class Nip55ContentProvider : ContentProvider() {
 
     private fun getCallerPackage(): String? {
         val callingUid = Binder.getCallingUid()
-        if (callingUid == android.os.Process.myUid()) {
+        if (callingUid == android.os.Process.myUid()) return null
+
+        val packages = context?.packageManager?.getPackagesForUid(callingUid)
+        if (packages.isNullOrEmpty()) return null
+        if (packages.size > 1) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from multi-package UID (count=${packages.size})")
             return null
         }
-        val packages = context?.packageManager?.getPackagesForUid(callingUid)
-        val packageName = when {
-            packages.isNullOrEmpty() -> return null
-            packages.size == 1 -> packages[0]
-            else -> {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from multi-package UID (count=${packages.size})")
-                return null
-            }
-        }
 
+        val packageName = packages[0]
         val verificationStore = app?.getCallerVerificationStore() ?: return packageName
-        return when (val result = verificationStore.verifyOrTrust(packageName)) {
-            is CallerVerificationStore.VerificationResult.Verified -> packageName
-            is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> {
-                if (BuildConfig.DEBUG) Log.d(TAG, "First use for $packageName requires user approval (sig: ${result.signatureHash.take(8)}...)")
-                null
+
+        val result = verificationStore.verifyOrTrust(packageName)
+        if (result is CallerVerificationStore.VerificationResult.Verified) return packageName
+
+        if (BuildConfig.DEBUG) {
+            val reason = when (result) {
+                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval ->
+                    "First use requires approval (sig: ${result.signatureHash.take(8)}...)"
+                is CallerVerificationStore.VerificationResult.SignatureMismatch ->
+                    "Signature mismatch: expected ${result.expected.take(8)}..., got ${result.actual.take(8)}..."
+                is CallerVerificationStore.VerificationResult.NotInstalled ->
+                    "Package not installed"
+                is CallerVerificationStore.VerificationResult.Verified -> error("unreachable")
             }
-            is CallerVerificationStore.VerificationResult.SignatureMismatch -> {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $packageName: expected ${result.expected.take(8)}..., got ${result.actual.take(8)}...")
-                null
-            }
-            is CallerVerificationStore.VerificationResult.NotInstalled -> {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Package $packageName not installed")
-                null
-            }
+            Log.w(TAG, "Rejecting $packageName: $reason")
         }
+        return null
     }
 
     private fun errorCursor(error: String, id: String?): MatrixCursor {

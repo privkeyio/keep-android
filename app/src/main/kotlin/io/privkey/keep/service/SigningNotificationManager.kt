@@ -107,38 +107,39 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? {
-        synchronized(pendingLock) {
-            requestIdToNotificationId.remove(requestId)
-            val info = pendingRequestData.remove(requestId)
-            if (info != null) {
-                info.callerPackage?.let { pkg ->
-                    val count = pendingRequestsPerPackage[pkg]
-                    if (count != null && count > 1) {
-                        pendingRequestsPerPackage[pkg] = count - 1
-                    } else {
-                        pendingRequestsPerPackage.remove(pkg)
-                    }
-                }
-            }
-            return info
+    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingLock) {
+        removeRequestInternal(requestId).first
+    }
+
+    fun removeRequest(requestId: String): Int? = synchronized(pendingLock) {
+        removeRequestInternal(requestId).second
+    }
+
+    private fun removeRequestInternal(requestId: String): Pair<PendingRequestInfo?, Int?> {
+        val info = pendingRequestData.remove(requestId)
+        info?.callerPackage?.let { decrementPackageCount(it) }
+        val notificationId = requestIdToNotificationId.remove(requestId)
+        return Pair(info, notificationId)
+    }
+
+    private fun decrementPackageCount(packageName: String) {
+        val count = pendingRequestsPerPackage[packageName] ?: return
+        if (count > 1) {
+            pendingRequestsPerPackage[packageName] = count - 1
+        } else {
+            pendingRequestsPerPackage.remove(packageName)
         }
     }
 
     private fun generateRequestId(): String = UUID.randomUUID().toString()
 
     private fun hasNotificationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun getAppLabel(packageName: String): String? {
-        return try {
-            val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
-            context.packageManager.getApplicationLabel(appInfo).toString()
-        } catch (e: PackageManager.NameNotFoundException) {
-            null
-        }
-    }
+    private fun getAppLabel(packageName: String): String? = runCatching {
+        val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+        context.packageManager.getApplicationLabel(appInfo).toString()
+    }.getOrNull()
 
     private fun createBroadcastIntent(action: String, requestId: String, requestCode: Int): PendingIntent {
         val intent = Intent(context, SigningNotificationReceiver::class.java).apply {
@@ -181,23 +182,6 @@ class SigningNotificationManager(private val context: Context) {
         val callerPackage: String?,
         val createdAt: Long = System.currentTimeMillis()
     )
-
-    fun removeRequest(requestId: String): Int? {
-        synchronized(pendingLock) {
-            val info = pendingRequestData.remove(requestId)
-            if (info != null) {
-                info.callerPackage?.let { pkg ->
-                    val count = pendingRequestsPerPackage[pkg]
-                    if (count != null && count > 1) {
-                        pendingRequestsPerPackage[pkg] = count - 1
-                    } else {
-                        pendingRequestsPerPackage.remove(pkg)
-                    }
-                }
-            }
-            return requestIdToNotificationId.remove(requestId)
-        }
-    }
 
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()

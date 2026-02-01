@@ -39,22 +39,17 @@ class AutoSigningSafeguards(context: Context) {
     }
 
     private data class UsageWindow(var count: Int, var windowStart: Long)
+
     private val usageLock = Any()
-    private val hourlyUsage = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
-            return size > MAX_TRACKED_PACKAGES
+    private val hourlyUsage = createLruUsageMap()
+    private val dailyUsage = createLruUsageMap()
+    private val recentActivity = createLruUsageMap()
+
+    private fun createLruUsageMap(): LinkedHashMap<String, UsageWindow> =
+        object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean =
+                size > MAX_TRACKED_PACKAGES
         }
-    }
-    private val dailyUsage = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
-            return size > MAX_TRACKED_PACKAGES
-        }
-    }
-    private val recentActivity = object : LinkedHashMap<String, UsageWindow>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, UsageWindow>?): Boolean {
-            return size > MAX_TRACKED_PACKAGES
-        }
-    }
 
     fun isOptedIn(packageName: String): Boolean =
         prefs.getBoolean(KEY_PREFIX_OPTED_IN + packageName, false)
@@ -63,10 +58,8 @@ class AutoSigningSafeguards(context: Context) {
         prefs.edit().putBoolean(KEY_PREFIX_OPTED_IN + packageName, optedIn).apply()
     }
 
-    fun isCooledOff(packageName: String): Boolean {
-        val until = prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
-        return System.currentTimeMillis() < until
-    }
+    fun isCooledOff(packageName: String): Boolean =
+        System.currentTimeMillis() < getCooledOffUntil(packageName)
 
     fun getCooledOffUntil(packageName: String): Long =
         prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
