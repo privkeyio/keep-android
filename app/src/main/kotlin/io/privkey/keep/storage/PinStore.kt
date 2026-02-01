@@ -242,7 +242,11 @@ class PinStore(context: Context) {
             val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
             val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
             if (newLevel != currentLevel) {
-                prefs.edit().putInt(KEY_LOCKOUT_LEVEL, newLevel).commit()
+                val newLastCleared = lastCleared + decaySteps * LOCKOUT_LEVEL_DECAY_MS
+                prefs.edit()
+                    .putInt(KEY_LOCKOUT_LEVEL, newLevel)
+                    .putLong(KEY_LAST_LOCKOUT_CLEARED, newLastCleared)
+                    .commit()
             }
         }
     }
