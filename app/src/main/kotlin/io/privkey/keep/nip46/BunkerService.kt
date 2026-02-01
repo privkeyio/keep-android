@@ -57,6 +57,7 @@ class BunkerService : Service() {
         val status: StateFlow<BunkerStatus> = _status.asStateFlow()
 
         private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
+        private val globalPendingCount = AtomicInteger(0)
         private val clientPendingCounts = ConcurrentHashMap<String, AtomicInteger>()
         private val clientRequestHistory = ConcurrentHashMap<String, MutableList<Long>>()
         private val clientBackoffUntil = ConcurrentHashMap<String, Long>()
@@ -77,6 +78,7 @@ class BunkerService : Service() {
 
         fun respondToApproval(requestId: String, approved: Boolean, clientPubkey: String? = null) {
             pendingApprovals.remove(requestId)?.let { approval ->
+                globalPendingCount.decrementAndGet()
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
@@ -87,19 +89,26 @@ class BunkerService : Service() {
         }
 
         internal fun addPendingApproval(requestId: String, approval: PendingApproval): Boolean {
-            if (pendingApprovals.size >= MAX_PENDING_APPROVALS) {
+            // Atomically increment global count, then check limit
+            val newGlobalCount = globalPendingCount.incrementAndGet()
+            if (newGlobalCount > MAX_PENDING_APPROVALS) {
+                globalPendingCount.decrementAndGet()
                 if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request: max pending approvals reached")
                 return false
             }
 
             val clientPubkey = approval.request.appPubkey
             val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
-            if (clientCount.get() >= MAX_CONCURRENT_PER_CLIENT) {
+
+            // Atomically increment client count, then check limit
+            val newClientCount = clientCount.incrementAndGet()
+            if (newClientCount > MAX_CONCURRENT_PER_CLIENT) {
+                clientCount.decrementAndGet()
+                globalPendingCount.decrementAndGet()
                 if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from $clientPubkey: max concurrent per client reached")
                 return false
             }
 
-            clientCount.incrementAndGet()
             pendingApprovals[requestId] = approval
             return true
         }
@@ -134,6 +143,7 @@ class BunkerService : Service() {
         }
 
         internal fun clearRateLimitState() {
+            globalPendingCount.set(0)
             clientRequestHistory.clear()
             clientBackoffUntil.clear()
             clientConsecutiveRequests.clear()
@@ -293,8 +303,10 @@ class BunkerService : Service() {
             .getOrDefault(false)
 
         if (!received) {
-            pendingApprovals.remove(requestId)
-            clientPendingCounts[clientPubkey]?.decrementAndGet()
+            pendingApprovals.remove(requestId)?.let {
+                globalPendingCount.decrementAndGet()
+                clientPendingCounts[clientPubkey]?.decrementAndGet()
+            }
             return false
         }
 

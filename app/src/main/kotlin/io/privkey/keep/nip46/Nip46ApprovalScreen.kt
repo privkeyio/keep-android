@@ -29,7 +29,7 @@ fun Nip46ApprovalScreen(
     eventKind: Int?,
     eventContent: String?,
     isConnectRequest: Boolean = false,
-    onApprove: () -> Unit,
+    onApprove: (onComplete: (success: Boolean) -> Unit) -> Unit,
     onReject: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
@@ -140,7 +140,11 @@ fun Nip46ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove()
+                        onApprove { success ->
+                            if (!success) {
+                                isLoading = false
+                            }
+                        }
                     },
                     modifier = Modifier.weight(1f)
                 ) {

@@ -33,6 +33,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private var storage: AndroidKeystoreStorage? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var requestId: String? = null
+    private var approveCompletionCallback: ((Boolean) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,12 +61,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
             return
         }
 
-        val appPubkey = intent.getStringExtra(EXTRA_APP_PUBKEY).orEmpty()
-        val appName = intent.getStringExtra(EXTRA_APP_NAME) ?: "Unknown App"
-        val method = intent.getStringExtra(EXTRA_METHOD).orEmpty()
-        val eventKind = intent.getIntExtra(EXTRA_EVENT_KIND, -1).takeIf { it >= 0 }
-        val eventContent = intent.getStringExtra(EXTRA_EVENT_CONTENT)
-        val isConnect = intent.getBooleanExtra(EXTRA_IS_CONNECT, false)
+        val request = pendingApproval.request
+        val isConnect = pendingApproval.isConnectRequest
 
         setContent {
             KeepAndroidTheme {
@@ -74,11 +71,11 @@ class Nip46ApprovalActivity : FragmentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     Nip46ApprovalScreen(
-                        appPubkey = appPubkey,
-                        appName = appName,
-                        method = method,
-                        eventKind = eventKind,
-                        eventContent = eventContent,
+                        appPubkey = request.appPubkey,
+                        appName = request.appName,
+                        method = request.method,
+                        eventKind = request.eventKind?.toInt(),
+                        eventContent = request.eventContent,
                         isConnectRequest = isConnect,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
@@ -88,7 +85,9 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    private fun handleApprove() {
+    private fun handleApprove(onComplete: (Boolean) -> Unit) {
+        approveCompletionCallback = onComplete
+
         if (killSwitchStore?.isEnabled() == true) {
             respond(false)
             return
@@ -135,6 +134,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
     }
 
     private fun respond(approved: Boolean) {
+        approveCompletionCallback?.invoke(approved)
+        approveCompletionCallback = null
         requestId?.let { BunkerService.respondToApproval(it, approved) }
         finish()
     }
