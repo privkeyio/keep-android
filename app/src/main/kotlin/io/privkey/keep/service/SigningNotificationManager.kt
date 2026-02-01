@@ -69,6 +69,11 @@ class SigningNotificationManager(private val context: Context) {
         val notificationId = notificationIdCounter.getAndIncrement()
 
         synchronized(pendingLock) {
+            // Reject duplicate request IDs before modifying any state
+            if (requestIdToNotificationId.containsKey(effectiveRequestId)) {
+                return null
+            }
+
             if (callerPackage != null) {
                 val packageCount = pendingRequestsPerPackage[callerPackage] ?: 0
                 if (packageCount >= MAX_PENDING_REQUESTS_PER_PACKAGE) {
