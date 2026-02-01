@@ -315,6 +315,11 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
             "Chain verified ($entryCount entries)",
             MaterialTheme.colorScheme.primary
         )
+        is ChainVerificationResult.PartiallyVerified -> Triple(
+            Icons.Default.CheckCircle,
+            "Verified (${status.legacyEntriesSkipped} legacy entries)",
+            MaterialTheme.colorScheme.tertiary
+        )
         is ChainVerificationResult.Broken -> Triple(
             Icons.Default.Warning,
             "Chain integrity issue detected",
