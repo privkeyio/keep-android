@@ -136,10 +136,10 @@ class SigningNotificationManager(private val context: Context) {
         text: String,
         contentIntent: PendingIntent,
         deleteIntent: PendingIntent? = null,
-        visibility: Int = NotificationCompat.VISIBILITY_SECRET,
+        visibility: Int = NotificationCompat.VISIBILITY_PUBLIC,
         publicVersion: Notification? = null
     ): Notification {
-        return NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
@@ -147,12 +147,12 @@ class SigningNotificationManager(private val context: Context) {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
-            .apply {
-                deleteIntent?.let { setDeleteIntent(it) }
-                publicVersion?.let { setPublicVersion(it) }
-                setVisibility(visibility)
-            }
-            .build()
+            .setVisibility(visibility)
+
+        deleteIntent?.let { builder.setDeleteIntent(it) }
+        publicVersion?.let { builder.setPublicVersion(it) }
+
+        return builder.build()
     }
 
     data class PendingRequestInfo(
