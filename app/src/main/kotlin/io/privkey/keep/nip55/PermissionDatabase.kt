@@ -559,22 +559,14 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun verifyAuditChain(): ChainVerificationResult {
         val entries = auditDao.getAllOrdered()
-        var expectedPrevHash: String? = null
-        var foundFirstHashedEntry = false
+        val hashedEntries = entries.filter { it.entryHash.isNotEmpty() }
+        var expectedPrevHash: String? = hashedEntries.firstOrNull()?.previousHash
 
-        for (entry in entries) {
-            if (entry.entryHash.isEmpty()) {
-                continue
-            }
-
-            if (!foundFirstHashedEntry) {
-                foundFirstHashedEntry = true
-                expectedPrevHash = entry.previousHash
-            }
-
+        for (entry in hashedEntries) {
             if (entry.previousHash != expectedPrevHash) {
                 return ChainVerificationResult.Broken(entry.id)
             }
+
             val calculated = calculateEntryHash(
                 previousHash = entry.previousHash,
                 callerPackage = entry.callerPackage,
@@ -587,6 +579,7 @@ class PermissionStore(private val database: Nip55Database) {
             if (calculated != entry.entryHash) {
                 return ChainVerificationResult.Tampered(entry.id)
             }
+
             expectedPrevHash = entry.entryHash
         }
         return ChainVerificationResult.Valid

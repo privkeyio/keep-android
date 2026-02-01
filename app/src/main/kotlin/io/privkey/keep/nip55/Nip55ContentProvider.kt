@@ -154,20 +154,23 @@ class Nip55ContentProvider : ContentProvider() {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
                 return null
             }
-            val usageResult = safeguards.checkAndRecordUsage(callerPackage)
-            if (usageResult !is AutoSigningSafeguards.UsageCheckResult.Allowed) {
-                val denyReason = when (usageResult) {
-                    is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
-                    is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
-                    is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
-                    is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
-                    is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
+
+            return when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
+                is AutoSigningSafeguards.UsageCheckResult.Allowed ->
+                    executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                else -> {
+                    val denyReason = when (usageResult) {
+                        is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
+                        is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
+                        is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
+                        is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
+                        is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
+                    }
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
+                    rejectedCursor(null)
                 }
-                if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-                return rejectedCursor(null)
             }
-            return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
         }
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
@@ -289,22 +292,21 @@ class Nip55ContentProvider : ContentProvider() {
         val packageName = packages[0]
         val verificationStore = app?.getCallerVerificationStore() ?: return null
 
-        val result = verificationStore.verifyOrTrust(packageName)
-        if (result is CallerVerificationStore.VerificationResult.Verified) return packageName
-
-        if (BuildConfig.DEBUG) {
-            val reason = when (result) {
-                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval ->
-                    "First use requires approval"
-                is CallerVerificationStore.VerificationResult.SignatureMismatch ->
-                    "Signature mismatch"
-                is CallerVerificationStore.VerificationResult.NotInstalled ->
-                    "Package not installed"
-                is CallerVerificationStore.VerificationResult.Verified -> error("unreachable")
+        return when (val result = verificationStore.verifyOrTrust(packageName)) {
+            is CallerVerificationStore.VerificationResult.Verified -> packageName
+            else -> {
+                if (BuildConfig.DEBUG) {
+                    val reason = when (result) {
+                        is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
+                        is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
+                        is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
+                        is CallerVerificationStore.VerificationResult.Verified -> error("unreachable")
+                    }
+                    Log.w(TAG, "Rejecting $packageName: $reason")
+                }
+                null
             }
-            Log.w(TAG, "Rejecting $packageName: $reason")
         }
-        return null
     }
 
     private fun errorCursor(error: String, id: String?): MatrixCursor {
