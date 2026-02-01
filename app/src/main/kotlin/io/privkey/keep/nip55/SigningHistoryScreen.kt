@@ -5,7 +5,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
@@ -32,6 +34,8 @@ fun SigningHistoryScreen(
     var selectedApp by remember { mutableStateOf<String?>(null) }
     var availableApps by remember { mutableStateOf<List<String>>(emptyList()) }
     var appFilterExpanded by remember { mutableStateOf(false) }
+    var chainStatus by remember { mutableStateOf<ChainVerificationResult?>(null) }
+    var logCount by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -39,31 +43,33 @@ fun SigningHistoryScreen(
 
     fun loadLogs(reset: Boolean = false) {
         coroutineScope.launch {
-            try {
-                if (reset) isLoading = true else isLoadingMore = true
-                val offset = if (reset) 0 else logs.size
+            if (reset) isLoading = true else isLoadingMore = true
 
-                val newLogs = permissionStore.getAuditLogPage(
+            runCatching {
+                val offset = if (reset) 0 else logs.size
+                permissionStore.getAuditLogPage(
                     limit = PAGE_SIZE,
                     offset = offset,
                     callerPackage = selectedApp
                 )
-
+            }.onSuccess { newLogs ->
                 logs = if (reset) newLogs else logs + newLogs
                 hasMore = newLogs.size == PAGE_SIZE
                 loadError = null
-            } catch (e: Exception) {
+            }.onFailure {
                 loadError = "Failed to load signing history"
-            } finally {
-                isLoading = false
-                isLoadingMore = false
             }
+
+            isLoading = false
+            isLoadingMore = false
         }
     }
 
     LaunchedEffect(Unit) {
         try {
             availableApps = permissionStore.getDistinctAuditCallers()
+            chainStatus = permissionStore.verifyAuditChain()
+            logCount = permissionStore.getAuditLogCount()
         } catch (e: Exception) {
             loadError = "Failed to load apps"
         }
@@ -104,7 +110,11 @@ fun SigningHistoryScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ChainStatusIndicator(status = chainStatus, entryCount = logCount)
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (availableApps.isNotEmpty()) {
             ExposedDropdownMenuBox(
@@ -267,11 +277,6 @@ private fun AuditLogCard(log: Nip55AuditLog) {
 @Composable
 private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
     val isAllowed = decision == "allow"
-    val backgroundColor = if (isAllowed) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.error
-    }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (wasAutomatic) {
@@ -289,18 +294,53 @@ private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
             Spacer(modifier = Modifier.width(4.dp))
         }
         Surface(
-            color = backgroundColor,
+            color = if (isAllowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             shape = MaterialTheme.shapes.small
         ) {
             Text(
                 text = if (isAllowed) "Allowed" else "Denied",
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isAllowed)
-                    MaterialTheme.colorScheme.onPrimary
-                else
-                    MaterialTheme.colorScheme.onError
+                color = if (isAllowed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onError
             )
         }
+    }
+}
+
+@Composable
+private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: Int) {
+    val isError = status is ChainVerificationResult.Broken || status is ChainVerificationResult.Tampered
+    val icon = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle
+    val color = when (status) {
+        is ChainVerificationResult.Valid -> MaterialTheme.colorScheme.primary
+        is ChainVerificationResult.PartiallyVerified, is ChainVerificationResult.Truncated -> MaterialTheme.colorScheme.tertiary
+        is ChainVerificationResult.Broken, is ChainVerificationResult.Tampered -> MaterialTheme.colorScheme.error
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val text = when (status) {
+        is ChainVerificationResult.Valid -> "Chain verified ($entryCount entries)"
+        is ChainVerificationResult.PartiallyVerified -> "Verified (${status.legacyEntriesSkipped} legacy entries)"
+        is ChainVerificationResult.Truncated -> "Verified (older entries pruned)"
+        is ChainVerificationResult.Broken -> "Chain integrity issue detected"
+        is ChainVerificationResult.Tampered -> "Tampering detected in audit log"
+        null -> "Verifying..."
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = color
+        )
     }
 }
