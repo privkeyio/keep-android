@@ -35,7 +35,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85.0
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -52,6 +52,7 @@ jobs:
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.13113456
+          TARGETS: aarch64-linux-android
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
