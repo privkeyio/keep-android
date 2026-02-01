@@ -49,7 +49,8 @@
         <provider
             android:name=".nip55.Nip55ContentProvider"
             android:authorities="io.privkey.keep.GET_PUBLIC_KEY;io.privkey.keep.SIGN_EVENT;io.privkey.keep.NIP44_ENCRYPT;io.privkey.keep.NIP44_DECRYPT"
-            android:exported="true" />
+            android:exported="true"
+            android:permission="android.permission.INTERNET" />
 
         <receiver
             android:name=".service.BootReceiver"
