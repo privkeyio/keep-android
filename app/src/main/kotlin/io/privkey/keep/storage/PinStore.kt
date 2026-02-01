@@ -3,11 +3,12 @@ package io.privkey.keep.storage
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import android.util.Base64
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
 import java.security.SecureRandom
-import android.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
@@ -254,7 +255,12 @@ class PinStore(context: Context) {
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
         }
 
-        editor.commit()
+        if (!editor.commit()) {
+            Log.e("PinStore", "Failed to persist lockout state, retrying")
+            if (!editor.commit()) {
+                Log.e("PinStore", "Retry failed, lockout state may be inconsistent")
+            }
+        }
     }
 
     private fun clearFailedAttempts() {
