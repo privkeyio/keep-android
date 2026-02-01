@@ -272,7 +272,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         val packageName = packages[0]
-        val verificationStore = app?.getCallerVerificationStore() ?: return packageName
+        val verificationStore = app?.getCallerVerificationStore() ?: return null
 
         val result = verificationStore.verifyOrTrust(packageName)
         if (result is CallerVerificationStore.VerificationResult.Verified) return packageName
