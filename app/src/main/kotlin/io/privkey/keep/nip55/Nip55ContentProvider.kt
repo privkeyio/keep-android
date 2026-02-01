@@ -117,6 +117,18 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
+        val velocityResult = runWithTimeout { store.checkVelocity(callerPackage, eventKind) }
+        if (velocityResult == null) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check timed out, denying request")
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_velocity_timeout", wasAutomatic = true) }
+            return rejectedCursor(null)
+        }
+        if (velocityResult is VelocityResult.Blocked) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity limit: ${velocityResult.reason}")
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "velocity_blocked", wasAutomatic = true) }
+            return rejectedCursor(null)
+        }
+
         val effectivePolicy = runWithTimeout {
             store.getAppSignPolicyOverride(callerPackage)
                 ?.let { SignPolicy.fromOrdinal(it) }
@@ -216,7 +228,10 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                runWithTimeout {
+                    store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+                    store.recordVelocity(callerPackage, eventKind)
+                }
                 showBackgroundSigningNotification(callerPackage, requestType, eventKind)
             }
             .map { response ->

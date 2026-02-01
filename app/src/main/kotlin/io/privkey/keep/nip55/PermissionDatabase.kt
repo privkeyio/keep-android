@@ -10,6 +10,8 @@ import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
@@ -55,8 +57,39 @@ data class Nip55AuditLog(
     val requestType: String,
     val eventKind: Int?,
     val decision: String,
-    val wasAutomatic: Boolean
+    val wasAutomatic: Boolean,
+    val previousHash: String?,
+    val entryHash: String
 )
+
+@Entity(
+    tableName = "velocity_tracker",
+    indices = [Index(value = ["packageName", "timestamp"])]
+)
+data class VelocityEntry(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val packageName: String,
+    val timestamp: Long,
+    val eventKind: Int?
+)
+
+data class VelocityConfig(
+    val hourlyLimit: Int = 100,
+    val dailyLimit: Int = 500,
+    val weeklyLimit: Int = 2000,
+    val enabled: Boolean = true
+)
+
+sealed class VelocityResult {
+    data object Allowed : VelocityResult()
+    data class Blocked(val reason: String, val resetAt: Long) : VelocityResult()
+}
+
+sealed class ChainVerificationResult {
+    data object Valid : ChainVerificationResult()
+    data class Broken(val entryId: Long) : ChainVerificationResult()
+    data class Tampered(val entryId: Long) : ChainVerificationResult()
+}
 
 @Entity(tableName = "nip55_app_settings")
 data class Nip55AppSettings(
@@ -123,7 +156,7 @@ interface Nip55PermissionDao {
 @Dao
 interface Nip55AuditLogDao {
     @Insert
-    suspend fun insert(log: Nip55AuditLog)
+    suspend fun insert(log: Nip55AuditLog): Long
 
     @Query("SELECT * FROM nip55_audit_log ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecent(limit: Int = 100): List<Nip55AuditLog>
@@ -154,6 +187,30 @@ interface Nip55AuditLogDao {
         AND decision = 'allow'
     """)
     suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int?): Long?
+
+    @Query("SELECT entryHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
+    suspend fun getLastEntryHash(): String?
+
+    @Query("SELECT * FROM nip55_audit_log ORDER BY id ASC")
+    suspend fun getAllOrdered(): List<Nip55AuditLog>
+
+    @Query("SELECT COUNT(*) FROM nip55_audit_log")
+    suspend fun getCount(): Int
+}
+
+@Dao
+interface VelocityDao {
+    @Insert
+    suspend fun insert(entry: VelocityEntry)
+
+    @Query("SELECT COUNT(*) FROM velocity_tracker WHERE packageName = :packageName AND timestamp >= :since")
+    suspend fun countSince(packageName: String, since: Long): Int
+
+    @Query("DELETE FROM velocity_tracker WHERE timestamp < :before")
+    suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT MIN(timestamp) FROM velocity_tracker WHERE packageName = :packageName AND timestamp >= :since")
+    suspend fun getOldestInWindow(packageName: String, since: Long): Long?
 }
 
 @Dao
@@ -177,11 +234,12 @@ interface Nip55AppSettingsDao {
     suspend fun getAll(): List<Nip55AppSettings>
 }
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class], version = 3)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 4)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
     abstract fun appSettingsDao(): Nip55AppSettingsDao
+    abstract fun velocityDao(): VelocityDao
 
     companion object {
         @Volatile
@@ -189,6 +247,10 @@ abstract class Nip55Database : RoomDatabase() {
 
         private const val PREFS_NAME = "nip55_db_prefs"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
+        private const val KEY_HMAC_SECRET = "hmac_secret"
+
+        @Volatile
+        private var hmacKey: ByteArray? = null
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -208,7 +270,23 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE nip55_audit_log ADD COLUMN previousHash TEXT")
+                db.execSQL("ALTER TABLE nip55_audit_log ADD COLUMN entryHash TEXT NOT NULL DEFAULT ''")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS velocity_tracker (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        packageName TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        eventKind INTEGER
+                    )
+                """)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_velocity_tracker_packageName_timestamp ON velocity_tracker(packageName, timestamp)")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         private fun getOrCreateDbKey(context: Context): ByteArray {
             val masterKey = MasterKey.Builder(context)
@@ -236,10 +314,41 @@ abstract class Nip55Database : RoomDatabase() {
             return newKey
         }
 
+        private fun getOrCreateHmacKey(context: Context): ByteArray {
+            hmacKey?.let { return it }
+
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+
+            val prefs = EncryptedSharedPreferences.create(
+                context,
+                PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+
+            val existingKey = prefs.getString(KEY_HMAC_SECRET, null)
+            if (existingKey != null) {
+                return android.util.Base64.decode(existingKey, android.util.Base64.NO_WRAP).also { hmacKey = it }
+            }
+
+            val newKey = ByteArray(32)
+            SecureRandom().nextBytes(newKey)
+            prefs.edit()
+                .putString(KEY_HMAC_SECRET, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
+                .apply()
+            return newKey.also { hmacKey = it }
+        }
+
+        fun getHmacKey(): ByteArray? = hmacKey
+
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
                     val passphrase = getOrCreateDbKey(context.applicationContext)
+                    getOrCreateHmacKey(context.applicationContext)
                     val factory = SupportFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,
@@ -292,6 +401,13 @@ class PermissionStore(private val database: Nip55Database) {
     private val dao = database.permissionDao()
     private val auditDao = database.auditLogDao()
     private val appSettingsDao = database.appSettingsDao()
+    private val velocityDao = database.velocityDao()
+
+    companion object {
+        private const val HOUR_MS = 60 * 60 * 1000L
+        private const val DAY_MS = 24 * HOUR_MS
+        private const val WEEK_MS = 7 * DAY_MS
+    }
 
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
@@ -356,12 +472,13 @@ class PermissionStore(private val database: Nip55Database) {
         )
     }
 
-    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null, eventKind: Int? = null) =
+    suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null, eventKind: Int? = null) {
         when {
             requestType == null -> dao.deleteForCaller(callerPackage)
             eventKind != null -> dao.deleteForCallerAndTypeAndEventKind(callerPackage, requestType.name, eventKind)
             else -> dao.deleteForCallerAndType(callerPackage, requestType.name)
         }
+    }
 
     suspend fun logOperation(
         callerPackage: String,
@@ -370,17 +487,112 @@ class PermissionStore(private val database: Nip55Database) {
         decision: String,
         wasAutomatic: Boolean
     ) {
-        auditDao.insert(
-            Nip55AuditLog(
-                timestamp = System.currentTimeMillis(),
+        database.withTransaction {
+            val previousHash = auditDao.getLastEntryHash()
+            val timestamp = System.currentTimeMillis()
+            val entryHash = calculateEntryHash(
+                previousHash = previousHash,
                 callerPackage = callerPackage,
                 requestType = requestType.name,
                 eventKind = eventKind,
                 decision = decision,
+                timestamp = timestamp,
                 wasAutomatic = wasAutomatic
             )
-        )
+            auditDao.insert(
+                Nip55AuditLog(
+                    timestamp = timestamp,
+                    callerPackage = callerPackage,
+                    requestType = requestType.name,
+                    eventKind = eventKind,
+                    decision = decision,
+                    wasAutomatic = wasAutomatic,
+                    previousHash = previousHash,
+                    entryHash = entryHash
+                )
+            )
+        }
     }
+
+    suspend fun checkVelocity(packageName: String, eventKind: Int?, config: VelocityConfig = VelocityConfig()): VelocityResult {
+        if (!config.enabled) return VelocityResult.Allowed
+
+        val now = System.currentTimeMillis()
+
+        val hourCount = velocityDao.countSince(packageName, now - HOUR_MS)
+        if (hourCount >= config.hourlyLimit) {
+            val oldest = velocityDao.getOldestInWindow(packageName, now - HOUR_MS)
+            val resetAt = (oldest ?: now) + HOUR_MS
+            return VelocityResult.Blocked("Hourly limit ($hourCount/${config.hourlyLimit})", resetAt)
+        }
+
+        val dayCount = velocityDao.countSince(packageName, now - DAY_MS)
+        if (dayCount >= config.dailyLimit) {
+            val oldest = velocityDao.getOldestInWindow(packageName, now - DAY_MS)
+            val resetAt = (oldest ?: now) + DAY_MS
+            return VelocityResult.Blocked("Daily limit ($dayCount/${config.dailyLimit})", resetAt)
+        }
+
+        val weekCount = velocityDao.countSince(packageName, now - WEEK_MS)
+        if (weekCount >= config.weeklyLimit) {
+            val oldest = velocityDao.getOldestInWindow(packageName, now - WEEK_MS)
+            val resetAt = (oldest ?: now) + WEEK_MS
+            return VelocityResult.Blocked("Weekly limit ($weekCount/${config.weeklyLimit})", resetAt)
+        }
+
+        return VelocityResult.Allowed
+    }
+
+    suspend fun recordVelocity(packageName: String, eventKind: Int?) {
+        val now = System.currentTimeMillis()
+        velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
+        velocityDao.deleteOlderThan(now - WEEK_MS)
+    }
+
+    suspend fun getVelocityUsage(packageName: String): Triple<Int, Int, Int> {
+        val now = System.currentTimeMillis()
+        val hour = velocityDao.countSince(packageName, now - HOUR_MS)
+        val day = velocityDao.countSince(packageName, now - DAY_MS)
+        val week = velocityDao.countSince(packageName, now - WEEK_MS)
+        return Triple(hour, day, week)
+    }
+
+    suspend fun verifyAuditChain(): ChainVerificationResult {
+        val entries = auditDao.getAllOrdered()
+        var expectedPrevHash: String? = null
+        var foundFirstHashedEntry = false
+
+        for (entry in entries) {
+            if (entry.entryHash.isEmpty()) {
+                continue
+            }
+
+            if (!foundFirstHashedEntry) {
+                foundFirstHashedEntry = true
+                expectedPrevHash = entry.previousHash
+            }
+
+            if (entry.previousHash != expectedPrevHash) {
+                return ChainVerificationResult.Broken(entry.id)
+            }
+            val calculated = calculateEntryHash(
+                previousHash = entry.previousHash,
+                callerPackage = entry.callerPackage,
+                requestType = entry.requestType,
+                eventKind = entry.eventKind,
+                decision = entry.decision,
+                timestamp = entry.timestamp,
+                wasAutomatic = entry.wasAutomatic
+            )
+            if (calculated != entry.entryHash) {
+                return ChainVerificationResult.Tampered(entry.id)
+            }
+            expectedPrevHash = entry.entryHash
+        }
+        return ChainVerificationResult.Valid
+    }
+
+    suspend fun getAuditLogCount(): Int = auditDao.getCount()
 
     suspend fun getAllPermissions(): List<Nip55Permission> = dao.getAll()
 
@@ -555,5 +767,26 @@ fun formatExpiry(timestamp: Long): String {
         remaining < 86400_000 -> "in ${remaining / 3600_000}h"
         remaining < 604800_000 -> "in ${remaining / 86400_000}d"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+    }
+}
+
+private fun calculateEntryHash(
+    previousHash: String?,
+    callerPackage: String,
+    requestType: String,
+    eventKind: Int?,
+    decision: String,
+    timestamp: Long,
+    wasAutomatic: Boolean
+): String {
+    val content = "$previousHash|$callerPackage|$requestType|$eventKind|$decision|$timestamp|$wasAutomatic"
+    val hmacKey = Nip55Database.getHmacKey()
+    return if (hmacKey != null) {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
+        val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
+        hashBytes.joinToString("") { "%02x".format(it) }
+    } else {
+        ""
     }
 }

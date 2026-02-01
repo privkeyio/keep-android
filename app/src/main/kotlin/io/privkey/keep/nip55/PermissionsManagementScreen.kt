@@ -21,6 +21,7 @@ fun PermissionsManagementScreen(
     onDismiss: () -> Unit
 ) {
     var permissions by remember { mutableStateOf<List<Nip55Permission>>(emptyList()) }
+    var velocityUsage by remember { mutableStateOf<Map<String, Triple<Int, Int, Int>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var showRevokeAllDialog by remember { mutableStateOf<String?>(null) }
@@ -31,6 +32,8 @@ fun PermissionsManagementScreen(
     LaunchedEffect(Unit) {
         try {
             permissions = permissionStore.getAllPermissions()
+            val packages = permissions.map { it.callerPackage }.distinct()
+            velocityUsage = packages.associateWith { permissionStore.getVelocityUsage(it) }
         } catch (e: Exception) {
             loadError = "Failed to load permissions"
         } finally {
@@ -42,6 +45,8 @@ fun PermissionsManagementScreen(
         coroutineScope.launch {
             try {
                 permissions = permissionStore.getAllPermissions()
+                val packages = permissions.map { it.callerPackage }.distinct()
+                velocityUsage = packages.associateWith { permissionStore.getVelocityUsage(it) }
                 loadError = null
             } catch (e: Exception) {
                 loadError = "Failed to refresh permissions"
@@ -103,6 +108,7 @@ fun PermissionsManagementScreen(
                             AppPermissionHeader(
                                 packageName = packageName,
                                 permissionCount = appPermissions.size,
+                                velocityUsage = velocityUsage[packageName],
                                 onRevokeAll = { showRevokeAllDialog = packageName }
                             )
                         }
@@ -219,6 +225,7 @@ fun PermissionsManagementScreen(
 private fun AppPermissionHeader(
     packageName: String,
     permissionCount: Int,
+    velocityUsage: Triple<Int, Int, Int>?,
     onRevokeAll: () -> Unit
 ) {
     Row(
@@ -238,6 +245,16 @@ private fun AppPermissionHeader(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            velocityUsage?.let { (hour, day, week) ->
+                if (hour > 0 || day > 0 || week > 0) {
+                    Text(
+                        text = "Rate: $hour/h \u00b7 $day/d \u00b7 $week/w",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
         }
         TextButton(onClick = onRevokeAll) {
             Text("Revoke All", color = MaterialTheme.colorScheme.error)
@@ -299,8 +316,9 @@ private fun PermissionCard(
                         )
                     }
 
+                    val expiryText = permission.expiresAt?.let { "Expires ${dateFormat.format(Date(it))}" } ?: "Permanent"
                     Text(
-                        text = permission.expiresAt?.let { "Expires ${dateFormat.format(Date(it))}" } ?: "Permanent",
+                        text = expiryText,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
