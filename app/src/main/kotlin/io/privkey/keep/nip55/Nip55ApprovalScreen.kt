@@ -1,6 +1,8 @@
 package io.privkey.keep.nip55
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
@@ -8,9 +10,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import org.json.JSONArray
+import org.json.JSONObject
 
 internal fun Nip55RequestType.displayName(): String = when (this) {
     Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
@@ -31,11 +36,57 @@ internal fun Nip55RequestType.headerTitle(): String = when (this) {
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
-    org.json.JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
+    JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
 }.getOrNull()
 
-internal fun Nip55Request.eventKind(): Int? =
-    if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
+internal data class EventPreview(
+    val kind: Int,
+    val content: String,
+    val pTags: List<String>,
+    val eTags: List<String>,
+    val tTags: List<String>,
+    val recipientPubkey: String?
+)
+
+private val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
+private const val MAX_TAG_COUNT = 500
+private const val MAX_TAG_VALUE_LENGTH = 1024
+
+private fun isValidHex64(value: String): Boolean = HEX_64_REGEX.matches(value)
+
+internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
+    val json = JSONObject(eventJson)
+    val kind = json.optInt("kind", -1).takeIf { it in 0..65535 } ?: return@runCatching null
+    val tagsArray = json.optJSONArray("tags") ?: JSONArray()
+
+    val pTags = mutableListOf<String>()
+    val eTags = mutableListOf<String>()
+    val tTags = mutableListOf<String>()
+
+    val tagCount = minOf(tagsArray.length(), MAX_TAG_COUNT)
+    for (i in 0 until tagCount) {
+        val tag = tagsArray.optJSONArray(i) ?: continue
+        if (tag.length() < 2) continue
+        val tagValue = tag.optString(1).take(MAX_TAG_VALUE_LENGTH)
+        when (tag.optString(0)) {
+            "p" -> if (isValidHex64(tagValue)) pTags.add(tagValue)
+            "e" -> if (isValidHex64(tagValue)) eTags.add(tagValue)
+            "t" -> tTags.add(tagValue)
+        }
+    }
+
+    EventPreview(
+        kind = kind,
+        content = json.optString("content", ""),
+        pTags = pTags,
+        eTags = eTags,
+        tTags = tTags,
+        recipientPubkey = pTags.firstOrNull()
+    )
+}.getOrNull()
+
+private fun formatPubkey(pubkey: String): String =
+    if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey
 
 @Composable
 fun ApprovalScreen(
@@ -49,14 +100,15 @@ fun ApprovalScreen(
     val canRememberChoice = callerVerified && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
-    val eventKind = remember(request) { request.eventKind() }
+    val eventPreview = remember(request) {
+        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = request.requestType.headerTitle(),
@@ -72,11 +124,11 @@ fun ApprovalScreen(
             UnverifiedCallerWarning()
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        RequestDetailsCard(request, eventKind)
+        RequestDetailsCard(request, eventPreview)
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         if (canRememberChoice) {
             DurationSelector(
@@ -84,7 +136,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventKind != null && isSensitiveKind(eventKind)
+                isSensitiveKind = eventPreview?.kind?.let { isSensitiveKind(it) } == true
             )
         }
 
@@ -203,54 +255,158 @@ private fun UnverifiedCallerWarning() {
 }
 
 @Composable
-private fun RequestDetailsCard(request: Nip55Request, eventKind: Int?) {
-    var showFullContent by remember { mutableStateOf(false) }
-    val contentTruncated = request.content.length > 200
+private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: EventPreview?) {
+    val scrollState = rememberScrollState()
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f, fill = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .verticalScroll(scrollState)
+        ) {
             DetailRow("Type", request.requestType.displayName())
 
-            eventKind?.let { kind ->
-                Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Event Kind", EventKind.displayName(kind))
-                sensitiveKindWarning(kind)?.let { warning ->
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Text(
-                            text = warning,
-                            modifier = Modifier.padding(8.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-            }
-
-            if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
-                val shouldTruncate = !showFullContent && contentTruncated
-                val displayContent = if (shouldTruncate) "${request.content.take(200)}..." else request.content
-                Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Content", displayContent, MaterialTheme.typography.bodyMedium)
-                if (contentTruncated) {
-                    TextButton(
-                        onClick = { showFullContent = !showFullContent },
-                        modifier = Modifier.padding(top = 4.dp)
-                    ) {
-                        Text(if (showFullContent) "Show less" else "Show full content")
-                    }
-                }
+            if (eventPreview != null) {
+                EventPreviewSection(eventPreview)
+            } else if (request.content.isNotEmpty() && request.requestType != Nip55RequestType.SIGN_EVENT) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ExpandableContentSection(request.content)
             }
 
             request.pubkey?.let { pk ->
-                Spacer(modifier = Modifier.height(16.dp))
-                DetailRow("Recipient", "${pk.take(16)}...${pk.takeLast(8)}", MaterialTheme.typography.bodyMedium)
+                Spacer(modifier = Modifier.height(12.dp))
+                DetailRow("Recipient", formatPubkey(pk), MaterialTheme.typography.bodyMedium)
             }
         }
+    }
+}
+
+@Composable
+private fun EventPreviewSection(preview: EventPreview) {
+    Spacer(modifier = Modifier.height(12.dp))
+    DetailRow("Event Kind", EventKind.displayName(preview.kind))
+
+    sensitiveKindWarning(preview.kind)?.let { warning ->
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Text(
+                text = warning,
+                modifier = Modifier.padding(8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+
+    if (preview.content.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(12.dp))
+        ExpandableContentSection(preview.content)
+    }
+
+    if (preview.recipientPubkey != null) {
+        Spacer(modifier = Modifier.height(12.dp))
+        DetailRow("Recipient", formatPubkey(preview.recipientPubkey), MaterialTheme.typography.bodyMedium)
+    }
+
+    val otherPubkeys = preview.pTags.drop(1)
+    if (preview.eTags.isNotEmpty() || otherPubkeys.isNotEmpty() || preview.tTags.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(12.dp))
+        TagsSummarySection(
+            eTags = preview.eTags,
+            otherPubkeys = otherPubkeys,
+            tTags = preview.tTags
+        )
+    }
+}
+
+@Composable
+private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
+    var showFullContent by remember { mutableStateOf(false) }
+    val contentTruncated = content.length > maxLength
+
+    Text(
+        text = "Content",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = if (showFullContent || !contentTruncated) content else "${content.take(maxLength)}...",
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = if (showFullContent) Int.MAX_VALUE else 5,
+        overflow = TextOverflow.Ellipsis
+    )
+    if (contentTruncated) {
+        TextButton(
+            onClick = { showFullContent = !showFullContent },
+            contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.height(32.dp)
+        ) {
+            Text(
+                text = if (showFullContent) "Show less" else "Show more",
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun TagsSummarySection(
+    eTags: List<String>,
+    otherPubkeys: List<String>,
+    tTags: List<String>
+) {
+    Text(
+        text = "References",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (eTags.isNotEmpty()) {
+            val label = if (eTags.size == 1) "1 event" else "${eTags.size} events"
+            TagSummaryRow("Events:", label)
+        }
+
+        if (otherPubkeys.isNotEmpty()) {
+            val label = if (otherPubkeys.size == 1) "1 pubkey" else "${otherPubkeys.size} pubkeys"
+            TagSummaryRow("Mentions:", label)
+        }
+
+        if (tTags.isNotEmpty()) {
+            val topicsPreview = tTags.take(3).joinToString(", ") { "#$it" }
+            val suffix = if (tTags.size > 3) " +${tTags.size - 3} more" else ""
+            TagSummaryRow("Topics:", "$topicsPreview$suffix")
+        }
+    }
+}
+
+@Composable
+private fun TagSummaryRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
