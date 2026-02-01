@@ -21,6 +21,7 @@ class PinStore(context: Context) {
         private const val KEY_PIN_ENABLED = "pin_enabled"
         private const val KEY_FAILED_ATTEMPTS = "failed_attempts"
         private const val KEY_SESSION_STARTED_AT_REALTIME = "session_started_at_realtime"
+        private const val KEY_SESSION_STARTED_AT_WALL = "session_started_at_wall"
         private const val KEY_SESSION_TIMEOUT = "session_timeout"
         private const val KEY_LOCKOUT_LEVEL = "lockout_level"
         private const val KEY_LOCKOUT_SET_AT_ELAPSED = "lockout_set_at_elapsed"
@@ -154,6 +155,7 @@ class PinStore(context: Context) {
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+            .putLong(KEY_SESSION_STARTED_AT_WALL, 0)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
@@ -164,12 +166,25 @@ class PinStore(context: Context) {
     @Synchronized
     fun isSessionValid(): Boolean {
         if (!isPinEnabled()) return true
-        val sessionStartedAt = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
-        if (sessionStartedAt == 0L) return false
+        val sessionStartedAtRealtime = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+        val sessionStartedAtWall = prefs.getLong(KEY_SESSION_STARTED_AT_WALL, 0)
+        if (sessionStartedAtRealtime == 0L || sessionStartedAtWall == 0L) return false
         val timeout = getSessionTimeout()
         if (timeout == 0L) return false
-        val elapsed = SystemClock.elapsedRealtime() - sessionStartedAt
-        return elapsed in 0..timeout
+        val currentRealtime = SystemClock.elapsedRealtime()
+        val currentWall = System.currentTimeMillis()
+        val rebootDetected = currentRealtime < sessionStartedAtRealtime
+        if (rebootDetected) {
+            invalidateSession()
+            return false
+        }
+        val elapsedRealtime = currentRealtime - sessionStartedAtRealtime
+        val elapsedWall = currentWall - sessionStartedAtWall
+        if (elapsedWall < 0) {
+            invalidateSession()
+            return false
+        }
+        return elapsedRealtime in 0..timeout && elapsedWall in 0..timeout
     }
 
     @Synchronized
@@ -185,6 +200,7 @@ class PinStore(context: Context) {
     fun refreshSession() {
         prefs.edit()
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, SystemClock.elapsedRealtime())
+            .putLong(KEY_SESSION_STARTED_AT_WALL, System.currentTimeMillis())
             .commit()
     }
 
@@ -192,6 +208,7 @@ class PinStore(context: Context) {
     fun invalidateSession() {
         prefs.edit()
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+            .putLong(KEY_SESSION_STARTED_AT_WALL, 0)
             .commit()
     }
 
@@ -230,6 +247,7 @@ class PinStore(context: Context) {
         return remaining
     }
 
+    @Synchronized
     private fun maybeDecayLockoutLevel() {
         val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
         if (currentLevel == 0) return
@@ -237,7 +255,12 @@ class PinStore(context: Context) {
         val lastCleared = prefs.getLong(KEY_LAST_LOCKOUT_CLEARED, 0)
         if (lastCleared == 0L) return
 
-        val elapsed = System.currentTimeMillis() - lastCleared
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastCleared
+        if (elapsed < 0) {
+            prefs.edit().putLong(KEY_LAST_LOCKOUT_CLEARED, now).commit()
+            return
+        }
         if (elapsed >= LOCKOUT_LEVEL_DECAY_MS) {
             val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
             val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
@@ -287,14 +310,16 @@ class PinStore(context: Context) {
     }
 
     private fun clearFailedAttempts() {
-        prefs.edit()
+        val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+        val editor = prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
-            .putInt(KEY_LOCKOUT_LEVEL, 0)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
-            .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
-            .commit()
+        if (currentLevel > 0) {
+            editor.putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+        }
+        editor.commit()
     }
 
     private fun generateSalt(): String {
