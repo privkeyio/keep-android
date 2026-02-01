@@ -17,14 +17,16 @@ class RateLimiter(
 
     fun checkRateLimit(callerPackage: String): Boolean {
         val now = System.currentTimeMillis()
-        val entry = rateLimitMap.compute(callerPackage) { _, existing ->
+        var requestCount = 0
+        rateLimitMap.compute(callerPackage) { _, existing ->
             if (existing == null || now - existing.windowStart.get() >= windowMs) {
+                requestCount = 1
                 RateLimitEntry(AtomicInteger(1), AtomicLong(now))
             } else {
-                existing.count.incrementAndGet()
+                requestCount = existing.count.incrementAndGet()
                 existing
             }
         }
-        return entry != null && entry.count.get() <= maxRequests
+        return requestCount <= maxRequests
     }
 }
