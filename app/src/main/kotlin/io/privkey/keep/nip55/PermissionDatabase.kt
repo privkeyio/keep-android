@@ -21,10 +21,7 @@ enum class PermissionDecision(@StringRes val displayNameRes: Int) {
             "allow" -> ALLOW
             "deny" -> DENY
             "ask" -> ASK
-            else -> {
-                android.util.Log.w("PermissionDecision", "Unknown decision value '$value', defaulting to DENY")
-                DENY
-            }
+            else -> DENY
         }
     }
 
