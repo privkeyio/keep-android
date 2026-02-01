@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- NIP-55 requires third-party apps to access the provider; runtime caller verification handles security -->
     <permission
         android:name="io.privkey.keep.NIP55_PROVIDER"
-        android:protectionLevel="signature" />
+        android:protectionLevel="normal" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
