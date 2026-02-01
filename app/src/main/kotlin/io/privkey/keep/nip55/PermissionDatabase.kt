@@ -340,7 +340,7 @@ abstract class Nip55Database : RoomDatabase() {
             SecureRandom().nextBytes(newKey)
             prefs.edit()
                 .putString(KEY_HMAC_SECRET, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
-                .apply()
+                .commit()
             return newKey.also { hmacKey = it }
         }
 
