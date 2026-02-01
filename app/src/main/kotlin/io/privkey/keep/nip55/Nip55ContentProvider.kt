@@ -133,24 +133,27 @@ class Nip55ContentProvider : ContentProvider() {
             }
 
             val safeguards = currentApp.getAutoSigningSafeguards()
-            if (safeguards != null) {
-                if (!safeguards.isOptedIn(callerPackage)) {
-                    if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
-                    return null
+            if (safeguards == null) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for $callerPackage")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
+                return rejectedCursor(null)
+            }
+            if (!safeguards.isOptedIn(callerPackage)) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
+                return null
+            }
+            val usageResult = safeguards.checkAndRecordUsage(callerPackage)
+            if (usageResult !is AutoSigningSafeguards.UsageCheckResult.Allowed) {
+                val denyReason = when (usageResult) {
+                    is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
+                    is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
+                    is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
+                    is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
+                    is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
                 }
-                val usageResult = safeguards.checkAndRecordUsage(callerPackage)
-                if (usageResult !is AutoSigningSafeguards.UsageCheckResult.Allowed) {
-                    val denyReason = when (usageResult) {
-                        is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
-                        is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
-                        is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
-                        is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
-                        is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
-                    }
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-                    return rejectedCursor(null)
-                }
+                if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
+                return rejectedCursor(null)
             }
             return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
         }

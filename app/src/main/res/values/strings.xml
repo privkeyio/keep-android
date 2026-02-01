@@ -64,4 +64,7 @@
     <string name="auto_signing_opt_in_description">Allow this app to sign events without prompts</string>
     <string name="auto_signing_cooling_off">Cooling off until %1$s</string>
     <string name="auto_signing_usage_stats">Usage: %1$d/%2$d hourly, %3$d/%4$d daily</string>
+
+    <string name="nip55_unverified_caller_warning">Warning: Unable to verify the requesting app. Only approve if you initiated this action.</string>
+    <string name="nip55_first_use_warning">First connection from this app. Approving will trust this app for future requests.</string>
 </resources>

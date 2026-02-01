@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
@@ -265,7 +266,7 @@ private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
 @Composable
 private fun UnverifiedCallerWarning() {
     WarningCard(
-        text = "Warning: Unable to verify the requesting app. Only approve if you initiated this action.",
+        text = stringResource(R.string.nip55_unverified_caller_warning),
         containerColor = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer
     )
@@ -274,7 +275,7 @@ private fun UnverifiedCallerWarning() {
 @Composable
 private fun FirstUseWarning() {
     WarningCard(
-        text = "First connection from this app. Approving will trust this app for future requests.",
+        text = stringResource(R.string.nip55_first_use_warning),
         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
     )

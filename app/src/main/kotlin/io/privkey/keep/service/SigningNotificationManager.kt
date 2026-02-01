@@ -26,6 +26,7 @@ class SigningNotificationManager(private val context: Context) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean {
             if (size > MAX_PENDING_REQUESTS) {
                 eldest?.let { entry ->
+                    notificationManager.cancel(entry.value)
                     val removed = pendingRequestData.remove(entry.key)
                     removed?.callerPackage?.let { decrementPackageCount(it) }
                 }
