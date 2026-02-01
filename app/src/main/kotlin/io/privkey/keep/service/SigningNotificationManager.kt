@@ -39,6 +39,7 @@ class SigningNotificationManager(private val context: Context) {
             setShowBadge(true)
             enableVibration(true)
             enableLights(true)
+            lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
         notificationManager.createNotificationChannel(channel)
     }
