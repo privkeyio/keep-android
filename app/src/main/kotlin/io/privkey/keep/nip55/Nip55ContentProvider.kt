@@ -117,7 +117,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
-        val velocityResult = runWithTimeout { store.checkVelocity(callerPackage, eventKind) }
+        val velocityResult = runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }
         if (velocityResult == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check timed out, denying request")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_velocity_timeout", wasAutomatic = true) }
@@ -234,7 +234,6 @@ class Nip55ContentProvider : ContentProvider() {
                 try {
                     runWithTimeout {
                         store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
-                        store.recordVelocity(callerPackage, eventKind)
                     }
                     showBackgroundSigningNotification(callerPackage, requestType, eventKind)
                 } catch (e: Exception) {

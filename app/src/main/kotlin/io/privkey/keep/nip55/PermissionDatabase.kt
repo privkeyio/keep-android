@@ -514,39 +514,38 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
-    suspend fun checkVelocity(packageName: String, eventKind: Int?, config: VelocityConfig = VelocityConfig()): VelocityResult {
+    suspend fun checkAndRecordVelocity(packageName: String, eventKind: Int?, config: VelocityConfig = VelocityConfig()): VelocityResult {
         if (!config.enabled) return VelocityResult.Allowed
 
-        val now = System.currentTimeMillis()
+        return database.withTransaction {
+            val now = System.currentTimeMillis()
 
-        val hourCount = velocityDao.countSince(packageName, now - HOUR_MS)
-        if (hourCount >= config.hourlyLimit) {
-            val oldest = velocityDao.getOldestInWindow(packageName, now - HOUR_MS)
-            val resetAt = (oldest ?: now) + HOUR_MS
-            return VelocityResult.Blocked("Hourly limit ($hourCount/${config.hourlyLimit})", resetAt)
+            val hourCount = velocityDao.countSince(packageName, now - HOUR_MS)
+            if (hourCount >= config.hourlyLimit) {
+                val oldest = velocityDao.getOldestInWindow(packageName, now - HOUR_MS)
+                val resetAt = (oldest ?: now) + HOUR_MS
+                return@withTransaction VelocityResult.Blocked("Hourly limit ($hourCount/${config.hourlyLimit})", resetAt)
+            }
+
+            val dayCount = velocityDao.countSince(packageName, now - DAY_MS)
+            if (dayCount >= config.dailyLimit) {
+                val oldest = velocityDao.getOldestInWindow(packageName, now - DAY_MS)
+                val resetAt = (oldest ?: now) + DAY_MS
+                return@withTransaction VelocityResult.Blocked("Daily limit ($dayCount/${config.dailyLimit})", resetAt)
+            }
+
+            val weekCount = velocityDao.countSince(packageName, now - WEEK_MS)
+            if (weekCount >= config.weeklyLimit) {
+                val oldest = velocityDao.getOldestInWindow(packageName, now - WEEK_MS)
+                val resetAt = (oldest ?: now) + WEEK_MS
+                return@withTransaction VelocityResult.Blocked("Weekly limit ($weekCount/${config.weeklyLimit})", resetAt)
+            }
+
+            velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
+            velocityDao.deleteOlderThan(now - WEEK_MS)
+
+            VelocityResult.Allowed
         }
-
-        val dayCount = velocityDao.countSince(packageName, now - DAY_MS)
-        if (dayCount >= config.dailyLimit) {
-            val oldest = velocityDao.getOldestInWindow(packageName, now - DAY_MS)
-            val resetAt = (oldest ?: now) + DAY_MS
-            return VelocityResult.Blocked("Daily limit ($dayCount/${config.dailyLimit})", resetAt)
-        }
-
-        val weekCount = velocityDao.countSince(packageName, now - WEEK_MS)
-        if (weekCount >= config.weeklyLimit) {
-            val oldest = velocityDao.getOldestInWindow(packageName, now - WEEK_MS)
-            val resetAt = (oldest ?: now) + WEEK_MS
-            return VelocityResult.Blocked("Weekly limit ($weekCount/${config.weeklyLimit})", resetAt)
-        }
-
-        return VelocityResult.Allowed
-    }
-
-    suspend fun recordVelocity(packageName: String, eventKind: Int?) {
-        val now = System.currentTimeMillis()
-        velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
-        velocityDao.deleteOlderThan(now - WEEK_MS)
     }
 
     suspend fun getVelocityUsage(packageName: String): Triple<Int, Int, Int> {
