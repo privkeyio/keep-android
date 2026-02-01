@@ -25,7 +25,9 @@ class SigningNotificationReceiver : BroadcastReceiver() {
                     requestInfo.originalRequestId?.let { putExtra("id", it) }
                 }
 
-                context.startActivity(activityIntent)
+                if (activityIntent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(activityIntent)
+                }
             }
             SigningNotificationManager.ACTION_DISMISS_REQUEST -> {
                 notificationManager.removeRequest(requestId)
