@@ -35,7 +35,11 @@ internal fun parseEventKind(content: String): Int? = runCatching {
     val value = json.opt("kind") ?: return@runCatching null
     when (value) {
         is Int -> value.takeIf { it in 0..65535 }
-        is Number -> value.toInt().takeIf { it in 0..65535 }
+        is Number -> {
+            val d = value.toDouble()
+            if (!d.isFinite() || d != kotlin.math.floor(d)) return@runCatching null
+            d.toInt().takeIf { it in 0..65535 }
+        }
         else -> null
     }
 }.getOrNull()
