@@ -9,6 +9,7 @@ import androidx.security.crypto.MasterKey
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55RequestType
 import net.sqlcipher.database.SupportFactory
+import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -577,7 +578,7 @@ class PermissionStore(private val database: Nip55Database) {
                 if (entry.entryHash.isEmpty()) {
                     return ChainVerificationResult.Broken(entry.id)
                 }
-                if (entry.previousHash != expectedPrevHash) {
+                if (!constantTimeEquals(entry.previousHash, expectedPrevHash)) {
                     return ChainVerificationResult.Broken(entry.id)
                 }
             }
@@ -591,7 +592,7 @@ class PermissionStore(private val database: Nip55Database) {
                 timestamp = entry.timestamp,
                 wasAutomatic = entry.wasAutomatic
             )
-            if (calculated != entry.entryHash) {
+            if (!constantTimeEquals(calculated, entry.entryHash)) {
                 return ChainVerificationResult.Tampered(entry.id)
             }
 
@@ -794,4 +795,10 @@ private fun calculateEntryHash(
     mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
     val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
     return hashBytes.joinToString("") { "%02x".format(it) }
+}
+
+private fun constantTimeEquals(a: String?, b: String?): Boolean {
+    if (a == null && b == null) return true
+    if (a == null || b == null) return false
+    return MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
 }
