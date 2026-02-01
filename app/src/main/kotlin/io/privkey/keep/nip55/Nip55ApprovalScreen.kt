@@ -36,7 +36,18 @@ internal fun Nip55RequestType.headerTitle(): String = when (this) {
 }
 
 internal fun parseEventKind(content: String): Int? = runCatching {
-    JSONObject(content).optInt("kind", -1).takeIf { it in 0..65535 }
+    val json = JSONObject(content)
+    val value = json.opt("kind") ?: return@runCatching null
+    when (value) {
+        is Int -> value.takeIf { it in 0..65535 }
+        is Long -> value.toInt().takeIf { value in 0L..65535L }
+        is Number -> {
+            val l = value.toLong()
+            if (l.toDouble() != value.toDouble()) return@runCatching null
+            l.toInt().takeIf { l in 0L..65535L }
+        }
+        else -> null
+    }
 }.getOrNull()
 
 internal fun Nip55Request.eventKind(): Int? =
