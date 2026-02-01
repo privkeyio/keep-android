@@ -6,6 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 
 class CallerVerificationStore(context: Context) {
 
@@ -16,7 +17,8 @@ class CallerVerificationStore(context: Context) {
         private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
     }
 
-    private val nonceLock = Any()
+    private data class NonceData(val packageName: String, val expiresAt: Long)
+    private val activeNonces = ConcurrentHashMap<String, NonceData>()
 
     private val prefs = run {
         val masterKey = MasterKey.Builder(context)
@@ -45,11 +47,22 @@ class CallerVerificationStore(context: Context) {
             } else {
                 signingInfo.signingCertificateHistory
             }
-            signatures?.firstOrNull()?.let { signature ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                val hash = digest.digest(signature.toByteArray())
-                hash.joinToString("") { "%02x".format(it) }
-            }
+            if (signatures.isNullOrEmpty()) return null
+
+            val sortedSignatureBytes = signatures
+                .map { it.toByteArray() }
+                .sortedWith { a, b ->
+                    val minLen = minOf(a.size, b.size)
+                    for (i in 0 until minLen) {
+                        val cmp = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
+                        if (cmp != 0) return@sortedWith cmp
+                    }
+                    a.size - b.size
+                }
+
+            val digest = MessageDigest.getInstance("SHA-256")
+            sortedSignatureBytes.forEach { digest.update(it) }
+            digest.digest().joinToString("") { "%02x".format(it) }
         } catch (_: Exception) {
             null
         }
@@ -79,36 +92,18 @@ class CallerVerificationStore(context: Context) {
         SecureRandom().nextBytes(bytes)
         val nonce = bytes.joinToString("") { "%02x".format(it) }
         val expiresAt = System.currentTimeMillis() + NONCE_EXPIRY_MS
-        prefs.edit().putString(KEY_PREFIX_NONCE + nonce, "$packageName:$expiresAt").commit()
+        activeNonces[nonce] = NonceData(packageName, expiresAt)
         return nonce
     }
 
     fun consumeNonce(nonce: String): NonceResult {
-        val value = synchronized(nonceLock) {
-            val v = prefs.getString(KEY_PREFIX_NONCE + nonce, null) ?: return NonceResult.Invalid
-            if (!prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()) return NonceResult.Invalid
-            v
-        }
-
-        val separatorIndex = value.lastIndexOf(':')
-        if (separatorIndex == -1) return NonceResult.Invalid
-
-        val packageName = value.substring(0, separatorIndex)
-        val expiresAt = value.substring(separatorIndex + 1).toLongOrNull() ?: return NonceResult.Invalid
-
-        return if (System.currentTimeMillis() > expiresAt) NonceResult.Expired else NonceResult.Valid(packageName)
+        val data = activeNonces.remove(nonce) ?: return NonceResult.Invalid
+        return if (System.currentTimeMillis() > data.expiresAt) NonceResult.Expired else NonceResult.Valid(data.packageName)
     }
 
     fun cleanupExpiredNonces() {
         val now = System.currentTimeMillis()
-        val editor = prefs.edit()
-        prefs.all.entries
-            .filter { it.key.startsWith(KEY_PREFIX_NONCE) }
-            .forEach { (key, value) ->
-                val expiresAt = (value as? String)?.substringAfterLast(':')?.toLongOrNull()
-                if (expiresAt != null && now > expiresAt) editor.remove(key)
-            }
-        editor.apply()
+        activeNonces.entries.removeIf { it.value.expiresAt < now }
     }
 
     sealed class VerificationResult {
