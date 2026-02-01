@@ -20,14 +20,14 @@ class PinStore(context: Context) {
         private const val KEY_PIN_SALT = "pin_salt"
         private const val KEY_PIN_ENABLED = "pin_enabled"
         private const val KEY_FAILED_ATTEMPTS = "failed_attempts"
-        private const val KEY_LOCKOUT_UNTIL = "lockout_until"
-        private const val KEY_SESSION_VALID_UNTIL = "session_valid_until"
         private const val KEY_SESSION_STARTED_AT_REALTIME = "session_started_at_realtime"
+        private const val KEY_SESSION_STARTED_AT_WALL = "session_started_at_wall"
+        private const val KEY_SESSION_TIMEOUT = "session_timeout"
         private const val KEY_LOCKOUT_LEVEL = "lockout_level"
         private const val KEY_LOCKOUT_SET_AT_ELAPSED = "lockout_set_at_elapsed"
         private const val KEY_LOCKOUT_WALL_CLOCK = "lockout_wall_clock"
         private const val KEY_LOCKOUT_DURATION = "lockout_duration"
-        private const val KEY_SESSION_TIMEOUT = "session_timeout"
+        private const val KEY_LAST_LOCKOUT_CLEARED = "last_lockout_cleared"
 
         const val MIN_PIN_LENGTH = 4
         const val MAX_PIN_LENGTH = 8
@@ -44,6 +44,8 @@ class PinStore(context: Context) {
             900_000L,    // 15 minutes
             3600_000L    // 1 hour
         )
+
+        private const val LOCKOUT_LEVEL_DECAY_MS = 86_400_000L  // 24 hours
 
         private val WEAK_PINS = setOf(
             "0000", "1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888", "9999",
@@ -74,17 +76,14 @@ class PinStore(context: Context) {
 
     @Synchronized
     fun isWeakPin(pin: String): Boolean {
-        // Non-digit PINs are treated as weak/invalid to avoid digitToInt() exceptions
         if (!pin.all { it.isDigit() }) return true
-        if (WEAK_PINS.contains(pin)) return true
+        if (pin in WEAK_PINS) return true
         if (pin.length >= 3 && pin.all { it == pin[0] }) return true
+        if (pin.length < 3) return false
         val digits = pin.map { it.digitToInt() }
-        if (digits.size >= 3) {
-            val isAscending = digits.zipWithNext().all { (a, b) -> b == a + 1 }
-            val isDescending = digits.zipWithNext().all { (a, b) -> b == a - 1 }
-            if (isAscending || isDescending) return true
-        }
-        return false
+        val isSequential = digits.zipWithNext().all { (a, b) -> b == a + 1 } ||
+            digits.zipWithNext().all { (a, b) -> b == a - 1 }
+        return isSequential
     }
 
     @Synchronized
@@ -103,11 +102,11 @@ class PinStore(context: Context) {
                 .putString(KEY_PIN_SALT, salt)
                 .putBoolean(KEY_PIN_ENABLED, true)
                 .putInt(KEY_FAILED_ATTEMPTS, 0)
-                .putLong(KEY_LOCKOUT_UNTIL, 0)
                 .putInt(KEY_LOCKOUT_LEVEL, 0)
                 .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
                 .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
                 .putLong(KEY_LOCKOUT_DURATION, 0)
+                .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
                 .commit()
             if (success) refreshSession()
             return success
@@ -151,25 +150,38 @@ class PinStore(context: Context) {
             .remove(KEY_PIN_SALT)
             .putBoolean(KEY_PIN_ENABLED, false)
             .putInt(KEY_FAILED_ATTEMPTS, 0)
-            .putLong(KEY_LOCKOUT_UNTIL, 0)
-            .putLong(KEY_SESSION_VALID_UNTIL, 0)
-            .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
             .putInt(KEY_LOCKOUT_LEVEL, 0)
+            .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+            .putLong(KEY_SESSION_STARTED_AT_WALL, 0)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
             .commit()
     }
 
     @Synchronized
     fun isSessionValid(): Boolean {
         if (!isPinEnabled()) return true
-        val sessionStartedAt = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
-        if (sessionStartedAt == 0L) return false
+        val sessionStartedAtRealtime = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+        val sessionStartedAtWall = prefs.getLong(KEY_SESSION_STARTED_AT_WALL, 0)
+        if (sessionStartedAtRealtime == 0L || sessionStartedAtWall == 0L) return false
         val timeout = getSessionTimeout()
         if (timeout == 0L) return false
-        val elapsed = SystemClock.elapsedRealtime() - sessionStartedAt
-        return elapsed in 0..timeout
+        val currentRealtime = SystemClock.elapsedRealtime()
+        val currentWall = System.currentTimeMillis()
+        val rebootDetected = currentRealtime < sessionStartedAtRealtime
+        if (rebootDetected) {
+            invalidateSession()
+            return false
+        }
+        val elapsedRealtime = currentRealtime - sessionStartedAtRealtime
+        val elapsedWall = currentWall - sessionStartedAtWall
+        if (elapsedWall < 0) {
+            invalidateSession()
+            return false
+        }
+        return elapsedRealtime in 0..timeout && elapsedWall in 0..timeout
     }
 
     @Synchronized
@@ -185,6 +197,7 @@ class PinStore(context: Context) {
     fun refreshSession() {
         prefs.edit()
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, SystemClock.elapsedRealtime())
+            .putLong(KEY_SESSION_STARTED_AT_WALL, System.currentTimeMillis())
             .commit()
     }
 
@@ -192,6 +205,7 @@ class PinStore(context: Context) {
     fun invalidateSession() {
         prefs.edit()
             .putLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
+            .putLong(KEY_SESSION_STARTED_AT_WALL, 0)
             .commit()
     }
 
@@ -200,34 +214,61 @@ class PinStore(context: Context) {
 
     @Synchronized
     fun getLockoutRemainingMs(): Long {
-        val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val lockoutDuration = prefs.getLong(KEY_LOCKOUT_DURATION, 0)
-        val lockoutUntil = prefs.getLong(KEY_LOCKOUT_UNTIL, 0)
+        if (lockoutDuration == 0L) {
+            maybeDecayLockoutLevel()
+            return 0
+        }
+
+        val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+        val currentWallClock = System.currentTimeMillis()
         val currentElapsed = SystemClock.elapsedRealtime()
 
-        val remainingWallClock = if (lockoutWallClock != 0L && lockoutDuration != 0L) {
-            lockoutWallClock + lockoutDuration - System.currentTimeMillis()
-        } else 0L
+        val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
+        val rebootDetected = currentElapsed < savedSetElapsed
+        val remainingByElapsed = if (rebootDetected) Long.MIN_VALUE
+            else lockoutDuration - (currentElapsed - savedSetElapsed)
 
-        val remainingElapsed = if (lockoutUntil != 0L && savedSetElapsed != 0L && currentElapsed >= savedSetElapsed) {
-            lockoutUntil - currentElapsed
-        } else 0L
-
-        val remaining = maxOf(remainingWallClock, remainingElapsed)
+        val remaining = maxOf(remainingByWallClock, remainingByElapsed)
         if (remaining <= 0) {
-            clearLockoutTimestamps()
+            clearLockoutTimestampsInternal()
             return 0
         }
         return remaining
     }
 
-    private fun clearLockoutTimestamps() {
+    private fun maybeDecayLockoutLevel() {
+        val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+        if (currentLevel == 0) return
+
+        val lastCleared = prefs.getLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+        if (lastCleared == 0L) return
+
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastCleared
+        if (elapsed < 0) {
+            prefs.edit().putLong(KEY_LAST_LOCKOUT_CLEARED, now).commit()
+            return
+        }
+
+        val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
+        if (decaySteps == 0) return
+
+        val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
+        val newLastCleared = lastCleared + decaySteps * LOCKOUT_LEVEL_DECAY_MS
         prefs.edit()
-            .putLong(KEY_LOCKOUT_UNTIL, 0)
+            .putInt(KEY_LOCKOUT_LEVEL, newLevel)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, newLastCleared)
+            .commit()
+    }
+
+    private fun clearLockoutTimestampsInternal() {
+        prefs.edit()
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
             .commit()
     }
 
@@ -245,30 +286,29 @@ class PinStore(context: Context) {
             val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
             val duration = LOCKOUT_DURATIONS_MS[currentLevel.coerceIn(0, LOCKOUT_DURATIONS_MS.size - 1)]
             val newLevel = (currentLevel + 1).coerceAtMost(LOCKOUT_DURATIONS_MS.size - 1)
-            val currentElapsed = SystemClock.elapsedRealtime()
-            val currentWallClock = System.currentTimeMillis()
-            editor.putLong(KEY_LOCKOUT_UNTIL, currentElapsed + duration)
-            editor.putLong(KEY_LOCKOUT_SET_AT_ELAPSED, currentElapsed)
-            editor.putLong(KEY_LOCKOUT_WALL_CLOCK, currentWallClock)
+            editor.putLong(KEY_LOCKOUT_SET_AT_ELAPSED, SystemClock.elapsedRealtime())
+            editor.putLong(KEY_LOCKOUT_WALL_CLOCK, System.currentTimeMillis())
             editor.putLong(KEY_LOCKOUT_DURATION, duration)
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
         }
 
         if (!editor.commit()) {
-            Log.e("PinStore", "Failed to persist lockout state, retrying")
-            if (!editor.commit()) {
-                Log.e("PinStore", "Retry failed, lockout state may be inconsistent")
-            }
+            Log.e("PinStore", "Failed to persist lockout state")
         }
     }
 
     private fun clearFailedAttempts() {
-        clearLockoutTimestamps()
-        prefs.edit()
+        val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+        val editor = prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
-            .putInt(KEY_LOCKOUT_LEVEL, 0)
-            .commit()
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+            .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            .putLong(KEY_LOCKOUT_DURATION, 0)
+        if (currentLevel > 0) {
+            editor.putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+        }
+        editor.commit()
     }
 
     private fun generateSalt(): String {
