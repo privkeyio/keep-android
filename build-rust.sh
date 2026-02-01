@@ -9,13 +9,17 @@ JNILIBS_DIR="$SCRIPT_DIR/app/src/main/jniLibs"
 
 echo "Building keep-mobile for Android..."
 
-# Build for all Android targets
-TARGETS=(
-    "aarch64-linux-android"
-    "armv7-linux-androideabi"
-    "x86_64-linux-android"
-    "i686-linux-android"
-)
+# Build for Android targets (can override with TARGETS env var)
+if [ -n "$TARGETS" ]; then
+    IFS=',' read -ra TARGETS <<< "$TARGETS"
+else
+    TARGETS=(
+        "aarch64-linux-android"
+        "armv7-linux-androideabi"
+        "x86_64-linux-android"
+        "i686-linux-android"
+    )
+fi
 
 cd "$RUST_PROJECT"
 

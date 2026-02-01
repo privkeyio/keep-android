@@ -35,7 +35,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.85.0
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: keep/keep-mobile
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
@@ -47,15 +52,10 @@ jobs:
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.13113456
+          TARGETS: aarch64-linux-android
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug --no-daemon
-
-      - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
-
-      - name: Run lint
-        run: ./gradlew lintDebug --no-daemon
+      - name: Build, test, and lint
+        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
