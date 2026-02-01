@@ -16,6 +16,8 @@ class CallerVerificationStore(context: Context) {
         private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
     }
 
+    private val nonceLock = Any()
+
     private val prefs = run {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -82,17 +84,18 @@ class CallerVerificationStore(context: Context) {
     }
 
     fun consumeNonce(nonce: String): NonceResult {
-        val value = prefs.getString(KEY_PREFIX_NONCE + nonce, null)
-            ?: return NonceResult.Invalid
+        val value = synchronized(nonceLock) {
+            val v = prefs.getString(KEY_PREFIX_NONCE + nonce, null) ?: return NonceResult.Invalid
+            val removed = prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()
+            if (!removed) return NonceResult.Invalid
+            v
+        }
 
-        val removed = prefs.edit().remove(KEY_PREFIX_NONCE + nonce).commit()
-        if (!removed) return NonceResult.Invalid
+        val separatorIndex = value.lastIndexOf(':')
+        if (separatorIndex == -1) return NonceResult.Invalid
 
-        val parts = value.split(":")
-        if (parts.size != 2) return NonceResult.Invalid
-
-        val packageName = parts[0]
-        val expiresAt = parts[1].toLongOrNull() ?: return NonceResult.Invalid
+        val packageName = value.substring(0, separatorIndex)
+        val expiresAt = value.substring(separatorIndex + 1).toLongOrNull() ?: return NonceResult.Invalid
 
         if (System.currentTimeMillis() > expiresAt) {
             return NonceResult.Expired

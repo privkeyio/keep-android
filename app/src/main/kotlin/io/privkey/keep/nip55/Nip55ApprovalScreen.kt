@@ -116,6 +116,7 @@ fun ApprovalScreen(
     callerPackage: String?,
     callerVerified: Boolean,
     showFirstUseWarning: Boolean = false,
+    callerSignatureFingerprint: String? = null,
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
@@ -144,7 +145,7 @@ fun ApprovalScreen(
 
         if (showFirstUseWarning) {
             Spacer(modifier = Modifier.height(8.dp))
-            FirstUseWarning()
+            FirstUseWarning(signatureFingerprint = callerSignatureFingerprint)
         } else if (!callerVerified) {
             Spacer(modifier = Modifier.height(8.dp))
             UnverifiedCallerWarning()
@@ -273,12 +274,23 @@ private fun UnverifiedCallerWarning() {
 }
 
 @Composable
-private fun FirstUseWarning() {
+private fun FirstUseWarning(signatureFingerprint: String? = null) {
+    val baseText = stringResource(R.string.nip55_first_use_warning)
+    val displayText = if (signatureFingerprint != null) {
+        val formattedFingerprint = formatFingerprint(signatureFingerprint)
+        "$baseText\n\n${stringResource(R.string.nip55_signature_fingerprint, formattedFingerprint)}"
+    } else {
+        baseText
+    }
     WarningCard(
-        text = stringResource(R.string.nip55_first_use_warning),
+        text = displayText,
         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
     )
+}
+
+private fun formatFingerprint(hash: String): String {
+    return hash.take(32).chunked(4).joinToString(" ").uppercase()
 }
 
 @Composable

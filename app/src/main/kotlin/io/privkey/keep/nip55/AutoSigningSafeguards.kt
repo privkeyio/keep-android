@@ -70,16 +70,18 @@ class AutoSigningSafeguards(context: Context) {
     }
 
     fun clearCoolingOff(packageName: String) {
-        prefs.edit().remove(KEY_PREFIX_COOLED_OFF_UNTIL + packageName).apply()
+        synchronized(usageLock) {
+            prefs.edit().remove(KEY_PREFIX_COOLED_OFF_UNTIL + packageName).apply()
+        }
     }
 
     fun checkAndRecordUsage(packageName: String): UsageCheckResult {
-        if (isCooledOff(packageName)) {
-            return UsageCheckResult.CoolingOff(getCooledOffUntil(packageName))
-        }
-
         val now = System.currentTimeMillis()
         synchronized(usageLock) {
+            if (isCooledOff(packageName)) {
+                return UsageCheckResult.CoolingOff(getCooledOffUntil(packageName))
+            }
+
             val hourly = incrementUsage(hourlyUsage, KEY_PREFIX_HOURLY, packageName, now, HOUR_MS)
             if (hourly.count > HOURLY_LIMIT) {
                 setCooledOff(packageName)

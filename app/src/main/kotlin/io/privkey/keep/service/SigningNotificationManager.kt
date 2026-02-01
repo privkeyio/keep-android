@@ -22,6 +22,11 @@ class SigningNotificationManager(private val context: Context) {
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID_START)
     private val pendingLock = Any()
+
+    // LRU map for request ID to notification ID mapping.
+    // IMPORTANT: removeEldestEntry is called from within put() operations, which must be
+    // performed while holding pendingLock to ensure thread-safe access to pendingRequestData
+    // and pendingRequestsPerPackage.
     private val requestIdToNotificationId = object : LinkedHashMap<String, Int>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean {
             if (size > MAX_PENDING_REQUESTS) {
@@ -67,7 +72,8 @@ class SigningNotificationManager(private val context: Context) {
         if (!hasNotificationPermission()) return null
 
         val effectiveRequestId = requestId ?: generateRequestId()
-        val notificationId = notificationIdCounter.getAndIncrement()
+        val rawId = notificationIdCounter.getAndIncrement()
+        val notificationId = NOTIFICATION_ID_START + ((rawId - NOTIFICATION_ID_START) and NOTIFICATION_ID_MASK)
 
         synchronized(pendingLock) {
             // Reject duplicate request IDs before modifying any state
@@ -210,6 +216,7 @@ class SigningNotificationManager(private val context: Context) {
         const val ACTION_DISMISS_REQUEST = "io.privkey.keep.action.DISMISS_REQUEST"
         const val EXTRA_REQUEST_ID = "extra_request_id"
         private const val NOTIFICATION_ID_START = 1000
+        private const val NOTIFICATION_ID_MASK = 0x7FFFFFFF - NOTIFICATION_ID_START
         private const val DISMISS_REQUEST_CODE_OFFSET = 100000
         private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
         private const val MAX_PENDING_REQUESTS = 1000

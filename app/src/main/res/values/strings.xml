@@ -67,4 +67,5 @@
 
     <string name="nip55_unverified_caller_warning">Warning: Unable to verify the requesting app. Only approve if you initiated this action.</string>
     <string name="nip55_first_use_warning">First connection from this app. Approving will trust this app for future requests.</string>
+    <string name="nip55_signature_fingerprint">Signature: %1$s</string>
 </resources>

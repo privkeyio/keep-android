@@ -161,6 +161,7 @@ class Nip55Activity : FragmentActivity() {
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
         val currentPendingFirstUse = callerPendingFirstUse
+        val currentSignatureHash = callerSignatureHash
 
         setContent {
             KeepAndroidTheme {
@@ -173,6 +174,7 @@ class Nip55Activity : FragmentActivity() {
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
                         showFirstUseWarning = currentPendingFirstUse,
+                        callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
                     )
@@ -210,9 +212,13 @@ class Nip55Activity : FragmentActivity() {
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         if (callerPendingFirstUse && callerSignatureHash != null) {
-            callerVerificationStore?.trustPackage(callerId, callerSignatureHash!!)
-            callerPendingFirstUse = false
-            callerVerified = true
+            if (callerVerificationStore != null) {
+                callerVerificationStore?.trustPackage(callerId, callerSignatureHash!!)
+                callerPendingFirstUse = false
+                callerVerified = true
+            } else {
+                Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+            }
         }
 
         lifecycleScope.launch {
