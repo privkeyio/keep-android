@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <permission
+        android:name="io.privkey.keep.NIP55_PROVIDER"
+        android:protectionLevel="signature" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -50,7 +54,7 @@
             android:name=".nip55.Nip55ContentProvider"
             android:authorities="io.privkey.keep.GET_PUBLIC_KEY;io.privkey.keep.SIGN_EVENT;io.privkey.keep.NIP44_ENCRYPT;io.privkey.keep.NIP44_DECRYPT"
             android:exported="true"
-            android:permission="android.permission.INTERNET" />
+            android:permission="io.privkey.keep.NIP55_PROVIDER" />
 
         <receiver
             android:name=".service.BootReceiver"
