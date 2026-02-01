@@ -222,26 +222,44 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun hasShare(): Boolean {
-        return prefs.contains(KEY_SHARE_DATA)
+        if (prefs.contains(KEY_SHARE_DATA)) return true
+
+        val activeKey = getActiveShareKey()
+        if (activeKey != null && getSharePrefs(activeKey).contains(KEY_SHARE_DATA)) {
+            return true
+        }
+
+        // Check registry for any shares when active key is missing or stale
+        val registryKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        val hasRegistryShares = registryKeys.isNotEmpty()
+
+        // Only clear stale active key when registry is empty
+        if (activeKey != null && !hasRegistryShares) {
+            multiSharePrefs.edit().remove(KEY_ACTIVE_SHARE).apply()
+        }
+
+        return hasRegistryShares
     }
 
     override fun getShareMetadata(): ShareMetadataInfo? {
-        if (!hasShare()) return null
-
-        return try {
-            val groupPubkeyB64 = prefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
-            val groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
-
-            ShareMetadataInfo(
-                name = prefs.getString(KEY_SHARE_NAME, "") ?: "",
-                identifier = prefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-                threshold = prefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-                totalShares = prefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
-                groupPubkey = groupPubkey
-            )
-        } catch (e: Exception) {
-            null
+        if (prefs.contains(KEY_SHARE_DATA)) {
+            return readMetadataFromPrefs(prefs)
         }
+        val activeKey = getActiveShareKey() ?: return null
+        return getShareMetadataByKey(activeKey)
+    }
+
+    private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
+        val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
+        ShareMetadataInfo(
+            name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
+            identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
+            threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
+            totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
+            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
+        )
+    } catch (e: Exception) {
+        null
     }
 
     override fun deleteShare() {
@@ -391,21 +409,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return null
-
-        return try {
-            val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
-            val groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
-
-            ShareMetadataInfo(
-                name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
-                identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-                threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-                totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
-                groupPubkey = groupPubkey
-            )
-        } catch (e: Exception) {
-            null
-        }
+        return readMetadataFromPrefs(sharePrefs)
     }
 
     override fun deleteShareByKey(key: String) {
