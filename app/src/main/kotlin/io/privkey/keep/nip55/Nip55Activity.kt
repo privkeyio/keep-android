@@ -1,7 +1,6 @@
 package io.privkey.keep.nip55
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
@@ -24,7 +23,6 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.Nip55Response
-import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,14 +34,17 @@ class Nip55Activity : FragmentActivity() {
     private var permissionStore: PermissionStore? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var pinStore: PinStore? = null
+    private var callerVerificationStore: CallerVerificationStore? = null
     private var request: Nip55Request? = null
     private var requestId: String? = null
     private var callerPackage: String? = null
     private var callerVerified: Boolean = false
     private var callerSignatureHash: String? = null
+    private var callerPendingFirstUse: Boolean = false
     private var notificationManager: SigningNotificationManager? = null
     private var intentUri: String? = null
     private var notificationRequestId: String? = null
+    private var isNotificationOriginated: Boolean = false
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -60,6 +61,7 @@ class Nip55Activity : FragmentActivity() {
         killSwitchStore = app?.getKillSwitchStore()
         pinStore = app?.getPinStore()
         notificationManager = app?.getSigningNotificationManager()
+        callerVerificationStore = app?.getCallerVerificationStore()
         handleIntent(intent)
     }
 
@@ -71,7 +73,6 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-check kill switch in case it was enabled while the activity was paused
         if (killSwitchStore?.isEnabled() == true) finishWithError("signing_disabled")
     }
 
@@ -79,7 +80,7 @@ class Nip55Activity : FragmentActivity() {
         if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
 
-        identifyCaller()
+        identifyCaller(intent)
         if (callerPackage == null) {
             Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
@@ -94,33 +95,55 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun identifyCaller() {
-        callerPackage = callingActivity?.packageName
-        callerVerified = callerPackage != null
-        callerSignatureHash = callerPackage?.let { getCallerSignatureHash(it) }
+    private fun identifyCaller(intent: Intent) {
+        val verificationStore = callerVerificationStore
+        isNotificationOriginated = false
+
+        val nonce = intent.getStringExtra("nip55_nonce")
+        if (nonce != null && verificationStore != null) {
+            when (val nonceResult = verificationStore.consumeNonce(nonce)) {
+                is CallerVerificationStore.NonceResult.Valid -> {
+                    val result = verificationStore.verifyOrTrust(nonceResult.packageName)
+                    if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
+                        clearCallerState()
+                    } else {
+                        isNotificationOriginated = true
+                        applyVerificationResult(nonceResult.packageName, result)
+                    }
+                    return
+                }
+                else -> if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
+            }
+        }
+
+        val directCallerPackage = callingActivity?.packageName
+        if (directCallerPackage != null && verificationStore != null) {
+            val result = verificationStore.verifyOrTrust(directCallerPackage)
+            if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for $directCallerPackage")
+                clearCallerState()
+            } else {
+                applyVerificationResult(directCallerPackage, result)
+            }
+            return
+        }
+
+        clearCallerState()
     }
 
-    private fun getCallerSignatureHash(packageName: String): String? {
-        return try {
-            val packageInfo = packageManager.getPackageInfo(
-                packageName,
-                PackageManager.GET_SIGNING_CERTIFICATES
-            )
-            val signingInfo = packageInfo.signingInfo ?: return null
-            val signatures = if (signingInfo.hasMultipleSigners()) {
-                signingInfo.apkContentsSigners
-            } else {
-                signingInfo.signingCertificateHistory
-            }
-            signatures?.firstOrNull()?.let { signature ->
-                val digest = MessageDigest.getInstance("SHA-256")
-                val hash = digest.digest(signature.toByteArray())
-                hash.joinToString("") { "%02x".format(it) }
-            }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to get signature for $packageName: ${e::class.simpleName}")
-            null
-        }
+    private fun applyVerificationResult(packageName: String, result: CallerVerificationStore.VerificationResult) {
+        callerPackage = packageName
+        callerVerified = result is CallerVerificationStore.VerificationResult.Verified
+        callerSignatureHash = result.signatureHash
+        callerPendingFirstUse = result is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval
+    }
+
+    private fun clearCallerState() {
+        callerPackage = null
+        callerVerified = false
+        callerSignatureHash = null
+        callerPendingFirstUse = false
     }
 
     private fun showNotification() {
@@ -138,6 +161,8 @@ class Nip55Activity : FragmentActivity() {
         val currentRequest = request ?: return
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
+        val currentPendingFirstUse = callerPendingFirstUse
+        val currentSignatureHash = callerSignatureHash
 
         setContent {
             KeepAndroidTheme {
@@ -149,6 +174,8 @@ class Nip55Activity : FragmentActivity() {
                         request = currentRequest,
                         callerPackage = currentCallerPackage,
                         callerVerified = currentCallerVerified,
+                        showFirstUseWarning = currentPendingFirstUse,
+                        callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
                     )
@@ -184,6 +211,17 @@ class Nip55Activity : FragmentActivity() {
         val store = permissionStore
         val eventKind = req.eventKind()
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
+
+        if (callerPendingFirstUse && callerSignatureHash != null) {
+            val verificationStore = callerVerificationStore
+            if (verificationStore != null) {
+                verificationStore.trustPackage(callerId, callerSignatureHash!!)
+                callerPendingFirstUse = false
+                callerVerified = true
+            } else {
+                Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+            }
+        }
 
         lifecycleScope.launch {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch

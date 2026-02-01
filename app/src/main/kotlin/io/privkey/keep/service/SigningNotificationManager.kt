@@ -16,14 +16,28 @@ import io.privkey.keep.R
 import io.privkey.keep.nip55.headerTitle
 import io.privkey.keep.uniffi.Nip55RequestType
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class SigningNotificationManager(private val context: Context) {
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID_START)
-    private val requestIdToNotificationId = ConcurrentHashMap<String, Int>()
-    private val pendingRequestData = ConcurrentHashMap<String, PendingRequestInfo>()
+    private val pendingLock = Any()
+
+    private val requestIdToNotificationId = object : LinkedHashMap<String, Int>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?): Boolean {
+            if (size > MAX_PENDING_REQUESTS) {
+                eldest?.let { entry ->
+                    notificationManager.cancel(entry.value)
+                    val removed = pendingRequestData.remove(entry.key)
+                    removed?.callerPackage?.let { decrementPackageCount(it) }
+                }
+                return true
+            }
+            return false
+        }
+    }
+    private val pendingRequestData = LinkedHashMap<String, PendingRequestInfo>(16, 0.75f, true)
+    private val pendingRequestsPerPackage = HashMap<String, Int>()
 
     init {
         createNotificationChannel()
@@ -44,7 +58,7 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.createNotificationChannel(channel)
     }
 
-    @SuppressLint("MissingPermission") // Permission is checked at function entry
+    @SuppressLint("MissingPermission")
     fun showSigningRequest(
         requestType: Nip55RequestType,
         callerPackage: String?,
@@ -54,18 +68,24 @@ class SigningNotificationManager(private val context: Context) {
         if (!hasNotificationPermission()) return null
 
         val effectiveRequestId = requestId ?: generateRequestId()
-        val notificationId = notificationIdCounter.getAndIncrement()
+        val rawId = notificationIdCounter.getAndIncrement()
+        val notificationId = NOTIFICATION_ID_START + ((rawId - NOTIFICATION_ID_START) and NOTIFICATION_ID_MASK)
 
-        // Synchronize the size check, cleanup, and insertion to prevent races
-        synchronized(pendingRequestData) {
-            if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
-                cleanupStaleEntries()
-                if (pendingRequestData.size >= MAX_PENDING_REQUESTS) {
+        synchronized(pendingLock) {
+            if (requestIdToNotificationId.containsKey(effectiveRequestId)) {
+                return null
+            }
+
+            if (callerPackage != null) {
+                val packageCount = pendingRequestsPerPackage[callerPackage] ?: 0
+                if (packageCount >= MAX_PENDING_REQUESTS_PER_PACKAGE) {
                     return null
                 }
+                pendingRequestsPerPackage[callerPackage] = packageCount + 1
             }
+
             requestIdToNotificationId[effectiveRequestId] = notificationId
-            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId)
+            pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId, callerPackage)
         }
 
         val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
@@ -97,25 +117,39 @@ class SigningNotificationManager(private val context: Context) {
         notificationManager.cancel(notificationId)
     }
 
-    fun getPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingRequestData) {
-        requestIdToNotificationId.remove(requestId)
-        pendingRequestData.remove(requestId)
+    fun popPendingRequestInfo(requestId: String): PendingRequestInfo? = synchronized(pendingLock) {
+        removeRequestInternal(requestId).first
+    }
+
+    fun removeRequest(requestId: String): Int? = synchronized(pendingLock) {
+        removeRequestInternal(requestId).second
+    }
+
+    private fun removeRequestInternal(requestId: String): Pair<PendingRequestInfo?, Int?> {
+        val info = pendingRequestData.remove(requestId)
+        info?.callerPackage?.let { decrementPackageCount(it) }
+        val notificationId = requestIdToNotificationId.remove(requestId)
+        return Pair(info, notificationId)
+    }
+
+    private fun decrementPackageCount(packageName: String) {
+        val count = pendingRequestsPerPackage[packageName] ?: return
+        if (count > 1) {
+            pendingRequestsPerPackage[packageName] = count - 1
+        } else {
+            pendingRequestsPerPackage.remove(packageName)
+        }
     }
 
     private fun generateRequestId(): String = UUID.randomUUID().toString()
 
     private fun hasNotificationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun getAppLabel(packageName: String): String? {
-        return try {
-            val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
-            context.packageManager.getApplicationLabel(appInfo).toString()
-        } catch (e: PackageManager.NameNotFoundException) {
-            null
-        }
-    }
+    private fun getAppLabel(packageName: String): String? = runCatching {
+        val appInfo = context.packageManager.getApplicationInfo(packageName, 0)
+        context.packageManager.getApplicationLabel(appInfo).toString()
+    }.getOrNull()
 
     private fun createBroadcastIntent(action: String, requestId: String, requestCode: Int): PendingIntent {
         val intent = Intent(context, SigningNotificationReceiver::class.java).apply {
@@ -155,23 +189,19 @@ class SigningNotificationManager(private val context: Context) {
     data class PendingRequestInfo(
         val intentUri: String,
         val originalRequestId: String?,
+        val callerPackage: String?,
         val createdAt: Long = System.currentTimeMillis()
     )
 
-    fun removeRequest(requestId: String): Int? = synchronized(pendingRequestData) {
-        pendingRequestData.remove(requestId)
-        requestIdToNotificationId.remove(requestId)
-    }
-
     fun cleanupStaleEntries(maxAgeMillis: Long = DEFAULT_MAX_AGE_MILLIS) {
         val now = System.currentTimeMillis()
-        synchronized(pendingRequestData) {
+        val staleRequestIds = synchronized(pendingLock) {
             pendingRequestData.entries
                 .filter { now - it.value.createdAt > maxAgeMillis }
-                .forEach { (requestId, _) ->
-                    pendingRequestData.remove(requestId)
-                    requestIdToNotificationId.remove(requestId)?.let { notificationManager.cancel(it) }
-                }
+                .map { it.key }
+        }
+        staleRequestIds.forEach { requestId ->
+            removeRequest(requestId)?.let { notificationManager.cancel(it) }
         }
     }
 
@@ -181,8 +211,10 @@ class SigningNotificationManager(private val context: Context) {
         const val ACTION_DISMISS_REQUEST = "io.privkey.keep.action.DISMISS_REQUEST"
         const val EXTRA_REQUEST_ID = "extra_request_id"
         private const val NOTIFICATION_ID_START = 1000
+        private const val NOTIFICATION_ID_MASK = 0x7FFFFFFF - NOTIFICATION_ID_START
         private const val DISMISS_REQUEST_CODE_OFFSET = 100000
-        private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L // 24 hours
-        private const val MAX_PENDING_REQUESTS = 100
+        private const val DEFAULT_MAX_AGE_MILLIS = 24 * 60 * 60 * 1000L
+        private const val MAX_PENDING_REQUESTS = 1000
+        private const val MAX_PENDING_REQUESTS_PER_PACKAGE = 50
     }
 }

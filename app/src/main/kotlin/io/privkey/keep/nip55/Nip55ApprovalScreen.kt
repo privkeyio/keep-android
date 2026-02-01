@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
@@ -114,11 +115,13 @@ fun ApprovalScreen(
     request: Nip55Request,
     callerPackage: String?,
     callerVerified: Boolean,
+    showFirstUseWarning: Boolean = false,
+    callerSignatureFingerprint: String? = null,
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    val canRememberChoice = callerVerified && callerPackage != null
+    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventPreview = remember(request) {
@@ -140,7 +143,10 @@ fun ApprovalScreen(
 
         CallerLabel(callerPackage, callerVerified)
 
-        if (!callerVerified) {
+        if (showFirstUseWarning) {
+            Spacer(modifier = Modifier.height(8.dp))
+            FirstUseWarning(signatureFingerprint = callerSignatureFingerprint)
+        } else if (!callerVerified) {
             Spacer(modifier = Modifier.height(8.dp))
             UnverifiedCallerWarning()
         }
@@ -157,7 +163,7 @@ fun ApprovalScreen(
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventPreview?.let { isSensitiveKind(it.kind) } == true
+                isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
             )
         }
 
@@ -247,7 +253,7 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
+    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
     val isTrusted = callerPackage != null && callerVerified
     val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 
@@ -260,17 +266,48 @@ private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
 
 @Composable
 private fun UnverifiedCallerWarning() {
+    WarningCard(
+        text = stringResource(R.string.nip55_unverified_caller_warning),
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
+    )
+}
+
+@Composable
+private fun FirstUseWarning(signatureFingerprint: String? = null) {
+    val baseText = stringResource(R.string.nip55_first_use_warning)
+    val displayText = if (signatureFingerprint != null) {
+        val formattedFingerprint = formatFingerprint(signatureFingerprint)
+        "$baseText\n\n${stringResource(R.string.nip55_signature_fingerprint, formattedFingerprint)}"
+    } else {
+        baseText
+    }
+    WarningCard(
+        text = displayText,
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    )
+}
+
+private fun formatFingerprint(hash: String): String {
+    return hash.take(32).chunked(4).joinToString(" ").uppercase()
+}
+
+@Composable
+private fun WarningCard(
+    text: String,
+    containerColor: androidx.compose.ui.graphics.Color,
+    contentColor: androidx.compose.ui.graphics.Color
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
+        colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Text(
-            text = "Warning: Unable to verify the requesting app. Only approve if you initiated this action.",
+            text = text,
             modifier = Modifier.padding(12.dp),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onErrorContainer
+            color = contentColor
         )
     }
 }
