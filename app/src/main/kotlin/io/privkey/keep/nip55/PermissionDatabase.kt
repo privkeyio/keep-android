@@ -290,58 +290,33 @@ abstract class Nip55Database : RoomDatabase() {
 
         private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
-        private fun getOrCreateDbKey(context: Context): ByteArray {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
+        private fun getEncryptedPrefs(context: Context) = EncryptedSharedPreferences.create(
+            context,
+            PREFS_NAME,
+            MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
 
-            val prefs = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-
-            val existingKey = prefs.getString(KEY_DB_PASSPHRASE, null)
-            if (existingKey != null) {
-                return android.util.Base64.decode(existingKey, android.util.Base64.NO_WRAP)
+        private fun getOrCreateKey(context: Context, prefKey: String, commit: Boolean = false): ByteArray {
+            val prefs = getEncryptedPrefs(context)
+            val existing = prefs.getString(prefKey, null)
+            if (existing != null) {
+                return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
 
-            val newKey = ByteArray(32)
-            SecureRandom().nextBytes(newKey)
-            prefs.edit()
-                .putString(KEY_DB_PASSPHRASE, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
-                .apply()
+            val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
+            val editor = prefs.edit().putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
+            if (commit) editor.commit() else editor.apply()
             return newKey
         }
 
+        private fun getOrCreateDbKey(context: Context): ByteArray =
+            getOrCreateKey(context, KEY_DB_PASSPHRASE)
+
         private fun getOrCreateHmacKey(context: Context): ByteArray {
             hmacKey?.let { return it }
-
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-
-            val prefs = EncryptedSharedPreferences.create(
-                context,
-                PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-
-            val existingKey = prefs.getString(KEY_HMAC_SECRET, null)
-            if (existingKey != null) {
-                return android.util.Base64.decode(existingKey, android.util.Base64.NO_WRAP).also { hmacKey = it }
-            }
-
-            val newKey = ByteArray(32)
-            SecureRandom().nextBytes(newKey)
-            prefs.edit()
-                .putString(KEY_HMAC_SECRET, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
-                .commit()
-            return newKey.also { hmacKey = it }
+            return getOrCreateKey(context, KEY_HMAC_SECRET, commit = true).also { hmacKey = it }
         }
 
         fun getHmacKey(): ByteArray? = hmacKey
@@ -404,12 +379,6 @@ class PermissionStore(private val database: Nip55Database) {
     private val auditDao = database.auditLogDao()
     private val appSettingsDao = database.appSettingsDao()
     private val velocityDao = database.velocityDao()
-
-    companion object {
-        private const val HOUR_MS = 60 * 60 * 1000L
-        private const val DAY_MS = 24 * HOUR_MS
-        private const val WEEK_MS = 7 * DAY_MS
-    }
 
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
@@ -522,26 +491,9 @@ class PermissionStore(private val database: Nip55Database) {
         return database.withTransaction {
             val now = System.currentTimeMillis()
 
-            val hourCount = velocityDao.countSince(packageName, now - HOUR_MS)
-            if (hourCount >= config.hourlyLimit) {
-                val oldest = velocityDao.getOldestInWindow(packageName, now - HOUR_MS)
-                val resetAt = (oldest ?: now) + HOUR_MS
-                return@withTransaction VelocityResult.Blocked("Hourly limit ($hourCount/${config.hourlyLimit})", resetAt)
-            }
-
-            val dayCount = velocityDao.countSince(packageName, now - DAY_MS)
-            if (dayCount >= config.dailyLimit) {
-                val oldest = velocityDao.getOldestInWindow(packageName, now - DAY_MS)
-                val resetAt = (oldest ?: now) + DAY_MS
-                return@withTransaction VelocityResult.Blocked("Daily limit ($dayCount/${config.dailyLimit})", resetAt)
-            }
-
-            val weekCount = velocityDao.countSince(packageName, now - WEEK_MS)
-            if (weekCount >= config.weeklyLimit) {
-                val oldest = velocityDao.getOldestInWindow(packageName, now - WEEK_MS)
-                val resetAt = (oldest ?: now) + WEEK_MS
-                return@withTransaction VelocityResult.Blocked("Weekly limit ($weekCount/${config.weeklyLimit})", resetAt)
-            }
+            checkLimit(packageName, now, HOUR_MS, config.hourlyLimit, "Hourly")?.let { return@withTransaction it }
+            checkLimit(packageName, now, DAY_MS, config.dailyLimit, "Daily")?.let { return@withTransaction it }
+            checkLimit(packageName, now, WEEK_MS, config.weeklyLimit, "Weekly")?.let { return@withTransaction it }
 
             velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
             velocityDao.deleteOlderThan(now - WEEK_MS)
@@ -550,12 +502,20 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
+    private suspend fun checkLimit(packageName: String, now: Long, windowMs: Long, limit: Int, label: String): VelocityResult.Blocked? {
+        val count = velocityDao.countSince(packageName, now - windowMs)
+        if (count < limit) return null
+        val oldest = velocityDao.getOldestInWindow(packageName, now - windowMs)
+        return VelocityResult.Blocked("$label limit ($count/$limit)", (oldest ?: now) + windowMs)
+    }
+
     suspend fun getVelocityUsage(packageName: String): Triple<Int, Int, Int> {
         val now = System.currentTimeMillis()
-        val hour = velocityDao.countSince(packageName, now - HOUR_MS)
-        val day = velocityDao.countSince(packageName, now - DAY_MS)
-        val week = velocityDao.countSince(packageName, now - WEEK_MS)
-        return Triple(hour, day, week)
+        return Triple(
+            velocityDao.countSince(packageName, now - HOUR_MS),
+            velocityDao.countSince(packageName, now - DAY_MS),
+            velocityDao.countSince(packageName, now - WEEK_MS)
+        )
     }
 
     suspend fun verifyAuditChain(): ChainVerificationResult {
@@ -747,6 +707,10 @@ class PermissionStore(private val database: Nip55Database) {
         appSettingsDao.delete(callerPackage)
     }
 }
+
+private const val HOUR_MS = 60 * 60 * 1000L
+private const val DAY_MS = 24 * HOUR_MS
+private const val WEEK_MS = 7 * DAY_MS
 
 private fun isTimestampExpired(expiresAt: Long?, createdAt: Long): Boolean {
     if (expiresAt == null) return false

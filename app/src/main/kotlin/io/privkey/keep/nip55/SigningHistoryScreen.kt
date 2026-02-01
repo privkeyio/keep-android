@@ -309,32 +309,20 @@ private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
 
 @Composable
 private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: Int) {
-    val (icon, text, color) = when (status) {
-        is ChainVerificationResult.Valid -> Triple(
-            Icons.Default.CheckCircle,
-            "Chain verified ($entryCount entries)",
-            MaterialTheme.colorScheme.primary
-        )
-        is ChainVerificationResult.PartiallyVerified -> Triple(
-            Icons.Default.CheckCircle,
-            "Verified (${status.legacyEntriesSkipped} legacy entries)",
-            MaterialTheme.colorScheme.tertiary
-        )
-        is ChainVerificationResult.Broken -> Triple(
-            Icons.Default.Warning,
-            "Chain integrity issue detected",
-            MaterialTheme.colorScheme.error
-        )
-        is ChainVerificationResult.Tampered -> Triple(
-            Icons.Default.Warning,
-            "Tampering detected in audit log",
-            MaterialTheme.colorScheme.error
-        )
-        null -> Triple(
-            Icons.Default.CheckCircle,
-            "Verifying...",
-            MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    val isError = status is ChainVerificationResult.Broken || status is ChainVerificationResult.Tampered
+    val icon = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle
+    val color = when (status) {
+        is ChainVerificationResult.Valid -> MaterialTheme.colorScheme.primary
+        is ChainVerificationResult.PartiallyVerified -> MaterialTheme.colorScheme.tertiary
+        is ChainVerificationResult.Broken, is ChainVerificationResult.Tampered -> MaterialTheme.colorScheme.error
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val text = when (status) {
+        is ChainVerificationResult.Valid -> "Chain verified ($entryCount entries)"
+        is ChainVerificationResult.PartiallyVerified -> "Verified (${status.legacyEntriesSkipped} legacy entries)"
+        is ChainVerificationResult.Broken -> "Chain integrity issue detected"
+        is ChainVerificationResult.Tampered -> "Tampering detected in audit log"
+        null -> "Verifying..."
     }
 
     Row(
