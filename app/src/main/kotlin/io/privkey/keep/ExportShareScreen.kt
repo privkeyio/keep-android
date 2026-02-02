@@ -280,7 +280,12 @@ fun ExportShareScreen(
                                             try {
                                                 val passphraseStr = String(passphraseChars)
                                                 val data = withContext(Dispatchers.IO) {
-                                                    keepMobile.exportShare(passphraseStr)
+                                                    storage.setRequestIdContext(exportId)
+                                                    try {
+                                                        keepMobile.exportShare(passphraseStr)
+                                                    } finally {
+                                                        storage.clearRequestIdContext()
+                                                    }
                                                 }
                                                 val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
                                                 exportState = ExportState.Success(data, frames)

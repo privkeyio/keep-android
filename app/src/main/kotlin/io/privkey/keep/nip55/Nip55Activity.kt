@@ -229,7 +229,14 @@ class Nip55Activity : FragmentActivity() {
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
-                withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
+                withContext(Dispatchers.Default) {
+                    requestId?.let { keystoreStorage?.setRequestIdContext(it) }
+                    try {
+                        runCatching { nip55Handler.handleRequest(req, callerId) }
+                    } finally {
+                        keystoreStorage?.clearRequestIdContext()
+                    }
+                }
                     .onSuccess { response ->
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)

@@ -341,7 +341,12 @@ fun MainScreen(
                     storage.setPendingCipher(importId, cipher)
                     try {
                         val result = withContext(Dispatchers.IO) {
-                            keepMobile.importShare(data, passphrase, name)
+                            storage.setRequestIdContext(importId)
+                            try {
+                                keepMobile.importShare(data, passphrase, name)
+                            } finally {
+                                storage.clearRequestIdContext()
+                            }
                         }
                         importState = ImportState.Success(result.name)
                         hasShare = keepMobile.hasShare()
