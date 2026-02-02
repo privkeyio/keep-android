@@ -273,7 +273,8 @@ fun ExportShareScreen(
                                 val passphraseChars = passphrase.toCharArray()
                                 onBiometricAuth(cipher) { authedCipher ->
                                     if (authedCipher != null) {
-                                        storage.setPendingCipher(authedCipher)
+                                        val exportId = java.util.UUID.randomUUID().toString()
+                                        storage.setPendingCipher(exportId, authedCipher)
                                         exportState = ExportState.Exporting
                                         coroutineScope.launch {
                                             try {
@@ -288,7 +289,7 @@ fun ExportShareScreen(
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
                                                 Arrays.fill(passphraseChars, '\u0000')
-                                                storage.clearPendingCipher()
+                                                storage.clearPendingCipher(exportId)
                                             }
                                         }
                                     } else {

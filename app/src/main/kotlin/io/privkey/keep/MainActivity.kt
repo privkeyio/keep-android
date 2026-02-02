@@ -337,7 +337,8 @@ fun MainScreen(
                     return@ImportShareScreen
                 }
                 coroutineScope.launch {
-                    storage.setPendingCipher(cipher)
+                    val importId = java.util.UUID.randomUUID().toString()
+                    storage.setPendingCipher(importId, cipher)
                     try {
                         val result = withContext(Dispatchers.IO) {
                             keepMobile.importShare(data, passphrase, name)
@@ -349,7 +350,7 @@ fun MainScreen(
                         Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
                     } finally {
-                        storage.clearPendingCipher()
+                        storage.clearPendingCipher(importId)
                     }
                 }
             },

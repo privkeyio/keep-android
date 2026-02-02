@@ -239,7 +239,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {
-                keystoreStorage?.clearPendingCipher()
+                requestId?.let { keystoreStorage?.clearPendingCipher(it) }
             }
         }
     }
@@ -273,7 +273,8 @@ class Nip55Activity : FragmentActivity() {
             return false
         }
 
-        keystoreStorage.setPendingCipher(authedCipher)
+        val reqId = requestId ?: java.util.UUID.randomUUID().toString().also { requestId = it }
+        keystoreStorage.setPendingCipher(reqId, authedCipher)
         return true
     }
 

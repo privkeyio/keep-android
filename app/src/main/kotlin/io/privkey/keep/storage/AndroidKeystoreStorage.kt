@@ -2,12 +2,12 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.privkey.keep.uniffi.KeepMobileException
@@ -86,13 +86,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     @Synchronized
     private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS)
 
-    private fun isStrongBoxAvailable(): Boolean {
-        return try {
-            context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
-        } catch (e: Exception) {
-            false
-        }
-    }
+    private fun isStrongBoxAvailable(): Boolean = runCatching {
+        context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
+    }.getOrDefault(false)
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
@@ -139,24 +135,22 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
+    private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {
+        cipher.doFinal(data)
+    }.getOrElse { throw KeepMobileException.StorageException("Failed to encrypt share") }
+
+    private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
+        cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
+    }.getOrElse { throw KeepMobileException.StorageException("Failed to decrypt share") }
+
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
-        val encrypted = try {
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to encrypt share")
-        }
-        val iv = cipher.iv
-        saveShareData(encrypted, iv, metadata)
+        saveShareData(encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
         val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageException("No share stored")
-        return try {
-            cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to decrypt share")
-        }
+        return decryptWithCipher(cipher, encryptedData)
     }
 
     fun setPendingCipher(requestId: String, cipher: Cipher) {
@@ -326,24 +320,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun storeShareByKeyWithCipher(cipher: Cipher, key: String, data: ByteArray, metadata: ShareMetadataInfo) {
-        val encrypted = try {
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to encrypt share")
-        }
-        val iv = cipher.iv
-        saveShareDataByKey(key, encrypted, iv, metadata)
+        saveShareDataByKey(key, encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
     fun loadShareByKeyWithCipher(cipher: Cipher, key: String): ByteArray {
-        val sharePrefs = getSharePrefs(key)
-        val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
+        val encryptedData = getSharePrefs(key).getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageException("No share stored for key: $key")
-        return try {
-            cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to decrypt share")
-        }
+        return decryptWithCipher(cipher, encryptedData)
     }
 
     private fun saveShareDataByKey(key: String, encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {

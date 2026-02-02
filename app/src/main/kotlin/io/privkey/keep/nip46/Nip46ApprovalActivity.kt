@@ -86,13 +86,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private fun handleApprove(onComplete: (Boolean) -> Unit) {
         approveCompletionCallback = onComplete
 
-        if (killSwitchStore?.isEnabled() == true) {
-            respond(false)
-            return
-        }
-
         val keystoreStorage = storage
-        if (keystoreStorage == null) {
+        if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
             respond(false)
             return
         }

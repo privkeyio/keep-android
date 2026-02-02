@@ -28,17 +28,18 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.coroutines.resume
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.resume
 
 class BunkerService : Service() {
 
@@ -100,7 +101,6 @@ class BunkerService : Service() {
         }
 
         internal fun addPendingApproval(requestId: String, approval: PendingApproval): Boolean {
-            // Atomically increment global count, then check limit
             val newGlobalCount = globalPendingCount.incrementAndGet()
             if (newGlobalCount > MAX_PENDING_APPROVALS) {
                 globalPendingCount.decrementAndGet()
@@ -110,8 +110,6 @@ class BunkerService : Service() {
 
             val clientPubkey = approval.request.appPubkey
             val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
-
-            // Atomically increment client count, then check limit
             val newClientCount = clientCount.incrementAndGet()
             if (newClientCount > MAX_CONCURRENT_PER_CLIENT) {
                 clientCount.decrementAndGet()
@@ -293,14 +291,6 @@ class BunkerService : Service() {
         else -> Nip55RequestType.SIGN_EVENT
     }
 
-    /**
-     * Handle an approval request from the FFI.
-     *
-     * Note: This method uses runBlocking to bridge between the synchronous FFI callback
-     * and coroutine-based waiting. The FFI callback thread will be blocked until the user
-     * responds or the timeout expires, but the actual waiting happens in coroutine
-     * infrastructure with proper timeout handling.
-     */
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         val clientPubkey = request.appPubkey
 
@@ -323,11 +313,8 @@ class BunkerService : Service() {
             return false
         }
 
-        val requestId = java.util.UUID.randomUUID().toString()
+        val requestId = UUID.randomUUID().toString()
 
-        // Use runBlocking to bridge the synchronous FFI callback with coroutine-based waiting.
-        // This moves the timeout/cleanup logic into structured concurrency while still
-        // providing the synchronous return value the FFI requires.
         return runBlocking {
             val approved = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->
@@ -344,7 +331,6 @@ class BunkerService : Service() {
                     }
 
                     continuation.invokeOnCancellation {
-                        // Cleanup on timeout/cancellation
                         pendingApprovals.remove(requestId)?.let {
                             globalPendingCount.decrementAndGet()
                             clientPendingCounts[clientPubkey]?.decrementAndGet()
@@ -355,7 +341,6 @@ class BunkerService : Service() {
                 }
             }
 
-            // Timeout case: cleanup already handled by invokeOnCancellation
             if (approved == null) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
                 return@runBlocking false
