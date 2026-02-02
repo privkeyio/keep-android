@@ -31,6 +31,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -366,8 +367,16 @@ class BunkerService : Service() {
         permissionStore = null
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED
-        pendingApprovals.clear()
+
+        // Reject all pending approvals to unblock waiting coroutines before clearing
+        pendingApprovals.keys.toList().forEach { requestId ->
+            pendingApprovals.remove(requestId)?.respond(false)
+        }
         clearRateLimitState()
+
+        // Cancel service scope to stop any ongoing coroutines
+        serviceScope.cancel("Service destroyed")
+
         super.onDestroy()
     }
 
