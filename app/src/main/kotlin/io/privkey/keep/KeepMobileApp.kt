@@ -209,8 +209,8 @@ class KeepMobileApp : Application() {
             runCatching {
                 store.setPendingCipher(connectId, cipher)
                 try {
-                    initializeAndAnnounce(mobile, relays)
-                    startPeriodicAnnounce(mobile)
+                    initializeConnection(mobile, relays)
+                    startPeriodicReconnect(mobile, relays)
                 } finally {
                     store.clearPendingCipher(connectId)
                 }
@@ -228,32 +228,28 @@ class KeepMobileApp : Application() {
         }
     }
 
-    private suspend fun initializeAndAnnounce(mobile: KeepMobile, relays: List<String>) {
+    private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
         if (BuildConfig.DEBUG) {
             val shareInfo = mobile.getShareInfo()
             Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
             Log.d(TAG, "Initializing with ${relays.size} relays: $relays")
         }
         mobile.initialize(relays)
-        if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, calling announce...")
-        mobile.announce()
-        if (BuildConfig.DEBUG) Log.d(TAG, "Announce completed, peers: ${mobile.getPeers().size}")
+        if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun startPeriodicAnnounce(mobile: KeepMobile) {
+    private fun startPeriodicReconnect(mobile: KeepMobile, relays: List<String>) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
                 delay(5000)
                 runCatching {
-                    mobile.announce()
+                    mobile.initialize(relays)
                     if (BuildConfig.DEBUG) {
-                        val runStarted = mobile.isRunStarted()
-                        val relayStatus = mobile.getRelayStatus()
-                        Log.d(TAG, "Re-announce #${iteration + 1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
+                        Log.d(TAG, "Reconnect #${iteration + 1}, peers: ${mobile.getPeers().size}")
                     }
                 }.onFailure {
-                    Log.e(TAG, "Re-announce failed on iteration ${iteration + 1}", it)
+                    Log.e(TAG, "Reconnect failed on iteration ${iteration + 1}", it)
                     if (it is CancellationException) throw it
                 }
             }
