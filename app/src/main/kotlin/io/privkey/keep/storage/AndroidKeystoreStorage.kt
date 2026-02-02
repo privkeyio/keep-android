@@ -42,7 +42,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
     }
 
-    private val pendingCipher = AtomicReference<Cipher?>(null)
+    private val pendingCipher = AtomicReference<Pair<String, Cipher>?>(null)
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -159,18 +159,33 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun setPendingCipher(cipher: Cipher) {
-        pendingCipher.set(cipher)
+    fun setPendingCipher(requestId: String, cipher: Cipher) {
+        pendingCipher.set(Pair(requestId, cipher))
     }
 
-    fun clearPendingCipher() {
-        pendingCipher.set(null)
+    fun clearPendingCipher(requestId: String) {
+        pendingCipher.updateAndGet { current ->
+            if (current?.first == requestId) null else current
+        }
+    }
+
+    fun consumePendingCipher(requestId: String): Cipher? {
+        var result: Cipher? = null
+        pendingCipher.updateAndGet { current ->
+            if (current?.first == requestId) {
+                result = current.second
+                null
+            } else {
+                current
+            }
+        }
+        return result
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = pendingCipher.getAndSet(null)
+        val pending = pendingCipher.getAndSet(null)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-        storeShareWithCipher(cipher, data, metadata)
+        storeShareWithCipher(pending.second, data, metadata)
     }
 
     private fun saveShareData(encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
@@ -198,7 +213,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShare(): ByteArray {
-        val cipher = pendingCipher.getAndSet(null)
+        val pending = pendingCipher.getAndSet(null)
+        val cipher = pending?.second
             ?: getCipherForDecryption()
             ?: throw KeepMobileException.StorageException("No share stored")
         return loadShareWithCipher(cipher)
@@ -346,13 +362,14 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = pendingCipher.getAndSet(null)
+        val pending = pendingCipher.getAndSet(null)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-        storeShareByKeyWithCipher(cipher, key, data, metadata)
+        storeShareByKeyWithCipher(pending.second, key, data, metadata)
     }
 
     override fun loadShareByKey(key: String): ByteArray {
-        val cipher = pendingCipher.getAndSet(null)
+        val pending = pendingCipher.getAndSet(null)
+        val cipher = pending?.second
             ?: getCipherForShareDecryption(key)
             ?: throw KeepMobileException.StorageException("No share stored for key: $key")
         return loadShareByKeyWithCipher(cipher, key)

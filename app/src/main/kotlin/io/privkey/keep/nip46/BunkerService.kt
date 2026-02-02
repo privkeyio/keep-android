@@ -54,6 +54,10 @@ class BunkerService : Service() {
         private const val BACKOFF_BASE_MS = 1000L
         private const val BACKOFF_MAX_MS = 60_000L
         private const val APPROVAL_TIMEOUT_MS = 60_000L
+        private const val GLOBAL_RATE_LIMIT_WINDOW_MS = 60_000L
+        private const val GLOBAL_MAX_REQUESTS_PER_WINDOW = 100
+
+        private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
         private val _bunkerUrl = MutableStateFlow<String?>(null)
         val bunkerUrl: StateFlow<String?> = _bunkerUrl.asStateFlow()
@@ -67,6 +71,8 @@ class BunkerService : Service() {
         private val clientRequestHistory = ConcurrentHashMap<String, MutableList<Long>>()
         private val clientBackoffUntil = ConcurrentHashMap<String, Long>()
         private val clientConsecutiveRequests = ConcurrentHashMap<String, AtomicInteger>()
+        private val globalRequestHistory = mutableListOf<Long>()
+        private val globalRequestLock = Any()
 
         fun start(context: Context) {
             val intent = Intent(context, BunkerService::class.java)
@@ -110,7 +116,7 @@ class BunkerService : Service() {
             if (newClientCount > MAX_CONCURRENT_PER_CLIENT) {
                 clientCount.decrementAndGet()
                 globalPendingCount.decrementAndGet()
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from $clientPubkey: max concurrent per client reached")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from ${truncatePubkey(clientPubkey)}: max concurrent per client reached")
                 return false
             }
 
@@ -123,9 +129,18 @@ class BunkerService : Service() {
         internal fun isRateLimited(clientPubkey: String): Boolean {
             val now = System.currentTimeMillis()
 
+            synchronized(globalRequestLock) {
+                globalRequestHistory.removeAll { it < now - GLOBAL_RATE_LIMIT_WINDOW_MS }
+                if (globalRequestHistory.size >= GLOBAL_MAX_REQUESTS_PER_WINDOW) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Global rate limit exceeded")
+                    return true
+                }
+                globalRequestHistory.add(now)
+            }
+
             val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
             if (now < backoffUntil) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Client $clientPubkey in backoff until $backoffUntil")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Client ${truncatePubkey(clientPubkey)} in backoff")
                 return true
             }
 
@@ -138,7 +153,7 @@ class BunkerService : Service() {
                     val backoffMs = (BACKOFF_BASE_MS * (1 shl consecutive.getAndIncrement().coerceAtMost(6)))
                         .coerceAtMost(BACKOFF_MAX_MS)
                     clientBackoffUntil[clientPubkey] = now + backoffMs
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $clientPubkey, backoff ${backoffMs}ms")
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${truncatePubkey(clientPubkey)}")
                     return true
                 }
 
@@ -147,12 +162,18 @@ class BunkerService : Service() {
             return false
         }
 
+        private fun truncatePubkey(pubkey: String): String =
+            if (pubkey.length > 16) "${pubkey.take(8)}..." else pubkey
+
         internal fun clearRateLimitState() {
             globalPendingCount.set(0)
             clientRequestHistory.clear()
             clientBackoffUntil.clear()
             clientConsecutiveRequests.clear()
             clientPendingCounts.clear()
+            synchronized(globalRequestLock) {
+                globalRequestHistory.clear()
+            }
         }
     }
 
@@ -283,8 +304,13 @@ class BunkerService : Service() {
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         val clientPubkey = request.appPubkey
 
+        if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid client pubkey format")
+            return false
+        }
+
         if (isRateLimited(clientPubkey)) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Request from $clientPubkey rate limited")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
             return false
         }
 
@@ -293,7 +319,7 @@ class BunkerService : Service() {
         val isConnectRequest = request.method == "connect"
 
         if (!isAuthorized && !isConnectRequest) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client $clientPubkey attempted ${request.method}")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
             return false
         }
 
@@ -337,7 +363,7 @@ class BunkerService : Service() {
 
             if (approved && isConnectRequest && store != null) {
                 store.authorizeClient(clientPubkey)
-                if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: $clientPubkey")
+                if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
             }
 
             approved
@@ -368,13 +394,11 @@ class BunkerService : Service() {
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED
 
-        // Reject all pending approvals to unblock waiting coroutines before clearing
-        pendingApprovals.keys.toList().forEach { requestId ->
-            pendingApprovals.remove(requestId)?.respond(false)
+        pendingApprovals.keys.toList().forEach { reqId ->
+            pendingApprovals.remove(reqId)?.respond(false)
         }
         clearRateLimitState()
 
-        // Cancel service scope to stop any ongoing coroutines
         serviceScope.cancel("Service destroyed")
 
         super.onDestroy()

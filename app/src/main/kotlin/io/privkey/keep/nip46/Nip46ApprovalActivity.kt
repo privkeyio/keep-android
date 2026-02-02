@@ -1,7 +1,9 @@
 package io.privkey.keep.nip46
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,10 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
         biometricHelper = BiometricHelper(this)
         val app = application as? KeepMobileApp
         storage = app?.getStorage()
@@ -115,17 +121,14 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 return@launch
             }
 
+            val reqId = requestId!!
             try {
-                keystoreStorage.setPendingCipher(authedCipher)
+                keystoreStorage.setPendingCipher(reqId, authedCipher)
                 respond(true)
             } finally {
-                // Clear cipher after delay to allow FFI signing to complete.
-                // The signing happens asynchronously in the Rust FFI after respond() triggers
-                // the callback and handleApprovalRequest returns. We use NonCancellable to ensure
-                // cleanup runs even when the activity finishes and cancels the coroutine.
                 withContext(NonCancellable) {
                     delay(CIPHER_CLEANUP_DELAY_MS)
-                    keystoreStorage.clearPendingCipher()
+                    keystoreStorage.clearPendingCipher(reqId)
                 }
             }
         }
@@ -152,6 +155,15 @@ class Nip46ApprovalActivity : FragmentActivity() {
         approveCompletionCallback = null
         requestId?.let { BunkerService.respondToApproval(it, approved) }
         finish()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val newRequestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+        if (newRequestId != null && newRequestId != requestId) {
+            requestId?.let { BunkerService.respondToApproval(it, false) }
+            finish()
+        }
     }
 
     @Deprecated("Use OnBackPressedCallback", ReplaceWith("onBackPressedDispatcher"))

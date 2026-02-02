@@ -14,10 +14,8 @@ import io.privkey.keep.nip55.EventKind
 private fun sanitizeDisplayContent(content: String): String {
     return content
         .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "\uFFFD")
-        .replace("\u202E", "")
-        .replace("\u202D", "")
-        .replace("\u200F", "")
-        .replace("\u200E", "")
+        .replace(Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
+        .replace(Regex("[\\u0300-\\u036F]+"), "")
         .take(500)
 }
 

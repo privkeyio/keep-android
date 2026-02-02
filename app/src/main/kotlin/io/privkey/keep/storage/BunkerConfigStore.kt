@@ -15,9 +15,15 @@ class BunkerConfigStore(context: Context) {
         private const val LIST_SEPARATOR = "\n"
         internal const val MAX_RELAYS = 5
         internal const val MAX_AUTHORIZED_CLIENTS = 50
-        internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
+        internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
         internal val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
+        private val INTERNAL_HOST_REGEX = Regex(
+            "^wss://(localhost|127\\.\\d+\\.\\d+\\.\\d+|10\\.\\d+\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+|172\\.(1[6-9]|2\\d|3[01])\\.\\d+\\.\\d+|\\[::1\\]|\\[fc|\\[fd)",
+            RegexOption.IGNORE_CASE
+        )
     }
+
+    private val authLock = Any()
 
     private val prefs: SharedPreferences = run {
         val masterKey = MasterKey.Builder(context)
@@ -38,7 +44,9 @@ class BunkerConfigStore(context: Context) {
     }
 
     fun setRelays(relays: List<String>) {
-        val validated = relays.filter { it.matches(RELAY_URL_REGEX) }.take(MAX_RELAYS)
+        val validated = relays
+            .filter { it.matches(RELAY_URL_REGEX) && !it.matches(INTERNAL_HOST_REGEX) }
+            .take(MAX_RELAYS)
         prefs.edit()
             .putString(KEY_RELAYS, validated.joinToString(LIST_SEPARATOR))
             .apply()
@@ -58,22 +66,29 @@ class BunkerConfigStore(context: Context) {
     }
 
     fun isClientAuthorized(pubkey: String): Boolean {
-        return getAuthorizedClients().contains(pubkey.lowercase())
+        synchronized(authLock) {
+            return getAuthorizedClients().contains(pubkey.lowercase())
+        }
     }
 
     fun authorizeClient(pubkey: String): Boolean {
         if (!pubkey.matches(HEX_PUBKEY_REGEX)) return false
-        val clients = getAuthorizedClients().toMutableSet()
-        if (clients.size >= MAX_AUTHORIZED_CLIENTS) return false
-        clients.add(pubkey.lowercase())
-        saveAuthorizedClients(clients)
-        return true
+        synchronized(authLock) {
+            val clients = getAuthorizedClients().toMutableSet()
+            if (clients.size >= MAX_AUTHORIZED_CLIENTS) return false
+            if (clients.contains(pubkey.lowercase())) return true
+            clients.add(pubkey.lowercase())
+            saveAuthorizedClients(clients)
+            return true
+        }
     }
 
     fun revokeClient(pubkey: String) {
-        val clients = getAuthorizedClients().toMutableSet()
-        clients.remove(pubkey.lowercase())
-        saveAuthorizedClients(clients)
+        synchronized(authLock) {
+            val clients = getAuthorizedClients().toMutableSet()
+            clients.remove(pubkey.lowercase())
+            saveAuthorizedClients(clients)
+        }
     }
 
     private fun saveAuthorizedClients(clients: Set<String>) {
