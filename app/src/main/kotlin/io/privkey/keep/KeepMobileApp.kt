@@ -52,6 +52,7 @@ class KeepMobileApp : Application() {
     private var signingNotificationManager: SigningNotificationManager? = null
     private var bunkerConfigStore: BunkerConfigStore? = null
     private var announceJob: Job? = null
+    private var connectionJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _connectionState = MutableStateFlow(ConnectionState())
@@ -209,9 +210,10 @@ class KeepMobileApp : Application() {
             onError("No relays configured")
             return
         }
+        connectionJob?.cancel()
         _connectionState.value = ConnectionState(isConnecting = true)
         val connectId = UUID.randomUUID().toString()
-        applicationScope.launch {
+        connectionJob = applicationScope.launch {
             runCatching {
                 store.setPendingCipher(connectId, cipher)
                 try {
@@ -251,10 +253,9 @@ class KeepMobileApp : Application() {
                 }
                 .onFailure {
                     Log.e(TAG, "Failed to connect: ${it::class.simpleName}: ${it.message}", it)
-                    val errorMessage = "${it::class.simpleName}: ${it.message ?: "Unknown error"}"
-                    _connectionState.value = ConnectionState(error = errorMessage)
+                    _connectionState.value = ConnectionState(error = "Connection failed")
                     withContext(Dispatchers.Main) {
-                        onError(errorMessage)
+                        onError("Connection failed")
                     }
                 }
         }
