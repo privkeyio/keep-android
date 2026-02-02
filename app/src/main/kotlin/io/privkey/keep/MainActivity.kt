@@ -117,15 +117,14 @@ class MainActivity : FragmentActivity() {
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
-                                app.initializeWithRelays(relays) { error ->
-                                    lifecycleScope.launch {
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            error,
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
+                                app.initializeWithRelays(relays) {}
+                            },
+                            onConnect = { cipher, onResult ->
+                                app.connectWithCipher(
+                                    cipher,
+                                    onSuccess = { onResult(true, null) },
+                                    onError = { error -> onResult(false, error) }
+                                )
                             },
                             onBiometricRequest = { title, subtitle, cipher, callback ->
                                 lifecycleScope.launch {
@@ -185,6 +184,7 @@ fun MainScreen(
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
+    onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
@@ -206,6 +206,9 @@ fun MainScreen(
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
+    var isConnected by remember { mutableStateOf(false) }
+    var isConnecting by remember { mutableStateOf(false) }
+    var connectionError by remember { mutableStateOf<String?>(null) }
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
@@ -370,6 +373,7 @@ fun MainScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -450,6 +454,43 @@ fun MainScreen(
                     val updated = relays - relay
                     relays = updated
                     onRelaysChanged(updated)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ConnectCard(
+                isConnected = isConnected,
+                isConnecting = isConnecting,
+                error = connectionError,
+                relaysConfigured = relays.isNotEmpty(),
+                onConnect = {
+                    val activeKey = storage.getActiveShareKey()
+                    val cipher = try {
+                        if (activeKey != null) {
+                            storage.getCipherForShareDecryptionLegacy(activeKey)
+                        } else {
+                            storage.getCipherForDecryption()
+                        }
+                    } catch (e: Exception) {
+                        connectionError = "Failed to get cipher"
+                        return@ConnectCard
+                    }
+                    if (cipher == null) {
+                        connectionError = "No encryption key available"
+                        return@ConnectCard
+                    }
+                    onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
+                        if (authedCipher != null) {
+                            isConnecting = true
+                            connectionError = null
+                            onConnect(authedCipher) { success, error ->
+                                isConnecting = false
+                                isConnected = success
+                                connectionError = error
+                            }
+                        }
+                    }
                 }
             )
 
