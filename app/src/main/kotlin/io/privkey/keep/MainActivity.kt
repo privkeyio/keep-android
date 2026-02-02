@@ -20,12 +20,16 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import io.privkey.keep.nip46.BunkerScreen
+import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.ConnectedAppsScreen
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.nip55.SignPolicyScreen
+import io.privkey.keep.storage.BunkerConfigStore
+import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.ForegroundServiceStore
@@ -60,6 +64,7 @@ class MainActivity : FragmentActivity() {
         val foregroundServiceStore = app.getForegroundServiceStore()
         val pinStore = app.getPinStore()
         val permissionStore = app.getPermissionStore()
+        val bunkerConfigStore = app.getBunkerConfigStore()
 
         val allDependenciesAvailable = keepMobile != null &&
             storage != null &&
@@ -69,7 +74,8 @@ class MainActivity : FragmentActivity() {
             autoStartStore != null &&
             foregroundServiceStore != null &&
             pinStore != null &&
-            permissionStore != null
+            permissionStore != null &&
+            bunkerConfigStore != null
 
         setContent {
             var isPinUnlocked by remember {
@@ -112,6 +118,7 @@ class MainActivity : FragmentActivity() {
                             foregroundServiceStore = foregroundServiceStore!!,
                             pinStore = pinStore!!,
                             permissionStore = permissionStore!!,
+                            bunkerConfigStore = bunkerConfigStore!!,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
@@ -153,6 +160,9 @@ class MainActivity : FragmentActivity() {
                             },
                             onForegroundServiceChanged = { enabled ->
                                 app.updateForegroundService(enabled)
+                            },
+                            onBunkerServiceChanged = { enabled ->
+                                app.updateBunkerService(enabled)
                             }
                         )
                     } else {
@@ -176,13 +186,15 @@ fun MainScreen(
     foregroundServiceStore: ForegroundServiceStore,
     pinStore: PinStore,
     permissionStore: PermissionStore,
+    bunkerConfigStore: BunkerConfigStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
-    onForegroundServiceChanged: (Boolean) -> Unit = {}
+    onForegroundServiceChanged: (Boolean) -> Unit = {},
+    onBunkerServiceChanged: (Boolean) -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -205,6 +217,9 @@ fun MainScreen(
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
     var showPinSetup by remember { mutableStateOf(false) }
     var pinEnabled by remember { mutableStateOf(pinStore.isPinEnabled()) }
+    var showBunkerScreen by remember { mutableStateOf(false) }
+    val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
+    val bunkerStatus by BunkerService.status.collectAsState()
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -302,6 +317,17 @@ fun MainScreen(
         return
     }
 
+    if (showBunkerScreen) {
+        BunkerScreen(
+            bunkerConfigStore = bunkerConfigStore,
+            bunkerUrl = bunkerUrl,
+            bunkerStatus = bunkerStatus,
+            onToggleBunker = onBunkerServiceChanged,
+            onDismiss = { showBunkerScreen = false }
+        )
+        return
+    }
+
     if (showImportScreen) {
         ImportShareScreen(
             onImport = { data, passphrase, name, cipher ->
@@ -311,10 +337,16 @@ fun MainScreen(
                     return@ImportShareScreen
                 }
                 coroutineScope.launch {
-                    storage.setPendingCipher(cipher)
+                    val importId = java.util.UUID.randomUUID().toString()
+                    storage.setPendingCipher(importId, cipher)
                     try {
                         val result = withContext(Dispatchers.IO) {
-                            keepMobile.importShare(data, passphrase, name)
+                            storage.setRequestIdContext(importId)
+                            try {
+                                keepMobile.importShare(data, passphrase, name)
+                            } finally {
+                                storage.clearRequestIdContext()
+                            }
                         }
                         importState = ImportState.Success(result.name)
                         hasShare = keepMobile.hasShare()
@@ -323,7 +355,7 @@ fun MainScreen(
                         Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
                     } finally {
-                        storage.clearPendingCipher()
+                        storage.clearPendingCipher(importId)
                     }
                 }
             },
@@ -445,6 +477,13 @@ fun MainScreen(
                 onSignPolicyClick = { showSignPolicyScreen = true },
                 onPermissionsClick = { showPermissionsScreen = true },
                 onHistoryClick = { showHistoryScreen = true }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            BunkerCard(
+                status = bunkerStatus,
+                onClick = { showBunkerScreen = true }
             )
 
         } else {
@@ -950,6 +989,40 @@ private fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit)
                 )
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
+    val statusText = when (status) {
+        BunkerStatus.RUNNING -> "Running"
+        BunkerStatus.STARTING -> "Starting..."
+        BunkerStatus.ERROR -> "Error"
+        BunkerStatus.STOPPED -> "Configure"
+    }
+    val statusColor = when (status) {
+        BunkerStatus.RUNNING -> MaterialTheme.colorScheme.primary
+        BunkerStatus.STARTING -> MaterialTheme.colorScheme.secondary
+        BunkerStatus.ERROR -> MaterialTheme.colorScheme.error
+        BunkerStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("NIP-46 Bunker", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Remote signing for web/desktop clients",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(statusText, style = MaterialTheme.typography.labelMedium, color = statusColor)
         }
     }
 }

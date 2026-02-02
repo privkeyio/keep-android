@@ -273,13 +273,19 @@ fun ExportShareScreen(
                                 val passphraseChars = passphrase.toCharArray()
                                 onBiometricAuth(cipher) { authedCipher ->
                                     if (authedCipher != null) {
-                                        storage.setPendingCipher(authedCipher)
+                                        val exportId = java.util.UUID.randomUUID().toString()
+                                        storage.setPendingCipher(exportId, authedCipher)
                                         exportState = ExportState.Exporting
                                         coroutineScope.launch {
                                             try {
                                                 val passphraseStr = String(passphraseChars)
                                                 val data = withContext(Dispatchers.IO) {
-                                                    keepMobile.exportShare(passphraseStr)
+                                                    storage.setRequestIdContext(exportId)
+                                                    try {
+                                                        keepMobile.exportShare(passphraseStr)
+                                                    } finally {
+                                                        storage.clearRequestIdContext()
+                                                    }
                                                 }
                                                 val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
                                                 exportState = ExportState.Success(data, frames)
@@ -288,7 +294,7 @@ fun ExportShareScreen(
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
                                                 Arrays.fill(passphraseChars, '\u0000')
-                                                storage.clearPendingCipher()
+                                                storage.clearPendingCipher(exportId)
                                             }
                                         }
                                     } else {

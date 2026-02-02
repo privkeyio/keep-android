@@ -229,7 +229,14 @@ class Nip55Activity : FragmentActivity() {
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
-                withContext(Dispatchers.Default) { runCatching { nip55Handler.handleRequest(req, callerId) } }
+                withContext(Dispatchers.Default) {
+                    requestId?.let { keystoreStorage?.setRequestIdContext(it) }
+                    try {
+                        runCatching { nip55Handler.handleRequest(req, callerId) }
+                    } finally {
+                        keystoreStorage?.clearRequestIdContext()
+                    }
+                }
                     .onSuccess { response ->
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)
@@ -239,7 +246,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {
-                keystoreStorage?.clearPendingCipher()
+                requestId?.let { keystoreStorage?.clearPendingCipher(it) }
             }
         }
     }
@@ -273,7 +280,8 @@ class Nip55Activity : FragmentActivity() {
             return false
         }
 
-        keystoreStorage.setPendingCipher(authedCipher)
+        val reqId = requestId ?: java.util.UUID.randomUUID().toString().also { requestId = it }
+        keystoreStorage.setPendingCipher(reqId, authedCipher)
         return true
     }
 

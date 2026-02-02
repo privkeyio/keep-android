@@ -2,12 +2,12 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.privkey.keep.uniffi.KeepMobileException
@@ -42,7 +42,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
     }
 
-    private val pendingCipher = AtomicReference<Cipher?>(null)
+    private val pendingCipher = AtomicReference<Pair<String, Cipher>?>(null)
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -86,13 +86,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     @Synchronized
     private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS)
 
-    private fun isStrongBoxAvailable(): Boolean {
-        return try {
-            context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
-        } catch (e: Exception) {
-            false
-        }
-    }
+    private fun isStrongBoxAvailable(): Boolean = runCatching {
+        context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
+    }.getOrDefault(false)
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
@@ -139,37 +135,61 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
+    private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {
+        cipher.doFinal(data)
+    }.getOrElse { throw KeepMobileException.StorageException("Failed to encrypt share") }
+
+    private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
+        cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
+    }.getOrElse { throw KeepMobileException.StorageException("Failed to decrypt share") }
+
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
-        val encrypted = try {
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to encrypt share")
-        }
-        val iv = cipher.iv
-        saveShareData(encrypted, iv, metadata)
+        saveShareData(encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
         val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageException("No share stored")
-        return try {
-            cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to decrypt share")
+        return decryptWithCipher(cipher, encryptedData)
+    }
+
+    fun setPendingCipher(requestId: String, cipher: Cipher) {
+        pendingCipher.set(Pair(requestId, cipher))
+    }
+
+    fun clearPendingCipher(requestId: String) {
+        pendingCipher.updateAndGet { current ->
+            if (current?.first == requestId) null else current
         }
     }
 
-    fun setPendingCipher(cipher: Cipher) {
-        pendingCipher.set(cipher)
+    fun consumePendingCipher(requestId: String): Cipher? {
+        while (true) {
+            val current = pendingCipher.get()
+            if (current == null || current.first != requestId) {
+                return null
+            }
+            if (pendingCipher.compareAndSet(current, null)) {
+                return current.second
+            }
+        }
     }
 
-    fun clearPendingCipher() {
-        pendingCipher.set(null)
+    private val requestIdContext = ThreadLocal<String>()
+
+    fun setRequestIdContext(requestId: String) {
+        requestIdContext.set(requestId)
+    }
+
+    fun clearRequestIdContext() {
+        requestIdContext.remove()
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = pendingCipher.getAndSet(null)
-            ?: throw KeepMobileException.StorageException("No authenticated cipher available")
+        val requestId = requestIdContext.get()
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         storeShareWithCipher(cipher, data, metadata)
     }
 
@@ -198,9 +218,21 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShare(): ByteArray {
-        val cipher = pendingCipher.getAndSet(null)
-            ?: getCipherForDecryption()
-            ?: throw KeepMobileException.StorageException("No share stored")
+        val requestId = requestIdContext.get()
+        val cipher = when {
+            requestId != null -> {
+                consumePendingCipher(requestId)
+                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
+            }
+            pendingCipher.get() != null -> {
+                pendingCipher.getAndSet(null)?.second
+                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
+            }
+            else -> {
+                getCipherForDecryption()
+                    ?: throw KeepMobileException.StorageException("No share stored")
+            }
+        }
         return loadShareWithCipher(cipher)
     }
 
@@ -310,24 +342,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun storeShareByKeyWithCipher(cipher: Cipher, key: String, data: ByteArray, metadata: ShareMetadataInfo) {
-        val encrypted = try {
-            cipher.doFinal(data)
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to encrypt share")
-        }
-        val iv = cipher.iv
-        saveShareDataByKey(key, encrypted, iv, metadata)
+        saveShareDataByKey(key, encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
     fun loadShareByKeyWithCipher(cipher: Cipher, key: String): ByteArray {
-        val sharePrefs = getSharePrefs(key)
-        val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
+        val encryptedData = getSharePrefs(key).getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageException("No share stored for key: $key")
-        return try {
-            cipher.doFinal(Base64.decode(encryptedData, Base64.NO_WRAP))
-        } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Failed to decrypt share")
-        }
+        return decryptWithCipher(cipher, encryptedData)
     }
 
     private fun saveShareDataByKey(key: String, encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
@@ -346,15 +367,29 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = pendingCipher.getAndSet(null)
-            ?: throw KeepMobileException.StorageException("No authenticated cipher available")
+        val requestId = requestIdContext.get()
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
 
     override fun loadShareByKey(key: String): ByteArray {
-        val cipher = pendingCipher.getAndSet(null)
-            ?: getCipherForShareDecryption(key)
-            ?: throw KeepMobileException.StorageException("No share stored for key: $key")
+        val requestId = requestIdContext.get()
+        val cipher = when {
+            requestId != null -> {
+                consumePendingCipher(requestId)
+                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
+            }
+            pendingCipher.get() != null -> {
+                pendingCipher.getAndSet(null)?.second
+                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
+            }
+            else -> {
+                getCipherForShareDecryption(key)
+                    ?: throw KeepMobileException.StorageException("No share stored for key: $key")
+            }
+        }
         return loadShareByKeyWithCipher(cipher, key)
     }
 
