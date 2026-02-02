@@ -354,12 +354,6 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return initCipherForShare(key, Cipher.DECRYPT_MODE, iv)
     }
 
-    fun getCipherForShareDecryptionLegacy(key: String): Cipher? {
-        val sharePrefs = getSharePrefs(key)
-        val iv = sharePrefs.getString(KEY_SHARE_IV, null) ?: return null
-        return initCipher(Cipher.DECRYPT_MODE, iv)
-    }
-
     fun storeShareByKeyWithCipher(cipher: Cipher, key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         saveShareDataByKey(key, encryptWithCipher(cipher, data), cipher.iv, metadata)
     }

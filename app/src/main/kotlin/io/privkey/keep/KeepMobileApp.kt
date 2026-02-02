@@ -22,8 +22,10 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.nip46.BunkerService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 private const val TAG = "KeepMobileApp"
 
@@ -43,6 +45,7 @@ class KeepMobileApp : Application() {
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var bunkerConfigStore: BunkerConfigStore? = null
+    private var announceJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -197,36 +200,40 @@ class KeepMobileApp : Application() {
             onError("No relays configured")
             return
         }
+        val connectId = UUID.randomUUID().toString()
         applicationScope.launch {
             runCatching {
-                store.setPendingCipher("connect", cipher)
+                store.setPendingCipher(connectId, cipher)
                 try {
-                    val shareInfo = mobile.getShareInfo()
-                    Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
-                    Log.d(TAG, "Initializing with ${relays.size} relays: $relays")
+                    if (BuildConfig.DEBUG) {
+                        val shareInfo = mobile.getShareInfo()
+                        Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
+                        Log.d(TAG, "Initializing with ${relays.size} relays: $relays")
+                    }
                     mobile.initialize(relays)
-                    Log.d(TAG, "Initialize completed, calling announce...")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, calling announce...")
                     mobile.announce()
-                    Log.d(TAG, "Announce completed, peers: ${mobile.getPeers().size}")
-                    // Start periodic announce
-                    applicationScope.launch {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Announce completed, peers: ${mobile.getPeers().size}")
+                    announceJob?.cancel()
+                    announceJob = applicationScope.launch {
                         repeat(10) {
                             kotlinx.coroutines.delay(5000)
                             runCatching {
                                 mobile.announce()
-                                val runStarted = mobile.isRunStarted()
-                                val runError = mobile.getRunError()
-                                val relayStatus = mobile.getRelayStatus()
-                                Log.d(TAG, "Re-announce #${it+1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
+                                if (BuildConfig.DEBUG) {
+                                    val runStarted = mobile.isRunStarted()
+                                    val relayStatus = mobile.getRelayStatus()
+                                    Log.d(TAG, "Re-announce #${it+1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
+                                }
                             }
                         }
                     }
                 } finally {
-                    store.clearPendingCipher("connect")
+                    store.clearPendingCipher(connectId)
                 }
             }
                 .onSuccess {
-                    Log.d(TAG, "Connection successful")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
                     onSuccess()
                 }
                 .onFailure {

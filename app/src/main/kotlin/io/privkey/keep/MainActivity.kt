@@ -468,7 +468,7 @@ fun MainScreen(
                     val activeKey = storage.getActiveShareKey()
                     val cipher = try {
                         if (activeKey != null) {
-                            storage.getCipherForShareDecryptionLegacy(activeKey)
+                            storage.getCipherForShareDecryption(activeKey)
                         } else {
                             storage.getCipherForDecryption()
                         }
