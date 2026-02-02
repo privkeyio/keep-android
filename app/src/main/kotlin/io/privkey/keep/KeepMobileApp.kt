@@ -9,23 +9,29 @@ import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.KeepAliveService
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.service.SigningNotificationManager
+import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
-import io.privkey.keep.nip46.BunkerService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
+import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
 
@@ -47,6 +53,9 @@ class KeepMobileApp : Application() {
     private var bunkerConfigStore: BunkerConfigStore? = null
     private var announceJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _connectionState = MutableStateFlow(ConnectionState())
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -182,7 +191,7 @@ class KeepMobileApp : Application() {
         config.setRelays(relays)
     }
 
-    fun connectWithCipher(cipher: javax.crypto.Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
+    fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: run {
             onError("KeepMobile not initialized")
             return
@@ -200,6 +209,7 @@ class KeepMobileApp : Application() {
             onError("No relays configured")
             return
         }
+        _connectionState.value = ConnectionState(isConnecting = true)
         val connectId = UUID.randomUUID().toString()
         applicationScope.launch {
             runCatching {
@@ -216,14 +226,14 @@ class KeepMobileApp : Application() {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Announce completed, peers: ${mobile.getPeers().size}")
                     announceJob?.cancel()
                     announceJob = applicationScope.launch {
-                        repeat(10) {
-                            kotlinx.coroutines.delay(5000)
+                        repeat(10) { iteration ->
+                            delay(5000)
                             runCatching {
                                 mobile.announce()
                                 if (BuildConfig.DEBUG) {
                                     val runStarted = mobile.isRunStarted()
                                     val relayStatus = mobile.getRelayStatus()
-                                    Log.d(TAG, "Re-announce #${it+1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
+                                    Log.d(TAG, "Re-announce #${iteration + 1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
                                 }
                             }
                         }
@@ -234,11 +244,18 @@ class KeepMobileApp : Application() {
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
-                    onSuccess()
+                    _connectionState.value = ConnectionState(isConnected = true)
+                    withContext(Dispatchers.Main) {
+                        onSuccess()
+                    }
                 }
                 .onFailure {
                     Log.e(TAG, "Failed to connect: ${it::class.simpleName}: ${it.message}", it)
-                    onError("${it::class.simpleName}: ${it.message ?: "Unknown error"}")
+                    val errorMessage = "${it::class.simpleName}: ${it.message ?: "Unknown error"}"
+                    _connectionState.value = ConnectionState(error = errorMessage)
+                    withContext(Dispatchers.Main) {
+                        onError(errorMessage)
+                    }
                 }
         }
     }
@@ -284,3 +301,9 @@ class KeepMobileApp : Application() {
         manager.register()
     }
 }
+
+data class ConnectionState(
+    val isConnected: Boolean = false,
+    val isConnecting: Boolean = false,
+    val error: String? = null
+)

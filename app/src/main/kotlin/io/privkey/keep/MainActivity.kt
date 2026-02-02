@@ -25,21 +25,22 @@ import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.nip55.SignPolicyScreen
-import io.privkey.keep.storage.BunkerConfigStore
-import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
@@ -114,6 +115,7 @@ class MainActivity : FragmentActivity() {
                             pinStore = pinStore!!,
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
+                            connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
@@ -181,6 +183,7 @@ fun MainScreen(
     pinStore: PinStore,
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
+    connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
@@ -206,9 +209,10 @@ fun MainScreen(
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
-    var isConnected by remember { mutableStateOf(false) }
-    var isConnecting by remember { mutableStateOf(false) }
-    var connectionError by remember { mutableStateOf<String?>(null) }
+    val connectionState by connectionStateFlow.collectAsState()
+    val isConnected = connectionState.isConnected
+    val isConnecting = connectionState.isConnecting
+    val connectionError = connectionState.error
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
@@ -473,22 +477,16 @@ fun MainScreen(
                             storage.getCipherForDecryption()
                         }
                     } catch (e: Exception) {
-                        connectionError = "Failed to get cipher"
+                        Log.e("MainActivity", "Failed to get cipher for connection", e)
                         return@ConnectCard
                     }
                     if (cipher == null) {
-                        connectionError = "No encryption key available"
+                        Log.e("MainActivity", "No encryption key available for connection")
                         return@ConnectCard
                     }
                     onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
                         if (authedCipher != null) {
-                            isConnecting = true
-                            connectionError = null
-                            onConnect(authedCipher) { success, error ->
-                                isConnecting = false
-                                isConnected = success
-                                connectionError = error
-                            }
+                            onConnect(authedCipher) { _, _ -> }
                         }
                     }
                 }
