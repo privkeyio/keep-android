@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -251,6 +252,9 @@ class KeepMobileApp : Application() {
                         val relayStatus = mobile.getRelayStatus()
                         Log.d(TAG, "Re-announce #${iteration + 1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
                     }
+                }.onFailure {
+                    Log.e(TAG, "Re-announce failed on iteration ${iteration + 1}", it)
+                    if (it is CancellationException) throw it
                 }
             }
         }
