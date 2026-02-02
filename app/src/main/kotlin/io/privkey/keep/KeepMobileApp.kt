@@ -175,22 +175,63 @@ class KeepMobileApp : Application() {
     }
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
+        val config = relayConfigStore ?: return
+        config.setRelays(relays)
+    }
+
+    fun connectWithCipher(cipher: javax.crypto.Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: run {
-            Log.e(TAG, "Cannot initialize: KeepMobile not available")
             onError("KeepMobile not initialized")
             return
         }
+        val store = storage ?: run {
+            onError("Storage not available")
+            return
+        }
         val config = relayConfigStore ?: run {
-            Log.e(TAG, "Cannot initialize: RelayConfigStore not available")
             onError("Relay configuration not available")
             return
         }
-        config.setRelays(relays)
+        val relays = config.getRelays()
+        if (relays.isEmpty()) {
+            onError("No relays configured")
+            return
+        }
         applicationScope.launch {
-            runCatching { mobile.initialize(relays) }
+            runCatching {
+                store.setPendingCipher("connect", cipher)
+                try {
+                    val shareInfo = mobile.getShareInfo()
+                    Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
+                    Log.d(TAG, "Initializing with ${relays.size} relays: $relays")
+                    mobile.initialize(relays)
+                    Log.d(TAG, "Initialize completed, calling announce...")
+                    mobile.announce()
+                    Log.d(TAG, "Announce completed, peers: ${mobile.getPeers().size}")
+                    // Start periodic announce
+                    applicationScope.launch {
+                        repeat(10) {
+                            kotlinx.coroutines.delay(5000)
+                            runCatching {
+                                mobile.announce()
+                                val runStarted = mobile.isRunStarted()
+                                val runError = mobile.getRunError()
+                                val relayStatus = mobile.getRelayStatus()
+                                Log.d(TAG, "Re-announce #${it+1}, peers: ${mobile.getPeers().size}, runStarted=$runStarted, relay=$relayStatus")
+                            }
+                        }
+                    }
+                } finally {
+                    store.clearPendingCipher("connect")
+                }
+            }
+                .onSuccess {
+                    Log.d(TAG, "Connection successful")
+                    onSuccess()
+                }
                 .onFailure {
-                    Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}")
-                    onError("Failed to connect to relays")
+                    Log.e(TAG, "Failed to connect: ${it::class.simpleName}: ${it.message}", it)
+                    onError("${it::class.simpleName}: ${it.message ?: "Unknown error"}")
                 }
         }
     }
