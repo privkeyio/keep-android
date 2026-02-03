@@ -163,6 +163,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
+        val oldData = pendingCipher.get()
+        if (oldData != null && oldData.requestId != requestId) {
+            cipherConsumedCallbacks.remove(oldData.requestId)
+        }
         val data = PendingCipherData(
             requestId = requestId,
             cipher = cipher,

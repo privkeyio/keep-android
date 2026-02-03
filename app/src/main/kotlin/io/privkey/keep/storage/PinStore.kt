@@ -226,6 +226,10 @@ class PinStore(context: Context) {
         val rebootDetected = currentElapsed < savedSetElapsed
         if (rebootDetected) {
             val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            if (lockoutWallClock == 0L) {
+                clearLockoutTimestampsInternal()
+                return 0
+            }
             val currentWallClock = System.currentTimeMillis()
             val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
             if (remainingByWallClock <= 0) {

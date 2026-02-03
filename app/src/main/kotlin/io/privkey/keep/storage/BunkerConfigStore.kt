@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URI
 
@@ -28,16 +31,24 @@ class BunkerConfigStore(context: Context) {
 
             if (host.equals("localhost", ignoreCase = true)) return true
 
-            val addr = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return true
-            return isInternalAddress(addr)
+            val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull() ?: return true
+            return addresses.any { isInternalAddress(it) }
         }
 
         internal fun isInternalAddress(addr: InetAddress): Boolean {
-            return addr.isLoopbackAddress ||
+            if (addr.isLoopbackAddress ||
                 addr.isLinkLocalAddress ||
                 addr.isSiteLocalAddress ||
-                addr.isAnyLocalAddress ||
-                isIPv4MappedPrivate(addr)
+                addr.isAnyLocalAddress) {
+                return true
+            }
+            if (addr is Inet6Address || addr.address.size == 16) {
+                val bytes = addr.address
+                if ((bytes[0].toInt() and 0xFE) == 0xFC) {
+                    return true
+                }
+            }
+            return isIPv4MappedPrivate(addr)
         }
 
         private fun isIPv4MappedPrivate(addr: InetAddress): Boolean {
@@ -75,10 +86,12 @@ class BunkerConfigStore(context: Context) {
         return stored.split(LIST_SEPARATOR).filter { it.isNotBlank() }
     }
 
-    fun setRelays(relays: List<String>) {
-        val validated = relays
-            .filter { it.matches(RELAY_URL_REGEX) && !isInternalHost(it) }
-            .take(MAX_RELAYS)
+    suspend fun setRelays(relays: List<String>) {
+        val validated = withContext(Dispatchers.IO) {
+            relays
+                .filter { it.matches(RELAY_URL_REGEX) && !isInternalHost(it) }
+                .take(MAX_RELAYS)
+        }
         prefs.edit()
             .putString(KEY_RELAYS, validated.joinToString(LIST_SEPARATOR))
             .apply()

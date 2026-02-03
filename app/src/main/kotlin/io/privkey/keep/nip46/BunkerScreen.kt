@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -36,6 +37,7 @@ fun BunkerScreen(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var relays by remember { mutableStateOf(bunkerConfigStore.getRelays()) }
     var authorizedClients by remember { mutableStateOf(bunkerConfigStore.getAuthorizedClients()) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -121,7 +123,7 @@ fun BunkerScreen(
             onRemove = { relay ->
                 val updated = relays - relay
                 relays = updated
-                bunkerConfigStore.setRelays(updated)
+                scope.launch { bunkerConfigStore.setRelays(updated) }
             }
         )
 
@@ -182,7 +184,7 @@ fun BunkerScreen(
                     } else {
                         val updated = relays + url
                         relays = updated
-                        bunkerConfigStore.setRelays(updated)
+                        scope.launch { bunkerConfigStore.setRelays(updated) }
                         dismissDialog()
                     }
                 }) {

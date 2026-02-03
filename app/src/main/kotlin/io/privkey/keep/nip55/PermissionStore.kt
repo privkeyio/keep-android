@@ -94,6 +94,7 @@ class PermissionStore(private val database: Nip55Database) {
         decision: String,
         wasAutomatic: Boolean
     ) {
+        val normalizedEventKind = eventKind ?: EVENT_KIND_GENERIC
         database.withTransaction {
             val previousHash = auditDao.getLastEntryHash()
             val timestamp = System.currentTimeMillis()
@@ -101,7 +102,7 @@ class PermissionStore(private val database: Nip55Database) {
                 previousHash = previousHash,
                 callerPackage = callerPackage,
                 requestType = requestType.name,
-                eventKind = eventKind,
+                eventKind = normalizedEventKind,
                 decision = decision,
                 timestamp = timestamp,
                 wasAutomatic = wasAutomatic
@@ -111,7 +112,7 @@ class PermissionStore(private val database: Nip55Database) {
                     timestamp = timestamp,
                     callerPackage = callerPackage,
                     requestType = requestType.name,
-                    eventKind = eventKind,
+                    eventKind = normalizedEventKind,
                     decision = decision,
                     wasAutomatic = wasAutomatic,
                     previousHash = previousHash,

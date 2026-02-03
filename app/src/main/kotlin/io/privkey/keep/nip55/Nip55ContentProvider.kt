@@ -239,8 +239,12 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
-                showBackgroundSigningNotification(callerPackage, requestType, eventKind)
+                runCatching {
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
+                }.onFailure { e ->
+                    Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
+                }
             }
             .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
