@@ -150,27 +150,35 @@ class Nip55ContentProvider : ContentProvider() {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
                 return rejectedCursor(null)
             }
+
+            val verificationStore = currentApp.getCallerVerificationStore()
+            if (verificationStore == null) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: CallerVerificationStore unavailable for $callerPackage")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_verification_unavailable", wasAutomatic = true) }
+                return rejectedCursor(null)
+            }
+            val verificationResult = verificationStore.verifyOrTrust(callerPackage)
+            if (verificationResult !is CallerVerificationStore.VerificationResult.Verified) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: $callerPackage not verified (${verificationResult::class.simpleName})")
+                return null
+            }
+
             if (!safeguards.isOptedIn(callerPackage)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
                 return null
             }
 
-            return when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
+            val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
                 is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                    executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
-                else -> {
-                    val denyReason = when (usageResult) {
-                        is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
-                        is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
-                        is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
-                        is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
-                        is AutoSigningSafeguards.UsageCheckResult.Allowed -> error("unreachable")
-                    }
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-                    rejectedCursor(null)
-                }
+                    return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
+                is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
+                is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
+                is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
             }
+            if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
+            return rejectedCursor(null)
         }
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
@@ -231,13 +239,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .onSuccess {
-                try {
-                    runWithTimeout {
-                        store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
-                    }
+                runCatching {
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
                     showBackgroundSigningNotification(callerPackage, requestType, eventKind)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to log operation or show notification: ${e.message}")
+                }.onFailure { e ->
+                    Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
             }
             .map { response ->
@@ -295,21 +301,21 @@ class Nip55ContentProvider : ContentProvider() {
         val packageName = packages[0]
         val verificationStore = app?.getCallerVerificationStore() ?: return null
 
-        return when (val result = verificationStore.verifyOrTrust(packageName)) {
-            is CallerVerificationStore.VerificationResult.Verified -> packageName
-            else -> {
-                if (BuildConfig.DEBUG) {
-                    val reason = when (result) {
-                        is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
-                        is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
-                        is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
-                        is CallerVerificationStore.VerificationResult.Verified -> error("unreachable")
-                    }
-                    Log.w(TAG, "Rejecting $packageName: $reason")
-                }
-                null
-            }
+        val result = verificationStore.verifyOrTrust(packageName)
+        if (result is CallerVerificationStore.VerificationResult.Verified) {
+            return packageName
         }
+
+        if (BuildConfig.DEBUG) {
+            val reason = when (result) {
+                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
+                is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
+                is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
+                is CallerVerificationStore.VerificationResult.Verified -> "Verified"
+            }
+            Log.w(TAG, "Rejecting $packageName: $reason")
+        }
+        return null
     }
 
     private fun errorCursor(error: String, id: String?): MatrixCursor {

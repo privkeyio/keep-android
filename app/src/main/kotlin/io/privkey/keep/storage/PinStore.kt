@@ -78,12 +78,12 @@ class PinStore(context: Context) {
     fun isWeakPin(pin: String): Boolean {
         if (!pin.all { it.isDigit() }) return true
         if (pin in WEAK_PINS) return true
-        if (pin.length >= 3 && pin.all { it == pin[0] }) return true
         if (pin.length < 3) return false
+        if (pin.all { it == pin[0] }) return true
+
         val digits = pin.map { it.digitToInt() }
-        val isSequential = digits.zipWithNext().all { (a, b) -> b == a + 1 } ||
+        return digits.zipWithNext().all { (a, b) -> b == a + 1 } ||
             digits.zipWithNext().all { (a, b) -> b == a - 1 }
-        return isSequential
     }
 
     @Synchronized
@@ -220,22 +220,31 @@ class PinStore(context: Context) {
             return 0
         }
 
-        val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-        val currentWallClock = System.currentTimeMillis()
         val currentElapsed = SystemClock.elapsedRealtime()
 
-        val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
         val rebootDetected = currentElapsed < savedSetElapsed
-        val remainingByElapsed = if (rebootDetected) Long.MIN_VALUE
-            else lockoutDuration - (currentElapsed - savedSetElapsed)
+        if (rebootDetected) {
+            val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            if (lockoutWallClock == 0L) {
+                clearLockoutTimestampsInternal()
+                return 0
+            }
+            val currentWallClock = System.currentTimeMillis()
+            val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
+            if (remainingByWallClock <= 0) {
+                clearLockoutTimestampsInternal()
+                return 0
+            }
+            return remainingByWallClock
+        }
 
-        val remaining = maxOf(remainingByWallClock, remainingByElapsed)
-        if (remaining <= 0) {
+        val remainingByElapsed = lockoutDuration - (currentElapsed - savedSetElapsed)
+        if (remainingByElapsed <= 0) {
             clearLockoutTimestampsInternal()
             return 0
         }
-        return remaining
+        return remainingByElapsed
     }
 
     private fun maybeDecayLockoutLevel() {

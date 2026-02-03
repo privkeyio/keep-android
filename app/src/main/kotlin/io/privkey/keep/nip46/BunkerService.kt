@@ -39,6 +39,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 
 class BunkerService : Service() {
@@ -66,14 +67,19 @@ class BunkerService : Service() {
         private val _status = MutableStateFlow(BunkerStatus.STOPPED)
         val status: StateFlow<BunkerStatus> = _status.asStateFlow()
 
+        private const val GLOBAL_REQUEST_HISTORY_MAX_SIZE = 200
+
         private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
         private val globalPendingCount = AtomicInteger(0)
         private val clientPendingCounts = ConcurrentHashMap<String, AtomicInteger>()
         private val clientRequestHistory = ConcurrentHashMap<String, MutableList<Long>>()
         private val clientBackoffUntil = ConcurrentHashMap<String, Long>()
         private val clientConsecutiveRequests = ConcurrentHashMap<String, AtomicInteger>()
-        private val globalRequestHistory = mutableListOf<Long>()
+        private val globalRequestHistory = ArrayDeque<Long>(GLOBAL_REQUEST_HISTORY_MAX_SIZE)
         private val globalRequestLock = Any()
+        private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
+
+        fun current(): BunkerService? = serviceInstanceRef.get()
 
         fun start(context: Context) {
             val intent = Intent(context, BunkerService::class.java)
@@ -128,12 +134,17 @@ class BunkerService : Service() {
             val now = System.currentTimeMillis()
 
             synchronized(globalRequestLock) {
-                globalRequestHistory.removeAll { it < now - GLOBAL_RATE_LIMIT_WINDOW_MS }
+                while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
+                    globalRequestHistory.removeFirst()
+                }
                 if (globalRequestHistory.size >= GLOBAL_MAX_REQUESTS_PER_WINDOW) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Global rate limit exceeded")
                     return true
                 }
-                globalRequestHistory.add(now)
+                if (globalRequestHistory.size >= GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
+                    globalRequestHistory.removeFirst()
+                }
+                globalRequestHistory.addLast(now)
             }
 
             val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
@@ -187,6 +198,9 @@ class BunkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        clearRateLimitState()
+        serviceInstanceRef.set(this)
+
         configStore = BunkerConfigStore(this)
         if (configStore?.isEnabled() != true) {
             stopSelf()
@@ -315,7 +329,7 @@ class BunkerService : Service() {
 
         val requestId = UUID.randomUUID().toString()
 
-        return runBlocking {
+        return runBlocking(Dispatchers.Default) {
             val approved = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->
                     val pendingApproval = PendingApproval(
@@ -383,6 +397,7 @@ class BunkerService : Service() {
             pendingApprovals.remove(reqId)?.respond(false)
         }
         clearRateLimitState()
+        serviceInstanceRef.set(null)
 
         serviceScope.cancel("Service destroyed")
 

@@ -15,6 +15,7 @@ import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -40,9 +41,17 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
+        private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
     }
 
-    private val pendingCipher = AtomicReference<Pair<String, Cipher>?>(null)
+    private data class PendingCipherData(
+        val requestId: String,
+        val cipher: Cipher,
+        val creatingThreadId: Long,
+        val createdAtMs: Long
+    )
+    private val pendingCipher = AtomicReference<PendingCipherData?>(null)
+    private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -153,26 +162,41 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return decryptWithCipher(cipher, encryptedData)
     }
 
-    fun setPendingCipher(requestId: String, cipher: Cipher) {
-        pendingCipher.set(Pair(requestId, cipher))
+    fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
+        val oldData = pendingCipher.get()
+        if (oldData != null && oldData.requestId != requestId) {
+            cipherConsumedCallbacks.remove(oldData.requestId)
+        }
+        val data = PendingCipherData(
+            requestId = requestId,
+            cipher = cipher,
+            creatingThreadId = Thread.currentThread().id,
+            createdAtMs = System.currentTimeMillis()
+        )
+        pendingCipher.set(data)
+        if (onConsumed != null) {
+            cipherConsumedCallbacks[requestId] = onConsumed
+        }
     }
 
     fun clearPendingCipher(requestId: String) {
+        cipherConsumedCallbacks.remove(requestId)
         pendingCipher.updateAndGet { current ->
-            if (current?.first == requestId) null else current
+            if (current?.requestId == requestId) null else current
         }
     }
 
     fun consumePendingCipher(requestId: String): Cipher? {
-        while (true) {
-            val current = pendingCipher.get()
-            if (current == null || current.first != requestId) {
-                return null
-            }
-            if (pendingCipher.compareAndSet(current, null)) {
-                return current.second
-            }
-        }
+        val current = pendingCipher.getAndUpdate { data ->
+            if (data?.requestId == requestId) null else data
+        } ?: return null
+
+        if (current.requestId != requestId) return null
+
+        val isExpired = System.currentTimeMillis() - current.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+        cipherConsumedCallbacks.remove(requestId)?.takeUnless { isExpired }?.invoke()
+
+        return if (isExpired) null else current.cipher
     }
 
     private val requestIdContext = ThreadLocal<String>()
@@ -219,20 +243,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun loadShare(): ByteArray {
         val requestId = requestIdContext.get()
-        val cipher = when {
-            requestId != null -> {
-                consumePendingCipher(requestId)
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
-            }
-            pendingCipher.get() != null -> {
-                pendingCipher.getAndSet(null)?.second
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-            }
-            else -> {
-                getCipherForDecryption()
-                    ?: throw KeepMobileException.StorageException("No share stored")
-            }
-        }
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareWithCipher(cipher)
     }
 
@@ -376,20 +389,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun loadShareByKey(key: String): ByteArray {
         val requestId = requestIdContext.get()
-        val cipher = when {
-            requestId != null -> {
-                consumePendingCipher(requestId)
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
-            }
-            pendingCipher.get() != null -> {
-                pendingCipher.getAndSet(null)?.second
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-            }
-            else -> {
-                getCipherForShareDecryption(key)
-                    ?: throw KeepMobileException.StorageException("No share stored for key: $key")
-            }
-        }
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareByKeyWithCipher(cipher, key)
     }
 

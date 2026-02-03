@@ -308,7 +308,7 @@ private fun PermissionCard(
                         }
                     }
 
-                    permission.eventKind?.let { kind ->
+                    permission.eventKindOrNull?.let { kind ->
                         Text(
                             text = EventKind.displayName(kind),
                             style = MaterialTheme.typography.bodySmall,

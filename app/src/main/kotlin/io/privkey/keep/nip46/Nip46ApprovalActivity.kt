@@ -16,10 +16,7 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class Nip46ApprovalActivity : FragmentActivity() {
 
@@ -117,21 +114,15 @@ class Nip46ApprovalActivity : FragmentActivity() {
             }
 
             val reqId = requestId!!
-            try {
-                keystoreStorage.setPendingCipher(reqId, authedCipher)
-                respond(true)
-            } finally {
-                withContext(NonCancellable) {
-                    delay(CIPHER_CLEANUP_DELAY_MS)
-                    keystoreStorage.clearPendingCipher(reqId)
-                }
+            keystoreStorage.setPendingCipher(reqId, authedCipher) {
+                keystoreStorage.clearPendingCipher(reqId)
             }
+            respond(true)
         }
     }
 
     companion object {
         private const val TAG = "Nip46ApprovalActivity"
-        private const val CIPHER_CLEANUP_DELAY_MS = 5000L
         const val EXTRA_REQUEST_ID = "request_id"
         const val EXTRA_APP_PUBKEY = "app_pubkey"
         const val EXTRA_APP_NAME = "app_name"
