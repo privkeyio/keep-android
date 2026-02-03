@@ -208,10 +208,12 @@ class KeepMobileApp : Application() {
         connectionJob = applicationScope.launch {
             runCatching {
                 store.setPendingCipher(connectId, cipher)
+                store.setRequestIdContext(connectId)
                 try {
                     initializeConnection(mobile, relays)
                     startPeriodicReconnect(mobile, relays)
                 } finally {
+                    store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
             }
