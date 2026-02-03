@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.app.Application
 import android.util.Log
+import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
 import io.privkey.keep.nip55.Nip55Database
@@ -11,19 +12,27 @@ import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
-import io.privkey.keep.nip46.BunkerService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
+import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
 
@@ -43,7 +52,12 @@ class KeepMobileApp : Application() {
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var bunkerConfigStore: BunkerConfigStore? = null
+    private var announceJob: Job? = null
+    private var connectionJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _connectionState = MutableStateFlow(ConnectionState())
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -175,23 +189,82 @@ class KeepMobileApp : Application() {
     }
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
-        val mobile = keepMobile ?: run {
-            Log.e(TAG, "Cannot initialize: KeepMobile not available")
-            onError("KeepMobile not initialized")
-            return
-        }
-        val config = relayConfigStore ?: run {
-            Log.e(TAG, "Cannot initialize: RelayConfigStore not available")
-            onError("Relay configuration not available")
-            return
-        }
+        val config = relayConfigStore ?: return
         config.setRelays(relays)
-        applicationScope.launch {
-            runCatching { mobile.initialize(relays) }
-                .onFailure {
-                    Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}")
-                    onError("Failed to connect to relays")
+    }
+
+    fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val mobile = keepMobile ?: return onError("KeepMobile not initialized")
+        val store = storage ?: return onError("Storage not available")
+        val config = relayConfigStore ?: return onError("Relay configuration not available")
+
+        val relays = config.getRelays()
+        if (relays.isEmpty()) return onError("No relays configured")
+
+        connectionJob?.cancel()
+        _connectionState.value = ConnectionState(isConnecting = true)
+
+        val connectId = UUID.randomUUID().toString()
+        connectionJob = applicationScope.launch {
+            runCatching {
+                store.setPendingCipher(connectId, cipher)
+                store.setRequestIdContext(connectId)
+                try {
+                    initializeConnection(mobile, relays)
+                } finally {
+                    store.clearRequestIdContext()
+                    store.clearPendingCipher(connectId)
                 }
+                startPeriodicReconnect(mobile, config)
+            }
+                .onSuccess {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
+                    _connectionState.value = ConnectionState(isConnected = true)
+                    withContext(Dispatchers.Main) { onSuccess() }
+                }
+                .onFailure { e ->
+                    announceJob?.cancel()
+                    if (isCancellationException(e)) {
+                        _connectionState.value = ConnectionState()
+                        return@onFailure
+                    }
+                    Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
+                    _connectionState.value = ConnectionState(error = "Connection failed")
+                    withContext(Dispatchers.Main) { onError("Connection failed") }
+                }
+        }
+    }
+
+    private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
+        if (BuildConfig.DEBUG) {
+            val shareInfo = mobile.getShareInfo()
+            Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
+            Log.d(TAG, "Initializing with ${relays.size} relay(s)")
+        }
+        mobile.initialize(relays)
+        if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
+    }
+
+    private fun startPeriodicReconnect(mobile: KeepMobile, config: RelayConfigStore) {
+        announceJob?.cancel()
+        announceJob = applicationScope.launch {
+            repeat(10) { iteration ->
+                delay(5000)
+                runCatching {
+                    val currentRelays = config.getRelays()
+                    if (currentRelays.isEmpty()) {
+                        Log.w(TAG, "No relays configured, skipping reconnect")
+                        return@runCatching
+                    }
+                    mobile.initialize(currentRelays)
+                    if (BuildConfig.DEBUG) {
+                        Log.d(TAG, "Reconnect #${iteration + 1}, peers: ${mobile.getPeers().size}")
+                    }
+                }.onFailure {
+                    Log.e(TAG, "Reconnect failed on iteration ${iteration + 1}", it)
+                    if (it is CancellationException) throw it
+                }
+            }
         }
     }
 
@@ -235,4 +308,15 @@ class KeepMobileApp : Application() {
             .also { networkManager = it }
         manager.register()
     }
+
+    private fun isCancellationException(e: Throwable): Boolean =
+        generateSequence(e) { it.cause }
+            .take(10)
+            .any { it is CancellationException }
 }
+
+data class ConnectionState(
+    val isConnected: Boolean = false,
+    val isConnecting: Boolean = false,
+    val error: String? = null
+)

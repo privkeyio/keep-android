@@ -23,23 +23,24 @@ import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.ConnectedAppsScreen
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
-import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.nip55.SignPolicyScreen
-import io.privkey.keep.storage.BunkerConfigStore
-import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
@@ -114,18 +115,18 @@ class MainActivity : FragmentActivity() {
                             pinStore = pinStore!!,
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
+                            connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
-                                app.initializeWithRelays(relays) { error ->
-                                    lifecycleScope.launch {
-                                        Toast.makeText(
-                                            this@MainActivity,
-                                            error,
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
+                                app.initializeWithRelays(relays) {}
+                            },
+                            onConnect = { cipher, onResult ->
+                                app.connectWithCipher(
+                                    cipher,
+                                    onSuccess = { onResult(true, null) },
+                                    onError = { error -> onResult(false, error) }
+                                )
                             },
                             onBiometricRequest = { title, subtitle, cipher, callback ->
                                 lifecycleScope.launch {
@@ -182,9 +183,11 @@ fun MainScreen(
     pinStore: PinStore,
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
+    connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
+    onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
@@ -206,6 +209,10 @@ fun MainScreen(
     var relays by remember { mutableStateOf(relayConfigStore.getRelays()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
+    val connectionState by connectionStateFlow.collectAsState()
+    val isConnected = connectionState.isConnected
+    val isConnecting = connectionState.isConnecting
+    val connectionError = connectionState.error
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
@@ -370,6 +377,7 @@ fun MainScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -450,6 +458,28 @@ fun MainScreen(
                     val updated = relays - relay
                     relays = updated
                     onRelaysChanged(updated)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ConnectCard(
+                isConnected = isConnected,
+                isConnecting = isConnecting,
+                error = connectionError,
+                relaysConfigured = relays.isNotEmpty(),
+                onConnect = {
+                    val activeKey = storage.getActiveShareKey()
+                    val cipher = runCatching {
+                        if (activeKey != null) storage.getCipherForShareDecryption(activeKey)
+                        else storage.getCipherForDecryption()
+                    }.onFailure {
+                        Log.e("MainActivity", "Failed to get cipher for connection", it)
+                    }.getOrNull() ?: return@ConnectCard
+
+                    onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
+                        authedCipher?.let { onConnect(it) { _, _ -> } }
+                    }
                 }
             )
 

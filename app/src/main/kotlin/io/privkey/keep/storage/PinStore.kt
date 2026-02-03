@@ -117,6 +117,7 @@ class PinStore(context: Context) {
 
     @Synchronized
     fun verifyPin(pin: String): Boolean {
+        if (pin.length > MAX_PIN_LENGTH) return false
         if (isLockedOut()) return false
 
         val storedHash = prefs.getString(KEY_PIN_HASH, null) ?: return false
