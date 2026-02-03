@@ -39,7 +39,13 @@ data class Nip55Permission(
     val createdAtElapsed: Long = 0,
     val durationMs: Long? = null
 ) {
-    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs)
+    fun isExpired(): Boolean = isExpired(
+        currentElapsed = SystemClock.elapsedRealtime(),
+        currentTimeMillis = System.currentTimeMillis()
+    )
+
+    fun isExpired(currentElapsed: Long, currentTimeMillis: Long): Boolean =
+        isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs, currentElapsed, currentTimeMillis)
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
@@ -81,7 +87,13 @@ data class Nip55AppSettings(
     val createdAtElapsed: Long = 0,
     val durationMs: Long? = null
 ) {
-    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs)
+    fun isExpired(): Boolean = isExpired(
+        currentElapsed = SystemClock.elapsedRealtime(),
+        currentTimeMillis = System.currentTimeMillis()
+    )
+
+    fun isExpired(currentElapsed: Long, currentTimeMillis: Long): Boolean =
+        isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs, currentElapsed, currentTimeMillis)
 }
 
 data class VelocityConfig(
@@ -141,12 +153,12 @@ data class ConnectedAppInfo(
 internal fun isTimestampExpired(
     expiresAt: Long?,
     createdAt: Long,
-    createdAtElapsed: Long = 0,
-    durationMs: Long? = null
+    createdAtElapsed: Long,
+    durationMs: Long?,
+    currentElapsed: Long,
+    currentTimeMillis: Long
 ): Boolean {
     if (expiresAt == null && durationMs == null) return false
-
-    val currentElapsed = SystemClock.elapsedRealtime()
 
     if (createdAtElapsed > 0 && durationMs != null) {
         if (currentElapsed < createdAtElapsed) return true
@@ -155,9 +167,8 @@ internal fun isTimestampExpired(
     }
 
     if (expiresAt != null) {
-        val now = System.currentTimeMillis()
-        val clockManipulated = now < createdAt
-        if (clockManipulated || expiresAt <= now) return true
+        val clockManipulated = currentTimeMillis < createdAt
+        if (clockManipulated || expiresAt <= currentTimeMillis) return true
     }
 
     return false
