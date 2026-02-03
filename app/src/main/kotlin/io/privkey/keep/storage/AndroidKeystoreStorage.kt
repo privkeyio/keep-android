@@ -41,9 +41,16 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
+        private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
     }
 
-    private val pendingCipher = AtomicReference<Pair<String, Cipher>?>(null)
+    private data class PendingCipherData(
+        val requestId: String,
+        val cipher: Cipher,
+        val creatingThreadId: Long,
+        val createdAtMs: Long
+    )
+    private val pendingCipher = AtomicReference<PendingCipherData?>(null)
     private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
@@ -156,7 +163,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
-        pendingCipher.set(Pair(requestId, cipher))
+        val data = PendingCipherData(
+            requestId = requestId,
+            cipher = cipher,
+            creatingThreadId = Thread.currentThread().id,
+            createdAtMs = System.currentTimeMillis()
+        )
+        pendingCipher.set(data)
         if (onConsumed != null) {
             cipherConsumedCallbacks[requestId] = onConsumed
         }
@@ -165,19 +178,25 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun clearPendingCipher(requestId: String) {
         cipherConsumedCallbacks.remove(requestId)
         pendingCipher.updateAndGet { current ->
-            if (current?.first == requestId) null else current
+            if (current?.requestId == requestId) null else current
         }
     }
 
     fun consumePendingCipher(requestId: String): Cipher? {
         while (true) {
-            val current = pendingCipher.get()
-            if (current == null || current.first != requestId) {
+            val current = pendingCipher.get() ?: return null
+            if (current.requestId != requestId) return null
+
+            val now = System.currentTimeMillis()
+            if (now - current.createdAtMs > PENDING_CIPHER_TIMEOUT_MS) {
+                pendingCipher.compareAndSet(current, null)
+                cipherConsumedCallbacks.remove(requestId)
                 return null
             }
+
             if (pendingCipher.compareAndSet(current, null)) {
                 cipherConsumedCallbacks.remove(requestId)?.invoke()
-                return current.second
+                return current.cipher
             }
         }
     }

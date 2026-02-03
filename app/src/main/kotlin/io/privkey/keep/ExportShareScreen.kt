@@ -27,7 +27,7 @@ import java.util.Arrays
 import javax.crypto.Cipher
 
 private const val MAX_SINGLE_QR_BYTES = 600
-private const val MIN_PASSPHRASE_LENGTH = 12
+private const val MIN_PASSPHRASE_LENGTH = 15
 
 sealed class ExportState {
     object Idle : ExportState()

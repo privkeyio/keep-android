@@ -150,6 +150,19 @@ class Nip55ContentProvider : ContentProvider() {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
                 return rejectedCursor(null)
             }
+
+            val verificationStore = currentApp.getCallerVerificationStore()
+            if (verificationStore == null) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: CallerVerificationStore unavailable for $callerPackage")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_verification_unavailable", wasAutomatic = true) }
+                return rejectedCursor(null)
+            }
+            val verificationResult = verificationStore.verifyOrTrust(callerPackage)
+            if (verificationResult !is CallerVerificationStore.VerificationResult.Verified) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: $callerPackage not verified (${verificationResult::class.simpleName})")
+                return null
+            }
+
             if (!safeguards.isOptedIn(callerPackage)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
                 return null

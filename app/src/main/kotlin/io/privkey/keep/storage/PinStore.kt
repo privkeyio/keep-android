@@ -220,22 +220,27 @@ class PinStore(context: Context) {
             return 0
         }
 
-        val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
         val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
-        val currentWallClock = System.currentTimeMillis()
         val currentElapsed = SystemClock.elapsedRealtime()
 
-        val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
         val rebootDetected = currentElapsed < savedSetElapsed
-        val remainingByElapsed = if (rebootDetected) Long.MIN_VALUE
-            else lockoutDuration - (currentElapsed - savedSetElapsed)
+        if (rebootDetected) {
+            val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            val currentWallClock = System.currentTimeMillis()
+            val remainingByWallClock = (lockoutWallClock + lockoutDuration) - currentWallClock
+            if (remainingByWallClock <= 0) {
+                clearLockoutTimestampsInternal()
+                return 0
+            }
+            return remainingByWallClock
+        }
 
-        val remaining = maxOf(remainingByWallClock, remainingByElapsed)
-        if (remaining <= 0) {
+        val remainingByElapsed = lockoutDuration - (currentElapsed - savedSetElapsed)
+        if (remainingByElapsed <= 0) {
             clearLockoutTimestampsInternal()
             return 0
         }
-        return remaining
+        return remainingByElapsed
     }
 
     private fun maybeDecayLockoutLevel() {
