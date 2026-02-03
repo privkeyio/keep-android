@@ -395,8 +395,11 @@ fun ErrorScreen(message: String) {
 @Composable
 fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val containerColor = if (enabled) colors.errorContainer else colors.surfaceVariant
-    val contentColor = if (enabled) colors.onErrorContainer else colors.onSurfaceVariant
+    val (containerColor, contentColor) = if (enabled) {
+        colors.errorContainer to colors.onErrorContainer
+    } else {
+        colors.surfaceVariant to colors.onSurfaceVariant
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor)

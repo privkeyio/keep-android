@@ -208,8 +208,10 @@ private fun DurationSelector(
     onDurationSelected: (PermissionDuration) -> Unit,
     isSensitiveKind: Boolean = false
 ) {
-    val availableDurations = PermissionDuration.entries.let { durations ->
-        if (isSensitiveKind) durations.filter { it != PermissionDuration.FOREVER } else durations
+    val availableDurations = if (isSensitiveKind) {
+        PermissionDuration.entries.filter { it != PermissionDuration.FOREVER }
+    } else {
+        PermissionDuration.entries
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {

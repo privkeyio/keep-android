@@ -219,12 +219,11 @@ private fun AuditLogCard(log: Nip55AuditLog) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm:ss", Locale.getDefault()) }
     val isAllowed = log.decision == "allow"
 
-    val baseColor = if (isAllowed) {
-        MaterialTheme.colorScheme.primaryContainer
+    val containerColor = if (isAllowed) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
     } else {
-        MaterialTheme.colorScheme.errorContainer
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
     }
-    val containerColor = baseColor.copy(alpha = if (isAllowed) 0.3f else 0.5f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
