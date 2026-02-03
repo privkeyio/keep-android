@@ -150,7 +150,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
         cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
     }.getOrElse { e ->
-        Log.e(TAG, "Decryption failed: ${e::class.simpleName}: ${e.message}", e)
+        if (BuildConfig.DEBUG) Log.e(TAG, "Decryption failed: ${e::class.simpleName}: ${e.message}", e)
         throw KeepMobileException.StorageException("Failed to decrypt share")
     }
 
