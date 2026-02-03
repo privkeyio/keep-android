@@ -15,6 +15,7 @@ import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -43,6 +44,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     private val pendingCipher = AtomicReference<Pair<String, Cipher>?>(null)
+    private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -153,11 +155,15 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return decryptWithCipher(cipher, encryptedData)
     }
 
-    fun setPendingCipher(requestId: String, cipher: Cipher) {
+    fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
         pendingCipher.set(Pair(requestId, cipher))
+        if (onConsumed != null) {
+            cipherConsumedCallbacks[requestId] = onConsumed
+        }
     }
 
     fun clearPendingCipher(requestId: String) {
+        cipherConsumedCallbacks.remove(requestId)
         pendingCipher.updateAndGet { current ->
             if (current?.first == requestId) null else current
         }
@@ -170,6 +176,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 return null
             }
             if (pendingCipher.compareAndSet(current, null)) {
+                cipherConsumedCallbacks.remove(requestId)?.invoke()
                 return current.second
             }
         }
@@ -219,20 +226,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun loadShare(): ByteArray {
         val requestId = requestIdContext.get()
-        val cipher = when {
-            requestId != null -> {
-                consumePendingCipher(requestId)
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
-            }
-            pendingCipher.get() != null -> {
-                pendingCipher.getAndSet(null)?.second
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-            }
-            else -> {
-                getCipherForDecryption()
-                    ?: throw KeepMobileException.StorageException("No share stored")
-            }
-        }
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareWithCipher(cipher)
     }
 
@@ -376,20 +372,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun loadShareByKey(key: String): ByteArray {
         val requestId = requestIdContext.get()
-        val cipher = when {
-            requestId != null -> {
-                consumePendingCipher(requestId)
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
-            }
-            pendingCipher.get() != null -> {
-                pendingCipher.getAndSet(null)?.second
-                    ?: throw KeepMobileException.StorageException("No authenticated cipher available")
-            }
-            else -> {
-                getCipherForShareDecryption(key)
-                    ?: throw KeepMobileException.StorageException("No share stored for key: $key")
-            }
-        }
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val cipher = consumePendingCipher(requestId)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareByKeyWithCipher(cipher, key)
     }
 

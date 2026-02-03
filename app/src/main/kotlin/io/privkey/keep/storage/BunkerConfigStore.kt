@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.net.InetAddress
+import java.net.URI
 
 class BunkerConfigStore(context: Context) {
 
@@ -17,10 +19,36 @@ class BunkerConfigStore(context: Context) {
         internal const val MAX_AUTHORIZED_CLIENTS = 50
         internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
         internal val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
-        private val INTERNAL_HOST_REGEX = Regex(
-            "^wss://(localhost|127\\.\\d+\\.\\d+\\.\\d+|10\\.\\d+\\.\\d+\\.\\d+|192\\.168\\.\\d+\\.\\d+|172\\.(1[6-9]|2\\d|3[01])\\.\\d+\\.\\d+|\\[::1\\]|\\[fc|\\[fd)",
-            RegexOption.IGNORE_CASE
-        )
+
+        internal fun isInternalHost(url: String): Boolean {
+            val host = runCatching {
+                val uri = URI(url)
+                uri.host?.removeSurrounding("[", "]")
+            }.getOrNull() ?: return true
+
+            if (host.equals("localhost", ignoreCase = true)) return true
+
+            val addr = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return false
+            return addr.isLoopbackAddress ||
+                addr.isLinkLocalAddress ||
+                addr.isSiteLocalAddress ||
+                addr.isAnyLocalAddress ||
+                isIPv4MappedPrivate(addr)
+        }
+
+        private fun isIPv4MappedPrivate(addr: InetAddress): Boolean {
+            val bytes = addr.address
+            if (bytes.size != 16) return false
+            for (i in 0..9) {
+                if (bytes[i] != 0.toByte()) return false
+            }
+            if (bytes[10] != 0xFF.toByte() || bytes[11] != 0xFF.toByte()) return false
+            val ipv4 = byteArrayOf(bytes[12], bytes[13], bytes[14], bytes[15])
+            val mappedAddr = runCatching { InetAddress.getByAddress(ipv4) }.getOrNull() ?: return false
+            return mappedAddr.isLoopbackAddress ||
+                mappedAddr.isLinkLocalAddress ||
+                mappedAddr.isSiteLocalAddress
+        }
     }
 
     private val authLock = Any()
@@ -45,7 +73,7 @@ class BunkerConfigStore(context: Context) {
 
     fun setRelays(relays: List<String>) {
         val validated = relays
-            .filter { it.matches(RELAY_URL_REGEX) && !it.matches(INTERNAL_HOST_REGEX) }
+            .filter { it.matches(RELAY_URL_REGEX) && !isInternalHost(it) }
             .take(MAX_RELAYS)
         prefs.edit()
             .putString(KEY_RELAYS, validated.joinToString(LIST_SEPARATOR))
