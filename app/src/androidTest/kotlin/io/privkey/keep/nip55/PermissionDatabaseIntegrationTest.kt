@@ -58,20 +58,21 @@ class PermissionDatabaseIntegrationTest {
     }
 
     @Test
-    fun getPermissionWithNullEventKind() = runBlocking {
+    fun getPermissionWithGenericEventKind() = runBlocking {
         val permission = Nip55Permission(
             callerPackage = "com.test.app",
             requestType = "GET_PUBLIC_KEY",
-            eventKind = null,
+            eventKind = EVENT_KIND_GENERIC,
             decision = "allow",
             expiresAt = null,
             createdAt = System.currentTimeMillis()
         )
         permissionDao.insertPermission(permission)
 
-        val retrieved = permissionDao.getPermission("com.test.app", "GET_PUBLIC_KEY", null)
+        val retrieved = permissionDao.getPermission("com.test.app", "GET_PUBLIC_KEY", EVENT_KIND_GENERIC)
         assertNotNull(retrieved)
-        assertNull(retrieved?.eventKind)
+        assertEquals(EVENT_KIND_GENERIC, retrieved?.eventKind)
+        assertNull(retrieved?.eventKindOrNull)
     }
 
     @Test
@@ -146,7 +147,7 @@ class PermissionDatabaseIntegrationTest {
         permissionDao.insertPermission(Nip55Permission(
             callerPackage = "com.test.app",
             requestType = "GET_PUBLIC_KEY",
-            eventKind = null,
+            eventKind = EVENT_KIND_GENERIC,
             decision = "allow",
             expiresAt = null,
             createdAt = now
