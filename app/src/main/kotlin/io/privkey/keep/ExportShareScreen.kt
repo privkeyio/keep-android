@@ -23,9 +23,9 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 import java.util.Arrays
 import javax.crypto.Cipher
 
@@ -35,14 +35,18 @@ private const val MIN_PASSPHRASE_LENGTH = 15
 sealed class ExportState {
     object Idle : ExportState()
     object Exporting : ExportState()
-    class Success(data: String, val frames: List<String>) : ExportState() {
+    class Success(data: String, frames: List<String>) : ExportState() {
         private var dataChars: CharArray? = data.toCharArray()
+        private var frameChars: List<CharArray>? = frames.map { it.toCharArray() }
 
         val data: String get() = dataChars?.let { String(it) } ?: ""
+        val frames: List<String> get() = frameChars?.map { String(it) } ?: emptyList()
 
         fun clear() {
             dataChars?.let { Arrays.fill(it, '\u0000') }
             dataChars = null
+            frameChars?.forEach { Arrays.fill(it, '\u0000') }
+            frameChars = null
         }
     }
     data class Error(val message: String) : ExportState()
@@ -294,7 +298,7 @@ fun ExportShareScreen(
                                         storage.setPendingCipher(exportId, authedCipher)
                                         exportState = ExportState.Exporting
                                         coroutineScope.launch {
-                                            coroutineContext[Job]?.invokeOnCompletion { cause ->
+                                            currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
                                                 if (cause is CancellationException) {
                                                     clearChars()
                                                     storage.clearPendingCipher(exportId)

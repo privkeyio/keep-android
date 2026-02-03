@@ -118,20 +118,20 @@ private fun QrDisplayContainer(
 
 @Composable
 private fun rememberAnimatedFrameIndex(frameCount: Int): Int {
-    val count = frameCount.coerceAtLeast(1)
+    val safeCount = frameCount.coerceAtLeast(1)
     val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
     val frameProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = count.toFloat(),
+        targetValue = safeCount.toFloat(),
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = count * FRAME_DURATION_MS,
+                durationMillis = safeCount * FRAME_DURATION_MS,
                 easing = LinearEasing
             )
         ),
         label = "frame_index"
     )
-    return frameProgress.toInt().coerceIn(0, (frameCount - 1).coerceAtLeast(0))
+    return frameProgress.toInt().coerceIn(0, safeCount - 1)
 }
 
 @Composable
@@ -277,16 +277,21 @@ private fun generateQrCode(content: String): Bitmap? {
 private object ClipboardClearManager {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingClear: Runnable? = null
+    private var clipboardRef: java.lang.ref.WeakReference<ClipboardManager>? = null
 
     fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
         pendingClear?.let { handler.removeCallbacks(it) }
+        clipboardRef = java.lang.ref.WeakReference(clipboard)
         val runnable = Runnable {
             pendingClear = null
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboard.clearPrimaryClip()
-            } else {
-                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            clipboardRef?.get()?.let { cb ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    cb.clearPrimaryClip()
+                } else {
+                    cb.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
             }
+            clipboardRef = null
         }
         pendingClear = runnable
         handler.postDelayed(runnable, delayMs)
