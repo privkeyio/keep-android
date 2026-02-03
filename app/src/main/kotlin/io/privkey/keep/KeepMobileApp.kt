@@ -133,13 +133,13 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeBunkerService() {
-        try {
+        runCatching {
             val store = BunkerConfigStore(this)
             bunkerConfigStore = store
             if (store.isEnabled()) {
                 BunkerService.start(this)
             }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
         }
     }
