@@ -123,19 +123,20 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNotifications() {
-        try {
+        runCatching {
             val manager = SigningNotificationManager(this)
             signingNotificationManager = manager
             applicationScope.launch { manager.cleanupStaleEntries() }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
         }
     }
 
     private fun initializeBunkerService() {
         try {
-            bunkerConfigStore = BunkerConfigStore(this)
-            if (bunkerConfigStore?.isEnabled() == true) {
+            val store = BunkerConfigStore(this)
+            bunkerConfigStore = store
+            if (store.isEnabled()) {
                 BunkerService.start(this)
             }
         } catch (e: Exception) {
@@ -177,9 +178,8 @@ class KeepMobileApp : Application() {
         action(this)
     }
 
-    fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
-        val config = relayConfigStore ?: return
-        config.setRelays(relays)
+    fun initializeWithRelays(relays: List<String>) {
+        relayConfigStore?.setRelays(relays)
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
