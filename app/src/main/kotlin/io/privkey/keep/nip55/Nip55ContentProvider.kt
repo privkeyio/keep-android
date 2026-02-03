@@ -238,17 +238,12 @@ class Nip55ContentProvider : ContentProvider() {
             }
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
-                    val storage = app.getStorage()
-                        ?: throw IllegalStateException("Storage unavailable for pubkey verification")
-                    val storedMetadata = storage.getShareMetadata()
-                    val groupPubkey = storedMetadata?.groupPubkey
-                    if (groupPubkey == null || groupPubkey.isEmpty()) {
+                    val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
+                    if (groupPubkey.isNullOrEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")
                     }
                     val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it) }
-                    val returnedBytes = response.result.toByteArray(Charsets.UTF_8)
-                    val storedBytes = storedPubkey.toByteArray(Charsets.UTF_8)
-                    if (!MessageDigest.isEqual(returnedBytes, storedBytes)) {
+                    if (!MessageDigest.isEqual(response.result.toByteArray(), storedPubkey.toByteArray())) {
                         if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
                         throw IllegalStateException("Pubkey verification failed")
                     }
