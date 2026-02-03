@@ -221,6 +221,10 @@ class KeepMobileApp : Application() {
                     withContext(Dispatchers.Main) { onSuccess() }
                 }
                 .onFailure { e ->
+                    // Ignore cancellation exceptions from connectionJob or coroutine cancellation
+                    if (e is CancellationException || generateSequence(e) { it.cause }.any { it is CancellationException }) {
+                        return@onFailure
+                    }
                     Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
                     _connectionState.value = ConnectionState(error = "Connection failed")
                     withContext(Dispatchers.Main) { onError("Connection failed") }
