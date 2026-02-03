@@ -88,23 +88,15 @@ class KeepMobileApp : Application() {
             pinStore = newPinStore
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
-
-            val relays = newRelayConfig.getRelays()
-            if (newStorage.hasShare() && relays.isNotEmpty()) {
-                applicationScope.launch {
-                    runCatching { newKeepMobile.initialize(relays) }
-                        .onFailure { Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}") }
-                }
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
 
     private fun initializeNetworkMonitoring() {
-        val autoStartEnabled = autoStartStore?.isEnabled() == true
-        val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
-        if (autoStartEnabled && !foregroundServiceEnabled) {
+        val shouldRegisterNetworkMonitor = autoStartStore?.isEnabled() == true &&
+            foregroundServiceStore?.isEnabled() != true
+        if (shouldRegisterNetworkMonitor) {
             ensureNetworkManagerRegistered()
         }
     }
@@ -181,11 +173,8 @@ class KeepMobileApp : Application() {
 
     fun updateBunkerService(enabled: Boolean) {
         bunkerConfigStore?.setEnabled(enabled)
-        if (enabled) {
-            BunkerService.start(this)
-        } else {
-            BunkerService.stop(this)
-        }
+        val action = if (enabled) BunkerService::start else BunkerService::stop
+        action(this)
     }
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {

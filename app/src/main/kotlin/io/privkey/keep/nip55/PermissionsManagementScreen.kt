@@ -29,11 +29,16 @@ fun PermissionsManagementScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    suspend fun loadPermissionsData() {
+        val loadedPermissions = permissionStore.getAllPermissions()
+        permissions = loadedPermissions
+        val packages = loadedPermissions.map { it.callerPackage }.distinct()
+        velocityUsage = packages.associateWith { permissionStore.getVelocityUsage(it) }
+    }
+
     LaunchedEffect(Unit) {
         try {
-            permissions = permissionStore.getAllPermissions()
-            val packages = permissions.map { it.callerPackage }.distinct()
-            velocityUsage = packages.associateWith { permissionStore.getVelocityUsage(it) }
+            loadPermissionsData()
         } catch (e: Exception) {
             loadError = "Failed to load permissions"
         } finally {
@@ -44,9 +49,7 @@ fun PermissionsManagementScreen(
     fun refreshPermissions() {
         coroutineScope.launch {
             try {
-                permissions = permissionStore.getAllPermissions()
-                val packages = permissions.map { it.callerPackage }.distinct()
-                velocityUsage = packages.associateWith { permissionStore.getVelocityUsage(it) }
+                loadPermissionsData()
                 loadError = null
             } catch (e: Exception) {
                 loadError = "Failed to refresh permissions"
@@ -271,11 +274,14 @@ private fun PermissionCard(
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
     val isExpired = permission.isExpired()
     val currentDecision = permission.permissionDecision
-    val containerColor = when {
-        isExpired -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-        currentDecision == PermissionDecision.DENY -> MaterialTheme.colorScheme.errorContainer
-        currentDecision == PermissionDecision.ASK -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+    val containerColor = if (isExpired) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+    } else {
+        when (currentDecision) {
+            PermissionDecision.DENY -> MaterialTheme.colorScheme.errorContainer
+            PermissionDecision.ASK -> MaterialTheme.colorScheme.tertiaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        }
     }
 
     Card(

@@ -36,6 +36,7 @@ fun ShareDetailsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -95,7 +96,7 @@ fun ShareDetailsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isNpubValid) npub.take(24) + "..." + npub.takeLast(8) else "---",
+                    text = if (isNpubValid) "${npub.take(24)}...${npub.takeLast(8)}" else "---",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -184,12 +185,8 @@ private fun convertBits(data: List<Byte>, fromBits: Int, toBits: Int, pad: Boole
 private fun bech32Encode(hrp: String, data: List<Int>): String {
     val checksum = bech32CreateChecksum(hrp, data)
     val combined = data + checksum
-    val encoded = StringBuilder(hrp)
-    encoded.append('1')
-    for (d in combined) {
-        encoded.append(BECH32_CHARSET[d])
-    }
-    return encoded.toString()
+    val dataChars = combined.map { BECH32_CHARSET[it] }.joinToString("")
+    return "${hrp}1${dataChars}"
 }
 
 private fun bech32CreateChecksum(hrp: String, data: List<Int>): List<Int> {

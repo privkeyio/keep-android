@@ -105,22 +105,23 @@ fun ExportShareScreen(
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                passphrase.clear()
-                confirmPassphrase.clear()
-                passphraseDisplay = ""
-                confirmPassphraseDisplay = ""
-                exportState = ExportState.Idle
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
+
+        fun clearSensitiveData() {
             passphrase.clear()
             confirmPassphrase.clear()
             passphraseDisplay = ""
             confirmPassphraseDisplay = ""
             exportState = ExportState.Idle
+        }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                clearSensitiveData()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            clearSensitiveData()
             setSecureScreen(context, false)
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
@@ -129,6 +130,7 @@ fun ExportShareScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally

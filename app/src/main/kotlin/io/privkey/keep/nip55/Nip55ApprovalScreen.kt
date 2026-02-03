@@ -131,6 +131,7 @@ fun ApprovalScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -253,7 +254,7 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
+    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
     val isTrusted = callerPackage != null && callerVerified
     val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 
