@@ -504,8 +504,7 @@ private fun SecurityLevelInfoContent(currentLevel: String) {
         Spacer(modifier = Modifier.height(16.dp))
 
         val protectionText = when (currentLevel) {
-            "strongbox" -> "hardware security"
-            "tee" -> "hardware security"
+            "strongbox", "tee" -> "hardware security"
             "software" -> "software encryption"
             else -> "an unknown protection level"
         }
@@ -577,21 +576,10 @@ private fun SecurityLevelItem(
                 )
                 if (isCurrent) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        shape = MaterialTheme.shapes.small,
-                        color = color
-                    ) {
-                        val badgeTextColor = when (color) {
-                            colors.primary -> colors.onPrimary
-                            colors.secondary -> colors.onSecondary
-                            colors.error -> colors.onError
-                            else -> colors.onPrimary
-                        }
+                    Badge(containerColor = color) {
                         Text(
                             text = "CURRENT",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = badgeTextColor,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 2.dp)
                         )
                     }
                 }
