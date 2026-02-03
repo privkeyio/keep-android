@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
+import io.privkey.keep.BuildConfig
 import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -304,7 +305,7 @@ class PinStore(context: Context) {
         }
 
         if (!editor.commit()) {
-            Log.e("PinStore", "Failed to persist lockout state")
+            if (BuildConfig.DEBUG) Log.e("PinStore", "Failed to persist lockout state")
         }
     }
 

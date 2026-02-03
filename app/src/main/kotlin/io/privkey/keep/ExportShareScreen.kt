@@ -318,7 +318,7 @@ fun ExportShareScreen(
                                                 (exportState as? ExportState.Success)?.clear()
                                                 exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
                                             } catch (e: Exception) {
-                                                Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
+                                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
                                                 clearChars()
@@ -333,7 +333,7 @@ fun ExportShareScreen(
                                 }
                             } catch (e: Exception) {
                                 clearChars()
-                                Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
+                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
                                 cipherError = "Failed to initialize encryption"
                             }
                         },

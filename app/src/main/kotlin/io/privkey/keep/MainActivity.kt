@@ -17,7 +17,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import io.privkey.keep.BuildConfig
 import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
@@ -475,7 +474,7 @@ fun MainScreen(
                         if (activeKey != null) storage.getCipherForShareDecryption(activeKey)
                         else storage.getCipherForDecryption()
                     }.onFailure {
-                        Log.e("MainActivity", "Failed to get cipher for connection", it)
+                        if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
                     }.getOrNull() ?: return@ConnectCard
 
                     onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
