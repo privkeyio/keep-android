@@ -63,7 +63,8 @@ fun ImportShareScreen(
     onDismiss: () -> Unit,
     importState: ImportState
 ) {
-    var shareData by remember { mutableStateOf("") }
+    val shareData = remember { SecureShareData(MAX_SHARE_LENGTH) }
+    var shareDataDisplay by remember { mutableStateOf("") }
     val passphrase = remember { SecurePassphrase() }
     var passphraseDisplay by remember { mutableStateOf("") }
     var shareName by remember { mutableStateOf("Mobile Share") }
@@ -73,7 +74,8 @@ fun ImportShareScreen(
 
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {
-            shareData = ""
+            shareData.clear()
+            shareDataDisplay = ""
             passphrase.clear()
             passphraseDisplay = ""
         }
@@ -81,7 +83,8 @@ fun ImportShareScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            shareData = ""
+            shareData.clear()
+            shareDataDisplay = ""
             passphrase.clear()
             passphraseDisplay = ""
         }
@@ -90,7 +93,8 @@ fun ImportShareScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                shareData = code
+                shareData.update(code)
+                shareDataDisplay = code
                 showScanner = false
             },
             onDismiss = { showScanner = false }
@@ -114,8 +118,13 @@ fun ImportShareScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         OutlinedTextField(
-            value = shareData,
-            onValueChange = { if (it.length <= MAX_SHARE_LENGTH) shareData = it },
+            value = shareDataDisplay,
+            onValueChange = {
+                if (it.length <= MAX_SHARE_LENGTH) {
+                    shareData.update(it)
+                    shareDataDisplay = it
+                }
+            },
             label = { Text("Share Data") },
             placeholder = { Text("kshare1q...") },
             modifier = Modifier.fillMaxWidth(),
@@ -196,7 +205,7 @@ fun ImportShareScreen(
                         onBiometricAuth(cipher) { authedCipher ->
                             try {
                                 if (authedCipher != null) {
-                                    onImport(shareData, String(passphraseChars), shareName, authedCipher)
+                                    onImport(shareData.toString(), String(passphraseChars), shareName, authedCipher)
                                 }
                             } finally {
                                 clearChars(passphraseChars)

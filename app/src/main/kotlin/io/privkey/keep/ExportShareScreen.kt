@@ -313,6 +313,7 @@ fun ExportShareScreen(
                                                         storage.clearRequestIdContext()
                                                     }
                                                 }
+                                                (exportState as? ExportState.Success)?.clear()
                                                 exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
                                             } catch (e: Exception) {
                                                 Log.e("ExportShare", "Export failed: ${e::class.simpleName}")

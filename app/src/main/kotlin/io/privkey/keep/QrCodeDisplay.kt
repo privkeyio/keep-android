@@ -42,7 +42,7 @@ import java.util.Arrays
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 2_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 10_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
@@ -66,6 +66,28 @@ internal class SecurePassphrase {
     fun contentEquals(other: SecurePassphrase): Boolean = chars.contentEquals(other.chars)
 
     fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
+}
+
+internal class SecureShareData(private val maxLength: Int) {
+    private var chars: CharArray = CharArray(0)
+
+    val length: Int get() = chars.size
+
+    fun update(newValue: String) {
+        if (newValue.length <= maxLength) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.toCharArray()
+        }
+    }
+
+    fun clear() {
+        Arrays.fill(chars, '\u0000')
+        chars = CharArray(0)
+    }
+
+    fun isNotBlank(): Boolean = chars.isNotEmpty() && chars.any { !it.isWhitespace() }
+
+    override fun toString(): String = String(chars)
 }
 
 @Composable
