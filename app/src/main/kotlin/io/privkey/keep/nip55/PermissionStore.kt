@@ -19,13 +19,14 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
-        dao.deleteExpired(now)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        dao.deleteExpired(now, nowElapsed)
         auditDao.deleteOlderThan(now - 30L * 24 * 60 * 60 * 1000)
-        val expiredPackages = appSettingsDao.getExpiredPackages(now)
+        val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
         expiredPackages.forEach { pkg ->
             dao.deleteForCaller(pkg)
         }
-        appSettingsDao.deleteExpired(now)
+        appSettingsDao.deleteExpired(now, nowElapsed)
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
@@ -223,12 +224,13 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getConnectedApps(): List<ConnectedAppInfo> {
         val now = System.currentTimeMillis()
-        val packages = dao.getAllCallerPackages(now)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val packages = dao.getAllCallerPackages(now, nowElapsed)
         return packages.map { pkg ->
             val appSettings = appSettingsDao.getSettings(pkg)
             ConnectedAppInfo(
                 packageName = pkg,
-                permissionCount = dao.getPermissionCountForCaller(pkg, now),
+                permissionCount = dao.getPermissionCountForCaller(pkg, now, nowElapsed),
                 lastUsedTime = auditDao.getLastUsedTime(pkg),
                 expiresAt = appSettings?.expiresAt
             )
@@ -266,7 +268,7 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
-        dao.getForCaller(callerPackage, System.currentTimeMillis())
+        dao.getForCaller(callerPackage, System.currentTimeMillis(), SystemClock.elapsedRealtime())
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
 

@@ -17,8 +17,13 @@ interface Nip55PermissionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)
 
-    @Query("DELETE FROM nip55_permissions WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
-    suspend fun deleteExpired(now: Long = System.currentTimeMillis())
+    @Query("""
+        DELETE FROM nip55_permissions WHERE
+        (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
+        OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
+    """)
+    suspend fun deleteExpired(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime())
 
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
@@ -29,14 +34,40 @@ interface Nip55PermissionDao {
     @Query("SELECT * FROM nip55_permissions ORDER BY createdAt DESC")
     suspend fun getAll(): List<Nip55Permission>
 
-    @Query("SELECT DISTINCT callerPackage FROM nip55_permissions WHERE expiresAt IS NULL OR expiresAt > :now")
-    suspend fun getAllCallerPackages(now: Long): List<String>
+    @Query("""
+        SELECT DISTINCT callerPackage FROM nip55_permissions WHERE
+        (expiresAt IS NULL AND durationMs IS NULL)
+        OR (
+            (expiresAt IS NULL OR expiresAt > :now)
+            AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
+            AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+        )
+    """)
+    suspend fun getAllCallerPackages(now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
-    @Query("SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now) ORDER BY createdAt DESC")
-    suspend fun getForCaller(callerPackage: String, now: Long): List<Nip55Permission>
+    @Query("""
+        SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (
+            (expiresAt IS NULL AND durationMs IS NULL)
+            OR (
+                (expiresAt IS NULL OR expiresAt > :now)
+                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
+                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+            )
+        ) ORDER BY createdAt DESC
+    """)
+    suspend fun getForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<Nip55Permission>
 
-    @Query("SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR expiresAt > :now)")
-    suspend fun getPermissionCountForCaller(callerPackage: String, now: Long): Int
+    @Query("""
+        SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (
+            (expiresAt IS NULL AND durationMs IS NULL)
+            OR (
+                (expiresAt IS NULL OR expiresAt > :now)
+                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
+                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+            )
+        )
+    """)
+    suspend fun getPermissionCountForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): Int
 
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType AND eventKind = :eventKind")
     suspend fun deleteForCallerAndTypeAndEventKind(callerPackage: String, requestType: String, eventKind: Int)
@@ -125,11 +156,21 @@ interface Nip55AppSettingsDao {
     @Query("DELETE FROM nip55_app_settings WHERE callerPackage = :callerPackage")
     suspend fun delete(callerPackage: String)
 
-    @Query("SELECT callerPackage FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
-    suspend fun getExpiredPackages(now: Long = System.currentTimeMillis()): List<String>
+    @Query("""
+        SELECT callerPackage FROM nip55_app_settings WHERE
+        (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
+        OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
+    """)
+    suspend fun getExpiredPackages(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
-    @Query("DELETE FROM nip55_app_settings WHERE expiresAt IS NOT NULL AND expiresAt <= :now")
-    suspend fun deleteExpired(now: Long = System.currentTimeMillis())
+    @Query("""
+        DELETE FROM nip55_app_settings WHERE
+        (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
+        OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
+    """)
+    suspend fun deleteExpired(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime())
 
     @Query("SELECT * FROM nip55_app_settings")
     suspend fun getAll(): List<Nip55AppSettings>
