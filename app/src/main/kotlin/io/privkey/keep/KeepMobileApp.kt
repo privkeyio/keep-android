@@ -123,22 +123,23 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNotifications() {
-        try {
+        runCatching {
             val manager = SigningNotificationManager(this)
             signingNotificationManager = manager
             applicationScope.launch { manager.cleanupStaleEntries() }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
         }
     }
 
     private fun initializeBunkerService() {
-        try {
-            bunkerConfigStore = BunkerConfigStore(this)
-            if (bunkerConfigStore?.isEnabled() == true) {
+        runCatching {
+            val store = BunkerConfigStore(this)
+            bunkerConfigStore = store
+            if (store.isEnabled()) {
                 BunkerService.start(this)
             }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
         }
     }
@@ -177,9 +178,8 @@ class KeepMobileApp : Application() {
         action(this)
     }
 
-    fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
-        val config = relayConfigStore ?: return
-        config.setRelays(relays)
+    fun initializeWithRelays(relays: List<String>) {
+        relayConfigStore?.setRelays(relays)
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
@@ -204,7 +204,7 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicReconnect(mobile, config)
+                startPeriodicPeerCheck(mobile, config)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
@@ -234,7 +234,7 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun startPeriodicReconnect(mobile: KeepMobile, config: RelayConfigStore) {
+    private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
@@ -242,15 +242,15 @@ class KeepMobileApp : Application() {
                 runCatching {
                     val currentRelays = config.getRelays()
                     if (currentRelays.isEmpty()) {
-                        Log.w(TAG, "No relays configured, skipping reconnect")
+                        Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
                     }
-                    mobile.initialize(currentRelays)
+                    val peers = mobile.getPeers()
                     if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "Reconnect #${iteration + 1}, peers: ${mobile.getPeers().size}")
+                        Log.d(TAG, "Peer check #${iteration + 1}, peers: ${peers.size}")
                     }
                 }.onFailure {
-                    Log.e(TAG, "Reconnect failed on iteration ${iteration + 1}", it)
+                    Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
                     if (it is CancellationException) throw it
                 }
             }

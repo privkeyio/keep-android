@@ -9,8 +9,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
-import io.privkey.keep.BuildConfig
 import androidx.security.crypto.MasterKey
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
@@ -100,18 +100,16 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
-        return try {
+        val keyInfo = runCatching {
             val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
-            val keyInfo = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
-            when (keyInfo.securityLevel) {
-                KeyProperties.SECURITY_LEVEL_STRONGBOX -> "strongbox"
-                KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "tee"
-                KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
-                else -> "unknown"
-            }
-        } catch (e: Exception) {
-            "unknown"
+            factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
+        }.getOrNull() ?: return "unknown"
+        return when (keyInfo.securityLevel) {
+            KeyProperties.SECURITY_LEVEL_STRONGBOX -> "strongbox"
+            KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "tee"
+            KeyProperties.SECURITY_LEVEL_SOFTWARE -> "software"
+            else -> "unknown"
         }
     }
 
@@ -149,7 +147,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
         cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
-    }.getOrElse { throw KeepMobileException.StorageException("Failed to decrypt share") }
+    }.getOrElse { e ->
+        if (BuildConfig.DEBUG) Log.e(TAG, "Decryption failed: ${e::class.simpleName}: ${e.message}", e)
+        throw KeepMobileException.StorageException("Failed to decrypt share")
+    }
 
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
         saveShareData(encryptWithCipher(cipher, data), cipher.iv, metadata)
@@ -180,11 +181,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     fun consumePendingCipher(requestId: String): Cipher? {
         val data = pendingCiphers.remove(requestId) ?: return null
-
+        val callback = cipherConsumedCallbacks.remove(requestId)
         val isExpired = System.currentTimeMillis() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
-        cipherConsumedCallbacks.remove(requestId)?.takeUnless { isExpired }?.invoke()
-
-        return if (isExpired) null else data.cipher
+        if (isExpired) return null
+        callback?.invoke()
+        return data.cipher
     }
 
     private val requestIdContext = ThreadLocal<String>()
@@ -294,11 +295,18 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     @Synchronized
     private fun getOrCreateKeyForShare(key: String): SecretKey {
+        if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
+            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+        }
         val legacyAlias = getLegacyKeystoreAlias(key)
         if (keyStore.containsAlias(legacyAlias)) {
             return keyStore.getKey(legacyAlias, null) as SecretKey
         }
-        return getOrCreateKeyWithAlias(getKeystoreAlias(key))
+        val newAlias = getKeystoreAlias(key)
+        if (keyStore.containsAlias(newAlias)) {
+            return keyStore.getKey(newAlias, null) as SecretKey
+        }
+        return getOrCreateKeyWithAlias(newAlias)
     }
 
     @Synchronized
@@ -433,8 +441,12 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     override fun setActiveShareKey(key: String?) {
         val editor = multiSharePrefs.edit()
-        val saved = if (key != null) editor.putString(KEY_ACTIVE_SHARE, key) else editor.remove(KEY_ACTIVE_SHARE)
-        if (!saved.commit()) {
+        if (key != null) {
+            editor.putString(KEY_ACTIVE_SHARE, key)
+        } else {
+            editor.remove(KEY_ACTIVE_SHARE)
+        }
+        if (!editor.commit()) {
             throw KeepMobileException.StorageException("Failed to save active share key")
         }
     }
