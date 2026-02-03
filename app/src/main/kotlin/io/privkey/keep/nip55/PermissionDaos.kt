@@ -20,6 +20,7 @@ interface Nip55PermissionDao {
     @Query("""
         DELETE FROM nip55_permissions WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
     """)
@@ -36,17 +37,19 @@ interface Nip55PermissionDao {
 
     @Query("""
         SELECT DISTINCT callerPackage FROM nip55_permissions WHERE
-        (expiresAt IS NULL AND durationMs IS NULL)
-        OR (
-            (expiresAt IS NULL OR expiresAt > :now)
-            AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
-            AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+        (expiresAt IS NULL OR :now >= createdAt) AND (
+            (expiresAt IS NULL AND durationMs IS NULL)
+            OR (
+                (expiresAt IS NULL OR expiresAt > :now)
+                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
+                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+            )
         )
     """)
     suspend fun getAllCallerPackages(now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
     @Query("""
-        SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (
+        SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR :now >= createdAt) AND (
             (expiresAt IS NULL AND durationMs IS NULL)
             OR (
                 (expiresAt IS NULL OR expiresAt > :now)
@@ -58,7 +61,7 @@ interface Nip55PermissionDao {
     suspend fun getForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<Nip55Permission>
 
     @Query("""
-        SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (
+        SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR :now >= createdAt) AND (
             (expiresAt IS NULL AND durationMs IS NULL)
             OR (
                 (expiresAt IS NULL OR expiresAt > :now)
@@ -159,6 +162,7 @@ interface Nip55AppSettingsDao {
     @Query("""
         SELECT callerPackage FROM nip55_app_settings WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
     """)
@@ -167,6 +171,7 @@ interface Nip55AppSettingsDao {
     @Query("""
         DELETE FROM nip55_app_settings WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
+        OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND createdAtElapsed > :nowElapsed)
     """)

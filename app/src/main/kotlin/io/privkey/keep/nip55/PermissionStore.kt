@@ -7,7 +7,8 @@ import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-private const val HOUR_MS = 60 * 60 * 1000L
+private const val MINUTE_MS = 60 * 1000L
+private const val HOUR_MS = 60 * MINUTE_MS
 private const val DAY_MS = 24 * HOUR_MS
 private const val WEEK_MS = 7 * DAY_MS
 
@@ -21,7 +22,7 @@ class PermissionStore(private val database: Nip55Database) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
         dao.deleteExpired(now, nowElapsed)
-        auditDao.deleteOlderThan(now - 30L * 24 * 60 * 60 * 1000)
+        auditDao.deleteOlderThan(now - 30 * DAY_MS)
         val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
         expiredPackages.forEach { pkg ->
             dao.deleteForCaller(pkg)
@@ -378,10 +379,10 @@ fun formatRequestType(type: String): String =
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
     return when {
-        diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${diff / 60_000}m ago"
-        diff < 86400_000 -> "${diff / 3600_000}h ago"
-        diff < 604800_000 -> "${diff / 86400_000}d ago"
+        diff < MINUTE_MS -> "just now"
+        diff < HOUR_MS -> "${diff / MINUTE_MS}m ago"
+        diff < DAY_MS -> "${diff / HOUR_MS}h ago"
+        diff < WEEK_MS -> "${diff / DAY_MS}d ago"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
@@ -393,10 +394,10 @@ fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
     return when {
         remaining <= 0 -> "expired"
-        remaining < 60_000 -> "<1m"
-        remaining < 3600_000 -> "in ${remaining / 60_000}m"
-        remaining < 86400_000 -> "in ${remaining / 3600_000}h"
-        remaining < 604800_000 -> "in ${remaining / 86400_000}d"
+        remaining < MINUTE_MS -> "<1m"
+        remaining < HOUR_MS -> "in ${remaining / MINUTE_MS}m"
+        remaining < DAY_MS -> "in ${remaining / HOUR_MS}h"
+        remaining < WEEK_MS -> "in ${remaining / DAY_MS}d"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
