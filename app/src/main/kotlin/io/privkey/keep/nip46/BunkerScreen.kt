@@ -10,8 +10,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.QrCodeDisplay
@@ -233,16 +233,16 @@ fun BunkerScreen(
 
 @Composable
 private fun StatusBadge(status: BunkerStatus) {
-    val (text, color) = when (status) {
+    val (statusText, statusColor) = when (status) {
         BunkerStatus.RUNNING -> "Running" to MaterialTheme.colorScheme.primary
         BunkerStatus.STARTING -> "Starting..." to MaterialTheme.colorScheme.secondary
         BunkerStatus.ERROR -> "Error" to MaterialTheme.colorScheme.error
         BunkerStatus.STOPPED -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(
-        text = text,
+        text = statusText,
         style = MaterialTheme.typography.labelLarge,
-        color = color
+        color = statusColor
     )
 }
 

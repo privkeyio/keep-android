@@ -219,11 +219,12 @@ private fun AuditLogCard(log: Nip55AuditLog) {
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm:ss", Locale.getDefault()) }
     val isAllowed = log.decision == "allow"
 
-    val containerColor = if (isAllowed) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+    val baseColor = if (isAllowed) {
+        MaterialTheme.colorScheme.primaryContainer
     } else {
-        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+        MaterialTheme.colorScheme.errorContainer
     }
+    val containerColor = baseColor.copy(alpha = if (isAllowed) 0.3f else 0.5f)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -312,19 +313,19 @@ private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
 private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: Int) {
     val isError = status is ChainVerificationResult.Broken || status is ChainVerificationResult.Tampered
     val icon = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle
-    val color = when (status) {
-        is ChainVerificationResult.Valid -> MaterialTheme.colorScheme.primary
-        is ChainVerificationResult.PartiallyVerified, is ChainVerificationResult.Truncated -> MaterialTheme.colorScheme.tertiary
-        is ChainVerificationResult.Broken, is ChainVerificationResult.Tampered -> MaterialTheme.colorScheme.error
-        null -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val text = when (status) {
-        is ChainVerificationResult.Valid -> "Chain verified ($entryCount entries)"
-        is ChainVerificationResult.PartiallyVerified -> "Verified (${status.legacyEntriesSkipped} legacy entries)"
-        is ChainVerificationResult.Truncated -> "Verified (older entries pruned)"
-        is ChainVerificationResult.Broken -> "Chain integrity issue detected"
-        is ChainVerificationResult.Tampered -> "Tampering detected in audit log"
-        null -> "Verifying..."
+    val (statusText, statusColor) = when (status) {
+        is ChainVerificationResult.Valid ->
+            "Chain verified ($entryCount entries)" to MaterialTheme.colorScheme.primary
+        is ChainVerificationResult.PartiallyVerified ->
+            "Verified (${status.legacyEntriesSkipped} legacy entries)" to MaterialTheme.colorScheme.tertiary
+        is ChainVerificationResult.Truncated ->
+            "Verified (older entries pruned)" to MaterialTheme.colorScheme.tertiary
+        is ChainVerificationResult.Broken ->
+            "Chain integrity issue detected" to MaterialTheme.colorScheme.error
+        is ChainVerificationResult.Tampered ->
+            "Tampering detected in audit log" to MaterialTheme.colorScheme.error
+        null ->
+            "Verifying..." to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Row(
@@ -334,14 +335,14 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = color,
+            tint = statusColor,
             modifier = Modifier.size(16.dp)
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = text,
+            text = statusText,
             style = MaterialTheme.typography.labelMedium,
-            color = color
+            color = statusColor
         )
     }
 }

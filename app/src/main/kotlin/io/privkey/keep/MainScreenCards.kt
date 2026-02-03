@@ -175,21 +175,17 @@ fun PeersCard(peers: List<PeerInfo>) {
 
 @Composable
 private fun PeerRow(peer: PeerInfo) {
-    val isOnline = peer.status == PeerStatus.ONLINE
-    val statusText = when (peer.status) {
-        PeerStatus.ONLINE -> "Online"
-        PeerStatus.OFFLINE -> "Offline"
-        PeerStatus.UNKNOWN -> "Unknown"
+    val (statusText, statusColor) = when (peer.status) {
+        PeerStatus.ONLINE -> "Online" to MaterialTheme.colorScheme.primary
+        PeerStatus.OFFLINE -> "Offline" to MaterialTheme.colorScheme.onSurfaceVariant
+        PeerStatus.UNKNOWN -> "Unknown" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text("Share ${peer.shareIndex}")
-        Text(
-            statusText,
-            color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(statusText, color = statusColor)
     }
 }
 
@@ -321,18 +317,12 @@ fun ConnectCard(
     relaysConfigured: Boolean,
     onConnect: () -> Unit
 ) {
-    val statusText = when {
-        isConnecting -> "Connecting..."
-        isConnected -> "Connected to relays"
-        error != null -> error
-        !relaysConfigured -> "Add relays first"
-        else -> "Not connected"
-    }
-
-    val statusColor = when {
-        isConnected -> MaterialTheme.colorScheme.primary
-        error != null -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    val (statusText, statusColor) = when {
+        isConnecting -> "Connecting..." to MaterialTheme.colorScheme.onSurfaceVariant
+        isConnected -> "Connected to relays" to MaterialTheme.colorScheme.primary
+        error != null -> error to MaterialTheme.colorScheme.error
+        !relaysConfigured -> "Add relays first" to MaterialTheme.colorScheme.onSurfaceVariant
+        else -> "Not connected" to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -677,17 +667,11 @@ fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
-    val statusText = when (status) {
-        BunkerStatus.RUNNING -> "Running"
-        BunkerStatus.STARTING -> "Starting..."
-        BunkerStatus.ERROR -> "Error"
-        BunkerStatus.STOPPED -> "Configure"
-    }
-    val statusColor = when (status) {
-        BunkerStatus.RUNNING -> MaterialTheme.colorScheme.primary
-        BunkerStatus.STARTING -> MaterialTheme.colorScheme.secondary
-        BunkerStatus.ERROR -> MaterialTheme.colorScheme.error
-        BunkerStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+    val (statusText, statusColor) = when (status) {
+        BunkerStatus.RUNNING -> "Running" to MaterialTheme.colorScheme.primary
+        BunkerStatus.STARTING -> "Starting..." to MaterialTheme.colorScheme.secondary
+        BunkerStatus.ERROR -> "Error" to MaterialTheme.colorScheme.error
+        BunkerStatus.STOPPED -> "Configure" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(

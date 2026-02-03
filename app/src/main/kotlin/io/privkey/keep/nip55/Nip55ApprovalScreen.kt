@@ -208,10 +208,8 @@ private fun DurationSelector(
     onDurationSelected: (PermissionDuration) -> Unit,
     isSensitiveKind: Boolean = false
 ) {
-    val availableDurations = if (isSensitiveKind) {
-        PermissionDuration.entries.filter { it != PermissionDuration.FOREVER }
-    } else {
-        PermissionDuration.entries
+    val availableDurations = PermissionDuration.entries.let { durations ->
+        if (isSensitiveKind) durations.filter { it != PermissionDuration.FOREVER } else durations
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -254,7 +252,7 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val displayText = callerPackage?.let { "from $it" } ?: "from unknown app"
+    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
     val isTrusted = callerPackage != null && callerVerified
     val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 

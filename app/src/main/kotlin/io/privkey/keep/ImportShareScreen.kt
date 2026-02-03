@@ -319,16 +319,17 @@ private fun CameraPreview(
         val scanner = remember { BarcodeScanning.getClient() }
         val executor = remember { Executors.newSingleThreadExecutor() }
         val scanned = remember { AtomicBoolean(false) }
-
         val closed = remember { AtomicBoolean(false) }
 
-        DisposableEffect(Unit) {
-            onDispose {
-                if (closed.compareAndSet(false, true)) {
-                    try { scanner.close() } catch (_: Exception) {}
-                    try { executor.shutdown() } catch (_: Exception) {}
-                }
+        fun cleanupResources() {
+            if (closed.compareAndSet(false, true)) {
+                runCatching { scanner.close() }
+                runCatching { executor.shutdown() }
             }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose { cleanupResources() }
         }
 
         LaunchedEffect(Unit) {
@@ -374,15 +375,13 @@ private fun CameraPreview(
                 provider.unbindAll()
                 provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
-                scanner.close()
-                executor.shutdown()
+                cleanupResources()
                 onDismiss()
             }
 
             onDispose {
                 provider.unbindAll()
-                scanner.close()
-                executor.shutdown()
+                cleanupResources()
             }
         }
 

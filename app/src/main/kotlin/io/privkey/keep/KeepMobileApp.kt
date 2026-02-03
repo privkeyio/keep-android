@@ -94,9 +94,9 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeNetworkMonitoring() {
-        val autoStartEnabled = autoStartStore?.isEnabled() == true
-        val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
-        if (autoStartEnabled && !foregroundServiceEnabled) {
+        val shouldRegisterNetworkMonitor = autoStartStore?.isEnabled() == true &&
+            foregroundServiceStore?.isEnabled() != true
+        if (shouldRegisterNetworkMonitor) {
             ensureNetworkManagerRegistered()
         }
     }
@@ -173,11 +173,8 @@ class KeepMobileApp : Application() {
 
     fun updateBunkerService(enabled: Boolean) {
         bunkerConfigStore?.setEnabled(enabled)
-        if (enabled) {
-            BunkerService.start(this)
-        } else {
-            BunkerService.stop(this)
-        }
+        val action = if (enabled) BunkerService::start else BunkerService::stop
+        action(this)
     }
 
     fun initializeWithRelays(relays: List<String>, onError: (String) -> Unit) {
