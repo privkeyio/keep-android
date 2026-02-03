@@ -581,10 +581,16 @@ private fun SecurityLevelItem(
                         shape = MaterialTheme.shapes.small,
                         color = color
                     ) {
+                        val badgeTextColor = when (color) {
+                            colors.primary -> colors.onPrimary
+                            colors.secondary -> colors.onSecondary
+                            colors.error -> colors.onError
+                            else -> colors.onPrimary
+                        }
                         Text(
                             text = "CURRENT",
                             style = MaterialTheme.typography.labelSmall,
-                            color = colors.onPrimary,
+                            color = badgeTextColor,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
