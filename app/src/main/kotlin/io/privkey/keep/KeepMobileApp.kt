@@ -221,8 +221,7 @@ class KeepMobileApp : Application() {
                     withContext(Dispatchers.Main) { onSuccess() }
                 }
                 .onFailure { e ->
-                    // Ignore cancellation exceptions from connectionJob or coroutine cancellation
-                    if (e is CancellationException || generateSequence(e) { it.cause }.any { it is CancellationException }) {
+                    if (isCancellationException(e)) {
                         return@onFailure
                     }
                     Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
@@ -299,6 +298,18 @@ class KeepMobileApp : Application() {
         val manager = networkManager ?: NetworkConnectivityManager(this) { reconnectRelays() }
             .also { networkManager = it }
         manager.register()
+    }
+
+    private fun isCancellationException(e: Throwable): Boolean {
+        if (e is CancellationException) return true
+        var cause = e.cause
+        var depth = 0
+        while (cause != null && depth < 10) {
+            if (cause is CancellationException) return true
+            cause = cause.cause
+            depth++
+        }
+        return false
     }
 }
 

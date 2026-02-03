@@ -306,6 +306,57 @@ fun RelaysCard(
     }
 }
 
+@Composable
+fun ConnectCard(
+    isConnected: Boolean,
+    isConnecting: Boolean,
+    error: String?,
+    relaysConfigured: Boolean,
+    onConnect: () -> Unit
+) {
+    val statusText = when {
+        isConnecting -> "Connecting..."
+        isConnected -> "Connected to relays"
+        error != null -> error
+        !relaysConfigured -> "Add relays first"
+        else -> "Not connected"
+    }
+
+    val statusColor = when {
+        isConnected -> MaterialTheme.colorScheme.primary
+        error != null -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Connection", style = MaterialTheme.typography.titleMedium)
+                    Text(statusText, style = MaterialTheme.typography.bodySmall, color = statusColor)
+                }
+                Button(
+                    onClick = onConnect,
+                    enabled = !isConnecting && !isConnected && relaysConfigured
+                ) {
+                    if (isConnecting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(if (isConnected) "Connected" else "Connect")
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectedAppsCard(onClick: () -> Unit) {

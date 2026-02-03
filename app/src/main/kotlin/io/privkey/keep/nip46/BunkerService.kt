@@ -33,14 +33,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.coroutines.resume
 
 class BunkerService : Service() {
 
@@ -328,45 +324,41 @@ class BunkerService : Service() {
         }
 
         val requestId = UUID.randomUUID().toString()
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val approvedRef = AtomicReference<Boolean?>(null)
 
-        return runBlocking(Dispatchers.Default) {
-            val approved = withTimeoutOrNull(APPROVAL_TIMEOUT_MS) {
-                suspendCancellableCoroutine { continuation ->
-                    val pendingApproval = PendingApproval(
-                        request,
-                        isConnectRequest = isConnectRequest
-                    ) { result ->
-                        continuation.resume(result)
-                    }
-
-                    if (!addPendingApproval(requestId, pendingApproval)) {
-                        continuation.resume(false)
-                        return@suspendCancellableCoroutine
-                    }
-
-                    continuation.invokeOnCancellation {
-                        pendingApprovals.remove(requestId)?.let {
-                            globalPendingCount.decrementAndGet()
-                            clientPendingCounts[clientPubkey]?.decrementAndGet()
-                        }
-                    }
-
-                    startApprovalActivity(requestId, request, isConnectRequest)
-                }
-            }
-
-            if (approved == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
-                return@runBlocking false
-            }
-
-            if (approved && isConnectRequest && store != null) {
-                store.authorizeClient(clientPubkey)
-                if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
-            }
-
-            approved
+        val pendingApproval = PendingApproval(
+            request,
+            isConnectRequest = isConnectRequest
+        ) { result ->
+            approvedRef.set(result)
+            latch.countDown()
         }
+
+        if (!addPendingApproval(requestId, pendingApproval)) {
+            return false
+        }
+
+        startApprovalActivity(requestId, request, isConnectRequest)
+
+        val completed = latch.await(APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+        if (!completed) {
+            pendingApprovals.remove(requestId)?.let {
+                globalPendingCount.decrementAndGet()
+                clientPendingCounts[clientPubkey]?.decrementAndGet()
+            }
+            if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
+            return false
+        }
+
+        val result = approvedRef.get() ?: false
+        if (result && isConnectRequest && store != null) {
+            store.authorizeClient(clientPubkey)
+            if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
+        }
+
+        return result
     }
 
     private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
