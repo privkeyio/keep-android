@@ -242,15 +242,15 @@ class KeepMobileApp : Application() {
                 runCatching {
                     val currentRelays = config.getRelays()
                     if (currentRelays.isEmpty()) {
-                        Log.w(TAG, "No relays configured, skipping reconnect")
+                        Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
                     }
-                    mobile.initialize(currentRelays)
+                    val peers = mobile.getPeers()
                     if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "Reconnect #${iteration + 1}, peers: ${mobile.getPeers().size}")
+                        Log.d(TAG, "Peer check #${iteration + 1}, peers: ${peers.size}")
                     }
                 }.onFailure {
-                    Log.e(TAG, "Reconnect failed on iteration ${iteration + 1}", it)
+                    Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
                     if (it is CancellationException) throw it
                 }
             }

@@ -149,7 +149,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
         cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
-    }.getOrElse { throw KeepMobileException.StorageException("Failed to decrypt share") }
+    }.getOrElse { e ->
+        Log.e(TAG, "Decryption failed: ${e::class.simpleName}: ${e.message}", e)
+        throw KeepMobileException.StorageException("Failed to decrypt share")
+    }
 
     fun storeShareWithCipher(cipher: Cipher, data: ByteArray, metadata: ShareMetadataInfo) {
         saveShareData(encryptWithCipher(cipher, data), cipher.iv, metadata)
@@ -294,11 +297,18 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     @Synchronized
     private fun getOrCreateKeyForShare(key: String): SecretKey {
+        if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
+            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+        }
         val legacyAlias = getLegacyKeystoreAlias(key)
         if (keyStore.containsAlias(legacyAlias)) {
             return keyStore.getKey(legacyAlias, null) as SecretKey
         }
-        return getOrCreateKeyWithAlias(getKeystoreAlias(key))
+        val newAlias = getKeystoreAlias(key)
+        if (keyStore.containsAlias(newAlias)) {
+            return keyStore.getKey(newAlias, null) as SecretKey
+        }
+        return getOrCreateKeyWithAlias(newAlias)
     }
 
     @Synchronized
