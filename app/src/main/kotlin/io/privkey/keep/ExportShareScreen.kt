@@ -35,6 +35,8 @@ private const val MIN_PASSPHRASE_LENGTH = 15
 sealed class ExportState {
     object Idle : ExportState()
     object Exporting : ExportState()
+    data class Error(val message: String) : ExportState()
+
     class Success(data: String, frames: List<String>) : ExportState() {
         private var dataChars: CharArray? = data.toCharArray()
         private var frameChars: List<CharArray>? = frames.map { it.toCharArray() }
@@ -42,6 +44,7 @@ sealed class ExportState {
         val data: String get() = dataChars?.let { String(it) } ?: ""
         val frames: List<String> get() = frameChars?.map { String(it) } ?: emptyList()
 
+        @Synchronized
         fun clear() {
             dataChars?.let { Arrays.fill(it, '\u0000') }
             dataChars = null
@@ -49,7 +52,6 @@ sealed class ExportState {
             frameChars = null
         }
     }
-    data class Error(val message: String) : ExportState()
 }
 
 @Composable
@@ -77,19 +79,19 @@ private enum class PassphraseStrength(val label: String) {
 private fun PassphraseStrength.color() = when (this) {
     PassphraseStrength.WEAK -> MaterialTheme.colorScheme.error
     PassphraseStrength.FAIR -> MaterialTheme.colorScheme.tertiary
-    PassphraseStrength.GOOD, PassphraseStrength.STRONG -> MaterialTheme.colorScheme.primary
+    PassphraseStrength.GOOD -> MaterialTheme.colorScheme.primary
+    PassphraseStrength.STRONG -> MaterialTheme.colorScheme.primary
 }
 
 private fun calculatePassphraseStrength(passphrase: SecurePassphrase): PassphraseStrength {
     if (passphrase.length < MIN_PASSPHRASE_LENGTH) return PassphraseStrength.WEAK
 
-    val hasLength12 = passphrase.length >= 12
-    val hasLength16 = passphrase.length >= 16
-    val hasMixedCase = passphrase.any { it.isUpperCase() } && passphrase.any { it.isLowerCase() }
-    val hasDigits = passphrase.any { it.isDigit() }
-    val hasSymbols = passphrase.any { !it.isLetterOrDigit() }
-
-    val score = listOf(hasLength12, hasLength16, hasMixedCase, hasDigits, hasSymbols).count { it }
+    var score = 0
+    if (passphrase.length >= 12) score++
+    if (passphrase.length >= 16) score++
+    if (passphrase.any { it.isUpperCase() } && passphrase.any { it.isLowerCase() }) score++
+    if (passphrase.any { it.isDigit() }) score++
+    if (passphrase.any { !it.isLetterOrDigit() }) score++
 
     return when {
         score >= 4 -> PassphraseStrength.STRONG

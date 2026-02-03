@@ -92,11 +92,11 @@ internal class SecureShareData(private val maxLength: Int) {
 
 @Composable
 private fun QrDisplayContainer(
-    modifier: Modifier = Modifier,
     label: String,
     copyData: String,
     onCopied: () -> Unit,
-    extraContent: (@Composable ColumnScope.() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    extraContent: @Composable (ColumnScope.() -> Unit)? = null,
     qrContent: @Composable BoxScope.() -> Unit
 ) {
     val context = LocalContext.current
@@ -181,10 +181,10 @@ fun QrCodeDisplay(
     }
 
     QrDisplayContainer(
-        modifier = modifier,
         label = label,
         copyData = data,
         onCopied = onCopied,
+        modifier = modifier,
         qrContent = {
             val bmp = bitmap
             if (bmp != null) {
@@ -233,10 +233,10 @@ fun AnimatedQrCodeDisplay(
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
 
     QrDisplayContainer(
-        modifier = modifier,
         label = label,
         copyData = fullData,
         onCopied = onCopied,
+        modifier = modifier,
         extraContent = {
             if (generationError) {
                 Text(
@@ -274,20 +274,17 @@ fun AnimatedQrCodeDisplay(
 
 private fun generateQrCode(content: String): Bitmap? {
     return try {
-        val writer = QRCodeWriter()
         val hints = mapOf(
             EncodeHintType.MARGIN to 1,
             EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M
         )
-        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
-        val width = bitMatrix.width
-        val height = bitMatrix.height
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
         val black = Color.Black.toArgb()
         val white = Color.White.toArgb()
-        val pixels = IntArray(width * height) { i ->
-            if (bitMatrix[i % width, i / width]) black else white
+        val pixels = IntArray(bitMatrix.width * bitMatrix.height) { i ->
+            if (bitMatrix[i % bitMatrix.width, i / bitMatrix.width]) black else white
         }
-        Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+        Bitmap.createBitmap(pixels, bitMatrix.width, bitMatrix.height, Bitmap.Config.ARGB_8888)
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) {
             android.util.Log.w("QrCodeDisplay", "Failed to generate QR code", e)

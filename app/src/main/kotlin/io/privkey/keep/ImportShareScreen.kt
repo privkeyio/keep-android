@@ -197,9 +197,9 @@ fun ImportShareScreen(
                 importState = importState,
                 canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
                 onDismiss = onDismiss,
-                onImportClick = {
-                    fun clearChars(chars: CharArray) = Arrays.fill(chars, '\u0000')
+                onImportClick = { onError ->
                     val passphraseChars = passphrase.toCharArray()
+                    fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
                     try {
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
@@ -208,18 +208,17 @@ fun ImportShareScreen(
                                     onImport(shareData.toString(), String(passphraseChars), shareName, authedCipher)
                                 }
                             } finally {
-                                clearChars(passphraseChars)
+                                clearChars()
                             }
                         }
-                        null
                     } catch (e: KeyPermanentlyInvalidatedException) {
-                        clearChars(passphraseChars)
+                        clearChars()
                         Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
-                        "Biometric key invalidated. Please re-enroll biometrics."
+                        onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: Exception) {
-                        clearChars(passphraseChars)
+                        clearChars()
                         Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
-                        "Failed to initialize encryption"
+                        onError("Failed to initialize encryption")
                     }
                 }
             )
@@ -232,7 +231,7 @@ private fun ImportButtons(
     importState: ImportState,
     canImport: Boolean,
     onDismiss: () -> Unit,
-    onImportClick: () -> String?
+    onImportClick: (onError: (String) -> Unit) -> Unit
 ) {
     var cipherError by remember { mutableStateOf<String?>(null) }
 
@@ -249,9 +248,7 @@ private fun ImportButtons(
             }
             if (importState !is ImportState.Success) {
                 Button(
-                    onClick = {
-                        cipherError = onImportClick()
-                    },
+                    onClick = { onImportClick { cipherError = it } },
                     modifier = Modifier.weight(1f),
                     enabled = canImport
                 ) {
