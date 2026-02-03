@@ -130,6 +130,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         const val EXTRA_EVENT_KIND = "event_kind"
         const val EXTRA_EVENT_CONTENT = "event_content"
         const val EXTRA_IS_CONNECT = "is_connect"
+        const val EXTRA_TIMEOUT = "timeout"
     }
 
     private fun handleReject() {
@@ -146,6 +147,13 @@ class Nip46ApprovalActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val newRequestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+        val isTimeout = intent.getBooleanExtra(EXTRA_TIMEOUT, false)
+
+        if (isTimeout && newRequestId == requestId) {
+            finish()
+            return
+        }
+
         if (newRequestId != null && newRequestId != requestId) {
             requestId?.let { BunkerService.respondToApproval(it, false) }
             finish()

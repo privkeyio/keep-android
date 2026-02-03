@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.privkey.keep.BuildConfig
@@ -302,6 +303,11 @@ class BunkerService : Service() {
     }
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            Log.e(TAG, "handleApprovalRequest called from main thread - rejecting to avoid ANR")
+            return false
+        }
+
         val clientPubkey = request.appPubkey
 
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
@@ -348,6 +354,7 @@ class BunkerService : Service() {
                 globalPendingCount.decrementAndGet()
                 clientPendingCounts[clientPubkey]?.decrementAndGet()
             }
+            dismissApprovalActivity(requestId)
             if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
             return false
         }
@@ -371,6 +378,15 @@ class BunkerService : Service() {
             request.eventKind?.let { putExtra(Nip46ApprovalActivity.EXTRA_EVENT_KIND, it.toInt()) }
             request.eventContent?.let { putExtra(Nip46ApprovalActivity.EXTRA_EVENT_CONTENT, it) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        startActivity(intent)
+    }
+
+    private fun dismissApprovalActivity(requestId: String) {
+        val intent = Intent(this, Nip46ApprovalActivity::class.java).apply {
+            putExtra(Nip46ApprovalActivity.EXTRA_REQUEST_ID, requestId)
+            putExtra(Nip46ApprovalActivity.EXTRA_TIMEOUT, true)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         startActivity(intent)
     }

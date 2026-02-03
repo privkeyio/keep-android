@@ -328,18 +328,14 @@ class PinStore(context: Context) {
     }
 
     private fun hashPinFromChars(pinChars: CharArray, salt: String): String {
-        val paddedPin = CharArray(MAX_PIN_LENGTH) { i ->
-            if (i < pinChars.size) pinChars[i] else '\u0000'
-        }
         val saltBytes = Base64.decode(salt, Base64.NO_WRAP)
-        val spec = PBEKeySpec(paddedPin, saltBytes, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
+        val spec = PBEKeySpec(pinChars, saltBytes, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
         try {
             val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             val hash = factory.generateSecret(spec).encoded
             return Base64.encodeToString(hash, Base64.NO_WRAP)
         } finally {
             spec.clearPassword()
-            paddedPin.fill('\u0000')
         }
     }
 }

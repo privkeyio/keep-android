@@ -211,7 +211,7 @@ class KeepMobileApp : Application() {
                 store.setRequestIdContext(connectId)
                 try {
                     initializeConnection(mobile, relays)
-                    startPeriodicReconnect(mobile, relays)
+                    startPeriodicReconnect(mobile, config)
                 } finally {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
@@ -223,7 +223,9 @@ class KeepMobileApp : Application() {
                     withContext(Dispatchers.Main) { onSuccess() }
                 }
                 .onFailure { e ->
+                    announceJob?.cancel()
                     if (isCancellationException(e)) {
+                        _connectionState.value = ConnectionState()
                         return@onFailure
                     }
                     Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
@@ -237,19 +239,24 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) {
             val shareInfo = mobile.getShareInfo()
             Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
-            Log.d(TAG, "Initializing with ${relays.size} relays: $relays")
+            Log.d(TAG, "Initializing with ${relays.size} relay(s)")
         }
         mobile.initialize(relays)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun startPeriodicReconnect(mobile: KeepMobile, relays: List<String>) {
+    private fun startPeriodicReconnect(mobile: KeepMobile, config: RelayConfigStore) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
                 delay(5000)
                 runCatching {
-                    mobile.initialize(relays)
+                    val currentRelays = config.getRelays()
+                    if (currentRelays.isEmpty()) {
+                        Log.w(TAG, "No relays configured, skipping reconnect")
+                        return@runCatching
+                    }
+                    mobile.initialize(currentRelays)
                     if (BuildConfig.DEBUG) {
                         Log.d(TAG, "Reconnect #${iteration + 1}, peers: ${mobile.getPeers().size}")
                     }
