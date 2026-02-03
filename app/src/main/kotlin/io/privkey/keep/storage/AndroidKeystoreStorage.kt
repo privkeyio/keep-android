@@ -183,22 +183,16 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun consumePendingCipher(requestId: String): Cipher? {
-        while (true) {
-            val current = pendingCipher.get() ?: return null
-            if (current.requestId != requestId) return null
+        val current = pendingCipher.getAndUpdate { data ->
+            if (data?.requestId == requestId) null else data
+        } ?: return null
 
-            val now = System.currentTimeMillis()
-            if (now - current.createdAtMs > PENDING_CIPHER_TIMEOUT_MS) {
-                pendingCipher.compareAndSet(current, null)
-                cipherConsumedCallbacks.remove(requestId)
-                return null
-            }
+        if (current.requestId != requestId) return null
 
-            if (pendingCipher.compareAndSet(current, null)) {
-                cipherConsumedCallbacks.remove(requestId)?.invoke()
-                return current.cipher
-            }
-        }
+        val isExpired = System.currentTimeMillis() - current.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+        cipherConsumedCallbacks.remove(requestId)?.takeUnless { isExpired }?.invoke()
+
+        return if (isExpired) null else current.cipher
     }
 
     private val requestIdContext = ThreadLocal<String>()

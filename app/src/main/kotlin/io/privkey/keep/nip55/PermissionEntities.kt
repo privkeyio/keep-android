@@ -21,6 +21,8 @@ enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     override fun toString(): String = name.lowercase()
 }
 
+const val EVENT_KIND_GENERIC = -1
+
 @Entity(
     tableName = "nip55_permissions",
     indices = [Index(value = ["callerPackage", "requestType", "eventKind"], unique = true)]
@@ -29,7 +31,7 @@ data class Nip55Permission(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val callerPackage: String,
     val requestType: String,
-    val eventKind: Int?,
+    val eventKind: Int = EVENT_KIND_GENERIC,
     val decision: String,
     val expiresAt: Long?,
     val createdAt: Long
@@ -38,6 +40,9 @@ data class Nip55Permission(
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
+
+    val eventKindOrNull: Int?
+        get() = if (eventKind == EVENT_KIND_GENERIC) null else eventKind
 }
 
 @Entity(tableName = "nip55_audit_log")

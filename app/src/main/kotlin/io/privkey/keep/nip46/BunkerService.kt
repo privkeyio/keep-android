@@ -79,6 +79,8 @@ class BunkerService : Service() {
         private val globalRequestLock = Any()
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
 
+        fun current(): BunkerService? = serviceInstanceRef.get()
+
         fun start(context: Context) {
             val intent = Intent(context, BunkerService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

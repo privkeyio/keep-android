@@ -28,11 +28,12 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
-        val permission = dao.getPermission(callerPackage, requestType.name, eventKind)
+        val storedKind = eventKind ?: EVENT_KIND_GENERIC
+        val permission = dao.getPermission(callerPackage, requestType.name, storedKind)
         if (permission != null && !permission.isExpired()) return permission.permissionDecision
 
         if (eventKind != null && !isSensitiveKind(eventKind)) {
-            val genericPermission = dao.getPermission(callerPackage, requestType.name, null)
+            val genericPermission = dao.getPermission(callerPackage, requestType.name, EVENT_KIND_GENERIC)
             if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
         }
         return null
@@ -71,7 +72,7 @@ class PermissionStore(private val database: Nip55Database) {
             Nip55Permission(
                 callerPackage = callerPackage,
                 requestType = requestType.name,
-                eventKind = eventKind,
+                eventKind = eventKind ?: EVENT_KIND_GENERIC,
                 decision = decision,
                 expiresAt = duration.expiresAt(),
                 createdAt = System.currentTimeMillis()
@@ -82,8 +83,7 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun revokePermission(callerPackage: String, requestType: Nip55RequestType? = null, eventKind: Int? = null) {
         when {
             requestType == null -> dao.deleteForCaller(callerPackage)
-            eventKind != null -> dao.deleteForCallerAndTypeAndEventKind(callerPackage, requestType.name, eventKind)
-            else -> dao.deleteForCallerAndType(callerPackage, requestType.name)
+            else -> dao.deleteForCallerAndTypeAndEventKind(callerPackage, requestType.name, eventKind ?: EVENT_KIND_GENERIC)
         }
     }
 
@@ -290,7 +290,7 @@ class PermissionStore(private val database: Nip55Database) {
                 Nip55Permission(
                     callerPackage = callerPackage,
                     requestType = requestType.name,
-                    eventKind = eventKind,
+                    eventKind = eventKind ?: EVENT_KIND_GENERIC,
                     decision = PermissionDecision.ASK.toString(),
                     expiresAt = null,
                     createdAt = System.currentTimeMillis()
@@ -324,7 +324,7 @@ class PermissionStore(private val database: Nip55Database) {
         callerPackage: String,
         requestType: String,
         eventKind: Int?
-    ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind)
+    ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind ?: EVENT_KIND_GENERIC)
 
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride

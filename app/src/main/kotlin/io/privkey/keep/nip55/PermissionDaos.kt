@@ -8,11 +8,11 @@ interface Nip55PermissionDao {
         SELECT * FROM nip55_permissions
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
-        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
+        AND eventKind = :eventKind
         ORDER BY eventKind DESC
         LIMIT 1
     """)
-    suspend fun getPermission(callerPackage: String, requestType: String, eventKind: Int?): Nip55Permission?
+    suspend fun getPermission(callerPackage: String, requestType: String, eventKind: Int): Nip55Permission?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)
@@ -84,10 +84,10 @@ interface Nip55AuditLogDao {
         SELECT MAX(timestamp) FROM nip55_audit_log
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
-        AND ((:eventKind IS NULL AND eventKind IS NULL) OR (:eventKind IS NOT NULL AND eventKind = :eventKind))
+        AND eventKind = :eventKind
         AND decision = 'allow'
     """)
-    suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int?): Long?
+    suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int): Long?
 
     @Query("SELECT entryHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
     suspend fun getLastEntryHash(): String?

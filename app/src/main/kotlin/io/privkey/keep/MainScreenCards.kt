@@ -277,7 +277,8 @@ fun RelaysCard(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = if (newRelayUrl.startsWith("wss://")) newRelayUrl else "wss://$newRelayUrl"
+                    val raw = newRelayUrl.trim()
+                    val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
                     when {
                         url.length > 256 -> error = "URL too long"
                         !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
@@ -465,7 +466,7 @@ fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Background Service", style = MaterialTheme.typography.titleMedium)
+                Text("Foreground Service", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Keep relay connections alive persistently",
                     style = MaterialTheme.typography.bodySmall,

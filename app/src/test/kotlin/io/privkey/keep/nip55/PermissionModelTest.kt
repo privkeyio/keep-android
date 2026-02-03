@@ -105,15 +105,19 @@ class Nip55PermissionTest {
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
-            eventKind = null,
+            eventKind = EVENT_KIND_GENERIC,
             decision = "allow",
             expiresAt = null,
             createdAt = System.currentTimeMillis()
         )
         assertEquals(PermissionDecision.ALLOW, allowPermission.permissionDecision)
+        assertNull(allowPermission.eventKindOrNull)
 
         val denyPermission = allowPermission.copy(decision = "deny")
         assertEquals(PermissionDecision.DENY, denyPermission.permissionDecision)
+
+        val specificKindPermission = allowPermission.copy(eventKind = 1)
+        assertEquals(1, specificKindPermission.eventKindOrNull)
     }
 }
 

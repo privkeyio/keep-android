@@ -67,12 +67,13 @@ private fun PassphraseStrength.color() = when (this) {
 private fun calculatePassphraseStrength(passphrase: SecurePassphrase): PassphraseStrength {
     if (passphrase.length < MIN_PASSPHRASE_LENGTH) return PassphraseStrength.WEAK
 
-    var score = 0
-    if (passphrase.length >= 12) score++
-    if (passphrase.length >= 16) score++
-    if (passphrase.any { it.isUpperCase() } && passphrase.any { it.isLowerCase() }) score++
-    if (passphrase.any { it.isDigit() }) score++
-    if (passphrase.any { !it.isLetterOrDigit() }) score++
+    val hasLength12 = passphrase.length >= 12
+    val hasLength16 = passphrase.length >= 16
+    val hasMixedCase = passphrase.any { it.isUpperCase() } && passphrase.any { it.isLowerCase() }
+    val hasDigits = passphrase.any { it.isDigit() }
+    val hasSymbols = passphrase.any { !it.isLetterOrDigit() }
+
+    val score = listOf(hasLength12, hasLength16, hasMixedCase, hasDigits, hasSymbols).count { it }
 
     return when {
         score >= 4 -> PassphraseStrength.STRONG

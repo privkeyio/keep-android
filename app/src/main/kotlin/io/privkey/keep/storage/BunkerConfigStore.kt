@@ -28,7 +28,11 @@ class BunkerConfigStore(context: Context) {
 
             if (host.equals("localhost", ignoreCase = true)) return true
 
-            val addr = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return false
+            val addr = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return true
+            return isInternalAddress(addr)
+        }
+
+        internal fun isInternalAddress(addr: InetAddress): Boolean {
             return addr.isLoopbackAddress ||
                 addr.isLinkLocalAddress ||
                 addr.isSiteLocalAddress ||

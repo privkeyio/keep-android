@@ -354,7 +354,7 @@ private fun PermissionItem(
                         text = formatRequestType(permission.requestType),
                         style = MaterialTheme.typography.titleSmall
                     )
-                    permission.eventKind?.let { kind ->
+                    permission.eventKindOrNull?.let { kind ->
                         Text(
                             text = EventKind.displayName(kind),
                             style = MaterialTheme.typography.bodySmall,
