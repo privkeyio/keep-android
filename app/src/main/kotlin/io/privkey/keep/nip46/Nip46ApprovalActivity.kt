@@ -150,7 +150,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val isTimeout = intent.getBooleanExtra(EXTRA_TIMEOUT, false)
 
         if (isTimeout && newRequestId == requestId) {
-            finish()
+            respond(false)
             return
         }
 

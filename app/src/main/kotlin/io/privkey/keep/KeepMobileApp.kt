@@ -211,11 +211,11 @@ class KeepMobileApp : Application() {
                 store.setRequestIdContext(connectId)
                 try {
                     initializeConnection(mobile, relays)
-                    startPeriodicReconnect(mobile, config)
                 } finally {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
+                startPeriodicReconnect(mobile, config)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
