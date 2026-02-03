@@ -242,7 +242,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithResult(response)
                     }
                     .onFailure { e ->
-                        Log.e(TAG, "Request failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}")
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {

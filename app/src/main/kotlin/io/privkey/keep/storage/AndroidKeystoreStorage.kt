@@ -9,6 +9,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
+import io.privkey.keep.BuildConfig
 import androidx.security.crypto.MasterKey
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
@@ -273,7 +274,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
         )
     } catch (e: Exception) {
-        Log.e(TAG, "Failed to parse stored key metadata", e)
+        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to parse stored key metadata", e)
         null
     }
 

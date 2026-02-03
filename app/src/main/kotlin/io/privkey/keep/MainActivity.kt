@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
@@ -354,7 +355,7 @@ fun MainScreen(
                         hasShare = keepMobile.hasShare()
                         shareInfo = keepMobile.getShareInfo()
                     } catch (e: Exception) {
-                        Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
                     } finally {
                         storage.clearPendingCipher(importId)

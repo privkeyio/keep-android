@@ -1,13 +1,20 @@
 package io.privkey.keep
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
@@ -435,18 +442,162 @@ fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SecurityLevelBadge(securityLevel: String) {
+    var showBottomSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
+
     val color = when (securityLevel) {
         "strongbox" -> MaterialTheme.colorScheme.primary
         "tee" -> MaterialTheme.colorScheme.secondary
         else -> MaterialTheme.colorScheme.error
     }
-    Text(
-        text = "Security: $securityLevel",
-        style = MaterialTheme.typography.bodySmall,
-        color = color
-    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "Security: $securityLevel",
+            style = MaterialTheme.typography.bodySmall,
+            color = color
+        )
+        IconButton(
+            onClick = { showBottomSheet = true },
+            modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Info,
+                contentDescription = "Security level info",
+                modifier = Modifier.size(16.dp),
+                tint = color
+            )
+        }
+    }
+
+    if (showBottomSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showBottomSheet = false },
+            sheetState = sheetState
+        ) {
+            SecurityLevelInfoContent(currentLevel = securityLevel)
+        }
+    }
+}
+
+@Composable
+private fun SecurityLevelInfoContent(currentLevel: String) {
+    val colors = MaterialTheme.colorScheme
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 32.dp)
+    ) {
+        Text(
+            text = "Security Level",
+            style = MaterialTheme.typography.titleLarge
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val protectionText = when (currentLevel) {
+            "strongbox" -> "hardware security"
+            "tee" -> "hardware security"
+            "software" -> "software encryption"
+            else -> "an unknown protection level"
+        }
+
+        Text(
+            text = buildAnnotatedString {
+                append("Your encryption keys are protected by ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(protectionText)
+                }
+                append(". This determines how securely your Nostr private keys are stored.")
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SecurityLevelItem(
+                title = "StrongBox",
+                description = "Dedicated security chip (HSM). Highest protection - keys never leave secure hardware.",
+                isCurrent = currentLevel == "strongbox",
+                color = colors.primary
+            )
+
+            SecurityLevelItem(
+                title = "Trusted Execution Environment",
+                description = "Secure area of main processor, isolated from regular OS.",
+                isCurrent = currentLevel == "tee",
+                color = colors.secondary
+            )
+
+            SecurityLevelItem(
+                title = "Software",
+                description = "Software-only protection. Less secure but still encrypted.",
+                isCurrent = currentLevel == "software",
+                color = colors.error
+            )
+        }
+    }
+}
+
+@Composable
+private fun SecurityLevelItem(
+    title: String,
+    description: String,
+    isCurrent: Boolean,
+    color: Color
+) {
+    val colors = MaterialTheme.colorScheme
+    val backgroundColor = if (isCurrent) color.copy(alpha = 0.12f) else colors.surfaceVariant.copy(alpha = 0.5f)
+
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = backgroundColor,
+        border = if (isCurrent) BorderStroke(2.dp, color) else null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isCurrent) color else colors.onSurface
+                )
+                if (isCurrent) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = color
+                    ) {
+                        Text(
+                            text = "CURRENT",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onPrimary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
