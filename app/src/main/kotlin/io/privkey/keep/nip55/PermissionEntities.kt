@@ -1,8 +1,19 @@
 package io.privkey.keep.nip55
 
+import android.os.SystemClock
+import android.util.Log
 import androidx.annotation.StringRes
+import androidx.annotation.VisibleForTesting
 import androidx.room.*
 import io.privkey.keep.R
+
+object MonotonicClock {
+    @Volatile
+    @VisibleForTesting
+    var testTimeOverride: Long? = null
+
+    fun now(): Long = testTimeOverride ?: SystemClock.elapsedRealtime()
+}
 
 enum class PermissionDecision(@StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
@@ -108,7 +119,7 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
     ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
     FOREVER(null, R.string.permission_duration_forever);
 
-    fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
+    fun expiresAt(): Long? = millis?.let { MonotonicClock.now() + it }
 
     val shouldPersist: Boolean
         get() = this != JUST_THIS_TIME
@@ -121,7 +132,7 @@ enum class AppExpiryDuration(val millis: Long?, @StringRes val displayNameRes: I
     ONE_WEEK(7 * 24 * 60 * 60 * 1000L, R.string.app_expiry_one_week),
     NEVER(null, R.string.app_expiry_never);
 
-    fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
+    fun expiresAt(): Long? = millis?.let { MonotonicClock.now() + it }
 }
 
 data class ConnectedAppInfo(
@@ -131,9 +142,17 @@ data class ConnectedAppInfo(
     val expiresAt: Long?
 )
 
+private const val CLOCK_JUMP_THRESHOLD_MS = 60 * 60 * 1000L
+
 internal fun isTimestampExpired(expiresAt: Long?, createdAt: Long): Boolean {
     if (expiresAt == null) return false
-    val now = System.currentTimeMillis()
-    val clockManipulated = now < createdAt
-    return clockManipulated || expiresAt <= now
+    val now = MonotonicClock.now()
+    if (now < createdAt) {
+        val jumpMs = createdAt - now
+        if (jumpMs > CLOCK_JUMP_THRESHOLD_MS) {
+            Log.w("PermissionExpiry", "Large clock jump detected: ${jumpMs}ms backward from createdAt")
+        }
+        return true
+    }
+    return expiresAt <= now
 }

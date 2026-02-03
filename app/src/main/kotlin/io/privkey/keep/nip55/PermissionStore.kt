@@ -17,14 +17,15 @@ class PermissionStore(private val database: Nip55Database) {
     private val velocityDao = database.velocityDao()
 
     suspend fun cleanupExpired() {
-        val now = System.currentTimeMillis()
-        dao.deleteExpired(now)
-        auditDao.deleteOlderThan(now - 30L * 24 * 60 * 60 * 1000)
-        val expiredPackages = appSettingsDao.getExpiredPackages(now)
+        val monotonicNow = MonotonicClock.now()
+        val wallClockNow = System.currentTimeMillis()
+        dao.deleteExpired(monotonicNow)
+        auditDao.deleteOlderThan(wallClockNow - 30L * 24 * 60 * 60 * 1000)
+        val expiredPackages = appSettingsDao.getExpiredPackages(monotonicNow)
         expiredPackages.forEach { pkg ->
             dao.deleteForCaller(pkg)
         }
-        appSettingsDao.deleteExpired(now)
+        appSettingsDao.deleteExpired(monotonicNow)
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
@@ -75,7 +76,7 @@ class PermissionStore(private val database: Nip55Database) {
                 eventKind = eventKind ?: EVENT_KIND_GENERIC,
                 decision = decision,
                 expiresAt = duration.expiresAt(),
-                createdAt = System.currentTimeMillis()
+                createdAt = MonotonicClock.now()
             )
         )
     }
@@ -216,13 +217,13 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun getAuditLog(limit: Int = 100): List<Nip55AuditLog> = auditDao.getRecent(limit)
 
     suspend fun getConnectedApps(): List<ConnectedAppInfo> {
-        val now = System.currentTimeMillis()
-        val packages = dao.getAllCallerPackages(now)
+        val monotonicNow = MonotonicClock.now()
+        val packages = dao.getAllCallerPackages(monotonicNow)
         return packages.map { pkg ->
             val appSettings = appSettingsDao.getSettings(pkg)
             ConnectedAppInfo(
                 packageName = pkg,
-                permissionCount = dao.getPermissionCountForCaller(pkg, now),
+                permissionCount = dao.getPermissionCountForCaller(pkg, monotonicNow),
                 lastUsedTime = auditDao.getLastUsedTime(pkg),
                 expiresAt = appSettings?.expiresAt
             )
@@ -243,7 +244,7 @@ class PermissionStore(private val database: Nip55Database) {
                     callerPackage = callerPackage,
                     expiresAt = expiresAt,
                     signPolicyOverride = existing?.signPolicyOverride,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = MonotonicClock.now()
                 )
             )
         }
@@ -255,7 +256,7 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
-        dao.getForCaller(callerPackage, System.currentTimeMillis())
+        dao.getForCaller(callerPackage, MonotonicClock.now())
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
 
@@ -294,7 +295,7 @@ class PermissionStore(private val database: Nip55Database) {
                     eventKind = eventKind ?: EVENT_KIND_GENERIC,
                     decision = PermissionDecision.ASK.toString(),
                     expiresAt = null,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = MonotonicClock.now()
                 )
             )
             logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
@@ -340,7 +341,7 @@ class PermissionStore(private val database: Nip55Database) {
                     callerPackage = callerPackage,
                     expiresAt = existing?.expiresAt,
                     signPolicyOverride = signPolicyOrdinal,
-                    createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                    createdAt = existing?.createdAt ?: MonotonicClock.now()
                 )
             )
         }
@@ -369,14 +370,14 @@ fun findRequestType(name: String): Nip55RequestType? =
     Nip55RequestType.entries.find { it.name == name }
 
 fun formatExpiry(timestamp: Long): String {
-    val remaining = timestamp - System.currentTimeMillis()
+    val remaining = timestamp - MonotonicClock.now()
     return when {
         remaining <= 0 -> "expired"
         remaining < 60_000 -> "<1m"
         remaining < 3600_000 -> "in ${remaining / 60_000}m"
         remaining < 86400_000 -> "in ${remaining / 3600_000}h"
         remaining < 604800_000 -> "in ${remaining / 86400_000}d"
-        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
+        else -> "in ${remaining / 86400_000}d"
     }
 }
 

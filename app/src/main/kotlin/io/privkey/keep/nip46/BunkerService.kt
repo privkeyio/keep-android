@@ -209,7 +209,7 @@ class BunkerService : Service() {
         val app = applicationContext as? KeepMobileApp
         val keepMobile = app?.getKeepMobile()
         if (keepMobile == null) {
-            Log.e(TAG, "KeepMobile not available")
+            if (BuildConfig.DEBUG) Log.e(TAG, "KeepMobile not available")
             _status.value = BunkerStatus.ERROR
             stopSelf()
             return START_NOT_STICKY
@@ -219,7 +219,7 @@ class BunkerService : Service() {
 
         val relays = configStore?.getRelays() ?: emptyList()
         if (relays.isEmpty()) {
-            Log.e(TAG, "No bunker relays configured")
+            if (BuildConfig.DEBUG) Log.e(TAG, "No bunker relays configured")
             _status.value = BunkerStatus.ERROR
             stopSelf()
             return START_NOT_STICKY
@@ -271,7 +271,7 @@ class BunkerService : Service() {
 
             updateNotification(isActive = true)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
         }
     }
@@ -304,7 +304,7 @@ class BunkerService : Service() {
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            Log.e(TAG, "handleApprovalRequest called from main thread - rejecting to avoid ANR")
+            if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread - rejecting to avoid ANR")
             return false
         }
 

@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.util.Log
 import androidx.compose.foundation.Image
+import io.privkey.keep.BuildConfig
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,8 +47,8 @@ fun ConnectedAppsScreen(
         try {
             connectedApps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
         } catch (e: Exception) {
-            Log.e("ConnectedApps", "Failed to load connected apps", e)
-            loadError = e.message ?: "Failed to load connected apps"
+            if (BuildConfig.DEBUG) Log.e("ConnectedApps", "Failed to load connected apps", e)
+            loadError = "Failed to load connected apps"
         }
         isLoading = false
     }
@@ -152,7 +153,7 @@ private fun ConnectedAppItem(
                     verified = true
                 )
             } catch (e: PackageManager.NameNotFoundException) {
-                Log.w("ConnectedApps", "Package not found")
+                if (BuildConfig.DEBUG) Log.w("ConnectedApps", "Package not found")
                 AppInfoResult(label = null, icon = null, verified = false)
             }
         }

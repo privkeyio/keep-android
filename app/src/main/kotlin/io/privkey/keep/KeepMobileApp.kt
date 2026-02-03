@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.app.Application
 import android.util.Log
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
@@ -89,7 +90,7 @@ class KeepMobileApp : Application() {
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
 
@@ -118,7 +119,7 @@ class KeepMobileApp : Application() {
                 callerVerificationStore?.cleanupExpiredNonces()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
     }
 
@@ -128,7 +129,7 @@ class KeepMobileApp : Application() {
             signingNotificationManager = manager
             applicationScope.launch { manager.cleanupStaleEntries() }
         }.onFailure { e ->
-            Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize SigningNotificationManager: ${e::class.simpleName}", e)
         }
     }
 
@@ -140,7 +141,7 @@ class KeepMobileApp : Application() {
                 BunkerService.start(this)
             }
         }.onFailure { e ->
-            Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
         }
     }
 
@@ -217,7 +218,7 @@ class KeepMobileApp : Application() {
                         _connectionState.value = ConnectionState()
                         return@onFailure
                     }
-                    Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
                     _connectionState.value = ConnectionState(error = "Connection failed")
                     withContext(Dispatchers.Main) { onError("Connection failed") }
                 }
@@ -242,7 +243,7 @@ class KeepMobileApp : Application() {
                 runCatching {
                     val currentRelays = config.getRelays()
                     if (currentRelays.isEmpty()) {
-                        Log.w(TAG, "No relays configured, skipping peer check")
+                        if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
                     }
                     val peers = mobile.getPeers()
@@ -250,7 +251,7 @@ class KeepMobileApp : Application() {
                         Log.d(TAG, "Peer check #${iteration + 1}, peers: ${peers.size}")
                     }
                 }.onFailure {
-                    Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
                     if (it is CancellationException) throw it
                 }
             }
@@ -267,7 +268,7 @@ class KeepMobileApp : Application() {
 
         applicationScope.launch {
             runCatching { mobile.initialize(relays) }
-                .onFailure { Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
         }
     }
 

@@ -475,7 +475,7 @@ fun MainScreen(
                         if (activeKey != null) storage.getCipherForShareDecryption(activeKey)
                         else storage.getCipherForDecryption()
                     }.onFailure {
-                        Log.e("MainActivity", "Failed to get cipher for connection", it)
+                        if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
                     }.getOrNull() ?: return@ConnectCard
 
                     onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->

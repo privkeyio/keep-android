@@ -82,7 +82,7 @@ class Nip55Activity : FragmentActivity() {
 
         identifyCaller(intent)
         if (callerPackage == null) {
-            Log.w(TAG, "Rejecting request from unverified caller")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
         }
 
@@ -219,7 +219,7 @@ class Nip55Activity : FragmentActivity() {
                 callerPendingFirstUse = false
                 callerVerified = true
             } else {
-                Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
             }
         }
 
@@ -258,7 +258,7 @@ class Nip55Activity : FragmentActivity() {
         }
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-            .onFailure { Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
             .getOrNull()
 
         if (cipher == null) {
@@ -272,7 +272,7 @@ class Nip55Activity : FragmentActivity() {
                 title = "Approve Request",
                 subtitle = req.requestType.displayName()
             )
-        }.onFailure { Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
             .getOrNull()
 
         if (authedCipher == null) {

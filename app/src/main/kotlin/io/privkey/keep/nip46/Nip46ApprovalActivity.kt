@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import io.privkey.keep.BuildConfig
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -39,14 +40,14 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
         requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
         if (requestId == null) {
-            Log.e(TAG, "No request ID provided")
+            if (BuildConfig.DEBUG) Log.e(TAG, "No request ID provided")
             finish()
             return
         }
 
         val pendingApproval = BunkerService.getPendingApproval(requestId!!)
         if (pendingApproval == null) {
-            Log.e(TAG, "No pending approval found for $requestId")
+            if (BuildConfig.DEBUG) Log.e(TAG, "No pending approval found for $requestId")
             finish()
             return
         }
@@ -91,7 +92,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
         lifecycleScope.launch {
             val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-                .onFailure { Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
                 .getOrNull()
 
             if (cipher == null) {
@@ -105,7 +106,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                     title = "Approve NIP-46 Request",
                     subtitle = "Authenticate to sign"
                 )
-            }.onFailure { Log.e(TAG, "Biometric auth failed: ${it::class.simpleName}") }
+            }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric auth failed: ${it::class.simpleName}") }
                 .getOrNull()
 
             if (authedCipher == null) {

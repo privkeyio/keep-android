@@ -1,10 +1,12 @@
 package io.privkey.keep.nip55
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class PermissionDecisionTest {
@@ -43,8 +45,19 @@ class PermissionDecisionTest {
 
 class Nip55PermissionTest {
 
+    @Before
+    fun setUp() {
+        MonotonicClock.testTimeOverride = 100_000L
+    }
+
+    @After
+    fun tearDown() {
+        MonotonicClock.testTimeOverride = null
+    }
+
     @Test
     fun `isExpired returns false when expiresAt is null`() {
+        val now = MonotonicClock.now()
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
@@ -52,55 +65,59 @@ class Nip55PermissionTest {
             eventKind = 1,
             decision = "allow",
             expiresAt = null,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         assertFalse(permission.isExpired())
     }
 
     @Test
     fun `isExpired returns true when expiresAt is in the past`() {
+        val now = MonotonicClock.now()
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() - 1000,
-            createdAt = System.currentTimeMillis() - 2000
+            expiresAt = now - 1000,
+            createdAt = now - 2000
         )
         assertTrue(permission.isExpired())
     }
 
     @Test
     fun `isExpired returns false when expiresAt is in the future`() {
+        val now = MonotonicClock.now()
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() + 60000,
-            createdAt = System.currentTimeMillis()
+            expiresAt = now + 60000,
+            createdAt = now
         )
         assertFalse(permission.isExpired())
     }
 
     @Test
-    fun `isExpired detects clock manipulation`() {
+    fun `isExpired detects clock manipulation via reboot`() {
+        val now = MonotonicClock.now()
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() + 60000,
-            createdAt = System.currentTimeMillis() + 120000
+            expiresAt = now + 60000,
+            createdAt = now + 120000
         )
         assertTrue(permission.isExpired())
     }
 
     @Test
     fun `permissionDecision returns correct enum`() {
+        val now = MonotonicClock.now()
         val allowPermission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
@@ -108,7 +125,7 @@ class Nip55PermissionTest {
             eventKind = EVENT_KIND_GENERIC,
             decision = "allow",
             expiresAt = null,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         assertEquals(PermissionDecision.ALLOW, allowPermission.permissionDecision)
         assertNull(allowPermission.eventKindOrNull)
@@ -122,6 +139,16 @@ class Nip55PermissionTest {
 }
 
 class PermissionDurationTest {
+
+    @Before
+    fun setUp() {
+        MonotonicClock.testTimeOverride = 100_000L
+    }
+
+    @After
+    fun tearDown() {
+        MonotonicClock.testTimeOverride = null
+    }
 
     @Test
     fun `JUST_THIS_TIME does not persist`() {
@@ -145,7 +172,7 @@ class PermissionDurationTest {
 
     @Test
     fun `expiresAt returns future timestamp for timed durations`() {
-        val now = System.currentTimeMillis()
+        val now = MonotonicClock.now()
         val expiry = PermissionDuration.ONE_HOUR.expiresAt()
         assertNotNull(expiry)
         assertTrue(expiry!! > now)
@@ -154,6 +181,16 @@ class PermissionDurationTest {
 }
 
 class FormatFunctionsTest {
+
+    @Before
+    fun setUp() {
+        MonotonicClock.testTimeOverride = 100_000L
+    }
+
+    @After
+    fun tearDown() {
+        MonotonicClock.testTimeOverride = null
+    }
 
     @Test
     fun `formatRequestType formats underscore-separated strings`() {
@@ -183,12 +220,14 @@ class FormatFunctionsTest {
 
     @Test
     fun `formatExpiry shows expired for past timestamps`() {
-        assertEquals("expired", formatExpiry(System.currentTimeMillis() - 1000))
+        val now = MonotonicClock.now()
+        assertEquals("expired", formatExpiry(now - 1000))
     }
 
     @Test
     fun `formatExpiry shows remaining time for future timestamps`() {
-        val oneHourFromNow = System.currentTimeMillis() + 60 * 60 * 1000
+        val now = MonotonicClock.now()
+        val oneHourFromNow = now + 60 * 60 * 1000
         assertTrue(formatExpiry(oneHourFromNow).startsWith("in "))
     }
 }

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Log
 import android.util.Size
+import io.privkey.keep.BuildConfig
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -201,10 +202,10 @@ fun ImportShareScreen(
                         }
                         null
                     } catch (e: KeyPermanentlyInvalidatedException) {
-                        Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
+                        if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
                         "Biometric key invalidated. Please re-enroll biometrics."
                     } catch (e: Exception) {
-                        Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
+                        if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
                         "Failed to initialize encryption"
                     }
                 }

@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.util.Log
 import android.widget.Toast
+import io.privkey.keep.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -293,7 +294,7 @@ fun ExportShareScreen(
                                                 val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
                                                 exportState = ExportState.Success(data, frames)
                                             } catch (e: Exception) {
-                                                Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
+                                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
                                                 Arrays.fill(passphraseChars, '\u0000')
@@ -307,7 +308,7 @@ fun ExportShareScreen(
                                     }
                                 }
                             } catch (e: Exception) {
-                                Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
+                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
                                 cipherError = "Failed to initialize encryption"
                             }
                         },
