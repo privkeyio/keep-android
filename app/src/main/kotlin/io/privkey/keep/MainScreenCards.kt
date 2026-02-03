@@ -397,7 +397,7 @@ fun NoShareCard(onImport: () -> Unit) {
 
 @Composable
 fun ErrorScreen(message: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
         Text(message, color = MaterialTheme.colorScheme.error)
     }
 }

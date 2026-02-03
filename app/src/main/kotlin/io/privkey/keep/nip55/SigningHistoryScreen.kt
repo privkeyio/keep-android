@@ -95,6 +95,7 @@ fun SigningHistoryScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(24.dp)
     ) {
         Text(

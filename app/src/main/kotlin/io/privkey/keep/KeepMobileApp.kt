@@ -88,14 +88,6 @@ class KeepMobileApp : Application() {
             pinStore = newPinStore
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
-
-            val relays = newRelayConfig.getRelays()
-            if (newStorage.hasShare() && relays.isNotEmpty()) {
-                applicationScope.launch {
-                    runCatching { newKeepMobile.initialize(relays) }
-                        .onFailure { Log.e(TAG, "Failed to initialize with relays: ${it::class.simpleName}") }
-                }
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
