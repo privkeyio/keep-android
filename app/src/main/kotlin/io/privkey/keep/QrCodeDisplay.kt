@@ -87,7 +87,13 @@ internal class SecureShareData(private val maxLength: Int) {
 
     fun isNotBlank(): Boolean = chars.isNotEmpty() && chars.any { !it.isWhitespace() }
 
-    override fun toString(): String = String(chars)
+    /**
+     * Returns the raw sensitive data. Use only when the actual value is required
+     * (e.g., passing to crypto operations). The returned String cannot be zeroized.
+     */
+    fun valueUnsafe(): String = String(chars)
+
+    override fun toString(): String = "<redacted>"
 }
 
 @Composable

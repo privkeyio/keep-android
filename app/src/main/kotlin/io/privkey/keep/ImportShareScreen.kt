@@ -205,7 +205,7 @@ fun ImportShareScreen(
                         onBiometricAuth(cipher) { authedCipher ->
                             try {
                                 if (authedCipher != null) {
-                                    onImport(shareData.toString(), String(passphraseChars), shareName, authedCipher)
+                                    onImport(shareData.valueUnsafe(), String(passphraseChars), shareName, authedCipher)
                                 }
                             } finally {
                                 clearChars()
