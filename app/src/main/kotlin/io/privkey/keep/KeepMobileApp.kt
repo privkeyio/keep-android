@@ -204,7 +204,7 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicReconnect(mobile, config)
+                startPeriodicPeerCheck(mobile, config)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
@@ -234,7 +234,7 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun startPeriodicReconnect(mobile: KeepMobile, config: RelayConfigStore) {
+    private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
