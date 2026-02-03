@@ -189,21 +189,26 @@ fun ImportShareScreen(
                 canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = {
+                    fun clearChars(chars: CharArray) = Arrays.fill(chars, '\u0000')
+                    val passphraseChars = passphrase.toCharArray()
                     try {
-                        val passphraseChars = passphrase.toCharArray()
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
-                            if (authedCipher != null) {
-                                val passphraseStr = String(passphraseChars)
-                                onImport(shareData, passphraseStr, shareName, authedCipher)
+                            try {
+                                if (authedCipher != null) {
+                                    onImport(shareData, String(passphraseChars), shareName, authedCipher)
+                                }
+                            } finally {
+                                clearChars(passphraseChars)
                             }
-                            Arrays.fill(passphraseChars, '\u0000')
                         }
                         null
                     } catch (e: KeyPermanentlyInvalidatedException) {
+                        clearChars(passphraseChars)
                         Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
                         "Biometric key invalidated. Please re-enroll biometrics."
                     } catch (e: Exception) {
+                        clearChars(passphraseChars)
                         Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
                         "Failed to initialize encryption"
                     }
@@ -324,7 +329,7 @@ private fun CameraPreview(
         fun cleanupResources() {
             if (closed.compareAndSet(false, true)) {
                 runCatching { scanner.close() }
-                runCatching { executor.shutdown() }
+                runCatching { executor.shutdownNow() }
             }
         }
 

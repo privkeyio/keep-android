@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import io.privkey.keep.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Arrays
@@ -41,13 +42,12 @@ import java.util.Arrays
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 2_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
 
     val length: Int get() = chars.size
-    val value: String get() = String(chars)
 
     fun update(newValue: String) {
         if (newValue.length <= MAX_PASSPHRASE_LENGTH) {
@@ -62,6 +62,8 @@ internal class SecurePassphrase {
     }
 
     fun toCharArray(): CharArray = chars.copyOf()
+
+    fun contentEquals(other: SecurePassphrase): Boolean = chars.contentEquals(other.chars)
 
     fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
 }
@@ -140,14 +142,20 @@ fun QrCodeDisplay(
     onCopied: () -> Unit = {}
 ) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var previousBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(data) {
-        bitmap?.recycle()
+        previousBitmap = bitmap
         bitmap = withContext(Dispatchers.Default) { generateQrCode(data) }
+        previousBitmap?.recycle()
+        previousBitmap = null
     }
 
     DisposableEffect(Unit) {
-        onDispose { bitmap?.recycle() }
+        onDispose {
+            bitmap?.recycle()
+            previousBitmap?.recycle()
+        }
     }
 
     QrDisplayContainer(
@@ -179,19 +187,25 @@ fun AnimatedQrCodeDisplay(
     onCopied: () -> Unit = {}
 ) {
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var previousBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
-        bitmaps.forEach { it.recycle() }
+        previousBitmaps = bitmaps
         val generated = withContext(Dispatchers.Default) {
             frames.mapNotNull { generateQrCode(it) }
         }
         generationError = generated.size != frames.size
         bitmaps = generated
+        previousBitmaps.forEach { it.recycle() }
+        previousBitmaps = emptyList()
     }
 
     DisposableEffect(Unit) {
-        onDispose { bitmaps.forEach { it.recycle() } }
+        onDispose {
+            bitmaps.forEach { it.recycle() }
+            previousBitmaps.forEach { it.recycle() }
+        }
     }
 
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
@@ -252,8 +266,30 @@ private fun generateQrCode(content: String): Bitmap? {
             if (bitMatrix[i % width, i / width]) black else white
         }
         Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w("QrCodeDisplay", "Failed to generate QR code", e)
+        }
         null
+    }
+}
+
+private object ClipboardClearManager {
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingClear: Runnable? = null
+
+    fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
+        pendingClear?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingClear = null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                clipboard.clearPrimaryClip()
+            } else {
+                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
+        }
+        pendingClear = runnable
+        handler.postDelayed(runnable, delayMs)
     }
 }
 
@@ -266,14 +302,7 @@ internal fun copySensitiveText(context: Context, text: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
-
-    Handler(Looper.getMainLooper()).postDelayed({
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            clipboard.clearPrimaryClip()
-        } else {
-            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-        }
-    }, CLIPBOARD_CLEAR_DELAY_MS)
+    ClipboardClearManager.scheduleClear(clipboard, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
 internal fun setSecureScreen(context: Context, secure: Boolean) {

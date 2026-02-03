@@ -20,9 +20,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.util.Arrays
 import javax.crypto.Cipher
 
@@ -32,7 +35,16 @@ private const val MIN_PASSPHRASE_LENGTH = 15
 sealed class ExportState {
     object Idle : ExportState()
     object Exporting : ExportState()
-    data class Success(val data: String, val frames: List<String>) : ExportState()
+    class Success(data: String, val frames: List<String>) : ExportState() {
+        private var dataChars: CharArray? = data.toCharArray()
+
+        val data: String get() = dataChars?.let { String(it) } ?: ""
+
+        fun clear() {
+            dataChars?.let { Arrays.fill(it, '\u0000') }
+            dataChars = null
+        }
+    }
     data class Error(val message: String) : ExportState()
 }
 
@@ -111,6 +123,7 @@ fun ExportShareScreen(
             confirmPassphrase.clear()
             passphraseDisplay = ""
             confirmPassphraseDisplay = ""
+            (exportState as? ExportState.Success)?.clear()
             exportState = ExportState.Idle
         }
 
@@ -226,8 +239,8 @@ fun ExportShareScreen(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true,
-                    isError = confirmPassphrase.length > 0 && passphrase.value != confirmPassphrase.value,
-                    supportingText = if (confirmPassphrase.length > 0 && passphrase.value != confirmPassphrase.value) {
+                    isError = confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase),
+                    supportingText = if (confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase)) {
                         { Text("Passphrases do not match") }
                     } else null
                 )
@@ -258,7 +271,7 @@ fun ExportShareScreen(
                                 exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
                                 return@Button
                             }
-                            if (passphrase.value != confirmPassphrase.value) {
+                            if (!passphrase.contentEquals(confirmPassphrase)) {
                                 exportState = ExportState.Error("Passphrases do not match")
                                 return@Button
                             }
@@ -272,48 +285,54 @@ fun ExportShareScreen(
                                 cipherError = "No encryption key available"
                                 return@Button
                             }
+                            val passphraseChars = passphrase.toCharArray()
+                            fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
                             try {
-                                val passphraseChars = passphrase.toCharArray()
                                 onBiometricAuth(cipher) { authedCipher ->
                                     if (authedCipher != null) {
                                         val exportId = java.util.UUID.randomUUID().toString()
                                         storage.setPendingCipher(exportId, authedCipher)
                                         exportState = ExportState.Exporting
                                         coroutineScope.launch {
+                                            coroutineContext[Job]?.invokeOnCompletion { cause ->
+                                                if (cause is CancellationException) {
+                                                    clearChars()
+                                                    storage.clearPendingCipher(exportId)
+                                                }
+                                            }
                                             try {
-                                                val passphraseStr = String(passphraseChars)
                                                 val data = withContext(Dispatchers.IO) {
                                                     storage.setRequestIdContext(exportId)
                                                     try {
-                                                        keepMobile.exportShare(passphraseStr)
+                                                        keepMobile.exportShare(String(passphraseChars))
                                                     } finally {
                                                         storage.clearRequestIdContext()
                                                     }
                                                 }
-                                                val frames = generateFrames(data, MAX_SINGLE_QR_BYTES)
-                                                exportState = ExportState.Success(data, frames)
+                                                exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
                                             } catch (e: Exception) {
                                                 Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                                 exportState = ExportState.Error("Export failed. Please try again.")
                                             } finally {
-                                                Arrays.fill(passphraseChars, '\u0000')
+                                                clearChars()
                                                 storage.clearPendingCipher(exportId)
                                             }
                                         }
                                     } else {
-                                        Arrays.fill(passphraseChars, '\u0000')
+                                        clearChars()
                                         exportState = ExportState.Error("Authentication cancelled")
                                         Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             } catch (e: Exception) {
+                                clearChars()
                                 Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
                                 cipherError = "Failed to initialize encryption"
                             }
                         },
                         modifier = Modifier.weight(1f),
                         enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH &&
-                            passphrase.value == confirmPassphrase.value &&
+                            passphrase.contentEquals(confirmPassphrase) &&
                             calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
                     ) {
                         Text("Export")
