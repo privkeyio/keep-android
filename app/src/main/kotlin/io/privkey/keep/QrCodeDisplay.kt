@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipDescription
@@ -169,21 +170,11 @@ fun QrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var previousBitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(data) {
-        previousBitmap = bitmap
-        bitmap = withContext(Dispatchers.Default) { generateQrCode(data) }
-        previousBitmap?.recycle()
-        previousBitmap = null
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            bitmap?.recycle()
-            previousBitmap?.recycle()
-        }
+    @SuppressLint("ProduceStateDoesNotAssignValue") // False positive: value is assigned after withContext
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = data) {
+        val generated = withContext(Dispatchers.Default) { generateQrCode(data) }
+        value = generated
+        awaitDispose { value?.recycle() }
     }
 
     QrDisplayContainer(
