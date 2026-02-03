@@ -20,11 +20,11 @@ import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -300,17 +300,10 @@ class KeepMobileApp : Application() {
         manager.register()
     }
 
-    private fun isCancellationException(e: Throwable): Boolean {
-        if (e is CancellationException) return true
-        var cause = e.cause
-        var depth = 0
-        while (cause != null && depth < 10) {
-            if (cause is CancellationException) return true
-            cause = cause.cause
-            depth++
-        }
-        return false
-    }
+    private fun isCancellationException(e: Throwable): Boolean =
+        generateSequence(e) { it.cause }
+            .take(10)
+            .any { it is CancellationException }
 }
 
 data class ConnectionState(

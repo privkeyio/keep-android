@@ -470,24 +470,15 @@ fun MainScreen(
                 relaysConfigured = relays.isNotEmpty(),
                 onConnect = {
                     val activeKey = storage.getActiveShareKey()
-                    val cipher = try {
-                        if (activeKey != null) {
-                            storage.getCipherForShareDecryption(activeKey)
-                        } else {
-                            storage.getCipherForDecryption()
-                        }
-                    } catch (e: Exception) {
-                        Log.e("MainActivity", "Failed to get cipher for connection", e)
-                        return@ConnectCard
-                    }
-                    if (cipher == null) {
-                        Log.e("MainActivity", "No encryption key available for connection")
-                        return@ConnectCard
-                    }
+                    val cipher = runCatching {
+                        if (activeKey != null) storage.getCipherForShareDecryption(activeKey)
+                        else storage.getCipherForDecryption()
+                    }.onFailure {
+                        Log.e("MainActivity", "Failed to get cipher for connection", it)
+                    }.getOrNull() ?: return@ConnectCard
+
                     onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
-                        if (authedCipher != null) {
-                            onConnect(authedCipher) { _, _ -> }
-                        }
+                        authedCipher?.let { onConnect(it) { _, _ -> } }
                     }
                 }
             )
