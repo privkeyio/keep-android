@@ -24,6 +24,7 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 
 class Nip55ContentProvider : ContentProvider() {
@@ -237,10 +238,18 @@ class Nip55ContentProvider : ContentProvider() {
             }
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
-                    val storedMetadata = app.getStorage()?.getShareMetadata()
-                    val storedPubkey = storedMetadata?.groupPubkey?.joinToString("") { "%02x".format(it) }
-                    if (storedPubkey != null && response.result != storedPubkey) {
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey mismatch: returned=${response.result?.take(16)}, stored=${storedPubkey.take(16)}")
+                    val storage = app.getStorage()
+                        ?: throw IllegalStateException("Storage unavailable for pubkey verification")
+                    val storedMetadata = storage.getShareMetadata()
+                    val groupPubkey = storedMetadata?.groupPubkey
+                    if (groupPubkey == null || groupPubkey.isEmpty()) {
+                        throw IllegalStateException("Stored pubkey unavailable for verification")
+                    }
+                    val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it) }
+                    val returnedBytes = response.result.toByteArray(Charsets.UTF_8)
+                    val storedBytes = storedPubkey.toByteArray(Charsets.UTF_8)
+                    if (!MessageDigest.isEqual(returnedBytes, storedBytes)) {
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
                         throw IllegalStateException("Pubkey verification failed")
                     }
                 }
