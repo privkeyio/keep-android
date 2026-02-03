@@ -62,7 +62,7 @@ class CallerVerificationStore(context: Context) {
 
             val digest = MessageDigest.getInstance("SHA-256")
             sortedSignatureBytes.forEach { digest.update(it) }
-            digest.digest().joinToString("") { "%02x".format(it) }
+            digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         } catch (_: Exception) {
             null
         }
@@ -90,7 +90,7 @@ class CallerVerificationStore(context: Context) {
     fun generateNonce(packageName: String): String {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
-        val nonce = bytes.joinToString("") { "%02x".format(it) }
+        val nonce = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         val expiresAt = System.currentTimeMillis() + NONCE_EXPIRY_MS
         activeNonces[nonce] = NonceData(packageName, expiresAt)
         return nonce

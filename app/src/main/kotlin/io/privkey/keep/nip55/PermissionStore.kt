@@ -395,7 +395,7 @@ private fun calculateEntryHash(
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
     val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
-    return hashBytes.joinToString("") { "%02x".format(it) }
+    return hashBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 }
 
 private fun constantTimeEquals(a: String?, b: String?): Boolean {

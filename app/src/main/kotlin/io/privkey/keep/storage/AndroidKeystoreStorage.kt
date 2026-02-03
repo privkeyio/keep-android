@@ -76,7 +76,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun sanitizeKey(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val hash = digest.digest(key.toByteArray(Charsets.UTF_8))
-        return hash.joinToString("") { "%02x".format(it) }
+        return hash.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
     private fun getLegacyKeystoreAlias(key: String): String {
