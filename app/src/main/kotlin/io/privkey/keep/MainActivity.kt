@@ -32,6 +32,7 @@ import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -65,6 +66,7 @@ class MainActivity : FragmentActivity() {
         val biometricTimeoutStore = app.getBiometricTimeoutStore()
         val permissionStore = app.getPermissionStore()
         val bunkerConfigStore = app.getBunkerConfigStore()
+        val proxyConfigStore = app.getProxyConfigStore()
 
         val allDependenciesAvailable = keepMobile != null &&
             storage != null &&
@@ -76,7 +78,8 @@ class MainActivity : FragmentActivity() {
             pinStore != null &&
             biometricTimeoutStore != null &&
             permissionStore != null &&
-            bunkerConfigStore != null
+            bunkerConfigStore != null &&
+            proxyConfigStore != null
 
         setContent {
             var isPinUnlocked by remember {
@@ -120,6 +123,7 @@ class MainActivity : FragmentActivity() {
                             biometricTimeoutStore = biometricTimeoutStore!!,
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
+                            proxyConfigStore = proxyConfigStore!!,
                             connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -189,6 +193,7 @@ fun MainScreen(
     biometricTimeoutStore: BiometricTimeoutStore,
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
+    proxyConfigStore: ProxyConfigStore,
     connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -229,6 +234,9 @@ fun MainScreen(
     var showBunkerScreen by remember { mutableStateOf(false) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
+    var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
+    var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
+    var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -465,6 +473,27 @@ fun MainScreen(
                     val updated = relays - relay
                     relays = updated
                     onRelaysChanged(updated)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ProxySettingsCard(
+                enabled = proxyEnabled,
+                host = proxyHost,
+                port = proxyPort,
+                onToggle = { enabled ->
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
+                        proxyEnabled = enabled
+                    }
+                },
+                onConfigChange = { host, port ->
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
+                        proxyHost = host
+                        proxyPort = port
+                    }
                 }
             )
 

@@ -2,6 +2,7 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -154,7 +155,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         val data = PendingCipherData(
             cipher = cipher,
             creatingThreadId = Thread.currentThread().id,
-            createdAtMs = System.currentTimeMillis()
+            createdAtMs = SystemClock.elapsedRealtime()
         )
         pendingCiphers[requestId] = data
         if (onConsumed != null) {
@@ -170,7 +171,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun consumePendingCipher(requestId: String): Cipher? {
         val data = pendingCiphers.remove(requestId) ?: return null
         val callback = cipherConsumedCallbacks.remove(requestId)
-        val isExpired = System.currentTimeMillis() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+        val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
         if (isExpired) return null
         callback?.invoke()
         return data.cipher
@@ -363,7 +364,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+    fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -371,7 +372,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
 
-    override fun loadShareByKey(key: String): ByteArray {
+    fun loadShareByKey(key: String): ByteArray {
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -379,7 +380,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return loadShareByKeyWithCipher(cipher, key)
     }
 
-    override fun listAllShares(): List<ShareMetadataInfo> {
+    fun listAllShares(): List<ShareMetadataInfo> {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         return keys.mapNotNull(::getShareMetadataByKey)
     }
@@ -390,7 +391,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return readMetadataFromPrefs(sharePrefs)
     }
 
-    override fun deleteShareByKey(key: String) {
+    fun deleteShareByKey(key: String) {
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
@@ -423,11 +424,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    override fun getActiveShareKey(): String? {
+    fun getActiveShareKey(): String? {
         return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
     }
 
-    override fun setActiveShareKey(key: String?) {
+    fun setActiveShareKey(key: String?) {
         val editor = multiSharePrefs.edit()
         if (key != null) {
             editor.putString(KEY_ACTIVE_SHARE, key)

@@ -17,6 +17,8 @@ import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.ProxyConfig
+import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
@@ -54,6 +56,7 @@ class KeepMobileApp : Application() {
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var bunkerConfigStore: BunkerConfigStore? = null
+    private var proxyConfigStore: ProxyConfigStore? = null
     private var announceJob: Job? = null
     private var connectionJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -81,6 +84,7 @@ class KeepMobileApp : Application() {
             val newForegroundService = ForegroundServiceStore(this)
             val newPinStore = PinStore(this)
             val newBiometricTimeoutStore = BiometricTimeoutStore(this)
+            val newProxyConfig = ProxyConfigStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
@@ -90,6 +94,7 @@ class KeepMobileApp : Application() {
             foregroundServiceStore = newForegroundService
             pinStore = newPinStore
             biometricTimeoutStore = newBiometricTimeoutStore
+            proxyConfigStore = newProxyConfig
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         } catch (e: Exception) {
@@ -178,6 +183,8 @@ class KeepMobileApp : Application() {
 
     fun getBunkerConfigStore(): BunkerConfigStore? = bunkerConfigStore
 
+    fun getProxyConfigStore(): ProxyConfigStore? = proxyConfigStore
+
     fun updateBunkerService(enabled: Boolean) {
         bunkerConfigStore?.setEnabled(enabled)
         val action = if (enabled) BunkerService::start else BunkerService::stop
@@ -231,13 +238,22 @@ class KeepMobileApp : Application() {
     }
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
+        val proxy = proxyConfigStore?.getProxyConfig()
         if (BuildConfig.DEBUG) {
             val shareInfo = mobile.getShareInfo()
             Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
-            Log.d(TAG, "Initializing with ${relays.size} relay(s)")
+            Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxy != null}")
         }
-        mobile.initialize(relays)
+        mobile.initializeWithProxy(relays, proxy)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
+    }
+
+    private fun KeepMobile.initializeWithProxy(relays: List<String>, proxy: ProxyConfig?) {
+        if (proxy != null) {
+            initializeWithProxy(relays, proxy.host, proxy.port.toUShort())
+        } else {
+            initialize(relays)
+        }
     }
 
     private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
@@ -272,7 +288,7 @@ class KeepMobileApp : Application() {
         if (!store.hasShare() || relays.isEmpty()) return
 
         applicationScope.launch {
-            runCatching { mobile.initialize(relays) }
+            runCatching { mobile.initializeWithProxy(relays, proxyConfigStore?.getProxyConfig()) }
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
         }
     }
