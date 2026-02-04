@@ -80,7 +80,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.5.2")
     implementation("androidx.camera:camera-view:1.5.2")
     implementation("com.google.zxing:core:3.5.3")
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 
     ksp("androidx.room:room-compiler:$roomVersion")
 
