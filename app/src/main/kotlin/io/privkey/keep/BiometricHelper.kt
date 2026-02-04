@@ -34,10 +34,6 @@ class BiometricHelper(
         }
     }
 
-    /**
-     * Non-crypto biometric authentication (e.g., for kill switch toggle).
-     * Respects the biometric timeout setting - skips prompt if recently authenticated.
-     */
     suspend fun authenticate(
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",

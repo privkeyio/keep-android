@@ -75,17 +75,12 @@ class BiometricTimeoutStore(context: Context) {
     fun requiresBiometric(): Boolean {
         val timeout = getTimeout()
         if (timeout == TIMEOUT_EVERY_TIME) return true
-
         if (lastAuthRealtime == 0L || lastAuthWall == 0L) return true
 
-        val currentRealtime = SystemClock.elapsedRealtime()
-        val currentWall = System.currentTimeMillis()
+        val elapsedRealtime = SystemClock.elapsedRealtime() - lastAuthRealtime
+        val elapsedWall = System.currentTimeMillis() - lastAuthWall
 
-        val elapsedRealtime = currentRealtime - lastAuthRealtime
-        val elapsedWall = currentWall - lastAuthWall
-
-        val clockTampered = elapsedRealtime < 0 || elapsedWall < 0
-        if (clockTampered) {
+        if (elapsedRealtime < 0 || elapsedWall < 0) {
             invalidateSession()
             return true
         }
