@@ -8,7 +8,7 @@ import androidx.security.crypto.MasterKey
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 5)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 6)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
@@ -68,7 +68,16 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE nip55_permissions ADD COLUMN createdAtElapsed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE nip55_permissions ADD COLUMN durationMs INTEGER")
+                db.execSQL("ALTER TABLE nip55_app_settings ADD COLUMN createdAtElapsed INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE nip55_app_settings ADD COLUMN durationMs INTEGER")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         private fun getEncryptedPrefs(context: Context) = EncryptedSharedPreferences.create(
             context,

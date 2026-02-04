@@ -1,5 +1,6 @@
 package io.privkey.keep.nip55
 
+import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.room.*
 import io.privkey.keep.R
@@ -34,9 +35,17 @@ data class Nip55Permission(
     val eventKind: Int = EVENT_KIND_GENERIC,
     val decision: String,
     val expiresAt: Long?,
-    val createdAt: Long
+    val createdAt: Long,
+    val createdAtElapsed: Long = 0,
+    val durationMs: Long? = null
 ) {
-    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt)
+    fun isExpired(): Boolean = isExpired(
+        currentElapsed = SystemClock.elapsedRealtime(),
+        currentTimeMillis = System.currentTimeMillis()
+    )
+
+    fun isExpired(currentElapsed: Long, currentTimeMillis: Long): Boolean =
+        isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs, currentElapsed, currentTimeMillis)
 
     val permissionDecision: PermissionDecision
         get() = PermissionDecision.fromString(decision)
@@ -74,9 +83,17 @@ data class Nip55AppSettings(
     @PrimaryKey val callerPackage: String,
     val expiresAt: Long?,
     val signPolicyOverride: Int?,
-    val createdAt: Long
+    val createdAt: Long,
+    val createdAtElapsed: Long = 0,
+    val durationMs: Long? = null
 ) {
-    fun isExpired(): Boolean = isTimestampExpired(expiresAt, createdAt)
+    fun isExpired(): Boolean = isExpired(
+        currentElapsed = SystemClock.elapsedRealtime(),
+        currentTimeMillis = System.currentTimeMillis()
+    )
+
+    fun isExpired(currentElapsed: Long, currentTimeMillis: Long): Boolean =
+        isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs, currentElapsed, currentTimeMillis)
 }
 
 data class VelocityConfig(
@@ -108,6 +125,7 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
     ONE_DAY(24 * 60 * 60 * 1000L, R.string.permission_duration_one_day),
     FOREVER(null, R.string.permission_duration_forever);
 
+    @Deprecated("Use monotonic time via durationMs field instead")
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
 
     val shouldPersist: Boolean
@@ -121,6 +139,7 @@ enum class AppExpiryDuration(val millis: Long?, @StringRes val displayNameRes: I
     ONE_WEEK(7 * 24 * 60 * 60 * 1000L, R.string.app_expiry_one_week),
     NEVER(null, R.string.app_expiry_never);
 
+    @Deprecated("Use monotonic time via durationMs field instead")
     fun expiresAt(): Long? = millis?.let { System.currentTimeMillis() + it }
 }
 
@@ -131,9 +150,31 @@ data class ConnectedAppInfo(
     val expiresAt: Long?
 )
 
-internal fun isTimestampExpired(expiresAt: Long?, createdAt: Long): Boolean {
-    if (expiresAt == null) return false
-    val now = System.currentTimeMillis()
-    val clockManipulated = now < createdAt
-    return clockManipulated || expiresAt <= now
+internal fun isTimestampExpired(
+    expiresAt: Long?,
+    createdAt: Long,
+    createdAtElapsed: Long,
+    durationMs: Long?,
+    currentElapsed: Long,
+    currentTimeMillis: Long
+): Boolean {
+    if (expiresAt == null && durationMs == null) return false
+
+    if (durationMs != null) {
+        if (createdAtElapsed > 0) {
+            if (currentElapsed < createdAtElapsed) return true
+            val elapsed = currentElapsed - createdAtElapsed
+            if (elapsed >= durationMs) return true
+        } else {
+            val wallClockExpiry = createdAt + durationMs
+            if (currentTimeMillis >= wallClockExpiry) return true
+        }
+    }
+
+    if (expiresAt != null) {
+        val clockManipulated = currentTimeMillis < createdAt
+        if (clockManipulated || expiresAt <= currentTimeMillis) return true
+    }
+
+    return false
 }

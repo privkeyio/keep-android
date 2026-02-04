@@ -21,6 +21,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,8 +47,8 @@ fun ConnectedAppsScreen(
         try {
             connectedApps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
         } catch (e: Exception) {
-            Log.e("ConnectedApps", "Failed to load connected apps", e)
-            loadError = e.message ?: "Failed to load connected apps"
+            if (BuildConfig.DEBUG) Log.e("ConnectedApps", "Failed to load connected apps", e)
+            loadError = "Failed to load connected apps"
         }
         isLoading = false
     }
@@ -152,7 +153,7 @@ private fun ConnectedAppItem(
                     verified = true
                 )
             } catch (e: PackageManager.NameNotFoundException) {
-                Log.w("ConnectedApps", "Package not found")
+                if (BuildConfig.DEBUG) Log.w("ConnectedApps", "Package not found")
                 AppInfoResult(label = null, icon = null, verified = false)
             }
         }

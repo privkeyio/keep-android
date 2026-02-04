@@ -244,7 +244,7 @@ class Nip55ContentProvider : ContentProvider() {
                     runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
                     showBackgroundSigningNotification(callerPackage, requestType, eventKind)
                 }.onFailure { e ->
-                    Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
                 val cursor = MatrixCursor(RESULT_COLUMNS)
                 val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
@@ -252,7 +252,7 @@ class Nip55ContentProvider : ContentProvider() {
                 cursor
             }
             .getOrElse { e ->
-                Log.e(TAG, "Background request failed: ${e::class.simpleName}")
+                if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}")
                 errorCursor(GENERIC_ERROR_MESSAGE, id)
             }
     }

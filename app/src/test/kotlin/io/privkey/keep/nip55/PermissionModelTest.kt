@@ -45,6 +45,8 @@ class Nip55PermissionTest {
 
     @Test
     fun `isExpired returns false when expiresAt is null`() {
+        val now = System.currentTimeMillis()
+        val elapsedTime = 10000L
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
@@ -52,51 +54,144 @@ class Nip55PermissionTest {
             eventKind = 1,
             decision = "allow",
             expiresAt = null,
-            createdAt = System.currentTimeMillis()
+            createdAt = now,
+            createdAtElapsed = elapsedTime,
+            durationMs = null
         )
-        assertFalse(permission.isExpired())
+        assertFalse(permission.isExpired(currentElapsed = elapsedTime, currentTimeMillis = now))
     }
 
     @Test
     fun `isExpired returns true when expiresAt is in the past`() {
+        val now = System.currentTimeMillis()
+        val elapsedTime = 10000L
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() - 1000,
-            createdAt = System.currentTimeMillis() - 2000
+            expiresAt = now - 1000,
+            createdAt = now - 2000,
+            createdAtElapsed = elapsedTime - 2000,
+            durationMs = null
         )
-        assertTrue(permission.isExpired())
+        assertTrue(permission.isExpired(currentElapsed = elapsedTime, currentTimeMillis = now))
     }
 
     @Test
     fun `isExpired returns false when expiresAt is in the future`() {
+        val now = System.currentTimeMillis()
+        val elapsedTime = 10000L
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() + 60000,
-            createdAt = System.currentTimeMillis()
+            expiresAt = now + 60000,
+            createdAt = now,
+            createdAtElapsed = elapsedTime,
+            durationMs = null
         )
-        assertFalse(permission.isExpired())
+        assertFalse(permission.isExpired(currentElapsed = elapsedTime, currentTimeMillis = now))
     }
 
     @Test
     fun `isExpired detects clock manipulation`() {
+        val now = System.currentTimeMillis()
+        val elapsedTime = 10000L
         val permission = Nip55Permission(
             id = 1,
             callerPackage = "com.test.app",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
-            expiresAt = System.currentTimeMillis() + 60000,
-            createdAt = System.currentTimeMillis() + 120000
+            expiresAt = now + 60000,
+            createdAt = now + 120000,
+            createdAtElapsed = elapsedTime,
+            durationMs = null
         )
-        assertTrue(permission.isExpired())
+        assertTrue(permission.isExpired(currentElapsed = elapsedTime, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired returns false when durationMs not yet expired`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 10000L
+        val currentElapsed = 15000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertFalse(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired returns true when durationMs expired`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 10000L
+        val durationMs = 60000L
+        val currentElapsed = createdElapsed + durationMs + 1000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertTrue(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired detects device reboot via elapsed time regression`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 100000L
+        val currentElapsed = 5000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertTrue(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired falls back to wall clock when createdAtElapsed is zero`() {
+        val createdAt = 1000000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = createdAt,
+            createdAtElapsed = 0,
+            durationMs = durationMs
+        )
+        assertFalse(permission.isExpired(currentElapsed = 5000L, currentTimeMillis = createdAt + 30000L))
+        assertTrue(permission.isExpired(currentElapsed = 5000L, currentTimeMillis = createdAt + 60000L))
     }
 
     @Test

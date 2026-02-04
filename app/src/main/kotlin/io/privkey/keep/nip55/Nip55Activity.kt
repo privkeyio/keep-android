@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -21,7 +22,6 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
-import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.Nip55Response
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -83,7 +83,7 @@ class Nip55Activity : FragmentActivity() {
 
         identifyCaller(intent)
         if (callerPackage == null) {
-            Log.w(TAG, "Rejecting request from unverified caller")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
         }
 
@@ -219,7 +219,7 @@ class Nip55Activity : FragmentActivity() {
                 callerPendingFirstUse = false
                 callerVerified = true
             } else {
-                Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
             }
         }
 
@@ -258,7 +258,7 @@ class Nip55Activity : FragmentActivity() {
         }
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-            .onFailure { Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to get cipher: ${it::class.simpleName}") }
             .getOrNull()
 
         if (cipher == null) {
@@ -272,7 +272,7 @@ class Nip55Activity : FragmentActivity() {
                 title = "Approve Request",
                 subtitle = req.requestType.displayName()
             )
-        }.onFailure { Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
             .getOrNull()
 
         if (authedCipher == null) {

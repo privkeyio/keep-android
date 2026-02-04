@@ -1,12 +1,14 @@
 package io.privkey.keep.nip55
 
+import android.os.SystemClock
 import androidx.room.withTransaction
 import io.privkey.keep.uniffi.Nip55RequestType
 import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-private const val HOUR_MS = 60 * 60 * 1000L
+private const val MINUTE_MS = 60 * 1000L
+private const val HOUR_MS = 60 * MINUTE_MS
 private const val DAY_MS = 24 * HOUR_MS
 private const val WEEK_MS = 7 * DAY_MS
 
@@ -18,13 +20,14 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
-        dao.deleteExpired(now)
-        auditDao.deleteOlderThan(now - 30L * 24 * 60 * 60 * 1000)
-        val expiredPackages = appSettingsDao.getExpiredPackages(now)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        dao.deleteExpired(now, nowElapsed)
+        auditDao.deleteOlderThan(now - 30 * DAY_MS)
+        val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
         expiredPackages.forEach { pkg ->
             dao.deleteForCaller(pkg)
         }
-        appSettingsDao.deleteExpired(now)
+        appSettingsDao.deleteExpired(now, nowElapsed)
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
@@ -68,6 +71,9 @@ class PermissionStore(private val database: Nip55Database) {
         decision: String
     ) {
         if (!duration.shouldPersist) return
+        val now = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+        @Suppress("DEPRECATION")
         dao.insertPermission(
             Nip55Permission(
                 callerPackage = callerPackage,
@@ -75,7 +81,9 @@ class PermissionStore(private val database: Nip55Database) {
                 eventKind = eventKind ?: EVENT_KIND_GENERIC,
                 decision = decision,
                 expiresAt = duration.expiresAt(),
-                createdAt = System.currentTimeMillis()
+                createdAt = now,
+                createdAtElapsed = nowElapsed,
+                durationMs = duration.millis
             )
         )
     }
@@ -217,12 +225,13 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getConnectedApps(): List<ConnectedAppInfo> {
         val now = System.currentTimeMillis()
-        val packages = dao.getAllCallerPackages(now)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val packages = dao.getAllCallerPackages(now, nowElapsed)
         return packages.map { pkg ->
             val appSettings = appSettingsDao.getSettings(pkg)
             ConnectedAppInfo(
                 packageName = pkg,
-                permissionCount = dao.getPermissionCountForCaller(pkg, now),
+                permissionCount = dao.getPermissionCountForCaller(pkg, now, nowElapsed),
                 lastUsedTime = auditDao.getLastUsedTime(pkg),
                 expiresAt = appSettings?.expiresAt
             )
@@ -233,17 +242,22 @@ class PermissionStore(private val database: Nip55Database) {
         appSettingsDao.getSettings(callerPackage)
 
     suspend fun setAppExpiry(callerPackage: String, duration: AppExpiryDuration) {
+        @Suppress("DEPRECATION")
         val expiresAt = duration.expiresAt()
         val existing = appSettingsDao.getSettings(callerPackage)
         if (expiresAt == null && existing?.signPolicyOverride == null) {
             appSettingsDao.delete(callerPackage)
         } else {
+            val now = System.currentTimeMillis()
+            val nowElapsed = SystemClock.elapsedRealtime()
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
                     expiresAt = expiresAt,
                     signPolicyOverride = existing?.signPolicyOverride,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = now,
+                    createdAtElapsed = nowElapsed,
+                    durationMs = duration.millis
                 )
             )
         }
@@ -255,7 +269,7 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     suspend fun getPermissionsForCaller(callerPackage: String): List<Nip55Permission> =
-        dao.getForCaller(callerPackage, System.currentTimeMillis())
+        dao.getForCaller(callerPackage, System.currentTimeMillis(), SystemClock.elapsedRealtime())
 
     suspend fun deletePermission(id: Long) = dao.deleteById(id)
 
@@ -286,6 +300,8 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?
     ) {
+        val now = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
         database.withTransaction {
             dao.insertPermission(
                 Nip55Permission(
@@ -294,7 +310,9 @@ class PermissionStore(private val database: Nip55Database) {
                     eventKind = eventKind ?: EVENT_KIND_GENERIC,
                     decision = PermissionDecision.ASK.toString(),
                     expiresAt = null,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = now,
+                    createdAtElapsed = nowElapsed,
+                    durationMs = null
                 )
             )
             logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
@@ -335,12 +353,16 @@ class PermissionStore(private val database: Nip55Database) {
         if (signPolicyOrdinal == null && existing?.expiresAt == null) {
             appSettingsDao.delete(callerPackage)
         } else {
+            val now = System.currentTimeMillis()
+            val nowElapsed = SystemClock.elapsedRealtime()
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
                     expiresAt = existing?.expiresAt,
                     signPolicyOverride = signPolicyOrdinal,
-                    createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                    createdAt = existing?.createdAt ?: now,
+                    createdAtElapsed = existing?.createdAtElapsed ?: nowElapsed,
+                    durationMs = existing?.durationMs
                 )
             )
         }
@@ -357,10 +379,10 @@ fun formatRequestType(type: String): String =
 fun formatRelativeTime(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
     return when {
-        diff < 60_000 -> "just now"
-        diff < 3600_000 -> "${diff / 60_000}m ago"
-        diff < 86400_000 -> "${diff / 3600_000}h ago"
-        diff < 604800_000 -> "${diff / 86400_000}d ago"
+        diff < MINUTE_MS -> "just now"
+        diff < HOUR_MS -> "${diff / MINUTE_MS}m ago"
+        diff < DAY_MS -> "${diff / HOUR_MS}h ago"
+        diff < WEEK_MS -> "${diff / DAY_MS}d ago"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
@@ -372,10 +394,10 @@ fun formatExpiry(timestamp: Long): String {
     val remaining = timestamp - System.currentTimeMillis()
     return when {
         remaining <= 0 -> "expired"
-        remaining < 60_000 -> "<1m"
-        remaining < 3600_000 -> "in ${remaining / 60_000}m"
-        remaining < 86400_000 -> "in ${remaining / 3600_000}h"
-        remaining < 604800_000 -> "in ${remaining / 86400_000}d"
+        remaining < MINUTE_MS -> "<1m"
+        remaining < HOUR_MS -> "in ${remaining / MINUTE_MS}m"
+        remaining < DAY_MS -> "in ${remaining / HOUR_MS}h"
+        remaining < WEEK_MS -> "in ${remaining / DAY_MS}d"
         else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
