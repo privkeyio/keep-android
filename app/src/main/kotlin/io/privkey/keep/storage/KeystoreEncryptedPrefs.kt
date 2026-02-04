@@ -2,46 +2,75 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
+import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 object KeystoreEncryptedPrefs {
 
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS_PREFIX = "keep_prefs_"
-    private const val GCM_TAG_LENGTH = 128
-    private const val GCM_IV_LENGTH = 12
+    private const val GCM_TAG_BITS = 128
+    private const val GCM_IV_BYTES = 12
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
+
+    private const val PREFIX_STRING = "s:"
+    private const val PREFIX_INT = "i:"
+    private const val PREFIX_LONG = "l:"
+    private const val PREFIX_FLOAT = "f:"
+    private const val PREFIX_BOOL = "b:"
+    private const val PREFIX_STRING_SET = "ss:"
+    private const val STRING_SET_DELIMITER = "\u0000"
 
     fun create(context: Context, prefsName: String): SharedPreferences {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
-        val secretKey = getOrCreateKey(keyAlias)
+        val secretKey = getOrCreateKey(context, keyAlias)
         val basePrefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         return EncryptingSharedPreferences(basePrefs, secretKey)
     }
 
-    private fun getOrCreateKey(alias: String): SecretKey {
+    private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+    }.getOrDefault(false)
+
+    private fun getOrCreateKey(context: Context, alias: String): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(alias)) {
             return keyStore.getKey(alias, null) as SecretKey
         }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        val spec = KeyGenParameterSpec.Builder(
+        val builder = KeyGenParameterSpec.Builder(
             alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .build()
-        keyGenerator.init(spec)
+
+        if (isStrongBoxAvailable(context)) {
+            try {
+                builder.setIsStrongBoxBacked(true)
+                keyGenerator.init(builder.build())
+                return keyGenerator.generateKey()
+            } catch (_: Exception) {
+                builder.setIsStrongBoxBacked(false)
+            }
+        }
+
+        keyGenerator.init(builder.build())
         return keyGenerator.generateKey()
     }
 
@@ -58,47 +87,67 @@ object KeystoreEncryptedPrefs {
 
     private fun decrypt(key: SecretKey, ciphertext: String): String {
         val combined = Base64.decode(ciphertext, Base64.NO_WRAP)
-        val iv = combined.copyOfRange(0, GCM_IV_LENGTH)
-        val encrypted = combined.copyOfRange(GCM_IV_LENGTH, combined.size)
+        val iv = combined.copyOfRange(0, GCM_IV_BYTES)
+        val encrypted = combined.copyOfRange(GCM_IV_BYTES, combined.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
         return String(cipher.doFinal(encrypted), Charsets.UTF_8)
     }
-
-    private fun encryptKey(key: SecretKey, keyName: String): String = encrypt(key, keyName)
-
-    private fun decryptKey(key: SecretKey, encryptedKey: String): String = decrypt(key, encryptedKey)
 
     private class EncryptingSharedPreferences(
         private val basePrefs: SharedPreferences,
         private val secretKey: SecretKey
     ) : SharedPreferences {
 
-        private val keyCache = mutableMapOf<String, String>()
+        private val keyCache = ConcurrentHashMap<String, String>()
+        private val reverseKeyCache = ConcurrentHashMap<String, String>()
+        @Volatile
+        private var hmacKey: ByteArray? = null
+        private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
+
+        private fun getHmacKey(): ByteArray {
+            hmacKey?.let { return it }
+            synchronized(this) {
+                hmacKey?.let { return it }
+                val derivedKey = MessageDigest.getInstance("SHA-256")
+                    .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
+                hmacKey = derivedKey
+                return derivedKey
+            }
+        }
+
+        private fun calculateKeyHash(plainKey: String): String {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(getHmacKey(), "HmacSHA256"))
+            val hash = mac.doFinal(plainKey.toByteArray(Charsets.UTF_8))
+            return Base64.encodeToString(hash, Base64.NO_WRAP or Base64.URL_SAFE)
+        }
 
         private fun getEncryptedKeyName(plainKey: String): String {
-            return keyCache.getOrPut(plainKey) { encryptKey(secretKey, plainKey) }
+            keyCache[plainKey]?.let { return it }
+            val hash = calculateKeyHash(plainKey)
+            keyCache[plainKey] = hash
+            reverseKeyCache[hash] = plainKey
+            return hash
         }
 
         private fun findEncryptedKey(plainKey: String): String? {
-            keyCache[plainKey]?.let { return it }
-            for (encKey in basePrefs.all.keys) {
-                try {
-                    val decrypted = decryptKey(secretKey, encKey)
-                    keyCache[decrypted] = encKey
-                    if (decrypted == plainKey) return encKey
-                } catch (_: Exception) {
-                    continue
-                }
+            keyCache[plainKey]?.let { encKey ->
+                if (basePrefs.contains(encKey)) return encKey
             }
-            return null
+            val hash = calculateKeyHash(plainKey)
+            return if (basePrefs.contains(hash)) {
+                keyCache[plainKey] = hash
+                reverseKeyCache[hash] = plainKey
+                hash
+            } else null
         }
 
         override fun getAll(): MutableMap<String, *> {
             val result = mutableMapOf<String, Any?>()
             for ((encKey, encValue) in basePrefs.all) {
+                val plainKey = reverseKeyCache[encKey] ?: continue
                 try {
-                    val plainKey = decryptKey(secretKey, encKey)
                     val plainValue = when (encValue) {
                         is String -> decryptValue(encValue)
                         else -> encValue
@@ -114,107 +163,87 @@ object KeystoreEncryptedPrefs {
         private fun decryptValue(encrypted: String): Any? {
             val decrypted = decrypt(secretKey, encrypted)
             return when {
-                decrypted.startsWith("s:") -> decrypted.substring(2)
-                decrypted.startsWith("i:") -> decrypted.substring(2).toIntOrNull()
-                decrypted.startsWith("l:") -> decrypted.substring(2).toLongOrNull()
-                decrypted.startsWith("f:") -> decrypted.substring(2).toFloatOrNull()
-                decrypted.startsWith("b:") -> decrypted.substring(2) == "true"
-                decrypted.startsWith("ss:") -> decrypted.substring(3).split("\u0000").toSet()
+                decrypted.startsWith(PREFIX_STRING) -> decrypted.removePrefix(PREFIX_STRING)
+                decrypted.startsWith(PREFIX_INT) -> decrypted.removePrefix(PREFIX_INT).toIntOrNull()
+                decrypted.startsWith(PREFIX_LONG) -> decrypted.removePrefix(PREFIX_LONG).toLongOrNull()
+                decrypted.startsWith(PREFIX_FLOAT) -> decrypted.removePrefix(PREFIX_FLOAT).toFloatOrNull()
+                decrypted.startsWith(PREFIX_BOOL) -> decrypted.removePrefix(PREFIX_BOOL) == "true"
+                decrypted.startsWith(PREFIX_STRING_SET) -> decrypted.removePrefix(PREFIX_STRING_SET).split(STRING_SET_DELIMITER).toSet()
                 else -> decrypted
             }
         }
 
         private fun encryptValue(value: Any?): String {
             val prefixed = when (value) {
-                is String -> "s:$value"
-                is Int -> "i:$value"
-                is Long -> "l:$value"
-                is Float -> "f:$value"
-                is Boolean -> "b:$value"
-                is Set<*> -> "ss:" + value.joinToString("\u0000")
+                is String -> PREFIX_STRING + value
+                is Int -> PREFIX_INT + value
+                is Long -> PREFIX_LONG + value
+                is Float -> PREFIX_FLOAT + value
+                is Boolean -> PREFIX_BOOL + value
+                is Set<*> -> PREFIX_STRING_SET + value.joinToString(STRING_SET_DELIMITER)
                 else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass}")
             }
             return encrypt(secretKey, prefixed)
         }
 
-        override fun getString(key: String, defValue: String?): String? {
+        private inline fun <T> getTypedValue(
+            key: String,
+            defValue: T,
+            prefix: String,
+            crossinline parse: (String) -> T
+        ): T {
             val encKey = findEncryptedKey(key) ?: return defValue
             val encValue = basePrefs.getString(encKey, null) ?: return defValue
             return try {
                 val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("s:")) decrypted.substring(2) else decrypted
+                if (decrypted.startsWith(prefix)) parse(decrypted.removePrefix(prefix)) else defValue
             } catch (_: Exception) {
                 defValue
             }
         }
 
-        override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? {
-            val encKey = findEncryptedKey(key) ?: return defValues
-            val encValue = basePrefs.getString(encKey, null) ?: return defValues
-            return try {
-                val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("ss:")) {
-                    decrypted.substring(3).split("\u0000").filter { it.isNotEmpty() }.toMutableSet()
-                } else defValues
-            } catch (_: Exception) {
-                defValues
-            }
-        }
+        override fun getString(key: String, defValue: String?): String? =
+            getTypedValue(key, defValue, PREFIX_STRING) { it }
 
-        override fun getInt(key: String, defValue: Int): Int {
-            val encKey = findEncryptedKey(key) ?: return defValue
-            val encValue = basePrefs.getString(encKey, null) ?: return defValue
-            return try {
-                val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("i:")) decrypted.substring(2).toInt() else defValue
-            } catch (_: Exception) {
-                defValue
+        override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
+            getTypedValue(key, defValues, PREFIX_STRING_SET) { raw ->
+                raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toMutableSet()
             }
-        }
 
-        override fun getLong(key: String, defValue: Long): Long {
-            val encKey = findEncryptedKey(key) ?: return defValue
-            val encValue = basePrefs.getString(encKey, null) ?: return defValue
-            return try {
-                val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("l:")) decrypted.substring(2).toLong() else defValue
-            } catch (_: Exception) {
-                defValue
-            }
-        }
+        override fun getInt(key: String, defValue: Int): Int =
+            getTypedValue(key, defValue, PREFIX_INT) { it.toInt() }
 
-        override fun getFloat(key: String, defValue: Float): Float {
-            val encKey = findEncryptedKey(key) ?: return defValue
-            val encValue = basePrefs.getString(encKey, null) ?: return defValue
-            return try {
-                val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("f:")) decrypted.substring(2).toFloat() else defValue
-            } catch (_: Exception) {
-                defValue
-            }
-        }
+        override fun getLong(key: String, defValue: Long): Long =
+            getTypedValue(key, defValue, PREFIX_LONG) { it.toLong() }
 
-        override fun getBoolean(key: String, defValue: Boolean): Boolean {
-            val encKey = findEncryptedKey(key) ?: return defValue
-            val encValue = basePrefs.getString(encKey, null) ?: return defValue
-            return try {
-                val decrypted = decrypt(secretKey, encValue)
-                if (decrypted.startsWith("b:")) decrypted.substring(2) == "true" else defValue
-            } catch (_: Exception) {
-                defValue
-            }
-        }
+        override fun getFloat(key: String, defValue: Float): Float =
+            getTypedValue(key, defValue, PREFIX_FLOAT) { it.toFloat() }
+
+        override fun getBoolean(key: String, defValue: Boolean): Boolean =
+            getTypedValue(key, defValue, PREFIX_BOOL) { it == "true" }
 
         override fun contains(key: String): Boolean = findEncryptedKey(key) != null
 
         override fun edit(): SharedPreferences.Editor = EncryptingEditor()
 
         override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {
-            basePrefs.registerOnSharedPreferenceChangeListener(listener)
+            if (listener == null) return
+            val wrappedListener = SharedPreferences.OnSharedPreferenceChangeListener { _, encKey ->
+                val plainKey = reverseKeyCache[encKey]
+                if (plainKey != null) {
+                    listener.onSharedPreferenceChanged(this, plainKey)
+                }
+            }
+            listenerMap[listener] = wrappedListener
+            basePrefs.registerOnSharedPreferenceChangeListener(wrappedListener)
         }
 
         override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {
-            basePrefs.unregisterOnSharedPreferenceChangeListener(listener)
+            if (listener == null) return
+            val wrappedListener = listenerMap.remove(listener)
+            if (wrappedListener != null) {
+                basePrefs.unregisterOnSharedPreferenceChangeListener(wrappedListener)
+            }
         }
 
         private inner class EncryptingEditor : SharedPreferences.Editor {
@@ -282,6 +311,7 @@ object KeystoreEncryptedPrefs {
                 if (clearRequested) {
                     baseEditor.clear()
                     keyCache.clear()
+                    reverseKeyCache.clear()
                 }
 
                 for (plainKey in pendingRemoves) {
@@ -289,17 +319,14 @@ object KeystoreEncryptedPrefs {
                     if (encKey != null) {
                         baseEditor.remove(encKey)
                         keyCache.remove(plainKey)
+                        reverseKeyCache.remove(encKey)
                     }
                 }
 
                 for ((plainKey, value) in pendingPuts) {
-                    val existingEncKey = findEncryptedKey(plainKey)
-                    if (existingEncKey != null) {
-                        baseEditor.remove(existingEncKey)
-                    }
-                    val newEncKey = getEncryptedKeyName(plainKey)
+                    val encKey = getEncryptedKeyName(plainKey)
                     val encValue = encryptValue(value)
-                    baseEditor.putString(newEncKey, encValue)
+                    baseEditor.putString(encKey, encValue)
                 }
             }
         }

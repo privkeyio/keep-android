@@ -3,8 +3,6 @@ package io.privkey.keep.storage
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 class BiometricTimeoutStore(context: Context) {
     companion object {
@@ -33,18 +31,7 @@ class BiometricTimeoutStore(context: Context) {
             }
     }
 
-    private val prefs: SharedPreferences = run {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
     @Volatile private var lastAuthRealtime: Long = 0L
     @Volatile private var lastAuthWall: Long = 0L
