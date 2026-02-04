@@ -39,7 +39,7 @@ jobs:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@650c5ca14212efbbf3e580844b04bdccf68dac31 # v2
+        uses: taiki-e/install-action@3f67faa728964808f52294a9cd15561b15550b28 # v2
         with:
           tool: cargo-ndk
 
