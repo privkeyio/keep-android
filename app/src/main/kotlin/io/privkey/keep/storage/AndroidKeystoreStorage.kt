@@ -8,8 +8,6 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
@@ -56,18 +54,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         load(null)
     }
 
-    private fun createEncryptedPrefs(name: String): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            name,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private fun createEncryptedPrefs(name: String): SharedPreferences =
+        KeystoreEncryptedPrefs.create(context, name)
 
     private val prefs: SharedPreferences by lazy { createEncryptedPrefs(PREFS_NAME) }
 

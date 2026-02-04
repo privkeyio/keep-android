@@ -12,7 +12,7 @@ android {
 
     defaultConfig {
         applicationId = "io.privkey.keep"
-        minSdk = 33  // Android 13 for UniFFI Cleaner API
+        minSdk = 33
         targetSdk = 36
         versionCode = 3
         versionName = "0.3.0"
@@ -54,8 +54,7 @@ android {
     }
 
     lint {
-        disable += "MutableCollectionMutableState"
-        disable += "AutoboxingStateCreation"
+        disable += listOf("MutableCollectionMutableState", "AutoboxingStateCreation")
     }
 }
 
@@ -75,7 +74,7 @@ dependencies {
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
     implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.camera:camera-camera2:1.5.2")
     implementation("androidx.camera:camera-lifecycle:1.5.2")

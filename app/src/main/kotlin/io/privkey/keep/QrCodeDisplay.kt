@@ -50,7 +50,7 @@ import java.util.Arrays
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 2_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
