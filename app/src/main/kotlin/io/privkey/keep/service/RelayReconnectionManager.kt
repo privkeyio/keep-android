@@ -108,7 +108,8 @@ class RelayReconnectionManager {
         val cappedDelay = min(baseDelay, MAX_DELAY_MS)
         val jitterRange = (cappedDelay * JITTER_FACTOR).toLong()
         val jitter = if (jitterRange > 0) {
-            secureRandom.nextLong(jitterRange * 2) - jitterRange
+            // Use nextDouble() for API 33 compatibility (nextLong(bound) requires API 35)
+            (secureRandom.nextDouble() * jitterRange * 2 - jitterRange).toLong()
         } else 0L
         return (cappedDelay + jitter).coerceIn(INITIAL_DELAY_MS, MAX_DELAY_MS)
     }
