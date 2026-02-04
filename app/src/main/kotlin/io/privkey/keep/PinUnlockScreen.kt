@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import io.privkey.keep.storage.PinStore
 import kotlinx.coroutines.delay
 
@@ -23,11 +24,19 @@ fun PinUnlockScreen(
     onUnlocked: () -> Unit,
     onBiometricFallback: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
     val focusRequester = remember { FocusRequester() }
+
+    DisposableEffect(Unit) {
+        setSecureScreen(context, true)
+        onDispose {
+            setSecureScreen(context, false)
+        }
+    }
 
     LaunchedEffect(isLockedOut) {
         while (isLockedOut) {
