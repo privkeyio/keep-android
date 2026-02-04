@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
@@ -38,12 +39,13 @@ import com.google.zxing.qrcode.QRCodeWriter
 import io.privkey.keep.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import java.util.Arrays
 
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 10_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
@@ -293,11 +295,11 @@ private fun generateQrCode(content: String): Bitmap? {
 private object ClipboardClearManager {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingClear: Runnable? = null
-    private var clipboardRef: java.lang.ref.WeakReference<ClipboardManager>? = null
+    private var clipboardRef: WeakReference<ClipboardManager>? = null
 
     fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
         pendingClear?.let { handler.removeCallbacks(it) }
-        clipboardRef = java.lang.ref.WeakReference(clipboard)
+        clipboardRef = WeakReference(clipboard)
         val runnable = Runnable {
             pendingClear = null
             clipboardRef?.get()?.let { cb ->
@@ -326,14 +328,78 @@ internal fun copySensitiveText(context: Context, text: String) {
     ClipboardClearManager.scheduleClear(clipboard, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
+/**
+ * Manages FLAG_SECURE reference counting for Activity windows.
+ *
+ * All operations MUST be called from the main thread (enforced via Looper check).
+ * This avoids race conditions without requiring synchronization.
+ *
+ * The manager tracks the current Activity via a WeakReference. If a different Activity
+ * is passed (e.g., after Activity recreation), the refCount is reset to handle the new instance.
+ */
+private object SecureScreenManager {
+    private var refCount = 0
+    private var activityRef: WeakReference<Activity>? = null
+
+    fun acquire(activity: Activity) {
+        checkMainThread()
+        val currentActivity = activityRef?.get()
+        if (currentActivity !== activity) {
+            refCount = 0
+            activityRef = WeakReference(activity)
+        }
+        if (refCount == 0) {
+            activity.window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        }
+        refCount++
+    }
+
+    fun release(activity: Activity) {
+        checkMainThread()
+        val currentActivity = activityRef?.get()
+        if (currentActivity == null || currentActivity !== activity) {
+            return
+        }
+        if (refCount <= 0) {
+            refCount = 0
+            return
+        }
+        refCount--
+        if (refCount == 0) {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    private fun checkMainThread() {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "SecureScreenManager must be called from the main thread"
+        }
+    }
+}
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 internal fun setSecureScreen(context: Context, secure: Boolean) {
-    val activity = context as? Activity ?: return
+    val activity = context.findActivity()
+    if (activity == null) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w("SecureScreen", "setSecureScreen called with non-Activity context: ${context.javaClass.name}")
+        }
+        return
+    }
     if (secure) {
-        activity.window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        SecureScreenManager.acquire(activity)
     } else {
-        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        SecureScreenManager.release(activity)
     }
 }

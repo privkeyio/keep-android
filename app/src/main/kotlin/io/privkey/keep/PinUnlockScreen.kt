@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -28,6 +29,12 @@ fun PinUnlockScreen(
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
     val focusRequester = remember { FocusRequester() }
+    val context = LocalContext.current
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose { setSecureScreen(context, false) }
+    }
 
     LaunchedEffect(isLockedOut) {
         while (isLockedOut) {
