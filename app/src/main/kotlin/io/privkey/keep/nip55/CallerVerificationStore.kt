@@ -13,7 +13,6 @@ class CallerVerificationStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "nip55_caller_verification"
         private const val KEY_PREFIX_SIGNATURE = "sig_"
-        private const val KEY_PREFIX_NONCE = "nonce_"
         private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
     }
 
@@ -78,7 +77,7 @@ class CallerVerificationStore(context: Context) {
         val trustedSignature = getTrustedSignature(packageName)
         return when {
             trustedSignature == null -> VerificationResult.FirstUseRequiresApproval(currentSignature)
-            MessageDigest.isEqual(trustedSignature.toByteArray(), currentSignature.toByteArray()) -> VerificationResult.Verified(currentSignature)
+            MessageDigest.isEqual(trustedSignature.toByteArray(Charsets.UTF_8), currentSignature.toByteArray(Charsets.UTF_8)) -> VerificationResult.Verified(currentSignature)
             else -> VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
         }
     }

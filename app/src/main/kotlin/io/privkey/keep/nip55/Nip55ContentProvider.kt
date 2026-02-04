@@ -228,14 +228,6 @@ class Nip55ContentProvider : ContentProvider() {
         )
 
         return runCatching { h.handleRequest(request, callerPackage) }
-            .onSuccess {
-                runCatching {
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
-                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
-                }.onFailure { e ->
-                    Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
-                }
-            }
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
@@ -243,10 +235,16 @@ class Nip55ContentProvider : ContentProvider() {
                         throw IllegalStateException("Stored pubkey unavailable for verification")
                     }
                     val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-                    if (!MessageDigest.isEqual(response.result.toByteArray(), storedPubkey.toByteArray())) {
+                    if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
                         if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
                         throw IllegalStateException("Pubkey verification failed")
                     }
+                }
+                runCatching {
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
+                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
+                }.onFailure { e ->
+                    Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
                 val cursor = MatrixCursor(RESULT_COLUMNS)
                 val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
@@ -310,7 +308,7 @@ class Nip55ContentProvider : ContentProvider() {
                 is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
                 is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
                 is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
-                is CallerVerificationStore.VerificationResult.Verified -> "Verified"
+                else -> "Unknown"
             }
             Log.w(TAG, "Rejecting $packageName: $reason")
         }

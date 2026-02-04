@@ -102,20 +102,19 @@ class Nip55Activity : FragmentActivity() {
 
         val nonce = intent.getStringExtra("nip55_nonce")
         if (nonce != null && verificationStore != null) {
-            when (val nonceResult = verificationStore.consumeNonce(nonce)) {
-                is CallerVerificationStore.NonceResult.Valid -> {
-                    val result = verificationStore.verifyOrTrust(nonceResult.packageName)
-                    if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
-                        clearCallerState()
-                    } else {
-                        isNotificationOriginated = true
-                        applyVerificationResult(nonceResult.packageName, result)
-                    }
-                    return
+            val nonceResult = verificationStore.consumeNonce(nonce)
+            if (nonceResult is CallerVerificationStore.NonceResult.Valid) {
+                val result = verificationStore.verifyOrTrust(nonceResult.packageName)
+                if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
+                    clearCallerState()
+                } else {
+                    isNotificationOriginated = true
+                    applyVerificationResult(nonceResult.packageName, result)
                 }
-                else -> if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
+                return
             }
+            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid or expired nonce")
         }
 
         val directCallerPackage = callingActivity?.packageName
@@ -320,7 +319,7 @@ class Nip55Activity : FragmentActivity() {
                 return finishWithError("pubkey_verification_failed")
             }
             val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-            if (!MessageDigest.isEqual(response.result.toByteArray(), storedPubkey.toByteArray())) {
+            if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
                 return finishWithError("pubkey_verification_failed")
             }
