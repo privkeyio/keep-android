@@ -75,4 +75,39 @@ class BiometricTimeoutStore(context: Context) {
             .putLong(KEY_LAST_AUTH_WALL, 0L)
             .apply()
     }
+
+    /**
+     * Checks if biometric authentication is required based on elapsed time since last auth.
+     * Uses both monotonic (SystemClock.elapsedRealtime) and wall clock to detect:
+     * - Device reboots (monotonic clock resets)
+     * - Clock manipulation (wall clock moved backward)
+     *
+     * Note: This is only used for non-crypto authentication flows.
+     * Crypto operations (authenticateWithCrypto) always require biometric due to
+     * hardware key constraints (setUserAuthenticationParameters with 0 timeout).
+     */
+    @Synchronized
+    fun requiresBiometric(): Boolean {
+        val timeout = getTimeout()
+        if (timeout == TIMEOUT_EVERY_TIME) return true
+
+        val lastAuthRealtime = prefs.getLong(KEY_LAST_AUTH_REALTIME, 0L)
+        val lastAuthWall = prefs.getLong(KEY_LAST_AUTH_WALL, 0L)
+        if (lastAuthRealtime == 0L || lastAuthWall == 0L) return true
+
+        val currentRealtime = SystemClock.elapsedRealtime()
+        val currentWall = System.currentTimeMillis()
+
+        val elapsedRealtime = currentRealtime - lastAuthRealtime
+        val elapsedWall = currentWall - lastAuthWall
+
+        // Detect reboot (monotonic clock reset) or clock manipulation (wall clock moved backward)
+        val clockTampered = elapsedRealtime < 0 || elapsedWall < 0
+        if (clockTampered) {
+            invalidateSession()
+            return true
+        }
+
+        return elapsedRealtime > timeout || elapsedWall > timeout
+    }
 }

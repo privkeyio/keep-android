@@ -34,26 +34,36 @@ class BiometricHelper(
         }
     }
 
+    /**
+     * Non-crypto biometric authentication (e.g., for kill switch toggle).
+     * Respects the biometric timeout setting - skips prompt if recently authenticated.
+     */
     suspend fun authenticate(
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel"
-    ): Boolean = suspendCoroutine { continuation ->
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                timeoutStore?.recordAuthentication()
-                continuation.resume(true)
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                continuation.resume(false)
-            }
-
-            override fun onAuthenticationFailed() {}
+    ): Boolean {
+        if (timeoutStore?.requiresBiometric() == false) {
+            timeoutStore?.recordAuthentication()
+            return true
         }
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    timeoutStore?.recordAuthentication()
+                    continuation.resume(true)
+                }
 
-        BiometricPrompt(activity, executor, callback)
-            .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    continuation.resume(false)
+                }
+
+                override fun onAuthenticationFailed() {}
+            }
+
+            BiometricPrompt(activity, executor, callback)
+                .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+        }
     }
 
     suspend fun authenticateWithCrypto(
