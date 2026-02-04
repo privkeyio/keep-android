@@ -20,15 +20,20 @@ class RateLimiter(
     }
 
     fun checkRateLimit(callerPackage: String): Boolean {
+        if (callerPackage.isBlank()) return false
         val now = timeProvider()
         synchronized(rateLimitMap) {
             val existing = rateLimitMap[callerPackage]
-            return if (existing == null || now - existing.windowStart >= windowMs) {
+            if (existing == null) {
                 rateLimitMap[callerPackage] = RateLimitEntry(1, now)
-                true
-            } else {
-                ++existing.count <= maxRequests
+                return true
             }
+            if (now - existing.windowStart >= windowMs) {
+                existing.count = 1
+                existing.windowStart = now
+                return true
+            }
+            return ++existing.count <= maxRequests
         }
     }
 }

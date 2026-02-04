@@ -296,7 +296,6 @@ private fun generateQrCode(content: String): Bitmap? {
 private object ClipboardClearManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var clearJob: Job? = null
-    private var expectedContentHash: ByteArray? = null
 
     private fun hashContent(text: String): ByteArray {
         return MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
@@ -305,23 +304,15 @@ private object ClipboardClearManager {
     fun scheduleClear(clipboard: ClipboardManager, text: String, delayMs: Long) {
         clearJob?.cancel()
         val localHash = hashContent(text)
-        expectedContentHash = localHash
         val job = scope.launch {
             delay(delayMs)
-            try {
-                val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: return@launch
-                val hashMatches = localHash.contentEquals(hashContent(currentText))
-                if (!hashMatches) return@launch
+            val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: return@launch
+            if (!localHash.contentEquals(hashContent(currentText))) return@launch
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    clipboard.clearPrimaryClip()
-                } else {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-                }
-            } finally {
-                if (clearJob === coroutineContext[Job]) {
-                    expectedContentHash = null
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                clipboard.clearPrimaryClip()
+            } else {
+                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
             }
         }
         clearJob = job
