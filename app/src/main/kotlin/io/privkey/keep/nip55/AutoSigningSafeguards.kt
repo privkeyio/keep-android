@@ -1,8 +1,7 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import io.privkey.keep.storage.KeystoreEncryptedPrefs
 
 class AutoSigningSafeguards(context: Context) {
 
@@ -25,18 +24,7 @@ class AutoSigningSafeguards(context: Context) {
         private const val MAX_TRACKED_PACKAGES = 500
     }
 
-    private val prefs = run {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
     private data class UsageWindow(var count: Int, var windowStart: Long)
 

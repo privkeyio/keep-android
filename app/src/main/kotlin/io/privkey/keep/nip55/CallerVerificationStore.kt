@@ -2,8 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.Context
 import android.content.pm.PackageManager
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -19,18 +18,7 @@ class CallerVerificationStore(context: Context) {
     private data class NonceData(val packageName: String, val expiresAt: Long)
     private val activeNonces = ConcurrentHashMap<String, NonceData>()
 
-    private val prefs = run {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
     private val packageManager = context.packageManager
 

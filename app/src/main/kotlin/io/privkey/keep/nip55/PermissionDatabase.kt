@@ -3,8 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.room.*
 import androidx.room.migration.Migration
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
 
@@ -79,13 +78,8 @@ abstract class Nip55Database : RoomDatabase() {
 
         private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
-        private fun getEncryptedPrefs(context: Context) = EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        private fun getEncryptedPrefs(context: Context) =
+            KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
         private fun getOrCreateKey(context: Context, prefKey: String, commit: Boolean = false): ByteArray {
             val prefs = getEncryptedPrefs(context)
