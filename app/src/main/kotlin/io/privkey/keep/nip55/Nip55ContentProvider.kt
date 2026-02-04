@@ -310,7 +310,7 @@ class Nip55ContentProvider : ContentProvider() {
                 is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
                 else -> "Unknown"
             }
-            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting $packageName: $reason")
+            Log.w(TAG, "Rejecting $packageName: $reason")
         }
         return null
     }
