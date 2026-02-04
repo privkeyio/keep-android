@@ -9,14 +9,35 @@ class RiskAssessorTest {
     companion object {
         private const val ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000L
         private const val TWELVE_HOURS_MS = 12 * 60 * 60 * 1000L
+        private const val TEST_WALL_CLOCK = 1_700_000_000_000L
+        private const val TEST_ELAPSED_TIME = 1_000_000_000L
+        private const val NORMAL_HOUR = 12
     }
+
+    private fun createAssessor(
+        auditDao: Nip55AuditLogDao,
+        appSettingsDao: Nip55AppSettingsDao,
+        elapsedRealtime: Long = TEST_ELAPSED_TIME,
+        currentTimeMillis: Long = TEST_WALL_CLOCK,
+        currentHour: Int = NORMAL_HOUR
+    ) = RiskAssessor(
+        auditDao = auditDao,
+        appSettingsDao = appSettingsDao,
+        elapsedRealtimeProvider = { elapsedRealtime },
+        currentTimeMillisProvider = { currentTimeMillis },
+        currentHourProvider = { currentHour }
+    )
 
     @Test
     fun `score 0 for normal request with history`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertEquals(0, result.score)
@@ -27,9 +48,13 @@ class RiskAssessorTest {
     @Test
     fun `sensitive kind adds 40 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 10002)
 
         assertTrue(result.factors.contains(RiskFactor.SENSITIVE_EVENT_KIND))
@@ -40,9 +65,13 @@ class RiskAssessorTest {
     @Test
     fun `first kind adds 15 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertTrue(result.factors.contains(RiskFactor.FIRST_KIND))
@@ -52,9 +81,13 @@ class RiskAssessorTest {
     @Test
     fun `high frequency adds 20 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 15)
-        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertTrue(result.factors.contains(RiskFactor.HIGH_FREQUENCY))
@@ -65,9 +98,13 @@ class RiskAssessorTest {
     @Test
     fun `new app adds 15 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = TWELVE_HOURS_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = TWELVE_HOURS_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertTrue(result.factors.contains(RiskFactor.NEW_APP))
@@ -77,9 +114,13 @@ class RiskAssessorTest {
     @Test
     fun `combined factors escalate to EXPLICIT at 60`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 15)
-        val appSettingsDao = FakeAppSettingsDao(appAge = TWELVE_HOURS_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = TWELVE_HOURS_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 10002)
 
         assertTrue(result.score >= 60)
@@ -89,9 +130,14 @@ class RiskAssessorTest {
     @Test
     fun `score capped at 100`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 100)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 1000L)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = 1000L,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        // Use unusual hour (3 AM) to trigger UNUSUAL_TIME factor
+        val assessor = createAssessor(auditDao, appSettingsDao, currentHour = 3)
         val result = assessor.assess("com.example.app", 0)
 
         assertEquals(100, result.score)
@@ -100,9 +146,13 @@ class RiskAssessorTest {
     @Test
     fun `null eventKind skips kind-based factors`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME
+        )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", null)
 
         assertFalse(result.factors.contains(RiskFactor.SENSITIVE_EVENT_KIND))
@@ -114,10 +164,12 @@ class RiskAssessorTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
         val appSettingsDao = FakeAppSettingsDao(
             appAge = TWELVE_HOURS_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME,
             useMonotonicTime = true
         )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertTrue(result.factors.contains(RiskFactor.NEW_APP))
@@ -129,10 +181,12 @@ class RiskAssessorTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
         val appSettingsDao = FakeAppSettingsDao(
             appAge = ONE_WEEK_MS,
+            wallClock = TEST_WALL_CLOCK,
+            elapsedTime = TEST_ELAPSED_TIME,
             useMonotonicTime = true
         )
 
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val assessor = createAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
 
         assertFalse(result.factors.contains(RiskFactor.NEW_APP))
@@ -161,17 +215,17 @@ class RiskAssessorTest {
 
     private class FakeAppSettingsDao(
         private val appAge: Long = 0,
+        private val wallClock: Long = 1_700_000_000_000L,
+        private val elapsedTime: Long = 1_000_000_000L,
         private val useMonotonicTime: Boolean = false
     ) : Nip55AppSettingsDao {
         override suspend fun getSettings(callerPackage: String): Nip55AppSettings? {
-            val now = System.currentTimeMillis()
-            val nowElapsed = if (useMonotonicTime) 1_000_000_000L else 0L
             return Nip55AppSettings(
                 callerPackage = callerPackage,
                 expiresAt = null,
                 signPolicyOverride = null,
-                createdAt = now - appAge,
-                createdAtElapsed = if (useMonotonicTime) nowElapsed - appAge else 0,
+                createdAt = wallClock - appAge,
+                createdAtElapsed = if (useMonotonicTime) elapsedTime - appAge else 0,
                 durationMs = null
             )
         }

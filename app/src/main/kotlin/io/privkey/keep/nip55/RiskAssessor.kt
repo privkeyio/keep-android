@@ -26,7 +26,10 @@ enum class RiskFactor(val weight: Int, val description: String) {
 
 class RiskAssessor(
     private val auditDao: Nip55AuditLogDao,
-    private val appSettingsDao: Nip55AppSettingsDao
+    private val appSettingsDao: Nip55AppSettingsDao,
+    private val elapsedRealtimeProvider: () -> Long = { SystemClock.elapsedRealtime() },
+    private val currentTimeMillisProvider: () -> Long = { System.currentTimeMillis() },
+    private val currentHourProvider: () -> Int = { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
 ) {
     companion object {
         private const val HIGH_FREQUENCY_THRESHOLD = 10
@@ -35,8 +38,8 @@ class RiskAssessor(
     }
 
     private val frequencyLock = Any()
-    @Volatile private var frequencyWindowStart: Long = SystemClock.elapsedRealtime()
-    @Volatile private var frequencyWindowWallClock: Long = System.currentTimeMillis()
+    @Volatile private var frequencyWindowStart: Long = elapsedRealtimeProvider()
+    @Volatile private var frequencyWindowWallClock: Long = currentTimeMillisProvider()
 
     suspend fun assess(packageName: String, eventKind: Int?): RiskAssessment {
         val factors = mutableListOf<RiskFactor>()
@@ -51,11 +54,11 @@ class RiskAssessor(
         }
 
         val frequencySince = synchronized(frequencyLock) {
-            val nowElapsedFreq = SystemClock.elapsedRealtime()
+            val nowElapsedFreq = elapsedRealtimeProvider()
             val elapsedSinceWindowStart = nowElapsedFreq - frequencyWindowStart
             if (elapsedSinceWindowStart < 0 || elapsedSinceWindowStart > FREQUENCY_WINDOW_MS * 2) {
                 frequencyWindowStart = nowElapsedFreq
-                frequencyWindowWallClock = System.currentTimeMillis()
+                frequencyWindowWallClock = currentTimeMillisProvider()
             }
             (frequencyWindowWallClock - FREQUENCY_WINDOW_MS +
                 (nowElapsedFreq - frequencyWindowStart)).coerceAtLeast(0)
@@ -65,18 +68,18 @@ class RiskAssessor(
             factors.add(RiskFactor.HIGH_FREQUENCY)
         }
 
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val hour = currentHourProvider()
         if (hour < 6 || hour >= 23) {
             factors.add(RiskFactor.UNUSUAL_TIME)
         }
 
         appSettingsDao.getSettings(packageName)?.let { appSettings ->
-            val nowElapsed = SystemClock.elapsedRealtime()
+            val nowElapsed = elapsedRealtimeProvider()
             val useMonotonic = appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed
             val appAge = if (useMonotonic) {
                 nowElapsed - appSettings.createdAtElapsed
             } else {
-                System.currentTimeMillis() - appSettings.createdAt
+                currentTimeMillisProvider() - appSettings.createdAt
             }
             if (appAge < NEW_APP_THRESHOLD_MS) {
                 factors.add(RiskFactor.NEW_APP)
