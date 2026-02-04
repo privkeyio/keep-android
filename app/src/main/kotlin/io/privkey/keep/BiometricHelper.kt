@@ -4,6 +4,7 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import io.privkey.keep.storage.BiometricTimeoutStore
 import javax.crypto.Cipher
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -11,6 +12,9 @@ import kotlin.coroutines.suspendCoroutine
 
 class BiometricHelper(private val activity: FragmentActivity) {
     private val executor = ContextCompat.getMainExecutor(activity)
+    private val timeoutStore: BiometricTimeoutStore? by lazy {
+        runCatching { BiometricTimeoutStore(activity) }.getOrNull()
+    }
 
     enum class BiometricStatus {
         AVAILABLE,
@@ -30,6 +34,8 @@ class BiometricHelper(private val activity: FragmentActivity) {
         }
     }
 
+    fun requiresBiometric(): Boolean = timeoutStore?.requiresBiometric() ?: true
+
     suspend fun authenticate(
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
@@ -37,6 +43,7 @@ class BiometricHelper(private val activity: FragmentActivity) {
     ): Boolean = suspendCoroutine { continuation ->
         val callback = object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                timeoutStore?.recordAuthentication()
                 continuation.resume(true)
             }
 
@@ -56,31 +63,38 @@ class BiometricHelper(private val activity: FragmentActivity) {
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel"
-    ): Cipher? = suspendCoroutine { continuation ->
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                continuation.resume(result.cryptoObject?.cipher)
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                if (isCancellation) {
-                    continuation.resume(null)
-                } else {
-                    continuation.resumeWithException(
-                        BiometricException(errorCode, errString.toString())
-                    )
-                }
-            }
-
-            override fun onAuthenticationFailed() {}
+    ): Cipher? {
+        if (!requiresBiometric()) {
+            timeoutStore?.recordAuthentication()
+            return cipher
         }
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    timeoutStore?.recordAuthentication()
+                    continuation.resume(result.cryptoObject?.cipher)
+                }
 
-        BiometricPrompt(activity, executor, callback).authenticate(
-            buildPromptInfo(title, subtitle, negativeButtonText),
-            BiometricPrompt.CryptoObject(cipher)
-        )
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                    if (isCancellation) {
+                        continuation.resume(null)
+                    } else {
+                        continuation.resumeWithException(
+                            BiometricException(errorCode, errString.toString())
+                        )
+                    }
+                }
+
+                override fun onAuthenticationFailed() {}
+            }
+
+            BiometricPrompt(activity, executor, callback).authenticate(
+                buildPromptInfo(title, subtitle, negativeButtonText),
+                BiometricPrompt.CryptoObject(cipher)
+            )
+        }
     }
 
     private fun buildPromptInfo(

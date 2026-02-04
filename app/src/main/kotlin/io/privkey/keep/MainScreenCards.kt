@@ -16,6 +16,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.BunkerStatus
@@ -691,6 +692,62 @@ fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
                 )
             }
             Text(statusText, style = MaterialTheme.typography.labelMedium, color = statusColor)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BiometricTimeoutCard(
+    currentTimeout: Long,
+    onTimeoutChanged: (Long) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Biometric Re-auth", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "How often to require biometric authentication",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it }
+            ) {
+                OutlinedTextField(
+                    value = BiometricTimeoutStore.formatTimeout(currentTimeout),
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier
+                        .menuAnchor()
+                        .width(140.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    singleLine = true
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    BiometricTimeoutStore.TIMEOUT_OPTIONS.forEach { timeout ->
+                        DropdownMenuItem(
+                            text = { Text(BiometricTimeoutStore.formatTimeout(timeout)) },
+                            onClick = {
+                                onTimeoutChanged(timeout)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }

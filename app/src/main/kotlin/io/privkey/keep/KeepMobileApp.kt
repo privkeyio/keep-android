@@ -12,6 +12,7 @@ import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
@@ -45,6 +46,7 @@ class KeepMobileApp : Application() {
     private var autoStartStore: AutoStartStore? = null
     private var foregroundServiceStore: ForegroundServiceStore? = null
     private var pinStore: PinStore? = null
+    private var biometricTimeoutStore: BiometricTimeoutStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
@@ -78,6 +80,7 @@ class KeepMobileApp : Application() {
             val newAutoStart = AutoStartStore(this)
             val newForegroundService = ForegroundServiceStore(this)
             val newPinStore = PinStore(this)
+            val newBiometricTimeoutStore = BiometricTimeoutStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = newRelayConfig
@@ -86,6 +89,7 @@ class KeepMobileApp : Application() {
             autoStartStore = newAutoStart
             foregroundServiceStore = newForegroundService
             pinStore = newPinStore
+            biometricTimeoutStore = newBiometricTimeoutStore
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         } catch (e: Exception) {
@@ -159,6 +163,8 @@ class KeepMobileApp : Application() {
     fun getForegroundServiceStore(): ForegroundServiceStore? = foregroundServiceStore
 
     fun getPinStore(): PinStore? = pinStore
+
+    fun getBiometricTimeoutStore(): BiometricTimeoutStore? = biometricTimeoutStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
