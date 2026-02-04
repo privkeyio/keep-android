@@ -304,18 +304,21 @@ private object ClipboardClearManager {
     fun scheduleClear(clipboard: ClipboardManager, text: String, delayMs: Long) {
         clearJob?.cancel()
         val localHash = hashContent(text)
-        val job = scope.launch {
-            delay(delayMs)
-            val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: return@launch
-            if (!localHash.contentEquals(hashContent(currentText))) return@launch
+        clearJob = scope.launch {
+            try {
+                delay(delayMs)
+                val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: return@launch
+                if (!localHash.contentEquals(hashContent(currentText))) return@launch
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboard.clearPrimaryClip()
-            } else {
-                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
+            } finally {
+                Arrays.fill(localHash, 0.toByte())
             }
         }
-        clearJob = job
     }
 }
 

@@ -55,11 +55,11 @@ class RateLimiterTest {
 
     @Test
     fun `rate limit resets after window`() {
-        var currentTime = 0L
+        var testTime = 0L
         val shortWindowLimiter = RateLimiter(
             windowMs = 100L,
             maxRequests = 2,
-            timeProvider = { currentTime }
+            timeProvider = { testTime }
         )
         val caller = "com.test.app"
 
@@ -67,7 +67,7 @@ class RateLimiterTest {
         assertTrue(shortWindowLimiter.checkRateLimit(caller))
         assertFalse(shortWindowLimiter.checkRateLimit(caller))
 
-        currentTime = 101L
+        testTime = 101L
 
         assertTrue(shortWindowLimiter.checkRateLimit(caller))
     }
@@ -100,8 +100,8 @@ class RateLimiterTest {
     }
 
     @Test
-    fun `empty caller package is handled`() {
-        assertTrue(rateLimiter.checkRateLimit(""))
+    fun `empty caller package is rejected`() {
+        assertFalse(rateLimiter.checkRateLimit(""))
     }
 
     @Test
