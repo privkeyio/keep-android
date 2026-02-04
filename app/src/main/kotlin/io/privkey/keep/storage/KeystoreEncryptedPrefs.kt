@@ -32,6 +32,8 @@ object KeystoreEncryptedPrefs {
     private const val PREFIX_BOOL = "b:"
     private const val PREFIX_STRING_SET = "ss:"
     private const val STRING_SET_DELIMITER = "\u0000"
+    private const val KEY_REGISTRY = "__keys__"
+    private const val KEY_REGISTRY_DELIMITER = "\u0000"
 
     fun create(context: Context, prefsName: String): SharedPreferences {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
@@ -143,10 +145,33 @@ object KeystoreEncryptedPrefs {
             } else null
         }
 
+        private fun rebuildKeyCacheFromRegistry() {
+            val registryHash = calculateKeyHash(KEY_REGISTRY)
+            val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return
+            try {
+                val decrypted = decrypt(secretKey, encryptedRegistry)
+                if (!decrypted.startsWith(PREFIX_STRING)) return
+                val registryContent = decrypted.removePrefix(PREFIX_STRING)
+                if (registryContent.isEmpty()) return
+                for (plainKey in registryContent.split(KEY_REGISTRY_DELIMITER)) {
+                    if (plainKey.isEmpty() || plainKey == KEY_REGISTRY) continue
+                    val hash = calculateKeyHash(plainKey)
+                    keyCache[plainKey] = hash
+                    reverseKeyCache[hash] = plainKey
+                }
+            } catch (_: Exception) {
+                // Registry corrupted, will rebuild as keys are accessed
+            }
+        }
+
         override fun getAll(): MutableMap<String, *> {
+            if (reverseKeyCache.isEmpty()) {
+                rebuildKeyCacheFromRegistry()
+            }
             val result = mutableMapOf<String, Any?>()
             for ((encKey, encValue) in basePrefs.all) {
                 val plainKey = reverseKeyCache[encKey] ?: continue
+                if (plainKey == KEY_REGISTRY) continue
                 try {
                     val plainValue = when (encValue) {
                         is String -> decryptValue(encValue)
@@ -328,6 +353,17 @@ object KeystoreEncryptedPrefs {
                     val encValue = encryptValue(value)
                     baseEditor.putString(encKey, encValue)
                 }
+
+                updateKeyRegistry()
+            }
+
+            private fun updateKeyRegistry() {
+                val allKeys = keyCache.keys.filter { it != KEY_REGISTRY }.toSet()
+                if (allKeys.isEmpty() && clearRequested) return
+                val registryContent = allKeys.joinToString(KEY_REGISTRY_DELIMITER)
+                val encKey = getEncryptedKeyName(KEY_REGISTRY)
+                val encValue = encryptValue(registryContent)
+                baseEditor.putString(encKey, encValue)
             }
         }
     }
