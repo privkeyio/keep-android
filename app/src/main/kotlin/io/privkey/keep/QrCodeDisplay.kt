@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
-import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
 import android.view.WindowManager
@@ -37,7 +36,12 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import io.privkey.keep.BuildConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import java.util.Arrays
@@ -90,10 +94,6 @@ internal class SecureShareData(private val maxLength: Int) {
 
     fun isNotBlank(): Boolean = chars.isNotEmpty() && chars.any { !it.isWhitespace() }
 
-    /**
-     * Returns the raw sensitive data. Use only when the actual value is required
-     * (e.g., passing to crypto operations). The returned String cannot be zeroized.
-     */
     fun valueUnsafe(): String = String(chars)
 
     override fun toString(): String = "<redacted>"
@@ -293,26 +293,31 @@ private fun generateQrCode(content: String): Bitmap? {
 }
 
 private object ClipboardClearManager {
-    private val handler = Handler(Looper.getMainLooper())
-    private var pendingClear: Runnable? = null
-    private var clipboardRef: WeakReference<ClipboardManager>? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var clearJob: Job? = null
+    private var expectedContent: String? = null
 
-    fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
-        pendingClear?.let { handler.removeCallbacks(it) }
-        clipboardRef = WeakReference(clipboard)
-        val runnable = Runnable {
-            pendingClear = null
-            clipboardRef?.get()?.let { cb ->
+    fun scheduleClear(clipboard: ClipboardManager, text: String, delayMs: Long) {
+        clearJob?.cancel()
+        expectedContent = text
+        clearJob = scope.launch {
+            delay(delayMs)
+            val current = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+            if (current == expectedContent) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    cb.clearPrimaryClip()
+                    clipboard.clearPrimaryClip()
                 } else {
-                    cb.setPrimaryClip(ClipData.newPlainText("", ""))
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
                 }
             }
-            clipboardRef = null
+            expectedContent = null
         }
-        pendingClear = runnable
-        handler.postDelayed(runnable, delayMs)
+    }
+
+    fun cancel() {
+        clearJob?.cancel()
+        clearJob = null
+        expectedContent = null
     }
 }
 
@@ -325,7 +330,7 @@ internal fun copySensitiveText(context: Context, text: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
-    ClipboardClearManager.scheduleClear(clipboard, CLIPBOARD_CLEAR_DELAY_MS)
+    ClipboardClearManager.scheduleClear(clipboard, text, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
 /**

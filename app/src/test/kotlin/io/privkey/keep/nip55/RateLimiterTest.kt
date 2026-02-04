@@ -59,7 +59,7 @@ class RateLimiterTest {
         }
         assertFalse(rateLimiter.checkRateLimit(caller))
 
-        rateLimiter.rateLimitMap[caller]?.windowStart?.set(
+        rateLimiter.rateLimitMap.get(caller)?.windowStart?.set(
             System.currentTimeMillis() - rateLimiter.windowMs - 1
         )
 
