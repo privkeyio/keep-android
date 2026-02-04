@@ -106,9 +106,6 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
     )
 }.getOrNull()
 
-private fun pluralize(count: Int, singular: String, plural: String): String =
-    if (count == 1) "1 $singular" else "$count $plural"
-
 @Composable
 fun ApprovalScreen(
     request: Nip55Request,
