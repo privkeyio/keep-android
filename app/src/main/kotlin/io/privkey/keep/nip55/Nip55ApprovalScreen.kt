@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.pubkeyToNpub
+import io.privkey.keep.uniffi.eventIdToNote
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -105,7 +107,14 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
 }.getOrNull()
 
 private fun formatPubkey(pubkey: String): String =
-    if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey
+    runCatching { pubkeyToNpub(pubkey) }
+        .map { npub -> "${npub.take(12)}...${npub.takeLast(8)}" }
+        .getOrElse { if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey }
+
+private fun formatEventId(eventId: String): String =
+    runCatching { eventIdToNote(eventId) }
+        .map { note -> "${note.take(12)}...${note.takeLast(8)}" }
+        .getOrElse { if (eventId.length > 24) "${eventId.take(12)}...${eventId.takeLast(8)}" else eventId }
 
 private fun pluralize(count: Int, singular: String, plural: String): String =
     if (count == 1) "1 $singular" else "$count $plural"
@@ -439,11 +448,15 @@ private fun TagsSummarySection(
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
-            TagSummaryRow("Events:", pluralize(eTags.size, "event", "events"))
+            val eventsPreview = eTags.take(2).joinToString(", ") { formatEventId(it) }
+            val suffix = if (eTags.size > 2) " +${eTags.size - 2} more" else ""
+            TagSummaryRow("Events:", "$eventsPreview$suffix")
         }
 
         if (otherPubkeys.isNotEmpty()) {
-            TagSummaryRow("Mentions:", pluralize(otherPubkeys.size, "pubkey", "pubkeys"))
+            val mentionsPreview = otherPubkeys.take(2).joinToString(", ") { formatPubkey(it) }
+            val suffix = if (otherPubkeys.size > 2) " +${otherPubkeys.size - 2} more" else ""
+            TagSummaryRow("Mentions:", "$mentionsPreview$suffix")
         }
 
         if (tTags.isNotEmpty()) {
