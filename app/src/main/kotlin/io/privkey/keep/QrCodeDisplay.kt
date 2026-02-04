@@ -38,6 +38,7 @@ import com.google.zxing.qrcode.QRCodeWriter
 import io.privkey.keep.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import java.util.Arrays
 
 private const val MAX_PASSPHRASE_LENGTH = 256
@@ -331,12 +332,21 @@ internal fun copySensitiveText(context: Context, text: String) {
  *
  * All operations MUST be called from the main thread (enforced via Looper check).
  * This avoids race conditions without requiring synchronization.
+ *
+ * The manager tracks the current Activity via a WeakReference. If a different Activity
+ * is passed (e.g., after Activity recreation), the refCount is reset to handle the new instance.
  */
 private object SecureScreenManager {
     private var refCount = 0
+    private var activityRef: WeakReference<Activity>? = null
 
     fun acquire(activity: Activity) {
         checkMainThread()
+        val currentActivity = activityRef?.get()
+        if (currentActivity !== activity) {
+            refCount = 0
+            activityRef = WeakReference(activity)
+        }
         if (refCount == 0) {
             activity.window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
@@ -348,6 +358,12 @@ private object SecureScreenManager {
 
     fun release(activity: Activity) {
         checkMainThread()
+        val currentActivity = activityRef?.get()
+        if (currentActivity !== activity) {
+            refCount = 0
+            activityRef = WeakReference(activity)
+            return
+        }
         if (refCount <= 0) {
             refCount = 0
             return
@@ -366,7 +382,10 @@ private object SecureScreenManager {
 }
 
 internal fun setSecureScreen(context: Context, secure: Boolean) {
-    val activity = context as? Activity ?: return
+    val activity = context as? Activity
+        ?: throw IllegalArgumentException(
+            "setSecureScreen requires an Activity context, got ${context.javaClass.name}"
+        )
     if (secure) {
         SecureScreenManager.acquire(activity)
     } else {
