@@ -6,10 +6,15 @@ import org.junit.Test
 
 class RiskAssessorTest {
 
+    companion object {
+        private const val ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000L
+        private const val TWELVE_HOURS_MS = 12 * 60 * 60 * 1000L
+    }
+
     @Test
     fun `score 0 for normal request with history`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 7 * 24 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
@@ -22,7 +27,7 @@ class RiskAssessorTest {
     @Test
     fun `sensitive kind adds 40 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 7 * 24 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 10002)
@@ -35,7 +40,7 @@ class RiskAssessorTest {
     @Test
     fun `first kind adds 15 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 7 * 24 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
@@ -47,7 +52,7 @@ class RiskAssessorTest {
     @Test
     fun `high frequency adds 20 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 15)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 7 * 24 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
@@ -60,7 +65,7 @@ class RiskAssessorTest {
     @Test
     fun `new app adds 15 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 12 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = TWELVE_HOURS_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 1)
@@ -72,7 +77,7 @@ class RiskAssessorTest {
     @Test
     fun `combined factors escalate to EXPLICIT at 60`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 15)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 12 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = TWELVE_HOURS_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", 10002)
@@ -95,13 +100,43 @@ class RiskAssessorTest {
     @Test
     fun `null eventKind skips kind-based factors`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 0, recentCount = 2)
-        val appSettingsDao = FakeAppSettingsDao(appAge = 7 * 24 * 60 * 60 * 1000L)
+        val appSettingsDao = FakeAppSettingsDao(appAge = ONE_WEEK_MS)
 
         val assessor = RiskAssessor(auditDao, appSettingsDao)
         val result = assessor.assess("com.example.app", null)
 
         assertFalse(result.factors.contains(RiskFactor.SENSITIVE_EVENT_KIND))
         assertFalse(result.factors.contains(RiskFactor.FIRST_KIND))
+    }
+
+    @Test
+    fun `new app with monotonic time tracking adds 15 points`() = runTest {
+        val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = TWELVE_HOURS_MS,
+            useMonotonicTime = true
+        )
+
+        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val result = assessor.assess("com.example.app", 1)
+
+        assertTrue(result.factors.contains(RiskFactor.NEW_APP))
+        assertEquals(15, result.score)
+    }
+
+    @Test
+    fun `old app with monotonic time tracking has no NEW_APP factor`() = runTest {
+        val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
+        val appSettingsDao = FakeAppSettingsDao(
+            appAge = ONE_WEEK_MS,
+            useMonotonicTime = true
+        )
+
+        val assessor = RiskAssessor(auditDao, appSettingsDao)
+        val result = assessor.assess("com.example.app", 1)
+
+        assertFalse(result.factors.contains(RiskFactor.NEW_APP))
+        assertEquals(0, result.score)
     }
 
     private class FakeAuditLogDao(
@@ -125,16 +160,18 @@ class RiskAssessorTest {
     }
 
     private class FakeAppSettingsDao(
-        private val appAge: Long = 0
+        private val appAge: Long = 0,
+        private val useMonotonicTime: Boolean = false
     ) : Nip55AppSettingsDao {
         override suspend fun getSettings(callerPackage: String): Nip55AppSettings? {
             val now = System.currentTimeMillis()
+            val nowElapsed = if (useMonotonicTime) 1_000_000_000L else 0L
             return Nip55AppSettings(
                 callerPackage = callerPackage,
                 expiresAt = null,
                 signPolicyOverride = null,
                 createdAt = now - appAge,
-                createdAtElapsed = 0,
+                createdAtElapsed = if (useMonotonicTime) nowElapsed - appAge else 0,
                 durationMs = null
             )
         }

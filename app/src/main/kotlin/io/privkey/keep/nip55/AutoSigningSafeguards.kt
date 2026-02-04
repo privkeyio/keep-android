@@ -51,16 +51,13 @@ class AutoSigningSafeguards(context: Context) {
     fun isCooledOff(packageName: String): Boolean {
         val nowElapsed = SystemClock.elapsedRealtime()
         val cooledOffUntilElapsed = prefs.getLong(KEY_PREFIX_COOLED_OFF_ELAPSED + packageName, 0)
-        if (cooledOffUntilElapsed > 0) {
-            if (nowElapsed < cooledOffUntilElapsed && cooledOffUntilElapsed - nowElapsed <= COOLING_OFF_PERIOD_MS) {
-                return true
-            }
-        }
-        val cooledOffUntilWall = prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
-        if (cooledOffUntilWall > 0 && System.currentTimeMillis() < cooledOffUntilWall) {
+        if (cooledOffUntilElapsed > 0 &&
+            nowElapsed < cooledOffUntilElapsed &&
+            cooledOffUntilElapsed - nowElapsed <= COOLING_OFF_PERIOD_MS) {
             return true
         }
-        return false
+        val cooledOffUntilWall = prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
+        return cooledOffUntilWall > 0 && System.currentTimeMillis() < cooledOffUntilWall
     }
 
     fun getCooledOffUntil(packageName: String): Long =
@@ -122,12 +119,14 @@ class AutoSigningSafeguards(context: Context) {
         windowMs: Long
     ): UsageWindow {
         val existing = map[packageName] ?: persistKeyPrefix?.let { loadPersistedUsage(it, packageName, nowElapsed) }
-        val elapsed = existing?.windowStartElapsed ?: 0
-        val entry = if (existing == null || nowElapsed - elapsed >= windowMs ||
-            elapsed > nowElapsed) {
+        val windowExpired = existing == null ||
+            existing.windowStartElapsed > nowElapsed ||
+            nowElapsed - existing.windowStartElapsed >= windowMs
+
+        val entry = if (windowExpired) {
             UsageWindow(1, nowElapsed)
         } else {
-            existing.count++
+            existing!!.count++
             existing
         }
         map[packageName] = entry

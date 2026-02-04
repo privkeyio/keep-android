@@ -34,32 +34,33 @@ class RiskAssessor(
         private const val NEW_APP_THRESHOLD_MS = 24 * 60 * 60 * 1000L
     }
 
-    private var frequencyWindowStart: Long = SystemClock.elapsedRealtime()
-    private var frequencyWindowWallClock: Long = System.currentTimeMillis()
+    private val frequencyLock = Any()
+    @Volatile private var frequencyWindowStart: Long = SystemClock.elapsedRealtime()
+    @Volatile private var frequencyWindowWallClock: Long = System.currentTimeMillis()
 
     suspend fun assess(packageName: String, eventKind: Int?): RiskAssessment {
         val factors = mutableListOf<RiskFactor>()
 
-        if (eventKind != null && isSensitiveKind(eventKind)) {
-            factors.add(RiskFactor.SENSITIVE_EVENT_KIND)
-        }
-
         if (eventKind != null) {
-            val kindHistory = auditDao.countByPackageAndKind(packageName, eventKind)
-            if (kindHistory == 0) {
+            if (isSensitiveKind(eventKind)) {
+                factors.add(RiskFactor.SENSITIVE_EVENT_KIND)
+            }
+            if (auditDao.countByPackageAndKind(packageName, eventKind) == 0) {
                 factors.add(RiskFactor.FIRST_KIND)
             }
         }
 
-        val nowElapsedFreq = SystemClock.elapsedRealtime()
-        val elapsedSinceWindowStart = nowElapsedFreq - frequencyWindowStart
-        if (elapsedSinceWindowStart < 0 || elapsedSinceWindowStart > FREQUENCY_WINDOW_MS * 2) {
-            frequencyWindowStart = nowElapsedFreq
-            frequencyWindowWallClock = System.currentTimeMillis()
+        val frequencySince = synchronized(frequencyLock) {
+            val nowElapsedFreq = SystemClock.elapsedRealtime()
+            val elapsedSinceWindowStart = nowElapsedFreq - frequencyWindowStart
+            if (elapsedSinceWindowStart < 0 || elapsedSinceWindowStart > FREQUENCY_WINDOW_MS * 2) {
+                frequencyWindowStart = nowElapsedFreq
+                frequencyWindowWallClock = System.currentTimeMillis()
+            }
+            (frequencyWindowWallClock - FREQUENCY_WINDOW_MS +
+                (nowElapsedFreq - frequencyWindowStart)).coerceAtLeast(0)
         }
-        val frequencySince = frequencyWindowWallClock - FREQUENCY_WINDOW_MS +
-            (nowElapsedFreq - frequencyWindowStart)
-        val recentCount = auditDao.countSince(packageName, frequencySince.coerceAtLeast(0))
+        val recentCount = auditDao.countSince(packageName, frequencySince)
         if (recentCount > HIGH_FREQUENCY_THRESHOLD) {
             factors.add(RiskFactor.HIGH_FREQUENCY)
         }
@@ -69,14 +70,13 @@ class RiskAssessor(
             factors.add(RiskFactor.UNUSUAL_TIME)
         }
 
-        val appSettings = appSettingsDao.getSettings(packageName)
-        if (appSettings != null) {
-            val now = System.currentTimeMillis()
+        appSettingsDao.getSettings(packageName)?.let { appSettings ->
             val nowElapsed = SystemClock.elapsedRealtime()
-            val appAge = if (appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed) {
+            val useMonotonic = appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed
+            val appAge = if (useMonotonic) {
                 nowElapsed - appSettings.createdAtElapsed
             } else {
-                now - appSettings.createdAt
+                System.currentTimeMillis() - appSettings.createdAt
             }
             if (appAge < NEW_APP_THRESHOLD_MS) {
                 factors.add(RiskFactor.NEW_APP)
