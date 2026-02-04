@@ -108,23 +108,28 @@ class PinStore(private val context: Context) {
 
     @Synchronized
     fun verifyPin(pin: String): Boolean {
-        if (pin.length > MAX_PIN_LENGTH) return false
-        if (isLockedOut()) return false
+        val invalidLength = pin.length > MAX_PIN_LENGTH
+        val lockedOut = isLockedOut()
 
-        val storedHash = prefs.getString(KEY_PIN_HASH, null) ?: return false
-        val salt = prefs.getString(KEY_PIN_SALT, null) ?: return false
+        val storedHash = prefs.getString(KEY_PIN_HASH, null)
+        val salt = prefs.getString(KEY_PIN_SALT, null)
+
+        if (storedHash == null || salt == null) {
+            return false
+        }
 
         val pinChars = pin.toCharArray()
         try {
             val inputHash = hashPinFromChars(pinChars, salt)
             val storedBytes = Base64.decode(storedHash, Base64.NO_WRAP)
             val inputBytes = Base64.decode(inputHash, Base64.NO_WRAP)
-            val verified = MessageDigest.isEqual(storedBytes, inputBytes)
+            val hashesMatch = MessageDigest.isEqual(storedBytes, inputBytes)
+            val verified = hashesMatch && !invalidLength && !lockedOut
 
             if (verified) {
                 clearFailedAttempts()
                 refreshSession()
-            } else {
+            } else if (!lockedOut) {
                 incrementFailedAttempts()
             }
 
