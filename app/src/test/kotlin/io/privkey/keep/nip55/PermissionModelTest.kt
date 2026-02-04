@@ -116,6 +116,66 @@ class Nip55PermissionTest {
     }
 
     @Test
+    fun `isExpired returns false when durationMs not yet expired`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 10000L
+        val currentElapsed = 15000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertFalse(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired returns true when durationMs expired`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 10000L
+        val durationMs = 60000L
+        val currentElapsed = createdElapsed + durationMs + 1000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertTrue(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
+    fun `isExpired detects device reboot via elapsed time regression`() {
+        val now = System.currentTimeMillis()
+        val createdElapsed = 100000L
+        val currentElapsed = 5000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = createdElapsed,
+            durationMs = durationMs
+        )
+        assertTrue(permission.isExpired(currentElapsed = currentElapsed, currentTimeMillis = now))
+    }
+
+    @Test
     fun `permissionDecision returns correct enum`() {
         val allowPermission = Nip55Permission(
             id = 1,

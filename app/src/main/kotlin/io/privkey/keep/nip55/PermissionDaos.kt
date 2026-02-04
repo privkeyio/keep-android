@@ -17,6 +17,9 @@ interface Nip55PermissionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)
 
+    // Note: This SQL query mirrors the logic in isTimestampExpired() in PermissionEntities.kt.
+    // Both must be kept in sync: wall clock expiry, wall clock manipulation detection,
+    // monotonic time expiry, and monotonic time regression (device reboot) detection.
     @Query("""
         DELETE FROM nip55_permissions WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
