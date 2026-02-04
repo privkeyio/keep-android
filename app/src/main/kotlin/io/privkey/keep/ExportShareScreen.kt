@@ -430,7 +430,7 @@ private fun generateFrames(data: String, maxBytes: Int): List<String> {
     }
 
     return chunks.mapIndexed { index, chunk ->
-        val hex = chunk.joinToString("") { "%02x".format(it) }
+        val hex = chunk.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
     }
 }

@@ -24,6 +24,7 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicInteger
 
 class Nip55ContentProvider : ContentProvider() {
@@ -89,7 +90,7 @@ class Nip55ContentProvider : ContentProvider() {
         val h = currentApp.getNip55Handler() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
         val store = currentApp.getPermissionStore()
 
-        val callerPackage = getCallerPackage() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $callerPackage")
@@ -151,18 +152,6 @@ class Nip55ContentProvider : ContentProvider() {
                 return rejectedCursor(null)
             }
 
-            val verificationStore = currentApp.getCallerVerificationStore()
-            if (verificationStore == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: CallerVerificationStore unavailable for $callerPackage")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_verification_unavailable", wasAutomatic = true) }
-                return rejectedCursor(null)
-            }
-            val verificationResult = verificationStore.verifyOrTrust(callerPackage)
-            if (verificationResult !is CallerVerificationStore.VerificationResult.Verified) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: $callerPackage not verified (${verificationResult::class.simpleName})")
-                return null
-            }
-
             if (!safeguards.isOptedIn(callerPackage)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
                 return null
@@ -170,7 +159,7 @@ class Nip55ContentProvider : ContentProvider() {
 
             val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
                 is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                    return executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                    return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
                 is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
                 is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
                 is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
@@ -205,7 +194,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         return when (decision) {
-            PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+            PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
             PermissionDecision.DENY -> {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
                 rejectedCursor(null)
@@ -217,6 +206,7 @@ class Nip55ContentProvider : ContentProvider() {
     private fun executeBackgroundRequest(
         h: Nip55Handler,
         store: PermissionStore,
+        app: KeepMobileApp,
         callerPackage: String,
         requestType: Nip55RequestType,
         content: String,
@@ -238,15 +228,24 @@ class Nip55ContentProvider : ContentProvider() {
         )
 
         return runCatching { h.handleRequest(request, callerPackage) }
-            .onSuccess {
+            .mapCatching { response ->
+                if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
+                    val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
+                    if (groupPubkey == null || groupPubkey.isEmpty()) {
+                        throw IllegalStateException("Stored pubkey unavailable for verification")
+                    }
+                    val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                    if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
+                        throw IllegalStateException("Pubkey verification failed")
+                    }
+                }
                 runCatching {
                     runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
                     showBackgroundSigningNotification(callerPackage, requestType, eventKind)
                 }.onFailure { e ->
                     Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
-            }
-            .map { response ->
                 val cursor = MatrixCursor(RESULT_COLUMNS)
                 val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
                 cursor.addRow(arrayOf(response.result, response.event, response.error, id, pubkeyValue, null))
@@ -287,7 +286,7 @@ class Nip55ContentProvider : ContentProvider() {
         NotificationManagerCompat.from(ctx).notify(backgroundNotificationId.getAndIncrement(), notification)
     }
 
-    private fun getCallerPackage(): String? {
+    private fun getVerifiedCaller(): String? {
         val callingUid = Binder.getCallingUid()
         if (callingUid == android.os.Process.myUid()) return null
 
@@ -302,16 +301,14 @@ class Nip55ContentProvider : ContentProvider() {
         val verificationStore = app?.getCallerVerificationStore() ?: return null
 
         val result = verificationStore.verifyOrTrust(packageName)
-        if (result is CallerVerificationStore.VerificationResult.Verified) {
-            return packageName
-        }
+        if (result is CallerVerificationStore.VerificationResult.Verified) return packageName
 
         if (BuildConfig.DEBUG) {
             val reason = when (result) {
                 is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
                 is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
                 is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
-                is CallerVerificationStore.VerificationResult.Verified -> "Verified"
+                else -> "Unknown"
             }
             Log.w(TAG, "Rejecting $packageName: $reason")
         }

@@ -13,7 +13,6 @@ class CallerVerificationStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "nip55_caller_verification"
         private const val KEY_PREFIX_SIGNATURE = "sig_"
-        private const val KEY_PREFIX_NONCE = "nonce_"
         private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
     }
 
@@ -62,7 +61,7 @@ class CallerVerificationStore(context: Context) {
 
             val digest = MessageDigest.getInstance("SHA-256")
             sortedSignatureBytes.forEach { digest.update(it) }
-            digest.digest().joinToString("") { "%02x".format(it) }
+            digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         } catch (_: Exception) {
             null
         }
@@ -78,7 +77,7 @@ class CallerVerificationStore(context: Context) {
         val trustedSignature = getTrustedSignature(packageName)
         return when {
             trustedSignature == null -> VerificationResult.FirstUseRequiresApproval(currentSignature)
-            trustedSignature == currentSignature -> VerificationResult.Verified(currentSignature)
+            MessageDigest.isEqual(trustedSignature.toByteArray(Charsets.UTF_8), currentSignature.toByteArray(Charsets.UTF_8)) -> VerificationResult.Verified(currentSignature)
             else -> VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
         }
     }
@@ -90,7 +89,7 @@ class CallerVerificationStore(context: Context) {
     fun generateNonce(packageName: String): String {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
-        val nonce = bytes.joinToString("") { "%02x".format(it) }
+        val nonce = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         val expiresAt = System.currentTimeMillis() + NONCE_EXPIRY_MS
         activeNonces[nonce] = NonceData(packageName, expiresAt)
         return nonce
