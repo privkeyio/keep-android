@@ -326,14 +326,47 @@ internal fun copySensitiveText(context: Context, text: String) {
     ClipboardClearManager.scheduleClear(clipboard, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
+/**
+ * Manages FLAG_SECURE reference counting for Activity windows.
+ *
+ * All operations MUST be called from the main thread (enforced via Looper check).
+ * This avoids race conditions without requiring synchronization.
+ */
+private object SecureScreenManager {
+    private var refCount = 0
+
+    fun acquire(activity: Activity) {
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            "SecureScreenManager must be called from the main thread"
+        }
+        if (refCount == 0) {
+            activity.window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        }
+        refCount++
+    }
+
+    fun release(activity: Activity) {
+        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            "SecureScreenManager must be called from the main thread"
+        }
+        refCount--
+        if (refCount == 0) {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else if (refCount < 0) {
+            // Mismatched acquire/release - reset to safe state
+            refCount = 0
+        }
+    }
+}
+
 internal fun setSecureScreen(context: Context, secure: Boolean) {
     val activity = context as? Activity ?: return
     if (secure) {
-        activity.window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        SecureScreenManager.acquire(activity)
     } else {
-        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        SecureScreenManager.release(activity)
     }
 }
