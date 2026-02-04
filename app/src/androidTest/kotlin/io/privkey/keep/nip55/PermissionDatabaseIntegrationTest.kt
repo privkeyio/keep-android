@@ -97,21 +97,61 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun deleteExpiredPermissions() = runBlocking {
         val now = System.currentTimeMillis()
-        val expired = Nip55Permission(
-            callerPackage = "com.test.expired",
+        val nowElapsed = 100000L
+
+        val expiredByWallClock = Nip55Permission(
+            callerPackage = "com.test.expired.wallclock",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
             expiresAt = now - 1000,
             createdAt = now - 2000
         )
-        val valid = Nip55Permission(
-            callerPackage = "com.test.valid",
+        val expiredByClockManipulation = Nip55Permission(
+            callerPackage = "com.test.expired.manipulation",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = now + 60000,
+            createdAt = now + 120000
+        )
+        val expiredByMonotonicTime = Nip55Permission(
+            callerPackage = "com.test.expired.monotonic",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now - 70000,
+            createdAtElapsed = nowElapsed - 70000,
+            durationMs = 60000
+        )
+        val expiredByElapsedRegression = Nip55Permission(
+            callerPackage = "com.test.expired.elapsed_regression",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = nowElapsed + 50000,
+            durationMs = 60000
+        )
+        val validByWallClock = Nip55Permission(
+            callerPackage = "com.test.valid.wallclock",
             requestType = "SIGN_EVENT",
             eventKind = 1,
             decision = "allow",
             expiresAt = now + 60000,
             createdAt = now
+        )
+        val validByMonotonicTime = Nip55Permission(
+            callerPackage = "com.test.valid.monotonic",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = now,
+            createdAtElapsed = nowElapsed - 10000,
+            durationMs = 60000
         )
         val permanent = Nip55Permission(
             callerPackage = "com.test.permanent",
@@ -122,14 +162,22 @@ class PermissionDatabaseIntegrationTest {
             createdAt = now
         )
 
-        permissionDao.insertPermission(expired)
-        permissionDao.insertPermission(valid)
+        permissionDao.insertPermission(expiredByWallClock)
+        permissionDao.insertPermission(expiredByClockManipulation)
+        permissionDao.insertPermission(expiredByMonotonicTime)
+        permissionDao.insertPermission(expiredByElapsedRegression)
+        permissionDao.insertPermission(validByWallClock)
+        permissionDao.insertPermission(validByMonotonicTime)
         permissionDao.insertPermission(permanent)
 
-        permissionDao.deleteExpired(now)
+        permissionDao.deleteExpired(now, nowElapsed)
 
-        assertNull(permissionDao.getPermission("com.test.expired", "SIGN_EVENT", 1))
-        assertNotNull(permissionDao.getPermission("com.test.valid", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.wallclock", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.manipulation", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.monotonic", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.elapsed_regression", "SIGN_EVENT", 1))
+        assertNotNull(permissionDao.getPermission("com.test.valid.wallclock", "SIGN_EVENT", 1))
+        assertNotNull(permissionDao.getPermission("com.test.valid.monotonic", "SIGN_EVENT", 1))
         assertNotNull(permissionDao.getPermission("com.test.permanent", "SIGN_EVENT", 1))
     }
 
@@ -171,11 +219,11 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun getDistinctCallers() = runBlocking {
         val now = System.currentTimeMillis()
-        listOf("com.app1", "com.app2", "com.app1", "com.app3").forEach { pkg ->
+        listOf("com.app1", "com.app2", "com.app1", "com.app3").forEachIndexed { index, pkg ->
             permissionDao.insertPermission(Nip55Permission(
                 callerPackage = pkg,
                 requestType = "SIGN_EVENT",
-                eventKind = (1..100).random(),
+                eventKind = index + 1,
                 decision = "allow",
                 expiresAt = null,
                 createdAt = now
@@ -306,26 +354,65 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun appSettingsExpiry() = runBlocking {
         val now = System.currentTimeMillis()
+        val nowElapsed = 100000L
+
         appSettingsDao.insertOrUpdate(Nip55AppSettings(
-            callerPackage = "com.expired.app",
+            callerPackage = "com.expired.wallclock",
             expiresAt = now - 1000,
             signPolicyOverride = null,
             createdAt = now - 2000
         ))
         appSettingsDao.insertOrUpdate(Nip55AppSettings(
-            callerPackage = "com.valid.app",
+            callerPackage = "com.expired.manipulation",
+            expiresAt = now + 60000,
+            signPolicyOverride = null,
+            createdAt = now + 120000
+        ))
+        appSettingsDao.insertOrUpdate(Nip55AppSettings(
+            callerPackage = "com.expired.monotonic",
+            expiresAt = null,
+            signPolicyOverride = null,
+            createdAt = now - 70000,
+            createdAtElapsed = nowElapsed - 70000,
+            durationMs = 60000
+        ))
+        appSettingsDao.insertOrUpdate(Nip55AppSettings(
+            callerPackage = "com.expired.elapsed_regression",
+            expiresAt = null,
+            signPolicyOverride = null,
+            createdAt = now,
+            createdAtElapsed = nowElapsed + 50000,
+            durationMs = 60000
+        ))
+        appSettingsDao.insertOrUpdate(Nip55AppSettings(
+            callerPackage = "com.valid.wallclock",
             expiresAt = now + 60000,
             signPolicyOverride = null,
             createdAt = now
         ))
+        appSettingsDao.insertOrUpdate(Nip55AppSettings(
+            callerPackage = "com.valid.monotonic",
+            expiresAt = null,
+            signPolicyOverride = null,
+            createdAt = now,
+            createdAtElapsed = nowElapsed - 10000,
+            durationMs = 60000
+        ))
 
-        val expired = appSettingsDao.getExpiredPackages(now)
-        assertEquals(1, expired.size)
-        assertEquals("com.expired.app", expired[0])
+        val expired = appSettingsDao.getExpiredPackages(now, nowElapsed)
+        assertEquals(4, expired.size)
+        assertTrue(expired.contains("com.expired.wallclock"))
+        assertTrue(expired.contains("com.expired.manipulation"))
+        assertTrue(expired.contains("com.expired.monotonic"))
+        assertTrue(expired.contains("com.expired.elapsed_regression"))
 
-        appSettingsDao.deleteExpired(now)
-        assertNull(appSettingsDao.getSettings("com.expired.app"))
-        assertNotNull(appSettingsDao.getSettings("com.valid.app"))
+        appSettingsDao.deleteExpired(now, nowElapsed)
+        assertNull(appSettingsDao.getSettings("com.expired.wallclock"))
+        assertNull(appSettingsDao.getSettings("com.expired.manipulation"))
+        assertNull(appSettingsDao.getSettings("com.expired.monotonic"))
+        assertNull(appSettingsDao.getSettings("com.expired.elapsed_regression"))
+        assertNotNull(appSettingsDao.getSettings("com.valid.wallclock"))
+        assertNotNull(appSettingsDao.getSettings("com.valid.monotonic"))
     }
 
     @Test
