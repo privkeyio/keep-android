@@ -66,7 +66,7 @@ class RiskAssessor(
         }
 
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        if (hour < 6 || hour > 23) {
+        if (hour < 6 || hour >= 23) {
             factors.add(RiskFactor.UNUSUAL_TIME)
         }
 

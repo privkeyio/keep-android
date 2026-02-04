@@ -60,8 +60,38 @@ class AutoSigningSafeguards(context: Context) {
         return cooledOffUntilWall > 0 && System.currentTimeMillis() < cooledOffUntilWall
     }
 
-    fun getCooledOffUntil(packageName: String): Long =
-        prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
+    /**
+     * Returns the earliest time the cooling-off period will expire.
+     *
+     * This considers both the wall-clock timestamp and the elapsed-time-based expiry
+     * to stay consistent with [isCooledOff] after sleep/clock changes.
+     * Returns 0 if not currently cooled off.
+     */
+    fun getCooledOffUntil(packageName: String): Long {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val nowWall = System.currentTimeMillis()
+
+        val cooledOffUntilWall = prefs.getLong(KEY_PREFIX_COOLED_OFF_UNTIL + packageName, 0)
+        val cooledOffUntilElapsed = prefs.getLong(KEY_PREFIX_COOLED_OFF_ELAPSED + packageName, 0)
+
+        val wallExpiryValid = cooledOffUntilWall > 0 && nowWall < cooledOffUntilWall
+        val elapsedExpiryValid = cooledOffUntilElapsed > 0 &&
+            nowElapsed < cooledOffUntilElapsed &&
+            cooledOffUntilElapsed - nowElapsed <= COOLING_OFF_PERIOD_MS
+
+        if (!wallExpiryValid && !elapsedExpiryValid) {
+            return 0
+        }
+
+        val wallExpiry = if (wallExpiryValid) cooledOffUntilWall else Long.MAX_VALUE
+        val elapsedExpiry = if (elapsedExpiryValid) {
+            nowWall + (cooledOffUntilElapsed - nowElapsed)
+        } else {
+            Long.MAX_VALUE
+        }
+
+        return minOf(wallExpiry, elapsedExpiry)
+    }
 
     private fun setCooledOff(packageName: String) {
         val nowElapsed = SystemClock.elapsedRealtime()
@@ -138,16 +168,35 @@ class AutoSigningSafeguards(context: Context) {
         val key = keyPrefix + packageName
         val value = prefs.getString(key, null) ?: return null
         val parts = value.split(":")
-        if (parts.size != 2) return null
+        if (parts.size < 2) return null
         val count = parts[0].toIntOrNull() ?: return null
         val windowStartElapsed = parts[1].toLongOrNull() ?: return null
-        if (windowStartElapsed > nowElapsed) return null
-        return UsageWindow(count, windowStartElapsed)
+
+        if (windowStartElapsed <= nowElapsed) {
+            return UsageWindow(count, windowStartElapsed)
+        }
+
+        if (parts.size >= 3) {
+            val windowStartWall = parts[2].toLongOrNull()
+            if (windowStartWall != null) {
+                val nowWall = System.currentTimeMillis()
+                val elapsedSinceWindowStart = nowWall - windowStartWall
+                if (elapsedSinceWindowStart >= 0) {
+                    val reconstructedElapsed = nowElapsed - elapsedSinceWindowStart
+                    if (reconstructedElapsed > 0) {
+                        return UsageWindow(count, reconstructedElapsed)
+                    }
+                }
+            }
+        }
+
+        return null
     }
 
     private fun persistUsage(keyPrefix: String, packageName: String, usage: UsageWindow) {
         val key = keyPrefix + packageName
-        prefs.edit().putString(key, "${usage.count}:${usage.windowStartElapsed}").apply()
+        val wallClock = System.currentTimeMillis()
+        prefs.edit().putString(key, "${usage.count}:${usage.windowStartElapsed}:$wallClock").apply()
     }
 
     fun getUsageStats(packageName: String): UsageStats {

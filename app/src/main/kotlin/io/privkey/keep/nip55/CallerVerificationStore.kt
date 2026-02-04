@@ -114,7 +114,7 @@ class CallerVerificationStore(context: Context) {
 
     private fun evictOldestNonces() {
         val sorted = activeNonces.entries.sortedBy { it.value.expiresAtElapsed }
-        val toRemove = sorted.take((activeNonces.size - MAX_ACTIVE_NONCES / 2).coerceAtLeast(1))
+        val toRemove = sorted.take((sorted.size - MAX_ACTIVE_NONCES / 2).coerceAtLeast(1))
         toRemove.forEach { activeNonces.remove(it.key) }
     }
 
