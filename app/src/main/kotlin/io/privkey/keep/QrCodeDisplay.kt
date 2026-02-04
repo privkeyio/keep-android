@@ -308,13 +308,14 @@ private object ClipboardClearManager {
         clearJob = scope.launch {
             delay(delayMs)
             try {
-                val current = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                if (current != null && expectedContentHash?.contentEquals(hashContent(current)) == true) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        clipboard.clearPrimaryClip()
-                    } else {
-                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-                    }
+                val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: return@launch
+                val hashMatches = expectedContentHash?.contentEquals(hashContent(currentText)) == true
+                if (!hashMatches) return@launch
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    clipboard.clearPrimaryClip()
+                } else {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
                 }
             } finally {
                 expectedContentHash = null
