@@ -78,7 +78,7 @@ class CallerVerificationStore(context: Context) {
         val trustedSignature = getTrustedSignature(packageName)
         return when {
             trustedSignature == null -> VerificationResult.FirstUseRequiresApproval(currentSignature)
-            trustedSignature == currentSignature -> VerificationResult.Verified(currentSignature)
+            MessageDigest.isEqual(trustedSignature.toByteArray(), currentSignature.toByteArray()) -> VerificationResult.Verified(currentSignature)
             else -> VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
         }
     }
