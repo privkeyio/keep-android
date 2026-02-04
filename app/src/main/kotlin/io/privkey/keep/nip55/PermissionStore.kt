@@ -21,13 +21,15 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        dao.deleteExpired(now, nowElapsed)
-        auditDao.deleteOlderThan(now - 30 * DAY_MS)
-        val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
-        expiredPackages.forEach { pkg ->
-            dao.deleteForCaller(pkg)
+        database.withTransaction {
+            dao.deleteExpired(now, nowElapsed)
+            auditDao.deleteOlderThan(now - 30 * DAY_MS)
+            val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
+            expiredPackages.forEach { pkg ->
+                dao.deleteForCaller(pkg)
+            }
+            appSettingsDao.deleteExpired(now, nowElapsed)
         }
-        appSettingsDao.deleteExpired(now, nowElapsed)
     }
 
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {

@@ -17,9 +17,7 @@ interface Nip55PermissionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)
 
-    // Note: This SQL query mirrors the logic in isTimestampExpired() in PermissionEntities.kt.
-    // Both must be kept in sync: wall clock expiry, wall clock manipulation detection,
-    // monotonic time expiry, and monotonic time regression (device reboot) detection.
+    // Keep in sync with isTimestampExpired() in PermissionEntities.kt
     @Query("""
         DELETE FROM nip55_permissions WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
@@ -40,38 +38,29 @@ interface Nip55PermissionDao {
 
     @Query("""
         SELECT DISTINCT callerPackage FROM nip55_permissions WHERE
-        (expiresAt IS NULL OR :now >= createdAt) AND (
-            (expiresAt IS NULL AND durationMs IS NULL)
-            OR (
-                (expiresAt IS NULL OR expiresAt > :now)
-                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
-                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
-            )
-        )
+        (expiresAt IS NULL OR expiresAt > :now)
+        AND (expiresAt IS NULL OR :now >= createdAt)
+        AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
+        AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
     """)
     suspend fun getAllCallerPackages(now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
     @Query("""
-        SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR :now >= createdAt) AND (
-            (expiresAt IS NULL AND durationMs IS NULL)
-            OR (
-                (expiresAt IS NULL OR expiresAt > :now)
-                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
-                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
-            )
-        ) ORDER BY createdAt DESC
+        SELECT * FROM nip55_permissions WHERE callerPackage = :callerPackage
+        AND (expiresAt IS NULL OR expiresAt > :now)
+        AND (expiresAt IS NULL OR :now >= createdAt)
+        AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
+        AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
+        ORDER BY createdAt DESC
     """)
     suspend fun getForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<Nip55Permission>
 
     @Query("""
-        SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage AND (expiresAt IS NULL OR :now >= createdAt) AND (
-            (expiresAt IS NULL AND durationMs IS NULL)
-            OR (
-                (expiresAt IS NULL OR expiresAt > :now)
-                AND (durationMs IS NULL OR createdAtElapsed <= 0 OR (createdAtElapsed + durationMs) > :nowElapsed)
-                AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
-            )
-        )
+        SELECT COUNT(*) FROM nip55_permissions WHERE callerPackage = :callerPackage
+        AND (expiresAt IS NULL OR expiresAt > :now)
+        AND (expiresAt IS NULL OR :now >= createdAt)
+        AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
+        AND (createdAtElapsed <= 0 OR createdAtElapsed <= :nowElapsed)
     """)
     suspend fun getPermissionCountForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): Int
 
