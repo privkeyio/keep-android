@@ -4,12 +4,16 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import io.privkey.keep.storage.BiometricTimeoutStore
 import javax.crypto.Cipher
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-class BiometricHelper(private val activity: FragmentActivity) {
+class BiometricHelper(
+    private val activity: FragmentActivity,
+    private val timeoutStore: BiometricTimeoutStore? = null
+) {
     private val executor = ContextCompat.getMainExecutor(activity)
 
     enum class BiometricStatus {
@@ -34,21 +38,27 @@ class BiometricHelper(private val activity: FragmentActivity) {
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel"
-    ): Boolean = suspendCoroutine { continuation ->
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                continuation.resume(true)
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                continuation.resume(false)
-            }
-
-            override fun onAuthenticationFailed() {}
+    ): Boolean {
+        if (timeoutStore?.requiresBiometric() == false) {
+            return true
         }
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    timeoutStore?.recordAuthentication()
+                    continuation.resume(true)
+                }
 
-        BiometricPrompt(activity, executor, callback)
-            .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    continuation.resume(false)
+                }
+
+                override fun onAuthenticationFailed() {}
+            }
+
+            BiometricPrompt(activity, executor, callback)
+                .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+        }
     }
 
     suspend fun authenticateWithCrypto(
@@ -59,6 +69,7 @@ class BiometricHelper(private val activity: FragmentActivity) {
     ): Cipher? = suspendCoroutine { continuation ->
         val callback = object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                timeoutStore?.recordAuthentication()
                 continuation.resume(result.cryptoObject?.cipher)
             }
 

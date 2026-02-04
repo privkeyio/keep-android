@@ -27,6 +27,7 @@ import io.privkey.keep.nip55.SignPolicyScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
+import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
@@ -46,12 +47,13 @@ import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 class MainActivity : FragmentActivity() {
-    private val biometricHelper by lazy { BiometricHelper(this) }
+    private var biometricHelper: BiometricHelper? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val app = application as KeepMobileApp
+        biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
         val relayConfigStore = app.getRelayConfigStore()
@@ -60,6 +62,7 @@ class MainActivity : FragmentActivity() {
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
         val pinStore = app.getPinStore()
+        val biometricTimeoutStore = app.getBiometricTimeoutStore()
         val permissionStore = app.getPermissionStore()
         val bunkerConfigStore = app.getBunkerConfigStore()
 
@@ -71,6 +74,7 @@ class MainActivity : FragmentActivity() {
             autoStartStore != null &&
             foregroundServiceStore != null &&
             pinStore != null &&
+            biometricTimeoutStore != null &&
             permissionStore != null &&
             bunkerConfigStore != null
 
@@ -113,6 +117,7 @@ class MainActivity : FragmentActivity() {
                             autoStartStore = autoStartStore!!,
                             foregroundServiceStore = foregroundServiceStore!!,
                             pinStore = pinStore!!,
+                            biometricTimeoutStore = biometricTimeoutStore!!,
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
                             connectionStateFlow = app.connectionState,
@@ -131,7 +136,7 @@ class MainActivity : FragmentActivity() {
                             onBiometricRequest = { title, subtitle, cipher, callback ->
                                 lifecycleScope.launch {
                                     try {
-                                        val authedCipher = biometricHelper.authenticateWithCrypto(
+                                        val authedCipher = biometricHelper?.authenticateWithCrypto(
                                             cipher, title, subtitle
                                         )
                                         callback(authedCipher)
@@ -146,10 +151,10 @@ class MainActivity : FragmentActivity() {
                                 }
                             },
                             onBiometricAuth = {
-                                biometricHelper.authenticate(
+                                biometricHelper?.authenticate(
                                     title = "Disable Kill Switch",
                                     subtitle = "Authenticate to re-enable signing"
-                                )
+                                ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
                                 app.updateNetworkMonitoring(enabled)
@@ -181,6 +186,7 @@ fun MainScreen(
     autoStartStore: AutoStartStore,
     foregroundServiceStore: ForegroundServiceStore,
     pinStore: PinStore,
+    biometricTimeoutStore: BiometricTimeoutStore,
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
     connectionStateFlow: StateFlow<ConnectionState>,
@@ -219,6 +225,7 @@ fun MainScreen(
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
     var showPinSetup by remember { mutableStateOf(false) }
     var pinEnabled by remember { mutableStateOf(pinStore.isPinEnabled()) }
+    var biometricTimeout by remember { mutableStateOf(biometricTimeoutStore.getTimeout()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
@@ -552,6 +559,18 @@ fun MainScreen(
                 val disabled = pinStore.disablePin(currentPin)
                 if (disabled) pinEnabled = false
                 disabled
+            }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        BiometricTimeoutCard(
+            currentTimeout = biometricTimeout,
+            onTimeoutChanged = { newTimeout ->
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
+                    biometricTimeout = newTimeout
+                }
             }
         )
     }

@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.SystemClock
 
 class NetworkConnectivityManager(
     context: Context,
@@ -15,6 +16,7 @@ class NetworkConnectivityManager(
     private var lastNetwork: Network? = null
     private var isRegistered = false
     private var lastReconnectTime = 0L
+    val reconnectionManager = RelayReconnectionManager()
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -22,9 +24,10 @@ class NetworkConnectivityManager(
                 if (lastNetwork == network) return@synchronized false
                 lastNetwork = network
 
-                val now = System.currentTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 if (now - lastReconnectTime < DEBOUNCE_INTERVAL_MS) return@synchronized false
                 lastReconnectTime = now
+                reconnectionManager.resetAll()
                 true
             }
             if (shouldReconnect) onNetworkChanged()
@@ -54,6 +57,7 @@ class NetworkConnectivityManager(
             runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
             isRegistered = false
             lastNetwork = null
+            reconnectionManager.resetAll()
         }
     }
 
