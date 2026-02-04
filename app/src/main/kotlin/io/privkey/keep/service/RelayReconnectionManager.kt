@@ -65,11 +65,15 @@ class RelayReconnectionManager {
 
     fun reset(relayUrl: String) {
         if (!isValidRelayUrl(relayUrl)) return
-        relayBackoffState.remove(relayUrl)
+        synchronized(lock) {
+            relayBackoffState.remove(relayUrl)
+        }
     }
 
     fun resetAll() {
-        relayBackoffState.clear()
+        synchronized(lock) {
+            relayBackoffState.clear()
+        }
     }
 
     fun hasExhaustedAttempts(relayUrl: String): Boolean {
