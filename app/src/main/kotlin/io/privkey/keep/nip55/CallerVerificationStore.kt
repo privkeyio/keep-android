@@ -3,6 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Context
 import android.content.pm.PackageManager
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import io.privkey.keep.storage.LegacyPrefsMigration
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -18,7 +19,10 @@ class CallerVerificationStore(context: Context) {
     private data class NonceData(val packageName: String, val expiresAt: Long)
     private val activeNonces = ConcurrentHashMap<String, NonceData>()
 
-    private val prefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     private val packageManager = context.packageManager
 

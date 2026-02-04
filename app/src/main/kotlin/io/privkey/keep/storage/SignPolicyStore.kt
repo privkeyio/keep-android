@@ -22,7 +22,10 @@ class SignPolicyStore(context: Context) {
         private const val KEY_GLOBAL_POLICY = "global_sign_policy"
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     fun getGlobalPolicy(): SignPolicy {
         val ordinal = prefs.getInt(KEY_GLOBAL_POLICY, SignPolicy.MANUAL.ordinal)

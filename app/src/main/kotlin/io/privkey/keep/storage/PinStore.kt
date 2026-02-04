@@ -11,7 +11,7 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-class PinStore(context: Context) {
+class PinStore(private val context: Context) {
 
     companion object {
         private const val PREFS_NAME = "keep_pin_protection"
@@ -54,7 +54,10 @@ class PinStore(context: Context) {
         )
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     @Synchronized
     fun isPinEnabled(): Boolean = prefs.getBoolean(KEY_PIN_ENABLED, false)

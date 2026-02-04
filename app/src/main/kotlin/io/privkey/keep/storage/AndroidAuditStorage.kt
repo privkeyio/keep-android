@@ -16,7 +16,10 @@ class AndroidAuditStorage(context: Context) {
         private const val MAX_ENTRY_SIZE_BYTES = 64 * 1024
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     @Synchronized
     fun storeEntry(entryJson: String) {

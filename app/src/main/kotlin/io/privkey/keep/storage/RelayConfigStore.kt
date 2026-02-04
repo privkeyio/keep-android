@@ -13,7 +13,10 @@ class RelayConfigStore(context: Context) {
         internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     fun getRelays(): List<String> {
         val stored = prefs.getString(KEY_RELAYS, null) ?: return emptyList()

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.*
 import androidx.room.migration.Migration
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import io.privkey.keep.storage.LegacyPrefsMigration
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
 
@@ -83,7 +84,13 @@ abstract class Nip55Database : RoomDatabase() {
 
         private fun getOrCreateKey(context: Context, prefKey: String, commit: Boolean = false): ByteArray {
             val prefs = getEncryptedPrefs(context)
-            val existing = prefs.getString(prefKey, null)
+
+            var existing = prefs.getString(prefKey, null)
+            if (existing != null) {
+                return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
+            }
+
+            existing = LegacyPrefsMigration.migrateStringIfNeeded(context, PREFS_NAME, prefKey, prefs)
             if (existing != null) {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }

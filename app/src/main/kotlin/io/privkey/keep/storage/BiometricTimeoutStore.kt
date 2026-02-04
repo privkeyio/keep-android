@@ -31,7 +31,10 @@ class BiometricTimeoutStore(context: Context) {
             }
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     @Volatile private var lastAuthRealtime: Long = 0L
     @Volatile private var lastAuthWall: Long = 0L

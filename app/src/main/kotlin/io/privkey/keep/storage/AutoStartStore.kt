@@ -10,7 +10,10 @@ class AutoStartStore(context: Context) {
         private const val KEY_ENABLED = "auto_start_enabled"
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs: SharedPreferences = run {
+        val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+        LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
+    }
 
     fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
 
