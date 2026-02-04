@@ -24,18 +24,16 @@ fun PinUnlockScreen(
     onUnlocked: () -> Unit,
     onBiometricFallback: (() -> Unit)? = null
 ) {
-    val context = LocalContext.current
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
     val focusRequester = remember { FocusRequester() }
+    val context = LocalContext.current
 
-    DisposableEffect(Unit) {
+    DisposableEffect(context) {
         setSecureScreen(context, true)
-        onDispose {
-            setSecureScreen(context, false)
-        }
+        onDispose { setSecureScreen(context, false) }
     }
 
     LaunchedEffect(isLockedOut) {

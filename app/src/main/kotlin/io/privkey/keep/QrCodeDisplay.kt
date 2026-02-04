@@ -295,11 +295,11 @@ private fun generateQrCode(content: String): Bitmap? {
 private object ClipboardClearManager {
     private val handler = Handler(Looper.getMainLooper())
     private var pendingClear: Runnable? = null
-    private var clipboardRef: java.lang.ref.WeakReference<ClipboardManager>? = null
+    private var clipboardRef: WeakReference<ClipboardManager>? = null
 
     fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
         pendingClear?.let { handler.removeCallbacks(it) }
-        clipboardRef = java.lang.ref.WeakReference(clipboard)
+        clipboardRef = WeakReference(clipboard)
         val runnable = Runnable {
             pendingClear = null
             clipboardRef?.get()?.let { cb ->
@@ -390,7 +390,13 @@ private fun Context.findActivity(): Activity? {
 }
 
 internal fun setSecureScreen(context: Context, secure: Boolean) {
-    val activity = context.findActivity() ?: return
+    val activity = context.findActivity()
+    if (activity == null) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w("SecureScreen", "setSecureScreen called with non-Activity context: ${context.javaClass.name}")
+        }
+        return
+    }
     if (secure) {
         SecureScreenManager.acquire(activity)
     } else {
