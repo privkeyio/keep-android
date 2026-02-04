@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -68,18 +69,11 @@ class MainActivity : FragmentActivity() {
         val bunkerConfigStore = app.getBunkerConfigStore()
         val proxyConfigStore = app.getProxyConfigStore()
 
-        val allDependenciesAvailable = keepMobile != null &&
-            storage != null &&
-            relayConfigStore != null &&
-            killSwitchStore != null &&
-            signPolicyStore != null &&
-            autoStartStore != null &&
-            foregroundServiceStore != null &&
-            pinStore != null &&
-            biometricTimeoutStore != null &&
-            permissionStore != null &&
-            bunkerConfigStore != null &&
-            proxyConfigStore != null
+        val allDependenciesAvailable = listOf(
+            keepMobile, storage, relayConfigStore, killSwitchStore, signPolicyStore,
+            autoStartStore, foregroundServiceStore, pinStore, biometricTimeoutStore,
+            permissionStore, bunkerConfigStore, proxyConfigStore
+        ).all { it != null }
 
         setContent {
             var isPinUnlocked by remember {
@@ -87,15 +81,13 @@ class MainActivity : FragmentActivity() {
             }
 
             DisposableEffect(pinStore) {
-                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         isPinUnlocked = pinStore?.isSessionValid() ?: true
                     }
                 }
                 lifecycle.addObserver(observer)
-                onDispose {
-                    lifecycle.removeObserver(observer)
-                }
+                onDispose { lifecycle.removeObserver(observer) }
             }
 
             KeepAndroidTheme {

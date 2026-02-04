@@ -89,8 +89,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     fun getSecurityLevel(): String {
         if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
+        val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
         val keyInfo = runCatching {
-            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
         }.getOrNull() ?: return "unknown"
@@ -112,22 +112,21 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun initCipher(mode: Int, ivBase64: String?): Cipher =
         initCipherWithKey(getOrCreateKey(), mode, ivBase64)
 
-    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher {
-        try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            if (ivBase64 != null) {
-                val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
-                cipher.init(mode, key, spec)
-            } else {
-                cipher.init(mode, key)
-            }
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
-        } catch (e: Throwable) {
-            val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
-            throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
+    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        if (ivBase64 != null) {
+            val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
+            cipher.init(mode, key, spec)
+        } else {
+            cipher.init(mode, key)
         }
+        cipher
+    }.getOrElse { e ->
+        if (e is KeyPermanentlyInvalidatedException) {
+            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
+        }
+        val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
+        throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
     }
 
     private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {

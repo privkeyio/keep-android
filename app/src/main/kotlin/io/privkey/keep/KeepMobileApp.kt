@@ -75,37 +75,29 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeKeepMobile() {
-        try {
+        runCatching {
             val newStorage = AndroidKeystoreStorage(this)
-            val newRelayConfig = RelayConfigStore(this)
-            val newKillSwitch = KillSwitchStore(this)
-            val newSignPolicy = SignPolicyStore(this)
-            val newAutoStart = AutoStartStore(this)
-            val newForegroundService = ForegroundServiceStore(this)
-            val newPinStore = PinStore(this)
-            val newBiometricTimeoutStore = BiometricTimeoutStore(this)
-            val newProxyConfig = ProxyConfigStore(this)
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
-            relayConfigStore = newRelayConfig
-            killSwitchStore = newKillSwitch
-            signPolicyStore = newSignPolicy
-            autoStartStore = newAutoStart
-            foregroundServiceStore = newForegroundService
-            pinStore = newPinStore
-            biometricTimeoutStore = newBiometricTimeoutStore
-            proxyConfigStore = newProxyConfig
+            relayConfigStore = RelayConfigStore(this)
+            killSwitchStore = KillSwitchStore(this)
+            signPolicyStore = SignPolicyStore(this)
+            autoStartStore = AutoStartStore(this)
+            foregroundServiceStore = ForegroundServiceStore(this)
+            pinStore = PinStore(this)
+            biometricTimeoutStore = BiometricTimeoutStore(this)
+            proxyConfigStore = ProxyConfigStore(this)
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
-        } catch (e: Exception) {
+        }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
 
     private fun initializeNetworkMonitoring() {
-        val shouldRegisterNetworkMonitor = autoStartStore?.isEnabled() == true &&
-            foregroundServiceStore?.isEnabled() != true
-        if (shouldRegisterNetworkMonitor) {
+        val autoStartEnabled = autoStartStore?.isEnabled() == true
+        val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true
+        if (autoStartEnabled && !foregroundServiceEnabled) {
             ensureNetworkManagerRegistered()
         }
     }
@@ -244,15 +236,15 @@ class KeepMobileApp : Application() {
             Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxy != null}")
         }
-        mobile.initializeWithProxy(relays, proxy)
+        initializeWithProxy(mobile, relays, proxy)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun KeepMobile.initializeWithProxy(relays: List<String>, proxy: ProxyConfig?) {
+    private fun initializeWithProxy(mobile: KeepMobile, relays: List<String>, proxy: ProxyConfig?) {
         if (proxy != null) {
-            initializeWithProxy(relays, proxy.host, proxy.port.toUShort())
+            mobile.initializeWithProxy(relays, proxy.host, proxy.port.toUShort())
         } else {
-            initialize(relays)
+            mobile.initialize(relays)
         }
     }
 
@@ -288,7 +280,7 @@ class KeepMobileApp : Application() {
         if (!store.hasShare() || relays.isEmpty()) return
 
         applicationScope.launch {
-            runCatching { mobile.initializeWithProxy(relays, proxyConfigStore?.getProxyConfig()) }
+            runCatching { initializeWithProxy(mobile, relays, proxyConfigStore?.getProxyConfig()) }
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
         }
     }

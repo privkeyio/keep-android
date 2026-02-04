@@ -12,16 +12,18 @@ class ProxyConfigStore(context: Context) {
         private const val KEY_ENABLED = "proxy_enabled"
         private const val KEY_HOST = "proxy_host"
         private const val KEY_PORT = "proxy_port"
-        internal const val DEFAULT_HOST = "127.0.0.1"
-        internal const val DEFAULT_PORT = 9050
-        internal val ALLOWED_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+        private const val DEFAULT_HOST = "127.0.0.1"
+        private const val DEFAULT_PORT = 9050
+        private val ALLOWED_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+        private const val MIN_PORT = 1
+        private const val MAX_PORT = 65535
 
         fun isValidHost(host: String): Boolean = host.lowercase() in ALLOWED_HOSTS
 
-        fun isValidPort(port: Int): Boolean = port in 1..65535
+        fun isValidPort(port: Int): Boolean = port in MIN_PORT..MAX_PORT
     }
 
-    private val prefs: SharedPreferences = run {
+    private val prefs: SharedPreferences by lazy {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()

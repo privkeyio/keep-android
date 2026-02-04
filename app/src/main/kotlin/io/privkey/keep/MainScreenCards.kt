@@ -177,10 +177,11 @@ fun PeersCard(peers: List<PeerInfo>) {
 
 @Composable
 private fun PeerRow(peer: PeerInfo) {
+    val colors = MaterialTheme.colorScheme
     val (statusText, statusColor) = when (peer.status) {
-        PeerStatus.ONLINE -> "Online" to MaterialTheme.colorScheme.primary
-        PeerStatus.OFFLINE -> "Offline" to MaterialTheme.colorScheme.onSurfaceVariant
-        PeerStatus.UNKNOWN -> "Unknown" to MaterialTheme.colorScheme.onSurfaceVariant
+        PeerStatus.ONLINE -> "Online" to colors.primary
+        PeerStatus.OFFLINE -> "Offline" to colors.onSurfaceVariant
+        PeerStatus.UNKNOWN -> "Unknown" to colors.onSurfaceVariant
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -319,12 +320,13 @@ fun ConnectCard(
     relaysConfigured: Boolean,
     onConnect: () -> Unit
 ) {
+    val colors = MaterialTheme.colorScheme
     val (statusText, statusColor) = when {
-        isConnecting -> "Connecting..." to MaterialTheme.colorScheme.onSurfaceVariant
-        isConnected -> "Connected to relays" to MaterialTheme.colorScheme.primary
-        error != null -> error to MaterialTheme.colorScheme.error
-        !relaysConfigured -> "Add relays first" to MaterialTheme.colorScheme.onSurfaceVariant
-        else -> "Not connected" to MaterialTheme.colorScheme.onSurfaceVariant
+        isConnecting -> "Connecting..." to colors.onSurfaceVariant
+        isConnected -> "Connected to relays" to colors.primary
+        error != null -> error to colors.error
+        !relaysConfigured -> "Add relays first" to colors.onSurfaceVariant
+        else -> "Not connected" to colors.onSurfaceVariant
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -442,11 +444,12 @@ fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
 fun SecurityLevelBadge(securityLevel: String) {
     var showBottomSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
+    val colors = MaterialTheme.colorScheme
 
     val color = when (securityLevel) {
-        "strongbox" -> MaterialTheme.colorScheme.primary
-        "tee" -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.error
+        "strongbox" -> colors.primary
+        "tee" -> colors.secondary
+        else -> colors.error
     }
 
     Row(
@@ -672,11 +675,12 @@ fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
     val (statusText, statusColor) = when (status) {
-        BunkerStatus.RUNNING -> "Running" to MaterialTheme.colorScheme.primary
-        BunkerStatus.STARTING -> "Starting..." to MaterialTheme.colorScheme.secondary
-        BunkerStatus.ERROR -> "Error" to MaterialTheme.colorScheme.error
-        BunkerStatus.STOPPED -> "Configure" to MaterialTheme.colorScheme.onSurfaceVariant
+        BunkerStatus.RUNNING -> "Running" to colors.primary
+        BunkerStatus.STARTING -> "Starting..." to colors.secondary
+        BunkerStatus.ERROR -> "Error" to colors.error
+        BunkerStatus.STOPPED -> "Configure" to colors.onSurfaceVariant
     }
     Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
