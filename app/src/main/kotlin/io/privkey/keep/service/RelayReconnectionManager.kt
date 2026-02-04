@@ -21,12 +21,13 @@ class RelayReconnectionManager {
 
     private fun isValidRelayUrl(url: String): Boolean {
         if (url.length > MAX_URL_LENGTH) return false
-        return url.startsWith("wss://") || url.startsWith("ws://")
+        return url.startsWith("wss://")
     }
 
     private fun evictOldestIfNeeded() {
         if (relayBackoffState.size <= MAX_TRACKED_RELAYS) return
         val oldest = relayBackoffState.entries
+            .filter { it.value.attempts >= MIN_ATTEMPTS_FOR_EVICTION }
             .minByOrNull { it.value.lastAttemptTime }
             ?.key
         oldest?.let { relayBackoffState.remove(it) }
@@ -121,5 +122,6 @@ class RelayReconnectionManager {
         const val JITTER_FACTOR = 0.2
         const val MAX_URL_LENGTH = 2048
         const val MAX_TRACKED_RELAYS = 100
+        const val MIN_ATTEMPTS_FOR_EVICTION = 3
     }
 }

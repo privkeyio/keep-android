@@ -44,7 +44,6 @@ class BiometricHelper(
         negativeButtonText: String = "Cancel"
     ): Boolean {
         if (timeoutStore?.requiresBiometric() == false) {
-            timeoutStore?.recordAuthentication()
             return true
         }
         return suspendCoroutine { continuation ->
