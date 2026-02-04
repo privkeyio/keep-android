@@ -359,9 +359,7 @@ private object SecureScreenManager {
     fun release(activity: Activity) {
         checkMainThread()
         val currentActivity = activityRef?.get()
-        if (currentActivity !== activity) {
-            refCount = 0
-            activityRef = WeakReference(activity)
+        if (currentActivity == null || currentActivity !== activity) {
             return
         }
         if (refCount <= 0) {
