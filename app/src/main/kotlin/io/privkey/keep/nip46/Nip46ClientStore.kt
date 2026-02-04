@@ -2,7 +2,6 @@ package io.privkey.keep.nip46
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.os.SystemClock
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.json.JSONArray
@@ -27,12 +26,13 @@ object Nip46ClientStore {
     }
 
     fun saveClient(context: Context, pubkey: String, name: String, relays: List<String>) {
+        val normalizedPubkey = pubkey.lowercase()
         val clients = getClients(context).toMutableMap()
-        clients[pubkey.lowercase()] = Nip46ClientInfo(
-            pubkey = pubkey.lowercase(),
+        clients[normalizedPubkey] = Nip46ClientInfo(
+            pubkey = normalizedPubkey,
             name = name,
             relays = relays,
-            connectedAt = SystemClock.elapsedRealtime()
+            connectedAt = System.currentTimeMillis()
         )
         saveClients(context, clients)
     }

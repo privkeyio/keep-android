@@ -17,8 +17,10 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.BunkerConfigStore
+import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -78,7 +80,7 @@ class NostrConnectActivity : FragmentActivity() {
         }
     }
 
-    private fun handleApprove(duration: io.privkey.keep.nip55.PermissionDuration, onComplete: (Boolean) -> Unit) {
+    private fun handleApprove(duration: PermissionDuration, onComplete: (Boolean) -> Unit) {
         val request = connectRequest ?: run {
             onComplete(false)
             return
@@ -222,17 +224,8 @@ class NostrConnectActivity : FragmentActivity() {
                 .ifBlank { "Unknown App" }
         }
 
-        private fun mapPermissionToRequestType(type: String): io.privkey.keep.uniffi.Nip55RequestType? {
-            return when (type) {
-                "sign_event" -> io.privkey.keep.uniffi.Nip55RequestType.SIGN_EVENT
-                "nip44_encrypt" -> io.privkey.keep.uniffi.Nip55RequestType.NIP44_ENCRYPT
-                "nip44_decrypt" -> io.privkey.keep.uniffi.Nip55RequestType.NIP44_DECRYPT
-                "nip04_encrypt" -> io.privkey.keep.uniffi.Nip55RequestType.NIP04_ENCRYPT
-                "nip04_decrypt" -> io.privkey.keep.uniffi.Nip55RequestType.NIP04_DECRYPT
-                "get_public_key" -> io.privkey.keep.uniffi.Nip55RequestType.GET_PUBLIC_KEY
-                else -> null
-            }
-        }
+        private fun mapPermissionToRequestType(type: String): Nip55RequestType? =
+            mapMethodToNip55RequestType(type)
     }
 }
 

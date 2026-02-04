@@ -329,15 +329,8 @@ class BunkerService : Service() {
         }
     }
 
-    private fun mapMethodToRequestType(method: String): Nip55RequestType? = when (method) {
-        "sign_event" -> Nip55RequestType.SIGN_EVENT
-        "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
-        "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
-        "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
-        "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
-        "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
-        else -> null
-    }
+    private fun mapMethodToRequestType(method: String): Nip55RequestType? =
+        mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {

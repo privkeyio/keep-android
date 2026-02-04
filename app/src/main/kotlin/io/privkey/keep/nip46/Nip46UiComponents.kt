@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.nip55.PermissionDuration
+import io.privkey.keep.uniffi.Nip55RequestType
 
 @Composable
 internal fun Nip46DetailRow(label: String, value: String) {
@@ -88,4 +89,14 @@ internal fun formatNip46Method(method: String): String = when (method) {
     "nip04_decrypt" -> "Decrypt (NIP-04)"
     "ping" -> "Ping"
     else -> method
+}
+
+internal fun mapMethodToNip55RequestType(method: String): Nip55RequestType? = when (method) {
+    "sign_event" -> Nip55RequestType.SIGN_EVENT
+    "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
+    "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+    "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
+    "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
+    "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
+    else -> null
 }

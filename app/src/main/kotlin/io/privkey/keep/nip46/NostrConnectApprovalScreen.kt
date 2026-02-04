@@ -17,7 +17,7 @@ fun NostrConnectApprovalScreen(
     onReject: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    var selectedDuration by remember { mutableStateOf(PermissionDuration.ONE_HOUR) }
+    var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
 
     Column(
