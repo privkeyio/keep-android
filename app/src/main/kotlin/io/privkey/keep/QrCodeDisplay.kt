@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Handler
@@ -44,7 +45,7 @@ import java.util.Arrays
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 2_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
@@ -379,11 +380,17 @@ private object SecureScreenManager {
     }
 }
 
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 internal fun setSecureScreen(context: Context, secure: Boolean) {
-    val activity = context as? Activity
-        ?: throw IllegalArgumentException(
-            "setSecureScreen requires an Activity context, got ${context.javaClass.name}"
-        )
+    val activity = context.findActivity() ?: return
     if (secure) {
         SecureScreenManager.acquire(activity)
     } else {
