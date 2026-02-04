@@ -36,8 +36,8 @@ class PinStore(private val context: Context) {
         private const val PBKDF2_ITERATIONS = 120_000
         private const val PBKDF2_KEY_LENGTH = 256
 
-        private const val dummySalt = "AAAAAAAAAAAAAAAAAAAAAA=="
-        private const val dummyHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        private const val DUMMY_SALT = "AAAAAAAAAAAAAAAAAAAAAA=="
+        private const val DUMMY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
         private val LOCKOUT_DURATIONS_MS = longArrayOf(
             30_000L,     // 30 seconds
@@ -118,8 +118,8 @@ class PinStore(private val context: Context) {
         val salt = prefs.getString(KEY_PIN_SALT, null)
 
         val pinNotSet = storedHash == null || salt == null
-        val effectiveSalt = salt ?: dummySalt
-        val effectiveStoredHash = storedHash ?: dummyHash
+        val effectiveSalt = salt ?: DUMMY_SALT
+        val effectiveStoredHash = storedHash ?: DUMMY_HASH
 
         val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
         try {
@@ -132,7 +132,7 @@ class PinStore(private val context: Context) {
             if (verified) {
                 clearFailedAttempts()
                 refreshSession()
-            } else if (!lockedOut && !pinNotSet) {
+            } else if (!lockedOut && !pinNotSet && !invalidLength) {
                 incrementFailedAttempts()
             }
 
