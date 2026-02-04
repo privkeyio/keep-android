@@ -336,9 +336,7 @@ private object SecureScreenManager {
     private var refCount = 0
 
     fun acquire(activity: Activity) {
-        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            "SecureScreenManager must be called from the main thread"
-        }
+        checkMainThread()
         if (refCount == 0) {
             activity.window.setFlags(
                 WindowManager.LayoutParams.FLAG_SECURE,
@@ -349,15 +347,20 @@ private object SecureScreenManager {
     }
 
     fun release(activity: Activity) {
-        check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            "SecureScreenManager must be called from the main thread"
+        checkMainThread()
+        if (refCount <= 0) {
+            refCount = 0
+            return
         }
         refCount--
         if (refCount == 0) {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } else if (refCount < 0) {
-            // Mismatched acquire/release - reset to safe state
-            refCount = 0
+        }
+    }
+
+    private fun checkMainThread() {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "SecureScreenManager must be called from the main thread"
         }
     }
 }
