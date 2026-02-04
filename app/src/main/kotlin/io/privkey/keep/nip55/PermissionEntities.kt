@@ -160,10 +160,15 @@ internal fun isTimestampExpired(
 ): Boolean {
     if (expiresAt == null && durationMs == null) return false
 
-    if (createdAtElapsed > 0 && durationMs != null) {
-        if (currentElapsed < createdAtElapsed) return true
-        val elapsed = currentElapsed - createdAtElapsed
-        if (elapsed >= durationMs) return true
+    if (durationMs != null) {
+        if (createdAtElapsed > 0) {
+            if (currentElapsed < createdAtElapsed) return true
+            val elapsed = currentElapsed - createdAtElapsed
+            if (elapsed >= durationMs) return true
+        } else {
+            val wallClockExpiry = createdAt + durationMs
+            if (currentTimeMillis >= wallClockExpiry) return true
+        }
     }
 
     if (expiresAt != null) {

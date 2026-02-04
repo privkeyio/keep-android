@@ -176,6 +176,25 @@ class Nip55PermissionTest {
     }
 
     @Test
+    fun `isExpired falls back to wall clock when createdAtElapsed is zero`() {
+        val createdAt = 1000000L
+        val durationMs = 60000L
+        val permission = Nip55Permission(
+            id = 1,
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = null,
+            createdAt = createdAt,
+            createdAtElapsed = 0,
+            durationMs = durationMs
+        )
+        assertFalse(permission.isExpired(currentElapsed = 5000L, currentTimeMillis = createdAt + 30000L))
+        assertTrue(permission.isExpired(currentElapsed = 5000L, currentTimeMillis = createdAt + 60000L))
+    }
+
+    @Test
     fun `permissionDecision returns correct enum`() {
         val allowPermission = Nip55Permission(
             id = 1,
