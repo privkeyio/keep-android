@@ -14,17 +14,26 @@ import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.nip55.PermissionDuration
+import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class Nip46ApprovalActivity : FragmentActivity() {
 
     private lateinit var biometricHelper: BiometricHelper
     private var storage: AndroidKeystoreStorage? = null
     private var killSwitchStore: KillSwitchStore? = null
+    private var permissionStore: PermissionStore? = null
     private var requestId: String? = null
+    private var clientPubkey: String? = null
+    private var method: String? = null
+    private var eventKind: Int? = null
     private var approveCompletionCallback: ((Boolean) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,8 +46,12 @@ class Nip46ApprovalActivity : FragmentActivity() {
         biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         storage = app?.getStorage()
         killSwitchStore = app?.getKillSwitchStore()
+        permissionStore = app?.getPermissionStore()
 
         requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+        clientPubkey = intent.getStringExtra(EXTRA_APP_PUBKEY)
+        method = intent.getStringExtra(EXTRA_METHOD)
+        eventKind = intent.getIntExtra(EXTRA_EVENT_KIND, -1).takeIf { it >= 0 }
         if (requestId == null) {
             if (BuildConfig.DEBUG) Log.e(TAG, "No request ID provided")
             finish()
@@ -53,7 +66,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
 
         if (killSwitchStore?.isEnabled() == true) {
-            respond(false)
+            respond(false, null)
             return
         }
 
@@ -73,7 +86,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                         eventKind = request.eventKind?.toInt(),
                         eventContent = request.eventContent,
                         isConnectRequest = isConnect,
-                        onApprove = ::handleApprove,
+                        onApprove = { duration, onComplete -> handleApprove(duration, onComplete) },
                         onReject = ::handleReject
                     )
                 }
@@ -81,12 +94,12 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    private fun handleApprove(onComplete: (Boolean) -> Unit) {
+    private fun handleApprove(duration: PermissionDuration, onComplete: (Boolean) -> Unit) {
         approveCompletionCallback = onComplete
 
         val keystoreStorage = storage
         if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
-            respond(false)
+            respond(false, null)
             return
         }
 
@@ -96,7 +109,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 .getOrNull()
 
             if (cipher == null) {
-                respond(false)
+                respond(false, null)
                 return@launch
             }
 
@@ -110,7 +123,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 .getOrNull()
 
             if (authedCipher == null) {
-                respond(false)
+                respond(false, null)
                 return@launch
             }
 
@@ -118,8 +131,37 @@ class Nip46ApprovalActivity : FragmentActivity() {
             keystoreStorage.setPendingCipher(reqId, authedCipher) {
                 keystoreStorage.clearPendingCipher(reqId)
             }
-            respond(true)
+            respond(true, duration)
         }
+    }
+
+    private suspend fun savePermissionIfRequested(duration: PermissionDuration) {
+        val store = permissionStore ?: return
+        val pubkey = clientPubkey ?: return
+        val methodName = method ?: return
+
+        if (!duration.shouldPersist) return
+
+        withContext(Dispatchers.IO) {
+            val callerPackage = "nip46:$pubkey"
+            val requestType = mapMethodToRequestType(methodName) ?: return@withContext
+            store.grantPermission(
+                callerPackage = callerPackage,
+                requestType = requestType,
+                eventKind = eventKind,
+                duration = duration
+            )
+        }
+    }
+
+    private fun mapMethodToRequestType(method: String): Nip55RequestType? = when (method) {
+        "sign_event" -> Nip55RequestType.SIGN_EVENT
+        "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
+        "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+        "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
+        "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
+        "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
+        else -> null
     }
 
     companion object {
@@ -135,14 +177,19 @@ class Nip46ApprovalActivity : FragmentActivity() {
     }
 
     private fun handleReject() {
-        respond(false)
+        respond(false, null)
     }
 
-    private fun respond(approved: Boolean) {
+    private fun respond(approved: Boolean, duration: PermissionDuration?) {
         approveCompletionCallback?.invoke(approved)
         approveCompletionCallback = null
-        requestId?.let { BunkerService.respondToApproval(it, approved) }
-        finish()
+        lifecycleScope.launch {
+            if (approved && duration != null) {
+                savePermissionIfRequested(duration)
+            }
+            requestId?.let { BunkerService.respondToApproval(it, approved, clientPubkey) }
+            finish()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -151,19 +198,19 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val isTimeout = intent.getBooleanExtra(EXTRA_TIMEOUT, false)
 
         if (isTimeout && newRequestId == requestId) {
-            respond(false)
+            respond(false, null)
             return
         }
 
         if (newRequestId != null && newRequestId != requestId) {
-            requestId?.let { BunkerService.respondToApproval(it, false) }
+            requestId?.let { BunkerService.respondToApproval(it, false, clientPubkey) }
             finish()
         }
     }
 
     @Deprecated("Use OnBackPressedCallback", ReplaceWith("onBackPressedDispatcher"))
     override fun onBackPressed() {
-        respond(false)
+        respond(false, null)
         super.onBackPressed()
     }
 }

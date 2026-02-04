@@ -89,6 +89,20 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.KeepAndroid" />
 
+        <activity
+            android:name=".nip46.NostrConnectActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.KeepAndroid">
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostrconnect" />
+            </intent-filter>
+        </activity>
+
     </application>
 
 </manifest>

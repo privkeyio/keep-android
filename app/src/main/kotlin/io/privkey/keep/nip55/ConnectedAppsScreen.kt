@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
+import io.privkey.keep.nip46.Nip46ClientStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -39,13 +41,30 @@ fun ConnectedAppsScreen(
     onAppClick: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var connectedApps by remember { mutableStateOf<List<ConnectedAppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         try {
-            connectedApps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
+            val nip55Apps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
+            val nip46Clients = withContext(Dispatchers.IO) {
+                Nip46ClientStore.getClients(context).values.map { client ->
+                    val callerPackage = "nip46:${client.pubkey}"
+                    val permCount = permissionStore.getPermissionsForCaller(callerPackage).size
+                    val lastUsed = permissionStore.getAuditLog(100)
+                        .filter { it.callerPackage == callerPackage }
+                        .maxOfOrNull { it.timestamp }
+                    ConnectedAppInfo(
+                        packageName = callerPackage,
+                        permissionCount = permCount,
+                        lastUsedTime = lastUsed ?: client.connectedAt,
+                        expiresAt = null
+                    )
+                }
+            }
+            connectedApps = (nip55Apps + nip46Clients).sortedByDescending { it.lastUsedTime ?: 0L }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e("ConnectedApps", "Failed to load connected apps", e)
             loadError = "Failed to load connected apps"
@@ -141,25 +160,34 @@ private fun ConnectedAppItem(
     var appLabel by remember { mutableStateOf<String?>(null) }
     var appIcon by remember { mutableStateOf<Drawable?>(null) }
     var isVerified by remember { mutableStateOf(true) }
+    val isNip46Client = app.packageName.startsWith("nip46:")
 
     LaunchedEffect(app.packageName) {
-        val result = withContext(Dispatchers.IO) {
-            try {
-                val pm = context.packageManager
-                val info = pm.getApplicationInfo(app.packageName, 0)
-                AppInfoResult(
-                    label = pm.getApplicationLabel(info).toString(),
-                    icon = pm.getApplicationIcon(info),
-                    verified = true
-                )
-            } catch (e: PackageManager.NameNotFoundException) {
-                if (BuildConfig.DEBUG) Log.w("ConnectedApps", "Package not found")
-                AppInfoResult(label = null, icon = null, verified = false)
+        if (isNip46Client) {
+            val pubkey = app.packageName.removePrefix("nip46:")
+            val clientInfo = Nip46ClientStore.getClient(context, pubkey)
+            appLabel = clientInfo?.name ?: "NIP-46 Client"
+            appIcon = null
+            isVerified = true
+        } else {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val pm = context.packageManager
+                    val info = pm.getApplicationInfo(app.packageName, 0)
+                    AppInfoResult(
+                        label = pm.getApplicationLabel(info).toString(),
+                        icon = pm.getApplicationIcon(info),
+                        verified = true
+                    )
+                } catch (e: PackageManager.NameNotFoundException) {
+                    if (BuildConfig.DEBUG) Log.w("ConnectedApps", "Package not found")
+                    AppInfoResult(label = null, icon = null, verified = false)
+                }
             }
+            appLabel = result.label
+            appIcon = result.icon
+            isVerified = result.verified
         }
-        appLabel = result.label
-        appIcon = result.icon
-        isVerified = result.verified
     }
 
     Card(
@@ -181,7 +209,14 @@ private fun ConnectedAppItem(
                     modifier = Modifier.size(48.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!isVerified) {
+                    if (isNip46Client) {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "NIP-46 Client",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    } else if (!isVerified) {
                         Icon(
                             Icons.Default.Warning,
                             contentDescription = stringResource(R.string.connected_app_unverified),
@@ -199,7 +234,14 @@ private fun ConnectedAppItem(
                     text = appLabel ?: app.packageName,
                     style = MaterialTheme.typography.titleMedium
                 )
-                if (appLabel != null) {
+                if (isNip46Client) {
+                    val pubkey = app.packageName.removePrefix("nip46:")
+                    Text(
+                        text = "NIP-46 (${pubkey.take(8)}...${pubkey.takeLast(6)})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (appLabel != null) {
                     Text(
                         text = app.packageName,
                         style = MaterialTheme.typography.bodySmall,
