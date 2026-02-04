@@ -117,6 +117,7 @@ fun ApprovalScreen(
     callerVerified: Boolean,
     showFirstUseWarning: Boolean = false,
     callerSignatureFingerprint: String? = null,
+    riskAssessment: RiskAssessment? = null,
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
@@ -150,6 +151,11 @@ fun ApprovalScreen(
         } else if (!callerVerified) {
             Spacer(modifier = Modifier.height(8.dp))
             UnverifiedCallerWarning()
+        }
+
+        if (riskAssessment != null && riskAssessment.factors.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            RiskIndicator(riskAssessment)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -480,4 +486,41 @@ private fun DetailRow(
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
     Text(text = value, style = valueStyle)
+}
+
+@Composable
+private fun RiskIndicator(risk: RiskAssessment) {
+    if (risk.requiredAuth == AuthLevel.NONE) return
+
+    val containerColor = when (risk.requiredAuth) {
+        AuthLevel.EXPLICIT -> MaterialTheme.colorScheme.errorContainer
+        AuthLevel.BIOMETRIC -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+        AuthLevel.PIN -> MaterialTheme.colorScheme.tertiaryContainer
+        AuthLevel.NONE -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = when (risk.requiredAuth) {
+        AuthLevel.EXPLICIT, AuthLevel.BIOMETRIC -> MaterialTheme.colorScheme.onErrorContainer
+        AuthLevel.PIN, AuthLevel.NONE -> MaterialTheme.colorScheme.onTertiaryContainer
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = containerColor)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                text = "Elevated authentication required",
+                style = MaterialTheme.typography.labelMedium,
+                color = contentColor
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            risk.factors.forEach { factor ->
+                Text(
+                    text = "• ${factor.description}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor
+                )
+            }
+        }
+    }
 }

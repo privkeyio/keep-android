@@ -46,6 +46,7 @@ class Nip55Activity : FragmentActivity() {
     private var intentUri: String? = null
     private var notificationRequestId: String? = null
     private var isNotificationOriginated: Boolean = false
+    private var riskAssessment: RiskAssessment? = null
 
     companion object {
         private const val TAG = "Nip55Activity"
@@ -92,6 +93,24 @@ class Nip55Activity : FragmentActivity() {
         parseAndSetRequest(intent)
         if (request != null) {
             showNotification()
+            calculateRiskAndSetupContent()
+        }
+    }
+
+    private fun calculateRiskAndSetupContent() {
+        val req = request ?: return
+        val pkg = callerPackage
+        val store = permissionStore
+
+        if (pkg == null || store == null) {
+            setupContent()
+            return
+        }
+
+        lifecycleScope.launch {
+            riskAssessment = runCatching {
+                store.riskAssessor.assess(pkg, req.eventKind())
+            }.getOrNull()
             setupContent()
         }
     }
@@ -163,6 +182,7 @@ class Nip55Activity : FragmentActivity() {
         val currentCallerVerified = callerVerified
         val currentPendingFirstUse = callerPendingFirstUse
         val currentSignatureHash = callerSignatureHash
+        val currentRisk = riskAssessment
 
         setContent {
             KeepAndroidTheme {
@@ -176,6 +196,7 @@ class Nip55Activity : FragmentActivity() {
                         callerVerified = currentCallerVerified,
                         showFirstUseWarning = currentPendingFirstUse,
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
+                        riskAssessment = currentRisk,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
                     )

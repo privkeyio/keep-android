@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import io.privkey.keep.storage.LegacyPrefsMigration
 import java.security.MessageDigest
@@ -14,9 +15,10 @@ class CallerVerificationStore(context: Context) {
         private const val PREFS_NAME = "nip55_caller_verification"
         private const val KEY_PREFIX_SIGNATURE = "sig_"
         private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
+        private const val MAX_ACTIVE_NONCES = 1000
     }
 
-    private data class NonceData(val packageName: String, val expiresAt: Long)
+    private data class NonceData(val packageName: String, val expiresAtElapsed: Long)
     private val activeNonces = ConcurrentHashMap<String, NonceData>()
 
     private val prefs = run {
@@ -82,19 +84,38 @@ class CallerVerificationStore(context: Context) {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         val nonce = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        val expiresAt = System.currentTimeMillis() + NONCE_EXPIRY_MS
-        activeNonces[nonce] = NonceData(packageName, expiresAt)
+        val expiresAtElapsed = SystemClock.elapsedRealtime() + NONCE_EXPIRY_MS
+        activeNonces[nonce] = NonceData(packageName, expiresAtElapsed)
+        if (activeNonces.size > MAX_ACTIVE_NONCES) {
+            cleanupExpiredNonces()
+            if (activeNonces.size > MAX_ACTIVE_NONCES) {
+                evictOldestNonces()
+            }
+        }
         return nonce
     }
 
     fun consumeNonce(nonce: String): NonceResult {
         val data = activeNonces.remove(nonce) ?: return NonceResult.Invalid
-        return if (System.currentTimeMillis() > data.expiresAt) NonceResult.Expired else NonceResult.Valid(data.packageName)
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed > data.expiresAtElapsed || data.expiresAtElapsed - nowElapsed > NONCE_EXPIRY_MS) {
+            return NonceResult.Expired
+        }
+        return NonceResult.Valid(data.packageName)
     }
 
     fun cleanupExpiredNonces() {
-        val now = System.currentTimeMillis()
-        activeNonces.entries.removeIf { it.value.expiresAt < now }
+        val nowElapsed = SystemClock.elapsedRealtime()
+        activeNonces.entries.removeIf {
+            nowElapsed > it.value.expiresAtElapsed ||
+            it.value.expiresAtElapsed - nowElapsed > NONCE_EXPIRY_MS
+        }
+    }
+
+    private fun evictOldestNonces() {
+        val sorted = activeNonces.entries.sortedBy { it.value.expiresAtElapsed }
+        val toRemove = sorted.take((activeNonces.size - MAX_ACTIVE_NONCES / 2).coerceAtLeast(1))
+        toRemove.forEach { activeNonces.remove(it.key) }
     }
 
     sealed class VerificationResult {
