@@ -298,13 +298,20 @@ class BunkerService : Service() {
             while (true) {
                 val request = pendingNostrConnectRequests.poll() ?: break
                 runCatching {
-                    handler.sendConnectResponse(request.clientPubkey, request.relays, request.secret)
+                    val method = handler::class.java.getMethod(
+                        "sendConnectResponse",
+                        String::class.java,
+                        List::class.java,
+                        String::class.java
+                    )
+                    method.invoke(handler, request.clientPubkey, request.relays, request.secret)
                     if (BuildConfig.DEBUG) Log.d(TAG, "Sent connect response to ${truncatePubkey(request.clientPubkey)}")
                 }.onFailure { e ->
-                    if (e is NoSuchMethodError || e is AbstractMethodError) {
+                    val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause else e
+                    if (cause is NoSuchMethodException || cause is NoSuchMethodError) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "sendConnectResponse not available in library - client authorized but response not sent")
                     } else {
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${(cause ?: e)::class.simpleName}")
                     }
                 }
             }

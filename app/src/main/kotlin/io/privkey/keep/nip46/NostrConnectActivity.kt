@@ -212,6 +212,7 @@ class NostrConnectActivity : FragmentActivity() {
                 val parts = perm.trim().split(":")
                 val type = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val kind = parts.getOrNull(1)?.toIntOrNull()
+                if (kind != null && kind < 0) return@mapNotNull null
                 RequestedPermission(type, kind)
             }
         }

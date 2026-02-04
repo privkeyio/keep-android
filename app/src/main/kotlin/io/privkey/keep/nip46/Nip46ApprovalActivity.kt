@@ -145,12 +145,16 @@ class Nip46ApprovalActivity : FragmentActivity() {
         withContext(Dispatchers.IO) {
             val callerPackage = "nip46:$pubkey"
             val requestType = mapMethodToRequestType(methodName) ?: return@withContext
-            store.grantPermission(
-                callerPackage = callerPackage,
-                requestType = requestType,
-                eventKind = eventKind,
-                duration = duration
-            )
+            try {
+                store.grantPermission(
+                    callerPackage = callerPackage,
+                    requestType = requestType,
+                    eventKind = eventKind,
+                    duration = duration
+                )
+            } catch (t: Throwable) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist permission: ${t::class.simpleName}")
+            }
         }
     }
 
