@@ -11,10 +11,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class RateLimiterTest {
 
     private lateinit var rateLimiter: RateLimiter
+    private var currentTime = 0L
 
     @Before
     fun setup() {
-        rateLimiter = RateLimiter(windowMs = 1000L, maxRequests = 10)
+        currentTime = 0L
+        rateLimiter = RateLimiter(windowMs = 1000L, maxRequests = 10, timeProvider = { currentTime })
     }
 
     @Test
@@ -53,17 +55,21 @@ class RateLimiterTest {
 
     @Test
     fun `rate limit resets after window`() {
-        val caller = "com.test.app"
-        for (i in 1..rateLimiter.maxRequests) {
-            rateLimiter.checkRateLimit(caller)
-        }
-        assertFalse(rateLimiter.checkRateLimit(caller))
-
-        rateLimiter.rateLimitMap[caller]?.windowStart?.set(
-            System.currentTimeMillis() - rateLimiter.windowMs - 1
+        var testTime = 0L
+        val shortWindowLimiter = RateLimiter(
+            windowMs = 100L,
+            maxRequests = 2,
+            timeProvider = { testTime }
         )
+        val caller = "com.test.app"
 
-        assertTrue(rateLimiter.checkRateLimit(caller))
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
+        assertFalse(shortWindowLimiter.checkRateLimit(caller))
+
+        testTime = 101L
+
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
     }
 
     @Test
@@ -94,8 +100,8 @@ class RateLimiterTest {
     }
 
     @Test
-    fun `empty caller package is handled`() {
-        assertTrue(rateLimiter.checkRateLimit(""))
+    fun `empty caller package is rejected`() {
+        assertFalse(rateLimiter.checkRateLimit(""))
     }
 
     @Test

@@ -266,7 +266,13 @@ fun ExportShareScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     OutlinedButton(
-                        onClick = onDismiss,
+                        onClick = {
+                            passphrase.clear()
+                            confirmPassphrase.clear()
+                            passphraseDisplay = ""
+                            confirmPassphraseDisplay = ""
+                            onDismiss()
+                        },
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("Cancel")
@@ -403,7 +409,10 @@ private fun ExportSuccessContent(
 
     Spacer(modifier = Modifier.height(8.dp))
 
-    Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+    Button(
+        onClick = onDismiss,
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Text("Done")
     }
 }
