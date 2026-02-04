@@ -54,8 +54,7 @@ android {
     }
 
     lint {
-        disable += "MutableCollectionMutableState"
-        disable += "AutoboxingStateCreation"
+        disable += listOf("MutableCollectionMutableState", "AutoboxingStateCreation")
     }
 }
 
