@@ -363,7 +363,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+    override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -371,7 +371,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
 
-    fun loadShareByKey(key: String): ByteArray {
+    override fun loadShareByKey(key: String): ByteArray {
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -379,7 +379,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return loadShareByKeyWithCipher(cipher, key)
     }
 
-    fun listAllShares(): List<ShareMetadataInfo> {
+    override fun listAllShares(): List<ShareMetadataInfo> {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         return keys.mapNotNull(::getShareMetadataByKey)
     }
@@ -390,7 +390,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return readMetadataFromPrefs(sharePrefs)
     }
 
-    fun deleteShareByKey(key: String) {
+    override fun deleteShareByKey(key: String) {
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
@@ -423,11 +423,11 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun getActiveShareKey(): String? {
+    override fun getActiveShareKey(): String? {
         return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
     }
 
-    fun setActiveShareKey(key: String?) {
+    override fun setActiveShareKey(key: String?) {
         val editor = multiSharePrefs.edit()
         if (key != null) {
             editor.putString(KEY_ACTIVE_SHARE, key)
