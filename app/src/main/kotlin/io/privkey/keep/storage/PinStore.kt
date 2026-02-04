@@ -36,6 +36,9 @@ class PinStore(private val context: Context) {
         private const val PBKDF2_ITERATIONS = 120_000
         private const val PBKDF2_KEY_LENGTH = 256
 
+        private const val dummySalt = "AAAAAAAAAAAAAAAAAAAAAA=="
+        private const val dummyHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
         private val LOCKOUT_DURATIONS_MS = longArrayOf(
             30_000L,     // 30 seconds
             60_000L,     // 1 minute
@@ -83,10 +86,10 @@ class PinStore(private val context: Context) {
         if (!pin.all { it.isDigit() }) return false
         if (isWeakPin(pin)) return false
 
-        val pinChars = pin.toCharArray()
+        val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
         try {
             val salt = generateSalt()
-            val hash = hashPinFromChars(pinChars, salt)
+            val hash = hashPinFromChars(normalizedPin, salt)
 
             val success = prefs.edit()
                 .putString(KEY_PIN_HASH, hash)
@@ -102,7 +105,7 @@ class PinStore(private val context: Context) {
             if (success) refreshSession()
             return success
         } finally {
-            pinChars.fill('0')
+            normalizedPin.fill('\u0000')
         }
     }
 
@@ -114,28 +117,28 @@ class PinStore(private val context: Context) {
         val storedHash = prefs.getString(KEY_PIN_HASH, null)
         val salt = prefs.getString(KEY_PIN_SALT, null)
 
-        if (storedHash == null || salt == null) {
-            return false
-        }
+        val pinNotSet = storedHash == null || salt == null
+        val effectiveSalt = salt ?: dummySalt
+        val effectiveStoredHash = storedHash ?: dummyHash
 
-        val pinChars = pin.toCharArray()
+        val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
         try {
-            val inputHash = hashPinFromChars(pinChars, salt)
-            val storedBytes = Base64.decode(storedHash, Base64.NO_WRAP)
+            val inputHash = hashPinFromChars(normalizedPin, effectiveSalt)
+            val storedBytes = Base64.decode(effectiveStoredHash, Base64.NO_WRAP)
             val inputBytes = Base64.decode(inputHash, Base64.NO_WRAP)
             val hashesMatch = MessageDigest.isEqual(storedBytes, inputBytes)
-            val verified = hashesMatch && !invalidLength && !lockedOut
+            val verified = hashesMatch && !invalidLength && !lockedOut && !pinNotSet
 
             if (verified) {
                 clearFailedAttempts()
                 refreshSession()
-            } else if (!lockedOut) {
+            } else if (!lockedOut && !pinNotSet) {
                 incrementFailedAttempts()
             }
 
             return verified
         } finally {
-            pinChars.fill('0')
+            normalizedPin.fill('\u0000')
         }
     }
 
