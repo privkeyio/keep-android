@@ -319,7 +319,7 @@ private object ClipboardClearManager {
                     clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
                 }
             } finally {
-                if (clearJob === job) {
+                if (clearJob === coroutineContext[Job]) {
                     expectedContentHash = null
                 }
             }
