@@ -63,7 +63,8 @@ fun ImportShareScreen(
     onDismiss: () -> Unit,
     importState: ImportState
 ) {
-    var shareData by remember { mutableStateOf("") }
+    val shareData = remember { SecureShareData(MAX_SHARE_LENGTH) }
+    var shareDataDisplay by remember { mutableStateOf("") }
     val passphrase = remember { SecurePassphrase() }
     var passphraseDisplay by remember { mutableStateOf("") }
     var shareName by remember { mutableStateOf("Mobile Share") }
@@ -73,7 +74,8 @@ fun ImportShareScreen(
 
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {
-            shareData = ""
+            shareData.clear()
+            shareDataDisplay = ""
             passphrase.clear()
             passphraseDisplay = ""
         }
@@ -81,7 +83,8 @@ fun ImportShareScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            shareData = ""
+            shareData.clear()
+            shareDataDisplay = ""
             passphrase.clear()
             passphraseDisplay = ""
         }
@@ -90,7 +93,8 @@ fun ImportShareScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                shareData = code
+                shareData.update(code)
+                shareDataDisplay = code
                 showScanner = false
             },
             onDismiss = { showScanner = false }
@@ -114,8 +118,13 @@ fun ImportShareScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         OutlinedTextField(
-            value = shareData,
-            onValueChange = { if (it.length <= MAX_SHARE_LENGTH) shareData = it },
+            value = shareDataDisplay,
+            onValueChange = {
+                if (it.length <= MAX_SHARE_LENGTH) {
+                    shareData.update(it)
+                    shareDataDisplay = it
+                }
+            },
             label = { Text("Share Data") },
             placeholder = { Text("kshare1q...") },
             modifier = Modifier.fillMaxWidth(),
@@ -188,24 +197,28 @@ fun ImportShareScreen(
                 importState = importState,
                 canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
                 onDismiss = onDismiss,
-                onImportClick = {
+                onImportClick = { onError ->
+                    val passphraseChars = passphrase.toCharArray()
+                    fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
                     try {
-                        val passphraseChars = passphrase.toCharArray()
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
-                            if (authedCipher != null) {
-                                val passphraseStr = String(passphraseChars)
-                                onImport(shareData, passphraseStr, shareName, authedCipher)
+                            try {
+                                if (authedCipher != null) {
+                                    onImport(shareData.valueUnsafe(), String(passphraseChars), shareName, authedCipher)
+                                }
+                            } finally {
+                                clearChars()
                             }
-                            Arrays.fill(passphraseChars, '\u0000')
                         }
-                        null
                     } catch (e: KeyPermanentlyInvalidatedException) {
+                        clearChars()
                         Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
-                        "Biometric key invalidated. Please re-enroll biometrics."
+                        onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: Exception) {
+                        clearChars()
                         Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
-                        "Failed to initialize encryption"
+                        onError("Failed to initialize encryption")
                     }
                 }
             )
@@ -218,7 +231,7 @@ private fun ImportButtons(
     importState: ImportState,
     canImport: Boolean,
     onDismiss: () -> Unit,
-    onImportClick: () -> String?
+    onImportClick: (onError: (String) -> Unit) -> Unit
 ) {
     var cipherError by remember { mutableStateOf<String?>(null) }
 
@@ -235,9 +248,7 @@ private fun ImportButtons(
             }
             if (importState !is ImportState.Success) {
                 Button(
-                    onClick = {
-                        cipherError = onImportClick()
-                    },
+                    onClick = { onImportClick { cipherError = it } },
                     modifier = Modifier.weight(1f),
                     enabled = canImport
                 ) {
@@ -324,7 +335,7 @@ private fun CameraPreview(
         fun cleanupResources() {
             if (closed.compareAndSet(false, true)) {
                 runCatching { scanner.close() }
-                runCatching { executor.shutdown() }
+                runCatching { executor.shutdownNow() }
             }
         }
 

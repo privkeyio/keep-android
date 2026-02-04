@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipDescription
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import io.privkey.keep.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Arrays
@@ -41,13 +43,12 @@ import java.util.Arrays
 private const val MAX_PASSPHRASE_LENGTH = 256
 private const val QR_SIZE = 300
 private const val FRAME_DURATION_MS = 800
-private const val CLIPBOARD_CLEAR_DELAY_MS = 5_000L
+private const val CLIPBOARD_CLEAR_DELAY_MS = 10_000L
 
 internal class SecurePassphrase {
     private var chars: CharArray = CharArray(0)
 
     val length: Int get() = chars.size
-    val value: String get() = String(chars)
 
     fun update(newValue: String) {
         if (newValue.length <= MAX_PASSPHRASE_LENGTH) {
@@ -63,16 +64,46 @@ internal class SecurePassphrase {
 
     fun toCharArray(): CharArray = chars.copyOf()
 
+    fun contentEquals(other: SecurePassphrase): Boolean = chars.contentEquals(other.chars)
+
     fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)
+}
+
+internal class SecureShareData(private val maxLength: Int) {
+    private var chars: CharArray = CharArray(0)
+
+    val length: Int get() = chars.size
+
+    fun update(newValue: String) {
+        if (newValue.length <= maxLength) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.toCharArray()
+        }
+    }
+
+    fun clear() {
+        Arrays.fill(chars, '\u0000')
+        chars = CharArray(0)
+    }
+
+    fun isNotBlank(): Boolean = chars.isNotEmpty() && chars.any { !it.isWhitespace() }
+
+    /**
+     * Returns the raw sensitive data. Use only when the actual value is required
+     * (e.g., passing to crypto operations). The returned String cannot be zeroized.
+     */
+    fun valueUnsafe(): String = String(chars)
+
+    override fun toString(): String = "<redacted>"
 }
 
 @Composable
 private fun QrDisplayContainer(
-    modifier: Modifier = Modifier,
     label: String,
     copyData: String,
     onCopied: () -> Unit,
-    extraContent: (@Composable ColumnScope.() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    extraContent: @Composable (ColumnScope.() -> Unit)? = null,
     qrContent: @Composable BoxScope.() -> Unit
 ) {
     val context = LocalContext.current
@@ -116,20 +147,20 @@ private fun QrDisplayContainer(
 
 @Composable
 private fun rememberAnimatedFrameIndex(frameCount: Int): Int {
-    val count = frameCount.coerceAtLeast(1)
+    val safeCount = frameCount.coerceAtLeast(1)
     val infiniteTransition = rememberInfiniteTransition(label = "qr_frame")
     val frameProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = count.toFloat(),
+        targetValue = safeCount.toFloat(),
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = count * FRAME_DURATION_MS,
+                durationMillis = safeCount * FRAME_DURATION_MS,
                 easing = LinearEasing
             )
         ),
         label = "frame_index"
     )
-    return frameProgress.toInt().coerceIn(0, (frameCount - 1).coerceAtLeast(0))
+    return frameProgress.toInt().coerceIn(0, safeCount - 1)
 }
 
 @Composable
@@ -139,22 +170,18 @@ fun QrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(data) {
-        bitmap?.recycle()
-        bitmap = withContext(Dispatchers.Default) { generateQrCode(data) }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { bitmap?.recycle() }
+    @SuppressLint("ProduceStateDoesNotAssignValue") // False positive: value is assigned after withContext
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = data) {
+        val generated = withContext(Dispatchers.Default) { generateQrCode(data) }
+        value = generated
+        awaitDispose { value?.recycle() }
     }
 
     QrDisplayContainer(
-        modifier = modifier,
         label = label,
         copyData = data,
         onCopied = onCopied,
+        modifier = modifier,
         qrContent = {
             val bmp = bitmap
             if (bmp != null) {
@@ -179,28 +206,34 @@ fun AnimatedQrCodeDisplay(
     onCopied: () -> Unit = {}
 ) {
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var previousBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
-        bitmaps.forEach { it.recycle() }
+        previousBitmaps = bitmaps
         val generated = withContext(Dispatchers.Default) {
             frames.mapNotNull { generateQrCode(it) }
         }
         generationError = generated.size != frames.size
         bitmaps = generated
+        previousBitmaps.forEach { it.recycle() }
+        previousBitmaps = emptyList()
     }
 
     DisposableEffect(Unit) {
-        onDispose { bitmaps.forEach { it.recycle() } }
+        onDispose {
+            bitmaps.forEach { it.recycle() }
+            previousBitmaps.forEach { it.recycle() }
+        }
     }
 
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
 
     QrDisplayContainer(
-        modifier = modifier,
         label = label,
         copyData = fullData,
         onCopied = onCopied,
+        modifier = modifier,
         extraContent = {
             if (generationError) {
                 Text(
@@ -238,22 +271,46 @@ fun AnimatedQrCodeDisplay(
 
 private fun generateQrCode(content: String): Bitmap? {
     return try {
-        val writer = QRCodeWriter()
         val hints = mapOf(
             EncodeHintType.MARGIN to 1,
             EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M
         )
-        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
-        val width = bitMatrix.width
-        val height = bitMatrix.height
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE, hints)
         val black = Color.Black.toArgb()
         val white = Color.White.toArgb()
-        val pixels = IntArray(width * height) { i ->
-            if (bitMatrix[i % width, i / width]) black else white
+        val pixels = IntArray(bitMatrix.width * bitMatrix.height) { i ->
+            if (bitMatrix[i % bitMatrix.width, i / bitMatrix.width]) black else white
         }
-        Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
-    } catch (_: Exception) {
+        Bitmap.createBitmap(pixels, bitMatrix.width, bitMatrix.height, Bitmap.Config.ARGB_8888)
+    } catch (e: Exception) {
+        if (BuildConfig.DEBUG) {
+            android.util.Log.w("QrCodeDisplay", "Failed to generate QR code", e)
+        }
         null
+    }
+}
+
+private object ClipboardClearManager {
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingClear: Runnable? = null
+    private var clipboardRef: java.lang.ref.WeakReference<ClipboardManager>? = null
+
+    fun scheduleClear(clipboard: ClipboardManager, delayMs: Long) {
+        pendingClear?.let { handler.removeCallbacks(it) }
+        clipboardRef = java.lang.ref.WeakReference(clipboard)
+        val runnable = Runnable {
+            pendingClear = null
+            clipboardRef?.get()?.let { cb ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    cb.clearPrimaryClip()
+                } else {
+                    cb.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
+            }
+            clipboardRef = null
+        }
+        pendingClear = runnable
+        handler.postDelayed(runnable, delayMs)
     }
 }
 
@@ -266,14 +323,7 @@ internal fun copySensitiveText(context: Context, text: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
-
-    Handler(Looper.getMainLooper()).postDelayed({
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            clipboard.clearPrimaryClip()
-        } else {
-            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
-        }
-    }, CLIPBOARD_CLEAR_DELAY_MS)
+    ClipboardClearManager.scheduleClear(clipboard, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
 internal fun setSecureScreen(context: Context, secure: Boolean) {
