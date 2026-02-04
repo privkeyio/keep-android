@@ -54,8 +54,8 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        biometricHelper = BiometricHelper(this)
         val app = application as? KeepMobileApp
+        biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         handler = app?.getNip55Handler()
         storage = app?.getStorage()
         permissionStore = app?.getPermissionStore()

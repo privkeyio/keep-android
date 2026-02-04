@@ -16,7 +16,6 @@ class NetworkConnectivityManager(
     private var lastNetwork: Network? = null
     private var isRegistered = false
     private var lastReconnectTime = 0L
-    val reconnectionManager = RelayReconnectionManager()
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -27,7 +26,6 @@ class NetworkConnectivityManager(
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastReconnectTime < DEBOUNCE_INTERVAL_MS) return@synchronized false
                 lastReconnectTime = now
-                reconnectionManager.resetAll()
                 true
             }
             if (shouldReconnect) onNetworkChanged()
@@ -57,7 +55,6 @@ class NetworkConnectivityManager(
             runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
             isRegistered = false
             lastNetwork = null
-            reconnectionManager.resetAll()
         }
     }
 

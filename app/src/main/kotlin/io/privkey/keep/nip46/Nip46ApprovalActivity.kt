@@ -33,8 +33,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE
         )
-        biometricHelper = BiometricHelper(this)
         val app = application as? KeepMobileApp
+        biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         storage = app?.getStorage()
         killSwitchStore = app?.getKillSwitchStore()
 

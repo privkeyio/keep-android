@@ -54,36 +54,8 @@ class BiometricTimeoutStore(context: Context) {
     @Synchronized
     fun setTimeout(timeoutMs: Long): Boolean {
         if (timeoutMs !in TIMEOUT_OPTIONS) return false
-        return prefs.edit().putLong(KEY_TIMEOUT, timeoutMs).commit()
-    }
-
-    @Synchronized
-    fun requiresBiometric(): Boolean {
-        val timeout = getTimeout()
-        if (timeout == TIMEOUT_EVERY_TIME) return true
-
-        val lastAuthRealtime = prefs.getLong(KEY_LAST_AUTH_REALTIME, 0L)
-        val lastAuthWall = prefs.getLong(KEY_LAST_AUTH_WALL, 0L)
-        if (lastAuthRealtime == 0L || lastAuthWall == 0L) return true
-
-        val currentRealtime = SystemClock.elapsedRealtime()
-        val currentWall = System.currentTimeMillis()
-
-        val rebootDetected = currentRealtime < lastAuthRealtime
-        if (rebootDetected) {
-            invalidateSession()
-            return true
-        }
-
-        val elapsedRealtime = currentRealtime - lastAuthRealtime
-        val elapsedWall = currentWall - lastAuthWall
-
-        if (elapsedWall < 0) {
-            invalidateSession()
-            return true
-        }
-
-        return elapsedRealtime > timeout || elapsedWall > timeout
+        prefs.edit().putLong(KEY_TIMEOUT, timeoutMs).apply()
+        return true
     }
 
     @Synchronized
@@ -92,7 +64,7 @@ class BiometricTimeoutStore(context: Context) {
             .edit()
             .putLong(KEY_LAST_AUTH_REALTIME, SystemClock.elapsedRealtime())
             .putLong(KEY_LAST_AUTH_WALL, System.currentTimeMillis())
-            .commit()
+            .apply()
     }
 
     @Synchronized
@@ -101,6 +73,6 @@ class BiometricTimeoutStore(context: Context) {
             .edit()
             .putLong(KEY_LAST_AUTH_REALTIME, 0L)
             .putLong(KEY_LAST_AUTH_WALL, 0L)
-            .commit()
+            .apply()
     }
 }

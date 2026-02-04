@@ -10,11 +10,11 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-class BiometricHelper(private val activity: FragmentActivity) {
+class BiometricHelper(
+    private val activity: FragmentActivity,
+    private val timeoutStore: BiometricTimeoutStore? = null
+) {
     private val executor = ContextCompat.getMainExecutor(activity)
-    private val timeoutStore: BiometricTimeoutStore? by lazy {
-        runCatching { BiometricTimeoutStore(activity) }.getOrNull()
-    }
 
     enum class BiometricStatus {
         AVAILABLE,
@@ -33,8 +33,6 @@ class BiometricHelper(private val activity: FragmentActivity) {
             else -> BiometricStatus.ERROR
         }
     }
-
-    fun requiresBiometric(): Boolean = timeoutStore?.requiresBiometric() ?: true
 
     suspend fun authenticate(
         title: String = "Authenticate",
@@ -63,38 +61,32 @@ class BiometricHelper(private val activity: FragmentActivity) {
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel"
-    ): Cipher? {
-        if (!requiresBiometric()) {
-            timeoutStore?.recordAuthentication()
-            return cipher
-        }
-        return suspendCoroutine { continuation ->
-            val callback = object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    timeoutStore?.recordAuthentication()
-                    continuation.resume(result.cryptoObject?.cipher)
-                }
-
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                    if (isCancellation) {
-                        continuation.resume(null)
-                    } else {
-                        continuation.resumeWithException(
-                            BiometricException(errorCode, errString.toString())
-                        )
-                    }
-                }
-
-                override fun onAuthenticationFailed() {}
+    ): Cipher? = suspendCoroutine { continuation ->
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                timeoutStore?.recordAuthentication()
+                continuation.resume(result.cryptoObject?.cipher)
             }
 
-            BiometricPrompt(activity, executor, callback).authenticate(
-                buildPromptInfo(title, subtitle, negativeButtonText),
-                BiometricPrompt.CryptoObject(cipher)
-            )
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                if (isCancellation) {
+                    continuation.resume(null)
+                } else {
+                    continuation.resumeWithException(
+                        BiometricException(errorCode, errString.toString())
+                    )
+                }
+            }
+
+            override fun onAuthenticationFailed() {}
         }
+
+        BiometricPrompt(activity, executor, callback).authenticate(
+            buildPromptInfo(title, subtitle, negativeButtonText),
+            BiometricPrompt.CryptoObject(cipher)
+        )
     }
 
     private fun buildPromptInfo(

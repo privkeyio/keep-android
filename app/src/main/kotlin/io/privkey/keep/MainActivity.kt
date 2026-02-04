@@ -47,12 +47,13 @@ import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 class MainActivity : FragmentActivity() {
-    private val biometricHelper by lazy { BiometricHelper(this) }
+    private var biometricHelper: BiometricHelper? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val app = application as KeepMobileApp
+        biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
         val relayConfigStore = app.getRelayConfigStore()
@@ -135,7 +136,7 @@ class MainActivity : FragmentActivity() {
                             onBiometricRequest = { title, subtitle, cipher, callback ->
                                 lifecycleScope.launch {
                                     try {
-                                        val authedCipher = biometricHelper.authenticateWithCrypto(
+                                        val authedCipher = biometricHelper?.authenticateWithCrypto(
                                             cipher, title, subtitle
                                         )
                                         callback(authedCipher)
@@ -150,10 +151,10 @@ class MainActivity : FragmentActivity() {
                                 }
                             },
                             onBiometricAuth = {
-                                biometricHelper.authenticate(
+                                biometricHelper?.authenticate(
                                     title = "Disable Kill Switch",
                                     subtitle = "Authenticate to re-enable signing"
-                                )
+                                ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
                                 app.updateNetworkMonitoring(enabled)
