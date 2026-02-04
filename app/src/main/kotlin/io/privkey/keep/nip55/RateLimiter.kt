@@ -6,7 +6,8 @@ import android.util.LruCache
 class RateLimiter(
     val windowMs: Long = 1000L,
     val maxRequests: Int = 10,
-    maxEntries: Int = 1000
+    maxEntries: Int = 1000,
+    private val timeProvider: () -> Long = { SystemClock.elapsedRealtime() }
 ) {
     private data class RateLimitEntry(
         var count: Int,
@@ -16,7 +17,7 @@ class RateLimiter(
     private val rateLimitMap = LruCache<String, RateLimitEntry>(maxEntries)
 
     fun checkRateLimit(callerPackage: String): Boolean {
-        val now = SystemClock.elapsedRealtime()
+        val now = timeProvider()
         synchronized(rateLimitMap) {
             val existing = rateLimitMap.get(callerPackage)
             return if (existing == null || now - existing.windowStart >= windowMs) {
