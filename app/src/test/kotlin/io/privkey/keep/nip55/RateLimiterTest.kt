@@ -11,10 +11,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class RateLimiterTest {
 
     private lateinit var rateLimiter: RateLimiter
+    private var currentTime = 0L
 
     @Before
     fun setup() {
-        rateLimiter = RateLimiter(windowMs = 1000L, maxRequests = 10)
+        currentTime = 0L
+        rateLimiter = RateLimiter(windowMs = 1000L, maxRequests = 10, timeProvider = { currentTime })
     }
 
     @Test
