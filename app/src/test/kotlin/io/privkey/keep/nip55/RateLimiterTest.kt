@@ -53,17 +53,16 @@ class RateLimiterTest {
 
     @Test
     fun `rate limit resets after window`() {
+        val shortWindowLimiter = RateLimiter(windowMs = 50L, maxRequests = 2)
         val caller = "com.test.app"
-        for (i in 1..rateLimiter.maxRequests) {
-            rateLimiter.checkRateLimit(caller)
-        }
-        assertFalse(rateLimiter.checkRateLimit(caller))
 
-        rateLimiter.rateLimitMap.get(caller)?.windowStart?.set(
-            System.currentTimeMillis() - rateLimiter.windowMs - 1
-        )
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
+        assertFalse(shortWindowLimiter.checkRateLimit(caller))
 
-        assertTrue(rateLimiter.checkRateLimit(caller))
+        Thread.sleep(60)
+
+        assertTrue(shortWindowLimiter.checkRateLimit(caller))
     }
 
     @Test

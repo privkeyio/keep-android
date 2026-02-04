@@ -44,6 +44,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
+import java.security.MessageDigest
 import java.util.Arrays
 
 private const val MAX_PASSPHRASE_LENGTH = 256
@@ -295,29 +296,30 @@ private fun generateQrCode(content: String): Bitmap? {
 private object ClipboardClearManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var clearJob: Job? = null
-    private var expectedContent: String? = null
+    private var expectedContentHash: ByteArray? = null
+
+    private fun hashContent(text: String): ByteArray {
+        return MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+    }
 
     fun scheduleClear(clipboard: ClipboardManager, text: String, delayMs: Long) {
         clearJob?.cancel()
-        expectedContent = text
+        expectedContentHash = hashContent(text)
         clearJob = scope.launch {
             delay(delayMs)
-            val current = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-            if (current == expectedContent) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    clipboard.clearPrimaryClip()
-                } else {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            try {
+                val current = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+                if (current != null && expectedContentHash?.contentEquals(hashContent(current)) == true) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        clipboard.clearPrimaryClip()
+                    } else {
+                        clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+                    }
                 }
+            } finally {
+                expectedContentHash = null
             }
-            expectedContent = null
         }
-    }
-
-    fun cancel() {
-        clearJob?.cancel()
-        clearJob = null
-        expectedContent = null
     }
 }
 
