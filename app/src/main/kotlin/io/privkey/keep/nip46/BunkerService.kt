@@ -38,8 +38,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -80,16 +80,12 @@ class BunkerService : Service() {
         private val globalRequestHistory = ArrayDeque<Long>(GLOBAL_REQUEST_HISTORY_MAX_SIZE)
         private val globalRequestLock = Any()
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
-        private val pendingNostrConnectRequests = ConcurrentLinkedQueue<NostrConnectRequest>()
+        private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
 
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
-            if (pendingNostrConnectRequests.size >= MAX_PENDING_NOSTR_CONNECT_REQUESTS) {
-                return false
-            }
-            pendingNostrConnectRequests.add(request)
-            return true
+            return pendingNostrConnectRequests.offer(request)
         }
 
         fun start(context: Context) {

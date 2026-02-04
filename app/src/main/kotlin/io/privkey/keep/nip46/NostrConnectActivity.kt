@@ -123,32 +123,50 @@ class NostrConnectActivity : FragmentActivity() {
             val bunkerConfigStore = app?.getBunkerConfigStore()
             val permissionStore = app?.getPermissionStore()
 
-            withContext(Dispatchers.IO) {
-                bunkerConfigStore?.authorizeClient(request.clientPubkey)
-
-                Nip46ClientStore.saveClient(
-                    this@NostrConnectActivity,
-                    request.clientPubkey,
-                    request.name,
-                    request.relays
-                )
-
-                if (duration.shouldPersist && request.permissions.isNotEmpty() && permissionStore != null) {
-                    val callerPackage = "nip46:${request.clientPubkey}"
-                    for (perm in request.permissions) {
-                        val requestType = mapPermissionToRequestType(perm.type) ?: continue
-                        permissionStore.grantPermission(
-                            callerPackage = callerPackage,
-                            requestType = requestType,
-                            eventKind = perm.kind,
-                            duration = duration
-                        )
-                    }
-                }
-            }
-
             if (!BunkerService.queueNostrConnectRequest(request)) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "NostrConnect queue full")
+                onComplete(false)
+                finish()
+                return@launch
+            }
+
+            try {
+                withContext(Dispatchers.IO) {
+                    bunkerConfigStore?.authorizeClient(request.clientPubkey)
+
+                    Nip46ClientStore.saveClient(
+                        this@NostrConnectActivity,
+                        request.clientPubkey,
+                        request.name,
+                        request.relays
+                    )
+
+                    if (duration.shouldPersist && request.permissions.isNotEmpty() && permissionStore != null) {
+                        val callerPackage = "nip46:${request.clientPubkey}"
+                        for (perm in request.permissions) {
+                            val requestType = mapPermissionToRequestType(perm.type) ?: continue
+                            permissionStore.grantPermission(
+                                callerPackage = callerPackage,
+                                requestType = requestType,
+                                eventKind = perm.kind,
+                                duration = duration
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Persistence failed: ${e::class.simpleName}")
+                withContext(Dispatchers.IO) {
+                    runCatching { bunkerConfigStore?.revokeClient(request.clientPubkey) }
+                    runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
+                    if (permissionStore != null) {
+                        val callerPackage = "nip46:${request.clientPubkey}"
+                        for (perm in request.permissions) {
+                            val requestType = mapPermissionToRequestType(perm.type) ?: continue
+                            runCatching { permissionStore.revokePermission(callerPackage, requestType, perm.kind) }
+                        }
+                    }
+                }
                 onComplete(false)
                 finish()
                 return@launch
