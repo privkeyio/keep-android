@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.formatPubkeyDisplay
 import io.privkey.keep.nip55.EventKind
 import io.privkey.keep.nip55.PermissionDuration
 
@@ -117,7 +118,7 @@ fun Nip46ApprovalScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatNip46Pubkey(appPubkey),
+                    text = formatPubkeyDisplay(appPubkey),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -167,4 +168,3 @@ fun Nip46ApprovalScreen(
         }
     }
 }
-

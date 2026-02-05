@@ -13,6 +13,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
+import io.privkey.keep.formatEventIdDisplay
+import io.privkey.keep.formatPubkeyDisplay
+import io.privkey.keep.isHex64
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
@@ -58,17 +61,14 @@ internal data class EventPreview(
     val kind: Int,
     val content: String,
     val pTags: List<String>,
-    val eTags: List<String>,
+    val eTags: List<Pair<String, String?>>,
     val tTags: List<String>,
     val recipientPubkey: String?
 )
 
-private val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
 private const val MAX_TAG_COUNT = 500
 private const val MAX_TAG_VALUE_LENGTH = 1024
 private const val MAX_CONTENT_LENGTH = 10_000
-
-private fun isValidHex64(value: String): Boolean = HEX_64_REGEX.matches(value)
 
 private fun sanitizeTTag(value: String): String =
     value.filterNot { it.isISOControl() || it in '\u2000'..'\u200F' || it in '\u2028'..'\u202F' || it in '\uFFF0'..'\uFFFF' }
@@ -79,7 +79,7 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
     val tagsArray = json.optJSONArray("tags") ?: JSONArray()
 
     val pTags = mutableListOf<String>()
-    val eTags = mutableListOf<String>()
+    val eTags = mutableListOf<Pair<String, String?>>()
     val tTags = mutableListOf<String>()
 
     val tagCount = minOf(tagsArray.length(), MAX_TAG_COUNT)
@@ -88,8 +88,11 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
         if (tag.length() < 2) continue
         val tagValue = tag.optString(1).take(MAX_TAG_VALUE_LENGTH)
         when (tag.optString(0)) {
-            "p" -> if (isValidHex64(tagValue)) pTags.add(tagValue)
-            "e" -> if (isValidHex64(tagValue)) eTags.add(tagValue)
+            "p" -> if (isHex64(tagValue)) pTags.add(tagValue)
+            "e" -> if (isHex64(tagValue)) {
+                val relay = tag.optString(2).takeIf { it.isNotEmpty() }
+                eTags.add(tagValue to relay)
+            }
             "t" -> sanitizeTTag(tagValue).takeIf { it.isNotEmpty() }?.let { tTags.add(it) }
         }
     }
@@ -103,12 +106,6 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
         recipientPubkey = pTags.firstOrNull()
     )
 }.getOrNull()
-
-private fun formatPubkey(pubkey: String): String =
-    if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey
-
-private fun pluralize(count: Int, singular: String, plural: String): String =
-    if (count == 1) "1 $singular" else "$count $plural"
 
 @Composable
 fun ApprovalScreen(
@@ -344,7 +341,7 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
 
             request.pubkey?.let { pk ->
                 Spacer(modifier = Modifier.height(12.dp))
-                DetailRow("Recipient", formatPubkey(pk), MaterialTheme.typography.bodyMedium)
+                DetailRow("Recipient", formatPubkeyDisplay(pk), MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -378,7 +375,7 @@ private fun EventPreviewSection(preview: EventPreview) {
 
     if (preview.recipientPubkey != null) {
         Spacer(modifier = Modifier.height(12.dp))
-        DetailRow("Recipient", formatPubkey(preview.recipientPubkey), MaterialTheme.typography.bodyMedium)
+        DetailRow("Recipient", formatPubkeyDisplay(preview.recipientPubkey), MaterialTheme.typography.bodyMedium)
     }
 
     val otherPubkeys = preview.pTags.drop(1)
@@ -426,7 +423,7 @@ private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
 
 @Composable
 private fun TagsSummarySection(
-    eTags: List<String>,
+    eTags: List<Pair<String, String?>>,
     otherPubkeys: List<String>,
     tTags: List<String>
 ) {
@@ -439,11 +436,15 @@ private fun TagsSummarySection(
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
-            TagSummaryRow("Events:", pluralize(eTags.size, "event", "events"))
+            val eventsPreview = eTags.take(2).joinToString(", ") { (id, relay) -> formatEventIdDisplay(id, relay) }
+            val suffix = if (eTags.size > 2) " +${eTags.size - 2} more" else ""
+            TagSummaryRow("Events:", "$eventsPreview$suffix")
         }
 
         if (otherPubkeys.isNotEmpty()) {
-            TagSummaryRow("Mentions:", pluralize(otherPubkeys.size, "pubkey", "pubkeys"))
+            val mentionsPreview = otherPubkeys.take(2).joinToString(", ") { formatPubkeyDisplay(it) }
+            val suffix = if (otherPubkeys.size > 2) " +${otherPubkeys.size - 2} more" else ""
+            TagSummaryRow("Mentions:", "$mentionsPreview$suffix")
         }
 
         if (tTags.isNotEmpty()) {

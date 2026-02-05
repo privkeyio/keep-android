@@ -37,7 +37,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
-private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private const val MAX_SHARE_LENGTH = 8192
 
 internal fun isValidKshareFormat(data: String): Boolean {

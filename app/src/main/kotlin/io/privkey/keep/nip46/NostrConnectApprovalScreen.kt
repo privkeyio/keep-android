@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.formatPubkeyDisplay
 import io.privkey.keep.nip55.PermissionDuration
 
 @Composable
@@ -67,7 +68,7 @@ fun NostrConnectApprovalScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Nip46DetailRow("Client Pubkey", formatNip46Pubkey(request.clientPubkey))
+                Nip46DetailRow("Client Pubkey", formatPubkeyDisplay(request.clientPubkey))
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(

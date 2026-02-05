@@ -76,9 +76,6 @@ internal fun PermissionDurationSelector(
     }
 }
 
-internal fun formatNip46Pubkey(pubkey: String): String =
-    if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey
-
 internal fun formatNip46Method(method: String): String = when (method) {
     "connect" -> "Connect"
     "get_public_key" -> "Get Public Key"
