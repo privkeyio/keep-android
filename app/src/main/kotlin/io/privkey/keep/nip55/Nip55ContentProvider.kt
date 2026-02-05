@@ -47,7 +47,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         private fun hashPackageName(pkg: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(pkg.toByteArray(Charsets.UTF_8))
-            return digest.take(8).joinToString("") { "%02x".format(it) }
+            return digest.take(8).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         }
     }
 
