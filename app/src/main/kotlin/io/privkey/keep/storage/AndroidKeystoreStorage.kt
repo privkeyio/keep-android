@@ -2,6 +2,7 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.SystemClock
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
@@ -111,22 +112,21 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun initCipher(mode: Int, ivBase64: String?): Cipher =
         initCipherWithKey(getOrCreateKey(), mode, ivBase64)
 
-    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher {
-        try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            if (ivBase64 != null) {
-                val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
-                cipher.init(mode, key, spec)
-            } else {
-                cipher.init(mode, key)
-            }
-            return cipher
-        } catch (e: KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
-        } catch (e: Throwable) {
-            val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
-            throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
+    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        if (ivBase64 != null) {
+            val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
+            cipher.init(mode, key, spec)
+        } else {
+            cipher.init(mode, key)
         }
+        cipher
+    }.getOrElse { e ->
+        if (e is KeyPermanentlyInvalidatedException) {
+            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
+        }
+        val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
+        throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
     }
 
     private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {
@@ -154,7 +154,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         val data = PendingCipherData(
             cipher = cipher,
             creatingThreadId = Thread.currentThread().id,
-            createdAtMs = System.currentTimeMillis()
+            createdAtMs = SystemClock.elapsedRealtime()
         )
         pendingCiphers[requestId] = data
         if (onConsumed != null) {
@@ -170,7 +170,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun consumePendingCipher(requestId: String): Cipher? {
         val data = pendingCiphers.remove(requestId) ?: return null
         val callback = cipherConsumedCallbacks.remove(requestId)
-        val isExpired = System.currentTimeMillis() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+        val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
         if (isExpired) return null
         callback?.invoke()
         return data.cipher

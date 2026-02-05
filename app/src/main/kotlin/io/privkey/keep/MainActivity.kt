@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -32,6 +33,7 @@ import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -65,18 +67,13 @@ class MainActivity : FragmentActivity() {
         val biometricTimeoutStore = app.getBiometricTimeoutStore()
         val permissionStore = app.getPermissionStore()
         val bunkerConfigStore = app.getBunkerConfigStore()
+        val proxyConfigStore = app.getProxyConfigStore()
 
-        val allDependenciesAvailable = keepMobile != null &&
-            storage != null &&
-            relayConfigStore != null &&
-            killSwitchStore != null &&
-            signPolicyStore != null &&
-            autoStartStore != null &&
-            foregroundServiceStore != null &&
-            pinStore != null &&
-            biometricTimeoutStore != null &&
-            permissionStore != null &&
-            bunkerConfigStore != null
+        val allDependenciesAvailable = listOf(
+            keepMobile, storage, relayConfigStore, killSwitchStore, signPolicyStore,
+            autoStartStore, foregroundServiceStore, pinStore, biometricTimeoutStore,
+            permissionStore, bunkerConfigStore, proxyConfigStore
+        ).all { it != null }
 
         setContent {
             var isPinUnlocked by remember {
@@ -84,15 +81,13 @@ class MainActivity : FragmentActivity() {
             }
 
             DisposableEffect(pinStore) {
-                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         isPinUnlocked = pinStore?.isSessionValid() ?: true
                     }
                 }
                 lifecycle.addObserver(observer)
-                onDispose {
-                    lifecycle.removeObserver(observer)
-                }
+                onDispose { lifecycle.removeObserver(observer) }
             }
 
             KeepAndroidTheme {
@@ -120,6 +115,7 @@ class MainActivity : FragmentActivity() {
                             biometricTimeoutStore = biometricTimeoutStore!!,
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
+                            proxyConfigStore = proxyConfigStore!!,
                             connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -164,7 +160,8 @@ class MainActivity : FragmentActivity() {
                             },
                             onBunkerServiceChanged = { enabled ->
                                 app.updateBunkerService(enabled)
-                            }
+                            },
+                            onReconnectRelays = { app.reconnectRelays() }
                         )
                     } else {
                         ErrorScreen("Failed to initialize")
@@ -189,6 +186,7 @@ fun MainScreen(
     biometricTimeoutStore: BiometricTimeoutStore,
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
+    proxyConfigStore: ProxyConfigStore,
     connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -198,7 +196,8 @@ fun MainScreen(
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
-    onBunkerServiceChanged: (Boolean) -> Unit = {}
+    onBunkerServiceChanged: (Boolean) -> Unit = {},
+    onReconnectRelays: () -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -229,6 +228,9 @@ fun MainScreen(
     var showBunkerScreen by remember { mutableStateOf(false) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
+    var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
+    var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
+    var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -465,6 +467,31 @@ fun MainScreen(
                     val updated = relays - relay
                     relays = updated
                     onRelaysChanged(updated)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ProxySettingsCard(
+                enabled = proxyEnabled,
+                host = proxyHost,
+                port = proxyPort,
+                onToggle = { enabled ->
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
+                        proxyEnabled = enabled
+                        if (isConnected) onReconnectRelays()
+                    }
+                },
+                onConfigChange = { host, port ->
+                    coroutineScope.launch {
+                        val saved = withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
+                        if (saved) {
+                            proxyHost = host
+                            proxyPort = port
+                            if (proxyEnabled && isConnected) onReconnectRelays()
+                        }
+                    }
                 }
             )
 
