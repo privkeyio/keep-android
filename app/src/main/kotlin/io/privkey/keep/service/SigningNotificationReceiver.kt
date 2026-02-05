@@ -7,6 +7,21 @@ import android.net.Uri
 import io.privkey.keep.KeepMobileApp
 
 class SigningNotificationReceiver : BroadcastReceiver() {
+    companion object {
+        private val VALID_TYPES = setOf(
+            "get_public_key", "sign_event",
+            "nip04_encrypt", "nip04_decrypt",
+            "nip44_encrypt", "nip44_decrypt",
+            "decrypt_zap_event"
+        )
+
+        private fun isValidNostrSignerUri(uri: Uri): Boolean {
+            if (uri.scheme != "nostrsigner") return false
+            val type = uri.getQueryParameter("type") ?: return false
+            return type in VALID_TYPES
+        }
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val requestId = intent.getStringExtra(SigningNotificationManager.EXTRA_REQUEST_ID) ?: return
         val app = context.applicationContext as? KeepMobileApp ?: return
@@ -17,7 +32,7 @@ class SigningNotificationReceiver : BroadcastReceiver() {
                 val requestInfo = notificationManager.popPendingRequestInfo(requestId) ?: return
 
                 val uri = Uri.parse(requestInfo.intentUri)
-                if (uri.scheme != "nostrsigner") return
+                if (!isValidNostrSignerUri(uri)) return
 
                 val callerVerificationStore = app.getCallerVerificationStore()
                 val nonce = requestInfo.callerPackage?.let { callerVerificationStore?.generateNonce(it) }

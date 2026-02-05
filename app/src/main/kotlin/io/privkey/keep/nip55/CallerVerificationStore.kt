@@ -69,10 +69,16 @@ class CallerVerificationStore(context: Context) {
             ?: return VerificationResult.NotInstalled
 
         val trustedSignature = getTrustedSignature(packageName)
-        return when {
-            trustedSignature == null -> VerificationResult.FirstUseRequiresApproval(currentSignature)
-            MessageDigest.isEqual(trustedSignature.toByteArray(Charsets.UTF_8), currentSignature.toByteArray(Charsets.UTF_8)) -> VerificationResult.Verified(currentSignature)
-            else -> VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
+            ?: return VerificationResult.FirstUseRequiresApproval(currentSignature)
+
+        val matches = MessageDigest.isEqual(
+            trustedSignature.toByteArray(Charsets.UTF_8),
+            currentSignature.toByteArray(Charsets.UTF_8)
+        )
+        return if (matches) {
+            VerificationResult.Verified(currentSignature)
+        } else {
+            VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
         }
     }
 
@@ -125,13 +131,19 @@ class CallerVerificationStore(context: Context) {
     sealed class VerificationResult {
         abstract val signatureHash: String?
 
-        data class Verified(override val signatureHash: String) : VerificationResult()
-        data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult()
+        data class Verified(override val signatureHash: String) : VerificationResult() {
+            override fun toString() = "Verified"
+        }
+        data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult() {
+            override fun toString() = "FirstUseRequiresApproval"
+        }
         data class SignatureMismatch(val expected: String, val actual: String) : VerificationResult() {
             override val signatureHash: String? = null
+            override fun toString() = "SignatureMismatch"
         }
         data object NotInstalled : VerificationResult() {
             override val signatureHash: String? = null
+            override fun toString() = "NotInstalled"
         }
     }
 

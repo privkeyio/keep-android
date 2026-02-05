@@ -44,6 +44,11 @@ class Nip55ContentProvider : ContentProvider() {
         private const val BACKGROUND_SIGNING_CHANNEL_ID = "background_signing"
 
         private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
+
+        private fun hashPackageName(pkg: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(pkg.toByteArray(Charsets.UTF_8))
+            return digest.take(8).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        }
     }
 
     private val rateLimiter = RateLimiter()
@@ -93,7 +98,7 @@ class Nip55ContentProvider : ContentProvider() {
         val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for $callerPackage")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
@@ -141,19 +146,19 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (effectivePolicy == SignPolicy.AUTO) {
             if (eventKind != null && isSensitiveKind(eventKind)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from $callerPackage")
+                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from ${hashPackageName(callerPackage)}")
                 return null
             }
 
             val safeguards = currentApp.getAutoSigningSafeguards()
             if (safeguards == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for $callerPackage")
+                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for ${hashPackageName(callerPackage)}")
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
                 return rejectedCursor(null)
             }
 
             if (!safeguards.isOptedIn(callerPackage)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for $callerPackage")
+                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for ${hashPackageName(callerPackage)}")
                 return null
             }
 
@@ -165,14 +170,14 @@ class Nip55ContentProvider : ContentProvider() {
                 is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
                 is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
             }
-            if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for $callerPackage: $denyReason")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for ${hashPackageName(callerPackage)}: $denyReason")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
             return rejectedCursor(null)
         }
 
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "isAppExpired check timed out for $callerPackage, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "isAppExpired check timed out for ${hashPackageName(callerPackage)}, denying request")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true) }
             return rejectedCursor(null)
         }
@@ -189,18 +194,18 @@ class Nip55ContentProvider : ContentProvider() {
             true
         }
         if (decisionLoaded == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Permission lookup timed out for $callerPackage/$requestType, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Permission lookup timed out for ${hashPackageName(callerPackage)}/$requestType, denying request")
             return rejectedCursor(null)
         }
 
         if (decision == PermissionDecision.ALLOW) {
             val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind) }
             if (risk == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for $callerPackage, falling back to UI")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
                 return null
             }
             if (risk.requiredAuth != AuthLevel.NONE) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for $callerPackage: score=${risk.score}, auth=${risk.requiredAuth}")
+                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for ${hashPackageName(callerPackage)}: score=${risk.score}, auth=${risk.requiredAuth}")
                 return null
             }
         }
@@ -315,15 +320,7 @@ class Nip55ContentProvider : ContentProvider() {
         val result = verificationStore.verifyOrTrust(packageName)
         if (result is CallerVerificationStore.VerificationResult.Verified) return packageName
 
-        if (BuildConfig.DEBUG) {
-            val reason = when (result) {
-                is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval -> "First use requires approval"
-                is CallerVerificationStore.VerificationResult.SignatureMismatch -> "Signature mismatch"
-                is CallerVerificationStore.VerificationResult.NotInstalled -> "Package not installed"
-                else -> "Unknown"
-            }
-            Log.w(TAG, "Rejecting $packageName: $reason")
-        }
+        if (BuildConfig.DEBUG) Log.w(TAG, "Caller verification failed: $result")
         return null
     }
 

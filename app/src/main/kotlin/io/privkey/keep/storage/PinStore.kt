@@ -36,6 +36,9 @@ class PinStore(private val context: Context) {
         private const val PBKDF2_ITERATIONS = 120_000
         private const val PBKDF2_KEY_LENGTH = 256
 
+        private const val DUMMY_SALT = "AAAAAAAAAAAAAAAAAAAAAA=="
+        private const val DUMMY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
         private val LOCKOUT_DURATIONS_MS = longArrayOf(
             30_000L,     // 30 seconds
             60_000L,     // 1 minute
@@ -83,10 +86,10 @@ class PinStore(private val context: Context) {
         if (!pin.all { it.isDigit() }) return false
         if (isWeakPin(pin)) return false
 
-        val pinChars = pin.toCharArray()
+        val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
         try {
             val salt = generateSalt()
-            val hash = hashPinFromChars(pinChars, salt)
+            val hash = hashPinFromChars(normalizedPin, salt)
 
             val success = prefs.edit()
                 .putString(KEY_PIN_HASH, hash)
@@ -102,35 +105,55 @@ class PinStore(private val context: Context) {
             if (success) refreshSession()
             return success
         } finally {
-            pinChars.fill('0')
+            normalizedPin.fill('\u0000')
         }
     }
 
     @Synchronized
     fun verifyPin(pin: String): Boolean {
-        if (pin.length > MAX_PIN_LENGTH) return false
-        if (isLockedOut()) return false
+        val invalidLength = pin.length > MAX_PIN_LENGTH
+        val lockedOut = isLockedOut()
 
-        val storedHash = prefs.getString(KEY_PIN_HASH, null) ?: return false
-        val salt = prefs.getString(KEY_PIN_SALT, null) ?: return false
+        val storedHash = prefs.getString(KEY_PIN_HASH, null)
+        val salt = prefs.getString(KEY_PIN_SALT, null)
 
-        val pinChars = pin.toCharArray()
+        val pinNotSet = storedHash == null || salt == null
+        val effectiveSalt = salt ?: DUMMY_SALT
+        val effectiveStoredHash = storedHash ?: DUMMY_HASH
+
+        val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
+        val legacyPin = pin.toCharArray()
         try {
-            val inputHash = hashPinFromChars(pinChars, salt)
-            val storedBytes = Base64.decode(storedHash, Base64.NO_WRAP)
-            val inputBytes = Base64.decode(inputHash, Base64.NO_WRAP)
-            val verified = MessageDigest.isEqual(storedBytes, inputBytes)
+            val storedBytes = Base64.decode(effectiveStoredHash, Base64.NO_WRAP)
+
+            val normalizedHash = hashPinFromChars(normalizedPin, effectiveSalt)
+            val normalizedBytes = Base64.decode(normalizedHash, Base64.NO_WRAP)
+            var hashesMatch = MessageDigest.isEqual(storedBytes, normalizedBytes)
+
+            if (!hashesMatch && !pinNotSet && !invalidLength && !lockedOut) {
+                val legacyHash = hashPinFromChars(legacyPin, effectiveSalt)
+                val legacyBytes = Base64.decode(legacyHash, Base64.NO_WRAP)
+                val legacyMatch = MessageDigest.isEqual(storedBytes, legacyBytes)
+                if (legacyMatch) {
+                    hashesMatch = true
+                    val newHash = hashPinFromChars(normalizedPin, salt!!)
+                    prefs.edit().putString(KEY_PIN_HASH, newHash).commit()
+                }
+            }
+
+            val verified = hashesMatch && !invalidLength && !lockedOut && !pinNotSet
 
             if (verified) {
                 clearFailedAttempts()
                 refreshSession()
-            } else {
+            } else if (!lockedOut && !pinNotSet && !invalidLength) {
                 incrementFailedAttempts()
             }
 
             return verified
         } finally {
-            pinChars.fill('0')
+            normalizedPin.fill('\u0000')
+            legacyPin.fill('\u0000')
         }
     }
 
