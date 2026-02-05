@@ -129,6 +129,7 @@ class CallerVerificationStore(context: Context) {
         data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult()
         data class SignatureMismatch(val expected: String, val actual: String) : VerificationResult() {
             override val signatureHash: String? = null
+            override fun toString() = "SignatureMismatch"
         }
         data object NotInstalled : VerificationResult() {
             override val signatureHash: String? = null
