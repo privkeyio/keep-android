@@ -2,8 +2,6 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
 class ProxyConfigStore(context: Context) {
 
@@ -23,18 +21,7 @@ class ProxyConfigStore(context: Context) {
         fun isValidPort(port: Int): Boolean = port in MIN_PORT..MAX_PORT
     }
 
-    private val prefs: SharedPreferences by lazy {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
+    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
     fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
 
