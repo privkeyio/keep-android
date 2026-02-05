@@ -45,8 +45,7 @@ class BiometricTimeoutStore(context: Context) {
     @Synchronized
     fun setTimeout(timeoutMs: Long): Boolean {
         if (timeoutMs !in TIMEOUT_OPTIONS) return false
-        prefs.edit().putLong(KEY_TIMEOUT, timeoutMs).apply()
-        return true
+        return prefs.edit().putLong(KEY_TIMEOUT, timeoutMs).commit()
     }
 
     @Synchronized
@@ -63,7 +62,7 @@ class BiometricTimeoutStore(context: Context) {
 
     @Synchronized
     fun requiresBiometric(): Boolean {
-        val timeout = getTimeout()
+        val timeout = prefs.getLong(KEY_TIMEOUT, TIMEOUT_EVERY_TIME)
         if (timeout == TIMEOUT_EVERY_TIME) return true
         if (lastAuthRealtime == 0L || lastAuthWall == 0L) return true
 
