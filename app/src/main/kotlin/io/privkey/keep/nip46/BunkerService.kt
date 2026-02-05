@@ -383,6 +383,9 @@ class BunkerService : Service() {
             val storedDecision = checkStoredPermission(clientPubkey, request)
             if (storedDecision != null) {
                 val allowed = storedDecision == PermissionDecision.ALLOW
+                if (allowed) {
+                    clientConsecutiveRequests[clientPubkey]?.set(0)
+                }
                 logBunkerEventWithDecision(request, allowed, wasAutomatic = true)
                 if (BuildConfig.DEBUG) Log.d(TAG, "Auto-${if (allowed) "approved" else "denied"} request from ${truncatePubkey(clientPubkey)} based on stored permission")
                 return allowed
