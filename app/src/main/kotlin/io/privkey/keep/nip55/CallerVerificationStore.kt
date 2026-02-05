@@ -137,7 +137,7 @@ class CallerVerificationStore(context: Context) {
         }
         data object NotInstalled : VerificationResult() {
             override val signatureHash: String? = null
-            override fun toString() = "NotFound"
+            override fun toString() = "NotInstalled"
         }
     }
 

@@ -130,7 +130,7 @@ class PinStore(private val context: Context) {
             val normalizedBytes = Base64.decode(normalizedHash, Base64.NO_WRAP)
             var hashesMatch = MessageDigest.isEqual(storedBytes, normalizedBytes)
 
-            if (!hashesMatch && !pinNotSet) {
+            if (!hashesMatch && !pinNotSet && !invalidLength && !lockedOut) {
                 val legacyHash = hashPinFromChars(legacyPin, effectiveSalt)
                 val legacyBytes = Base64.decode(legacyHash, Base64.NO_WRAP)
                 val legacyMatch = MessageDigest.isEqual(storedBytes, legacyBytes)
@@ -153,7 +153,7 @@ class PinStore(private val context: Context) {
             return verified
         } finally {
             normalizedPin.fill('\u0000')
-            legacyPin.fill('0')
+            legacyPin.fill('\u0000')
         }
     }
 
