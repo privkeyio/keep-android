@@ -123,14 +123,16 @@ class NostrConnectActivity : FragmentActivity() {
             val bunkerConfigStore = app?.getBunkerConfigStore()
             val permissionStore = app?.getPermissionStore()
 
-            if (!BunkerService.queueNostrConnectRequest(request)) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "NostrConnect queue full")
-                onComplete(false)
-                finish()
-                return@launch
-            }
-
+            var queued = false
             try {
+                if (!BunkerService.queueNostrConnectRequest(request)) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "NostrConnect queue full")
+                    onComplete(false)
+                    finish()
+                    return@launch
+                }
+                queued = true
+
                 withContext(Dispatchers.IO) {
                     bunkerConfigStore?.authorizeClient(request.clientPubkey)
 
@@ -156,6 +158,9 @@ class NostrConnectActivity : FragmentActivity() {
                 }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Persistence failed: ${e::class.simpleName}")
+                if (queued) {
+                    BunkerService.dequeueNostrConnectRequest(request)
+                }
                 withContext(Dispatchers.IO) {
                     runCatching { bunkerConfigStore?.revokeClient(request.clientPubkey) }
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
@@ -172,13 +177,8 @@ class NostrConnectActivity : FragmentActivity() {
                 return@launch
             }
 
-            val service = BunkerService.current()
-            if (service == null) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Starting BunkerService for nostrconnect")
-                BunkerService.start(this@NostrConnectActivity)
-            } else {
-                service.processQueuedNostrConnectRequests()
-            }
+            BunkerService.current()?.processQueuedNostrConnectRequests()
+                ?: BunkerService.start(this@NostrConnectActivity)
 
             onComplete(true)
             finish()
@@ -230,7 +230,7 @@ class NostrConnectActivity : FragmentActivity() {
                 val parts = perm.trim().split(":")
                 val type = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val kind = parts.getOrNull(1)?.toIntOrNull()
-                if (kind != null && kind < 0) return@mapNotNull null
+                if (kind != null && (kind < 0 || kind > 65535)) return@mapNotNull null
                 RequestedPermission(type, kind)
             }
         }
@@ -254,7 +254,9 @@ data class NostrConnectRequest(
     val secret: String,
     val name: String,
     val permissions: List<RequestedPermission>
-)
+) {
+    override fun toString(): String = "NostrConnectRequest(clientPubkey=$clientPubkey, relays=$relays, secret=[REDACTED], name=$name, permissions=$permissions)"
+}
 
 data class RequestedPermission(
     val type: String,

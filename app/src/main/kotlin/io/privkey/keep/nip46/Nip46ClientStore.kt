@@ -12,17 +12,24 @@ object Nip46ClientStore {
     private const val PREFS_NAME = "keep_nip46_clients"
     private const val KEY_CLIENTS = "clients"
 
+    @Volatile
+    private var cachedPrefs: SharedPreferences? = null
+
     private fun getPrefs(context: Context): SharedPreferences {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        return cachedPrefs ?: synchronized(this) {
+            cachedPrefs ?: run {
+                val masterKey = MasterKey.Builder(context.applicationContext)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    context.applicationContext,
+                    PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                ).also { cachedPrefs = it }
+            }
+        }
     }
 
     fun saveClient(context: Context, pubkey: String, name: String, relays: List<String>) {
@@ -38,25 +45,26 @@ object Nip46ClientStore {
     }
 
     fun getClients(context: Context): Map<String, Nip46ClientInfo> {
-        val prefs = getPrefs(context)
-        val stored = prefs.getString(KEY_CLIENTS, null) ?: return emptyMap()
-        return runCatching {
-            val json = JSONArray(stored)
-            val result = mutableMapOf<String, Nip46ClientInfo>()
-            for (i in 0 until json.length()) {
-                val obj = json.getJSONObject(i)
-                val pubkey = obj.getString("pubkey")
-                val relaysArray = obj.getJSONArray("relays")
-                val relays = (0 until relaysArray.length()).map { relaysArray.getString(it) }
-                result[pubkey] = Nip46ClientInfo(
-                    pubkey = pubkey,
-                    name = obj.optString("name", "Unknown"),
-                    relays = relays,
-                    connectedAt = obj.optLong("connectedAt", 0)
-                )
-            }
-            result
-        }.getOrDefault(emptyMap())
+        val stored = getPrefs(context).getString(KEY_CLIENTS, null) ?: return emptyMap()
+        return runCatching { parseClientsJson(stored) }.getOrDefault(emptyMap())
+    }
+
+    private fun parseClientsJson(stored: String): Map<String, Nip46ClientInfo> {
+        val json = JSONArray(stored)
+        val result = mutableMapOf<String, Nip46ClientInfo>()
+        for (i in 0 until json.length()) {
+            val obj = json.getJSONObject(i)
+            val pubkey = obj.getString("pubkey")
+            val relaysArray = obj.getJSONArray("relays")
+            val relays = (0 until relaysArray.length()).map { relaysArray.getString(it) }
+            result[pubkey] = Nip46ClientInfo(
+                pubkey = pubkey,
+                name = obj.optString("name", "Unknown"),
+                relays = relays,
+                connectedAt = obj.optLong("connectedAt", 0)
+            )
+        }
+        return result
     }
 
     fun getClient(context: Context, pubkey: String): Nip46ClientInfo? =

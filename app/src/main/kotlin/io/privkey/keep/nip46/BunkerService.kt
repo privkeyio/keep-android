@@ -88,6 +88,10 @@ class BunkerService : Service() {
             return pendingNostrConnectRequests.offer(request)
         }
 
+        fun dequeueNostrConnectRequest(request: NostrConnectRequest): Boolean {
+            return pendingNostrConnectRequests.remove(request)
+        }
+
         fun start(context: Context) {
             val intent = Intent(context, BunkerService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -113,26 +117,27 @@ class BunkerService : Service() {
             }
         }
 
+        private val approvalLock = Any()
+
         internal fun addPendingApproval(requestId: String, approval: PendingApproval): Boolean {
-            val newGlobalCount = globalPendingCount.incrementAndGet()
-            if (newGlobalCount > MAX_PENDING_APPROVALS) {
-                globalPendingCount.decrementAndGet()
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request: max pending approvals reached")
-                return false
-            }
-
             val clientPubkey = approval.request.appPubkey
-            val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
-            val newClientCount = clientCount.incrementAndGet()
-            if (newClientCount > MAX_CONCURRENT_PER_CLIENT) {
-                clientCount.decrementAndGet()
-                globalPendingCount.decrementAndGet()
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from ${truncatePubkey(clientPubkey)}: max concurrent per client reached")
-                return false
-            }
+            synchronized(approvalLock) {
+                if (globalPendingCount.get() >= MAX_PENDING_APPROVALS) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request: max pending approvals reached")
+                    return false
+                }
 
-            pendingApprovals[requestId] = approval
-            return true
+                val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
+                if (clientCount.get() >= MAX_CONCURRENT_PER_CLIENT) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from ${truncatePubkey(clientPubkey)}: max concurrent per client reached")
+                    return false
+                }
+
+                globalPendingCount.incrementAndGet()
+                clientCount.incrementAndGet()
+                pendingApprovals[requestId] = approval
+                return true
+            }
         }
 
         fun getPendingApproval(requestId: String): PendingApproval? = pendingApprovals[requestId]
@@ -288,29 +293,41 @@ class BunkerService : Service() {
         }
     }
 
+    @Volatile
+    private var cachedSendConnectMethod: java.lang.reflect.Method? = null
+
     fun processQueuedNostrConnectRequests() {
         val handler = bunkerHandler ?: return
         serviceScope.launch {
             while (true) {
                 val request = pendingNostrConnectRequests.poll() ?: break
-                runCatching {
-                    val method = handler::class.java.getMethod(
-                        "sendConnectResponse",
-                        String::class.java,
-                        List::class.java,
-                        String::class.java
-                    )
-                    method.invoke(handler, request.clientPubkey, request.relays, request.secret)
-                    if (BuildConfig.DEBUG) Log.d(TAG, "Sent connect response to ${truncatePubkey(request.clientPubkey)}")
-                }.onFailure { e ->
-                    val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause else e
-                    if (cause is NoSuchMethodException || cause is NoSuchMethodError) {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "sendConnectResponse not available in library - client authorized but response not sent")
-                    } else {
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${(cause ?: e)::class.simpleName}")
-                    }
-                }
+                sendConnectResponse(handler, request)
             }
+        }
+    }
+
+    private fun sendConnectResponse(handler: BunkerHandler, request: NostrConnectRequest) {
+        runCatching {
+            val method = cachedSendConnectMethod ?: handler::class.java.getMethod(
+                "sendConnectResponse",
+                String::class.java,
+                List::class.java,
+                String::class.java
+            ).also { cachedSendConnectMethod = it }
+            method.invoke(handler, request.clientPubkey, request.relays, request.secret)
+            if (BuildConfig.DEBUG) Log.d(TAG, "Sent connect response to ${truncatePubkey(request.clientPubkey)}")
+        }.onFailure { e ->
+            handleSendConnectError(e)
+        }
+    }
+
+    private fun handleSendConnectError(e: Throwable) {
+        val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause else e
+        if (cause is NoSuchMethodException || cause is NoSuchMethodError) {
+            cachedSendConnectMethod = null
+            if (BuildConfig.DEBUG) Log.w(TAG, "sendConnectResponse not available in library")
+        } else {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${(cause ?: e)::class.simpleName}")
         }
     }
 

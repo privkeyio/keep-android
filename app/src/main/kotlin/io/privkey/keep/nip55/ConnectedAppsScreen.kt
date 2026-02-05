@@ -50,10 +50,12 @@ fun ConnectedAppsScreen(
         try {
             val nip55Apps = withContext(Dispatchers.IO) { permissionStore.getConnectedApps() }
             val nip46Clients = withContext(Dispatchers.IO) {
-                Nip46ClientStore.getClients(context).values.map { client ->
+                val clients = Nip46ClientStore.getClients(context).values
+                val auditLog = if (clients.isNotEmpty()) permissionStore.getAuditLog(100) else emptyList()
+                clients.map { client ->
                     val callerPackage = "nip46:${client.pubkey}"
                     val permCount = permissionStore.getPermissionsForCaller(callerPackage).size
-                    val lastUsed = permissionStore.getAuditLog(100)
+                    val lastUsed = auditLog
                         .filter { it.callerPackage == callerPackage }
                         .maxOfOrNull { it.timestamp }
                     ConnectedAppInfo(
@@ -152,6 +154,52 @@ fun ConnectedAppsScreen(
 }
 
 @Composable
+private fun AppIconBox(
+    icon: Drawable?,
+    isNip46Client: Boolean,
+    isVerified: Boolean
+) {
+    when {
+        icon != null -> {
+            Image(
+                bitmap = icon.toBitmap(48, 48).asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+        isNip46Client -> {
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Cloud,
+                    contentDescription = "NIP-46 Client",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        !isVerified -> {
+            Box(
+                modifier = Modifier.size(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = stringResource(R.string.connected_app_unverified),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+        else -> {
+            Spacer(modifier = Modifier.size(48.dp))
+        }
+    }
+}
+
+@Composable
 private fun ConnectedAppItem(
     app: ConnectedAppInfo,
     onClick: () -> Unit
@@ -197,35 +245,11 @@ private fun ConnectedAppItem(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val icon = appIcon
-            if (icon != null) {
-                Image(
-                    bitmap = icon.toBitmap(48, 48).asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp)
-                )
-            } else {
-                Box(
-                    modifier = Modifier.size(48.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isNip46Client) {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = "NIP-46 Client",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    } else if (!isVerified) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = stringResource(R.string.connected_app_unverified),
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                }
-            }
+            AppIconBox(
+                icon = appIcon,
+                isNip46Client = isNip46Client,
+                isVerified = isVerified
+            )
 
             Spacer(modifier = Modifier.width(16.dp))
 

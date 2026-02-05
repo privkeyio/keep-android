@@ -19,12 +19,23 @@ import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
-import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class Nip46ApprovalActivity : FragmentActivity() {
+
+    companion object {
+        private const val TAG = "Nip46ApprovalActivity"
+        const val EXTRA_REQUEST_ID = "request_id"
+        const val EXTRA_APP_PUBKEY = "app_pubkey"
+        const val EXTRA_APP_NAME = "app_name"
+        const val EXTRA_METHOD = "method"
+        const val EXTRA_EVENT_KIND = "event_kind"
+        const val EXTRA_EVENT_CONTENT = "event_content"
+        const val EXTRA_IS_CONNECT = "is_connect"
+        const val EXTRA_TIMEOUT = "timeout"
+    }
 
     private lateinit var biometricHelper: BiometricHelper
     private var storage: AndroidKeystoreStorage? = null
@@ -128,10 +139,16 @@ class Nip46ApprovalActivity : FragmentActivity() {
             }
 
             val reqId = requestId!!
-            keystoreStorage.setPendingCipher(reqId, authedCipher) {
+            try {
+                keystoreStorage.setPendingCipher(reqId, authedCipher) {
+                    keystoreStorage.clearPendingCipher(reqId)
+                }
+                respond(true, duration)
+            } catch (e: Exception) {
                 keystoreStorage.clearPendingCipher(reqId)
+                if (BuildConfig.DEBUG) Log.e(TAG, "Error during approval: ${e::class.simpleName}")
+                respond(false, null)
             }
-            respond(true, duration)
         }
     }
 
@@ -144,7 +161,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
         withContext(Dispatchers.IO) {
             val callerPackage = "nip46:$pubkey"
-            val requestType = mapMethodToRequestType(methodName) ?: return@withContext
+            val requestType = mapMethodToNip55RequestType(methodName) ?: return@withContext
             try {
                 store.grantPermission(
                     callerPackage = callerPackage,
@@ -158,21 +175,6 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    private fun mapMethodToRequestType(method: String): Nip55RequestType? =
-        mapMethodToNip55RequestType(method)
-
-    companion object {
-        private const val TAG = "Nip46ApprovalActivity"
-        const val EXTRA_REQUEST_ID = "request_id"
-        const val EXTRA_APP_PUBKEY = "app_pubkey"
-        const val EXTRA_APP_NAME = "app_name"
-        const val EXTRA_METHOD = "method"
-        const val EXTRA_EVENT_KIND = "event_kind"
-        const val EXTRA_EVENT_CONTENT = "event_content"
-        const val EXTRA_IS_CONNECT = "is_connect"
-        const val EXTRA_TIMEOUT = "timeout"
-    }
-
     private fun handleReject() {
         respond(false, null)
     }
@@ -180,11 +182,11 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private fun respond(approved: Boolean, duration: PermissionDuration?) {
         approveCompletionCallback?.invoke(approved)
         approveCompletionCallback = null
+        requestId?.let { BunkerService.respondToApproval(it, approved, clientPubkey) }
         lifecycleScope.launch {
             if (approved && duration != null) {
                 savePermissionIfRequested(duration)
             }
-            requestId?.let { BunkerService.respondToApproval(it, approved, clientPubkey) }
             finish()
         }
     }
