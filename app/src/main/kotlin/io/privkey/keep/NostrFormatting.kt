@@ -1,7 +1,9 @@
 package io.privkey.keep
 
-private const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+internal const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private val HEX_REGEX = Regex("^[0-9a-fA-F]+$")
+
+internal fun isHex64(value: String): Boolean = value.length == 64 && HEX_REGEX.matches(value)
 
 private fun truncate(value: String): String =
     if (value.length > 20) "${value.take(12)}...${value.takeLast(8)}" else value
@@ -12,8 +14,10 @@ fun formatPubkeyDisplay(pubkey: String): String =
 fun formatEventIdDisplay(eventId: String): String =
     hexToBech32(eventId, "note")?.let { truncate(it) } ?: truncate(eventId)
 
+fun hexToNpub(hex: String): String = hexToBech32(hex, "npub") ?: ""
+
 private fun hexToBech32(hex: String, hrp: String): String? {
-    if (hex.length != 64 || !HEX_REGEX.matches(hex)) return null
+    if (!isHex64(hex)) return null
     return try {
         val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         bech32Encode(hrp, convertBits(bytes.toList(), 8, 5, true))

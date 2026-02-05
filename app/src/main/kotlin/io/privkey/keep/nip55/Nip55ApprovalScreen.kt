@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
 import io.privkey.keep.formatEventIdDisplay
 import io.privkey.keep.formatPubkeyDisplay
+import io.privkey.keep.isHex64
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
@@ -65,12 +66,9 @@ internal data class EventPreview(
     val recipientPubkey: String?
 )
 
-private val HEX_64_REGEX = Regex("^[0-9a-fA-F]{64}$")
 private const val MAX_TAG_COUNT = 500
 private const val MAX_TAG_VALUE_LENGTH = 1024
 private const val MAX_CONTENT_LENGTH = 10_000
-
-private fun isValidHex64(value: String): Boolean = HEX_64_REGEX.matches(value)
 
 private fun sanitizeTTag(value: String): String =
     value.filterNot { it.isISOControl() || it in '\u2000'..'\u200F' || it in '\u2028'..'\u202F' || it in '\uFFF0'..'\uFFFF' }
@@ -90,8 +88,8 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
         if (tag.length() < 2) continue
         val tagValue = tag.optString(1).take(MAX_TAG_VALUE_LENGTH)
         when (tag.optString(0)) {
-            "p" -> if (isValidHex64(tagValue)) pTags.add(tagValue)
-            "e" -> if (isValidHex64(tagValue)) eTags.add(tagValue)
+            "p" -> if (isHex64(tagValue)) pTags.add(tagValue)
+            "e" -> if (isHex64(tagValue)) eTags.add(tagValue)
             "t" -> sanitizeTTag(tagValue).takeIf { it.isNotEmpty() }?.let { tTags.add(it) }
         }
     }
