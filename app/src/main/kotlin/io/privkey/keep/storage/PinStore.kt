@@ -122,11 +122,25 @@ class PinStore(private val context: Context) {
         val effectiveStoredHash = storedHash ?: DUMMY_HASH
 
         val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
+        val legacyPin = pin.toCharArray()
         try {
-            val inputHash = hashPinFromChars(normalizedPin, effectiveSalt)
             val storedBytes = Base64.decode(effectiveStoredHash, Base64.NO_WRAP)
-            val inputBytes = Base64.decode(inputHash, Base64.NO_WRAP)
-            val hashesMatch = MessageDigest.isEqual(storedBytes, inputBytes)
+
+            val normalizedHash = hashPinFromChars(normalizedPin, effectiveSalt)
+            val normalizedBytes = Base64.decode(normalizedHash, Base64.NO_WRAP)
+            var hashesMatch = MessageDigest.isEqual(storedBytes, normalizedBytes)
+
+            if (!hashesMatch && !pinNotSet) {
+                val legacyHash = hashPinFromChars(legacyPin, effectiveSalt)
+                val legacyBytes = Base64.decode(legacyHash, Base64.NO_WRAP)
+                val legacyMatch = MessageDigest.isEqual(storedBytes, legacyBytes)
+                if (legacyMatch) {
+                    hashesMatch = true
+                    val newHash = hashPinFromChars(normalizedPin, salt!!)
+                    prefs.edit().putString(KEY_PIN_HASH, newHash).commit()
+                }
+            }
+
             val verified = hashesMatch && !invalidLength && !lockedOut && !pinNotSet
 
             if (verified) {
@@ -139,6 +153,7 @@ class PinStore(private val context: Context) {
             return verified
         } finally {
             normalizedPin.fill('\u0000')
+            legacyPin.fill('0')
         }
     }
 

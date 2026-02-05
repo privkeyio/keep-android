@@ -201,11 +201,11 @@ class Nip55ContentProvider : ContentProvider() {
         if (decision == PermissionDecision.ALLOW) {
             val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind) }
             if (risk == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for $callerPackage, falling back to UI")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
                 return null
             }
             if (risk.requiredAuth != AuthLevel.NONE) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for $callerPackage: score=${risk.score}, auth=${risk.requiredAuth}")
+                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for ${hashPackageName(callerPackage)}: score=${risk.score}, auth=${risk.requiredAuth}")
                 return null
             }
         }

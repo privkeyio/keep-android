@@ -125,14 +125,19 @@ class CallerVerificationStore(context: Context) {
     sealed class VerificationResult {
         abstract val signatureHash: String?
 
-        data class Verified(override val signatureHash: String) : VerificationResult()
-        data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult()
+        data class Verified(override val signatureHash: String) : VerificationResult() {
+            override fun toString() = "Verified"
+        }
+        data class FirstUseRequiresApproval(override val signatureHash: String) : VerificationResult() {
+            override fun toString() = "FirstUseRequiresApproval"
+        }
         data class SignatureMismatch(val expected: String, val actual: String) : VerificationResult() {
             override val signatureHash: String? = null
             override fun toString() = "SignatureMismatch"
         }
         data object NotInstalled : VerificationResult() {
             override val signatureHash: String? = null
+            override fun toString() = "NotFound"
         }
     }
 
