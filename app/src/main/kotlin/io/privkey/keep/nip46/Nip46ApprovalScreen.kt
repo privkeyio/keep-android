@@ -32,7 +32,7 @@ fun Nip46ApprovalScreen(
     onReject: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
+    var selectedDuration by remember { mutableStateOf(if (isConnectRequest) PermissionDuration.FOREVER else PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
     val sanitizedContent = remember(eventContent) {
         eventContent?.let { sanitizeDisplayContent(it) }

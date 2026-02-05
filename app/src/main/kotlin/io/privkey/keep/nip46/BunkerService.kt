@@ -434,9 +434,11 @@ class BunkerService : Service() {
         val requestType = mapMethodToRequestType(request.method) ?: return null
         val eventKind = request.eventKind?.toInt()
 
-        return runBlocking(Dispatchers.IO) {
-            store.getPermissionDecision(callerPackage, requestType, eventKind)
-        }
+        return runCatching {
+            runBlocking(Dispatchers.IO) {
+                store.getPermissionDecision(callerPackage, requestType, eventKind)
+            }
+        }.getOrNull()
     }
 
     private fun logBunkerEventWithDecision(request: BunkerApprovalRequest, allowed: Boolean, wasAutomatic: Boolean) {

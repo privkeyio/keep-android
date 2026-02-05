@@ -116,10 +116,10 @@ fun AppPermissionsScreen(
                     onClick = {
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
-                                permissionStore.revokePermission(packageName)
+                                runCatching { permissionStore.revokePermission(packageName) }
                                 if (isNip46) {
                                     val pubkey = packageName.removePrefix("nip46:")
-                                    revokeNip46Client(context, pubkey)
+                                    runCatching { revokeNip46Client(context, pubkey) }
                                 }
                             }
                             showRevokeAllDialog = false
@@ -300,8 +300,8 @@ fun AppPermissionsScreen(
 }
 
 private fun revokeNip46Client(context: android.content.Context, pubkey: String) {
-    Nip46ClientStore.removeClient(context, pubkey)
-    BunkerConfigStore(context).revokeClient(pubkey)
+    runCatching { Nip46ClientStore.removeClient(context, pubkey) }
+    runCatching { BunkerConfigStore(context).revokeClient(pubkey) }
 }
 
 @Composable
