@@ -18,6 +18,8 @@ class PermissionStore(private val database: Nip55Database) {
     private val appSettingsDao = database.appSettingsDao()
     private val velocityDao = database.velocityDao()
 
+    val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
+
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()

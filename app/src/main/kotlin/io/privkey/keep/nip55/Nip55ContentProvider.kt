@@ -193,6 +193,18 @@ class Nip55ContentProvider : ContentProvider() {
             return rejectedCursor(null)
         }
 
+        if (decision == PermissionDecision.ALLOW) {
+            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind) }
+            if (risk == null) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for $callerPackage, falling back to UI")
+                return null
+            }
+            if (risk.requiredAuth != AuthLevel.NONE) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for $callerPackage: score=${risk.score}, auth=${risk.requiredAuth}")
+                return null
+            }
+        }
+
         return when (decision) {
             PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
             PermissionDecision.DENY -> {

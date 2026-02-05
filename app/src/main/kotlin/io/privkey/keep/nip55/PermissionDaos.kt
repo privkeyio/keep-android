@@ -114,6 +114,12 @@ interface Nip55AuditLogDao {
     """)
     suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int): Long?
 
+    @Query("SELECT COUNT(*) FROM nip55_audit_log WHERE callerPackage = :packageName AND eventKind = :eventKind AND decision = 'allow'")
+    suspend fun countByPackageAndKind(packageName: String, eventKind: Int): Int
+
+    @Query("SELECT COUNT(*) FROM nip55_audit_log WHERE callerPackage = :packageName AND timestamp >= :since")
+    suspend fun countSince(packageName: String, since: Long): Int
+
     @Query("SELECT entryHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
     suspend fun getLastEntryHash(): String?
 

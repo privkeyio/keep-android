@@ -8,7 +8,7 @@ import io.privkey.keep.storage.LegacyPrefsMigration
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 6)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 7)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
@@ -77,7 +77,14 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_nip55_audit_log_callerPackage_eventKind ON nip55_audit_log(callerPackage, eventKind)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_nip55_audit_log_callerPackage_timestamp ON nip55_audit_log(callerPackage, timestamp)")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
         private fun getEncryptedPrefs(context: Context) =
             KeystoreEncryptedPrefs.create(context, PREFS_NAME)
