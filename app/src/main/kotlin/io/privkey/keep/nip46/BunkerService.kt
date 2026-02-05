@@ -280,8 +280,8 @@ class BunkerService : Service() {
             }
 
             val proxy = ProxyConfigStore(this@BunkerService).getProxyConfig()
-            if (proxy != null) {
-                handler.startBunkerWithProxy(relays, callbacks, proxy.host, proxy.port.toUShort())
+            if (proxy != null && hasStartBunkerWithProxy(handler)) {
+                invokeStartBunkerWithProxy(handler, relays, callbacks, proxy.host, proxy.port.toUShort())
             } else {
                 handler.startBunker(relays, callbacks)
             }
@@ -297,6 +297,21 @@ class BunkerService : Service() {
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
         }
+    }
+
+    private fun hasStartBunkerWithProxy(handler: BunkerHandler): Boolean = runCatching {
+        handler.javaClass.methods.any { it.name == "startBunkerWithProxy" }
+    }.getOrDefault(false)
+
+    private fun invokeStartBunkerWithProxy(
+        handler: BunkerHandler,
+        relays: List<String>,
+        callbacks: BunkerCallbacks,
+        proxyHost: String,
+        proxyPort: UShort
+    ) {
+        val method = handler.javaClass.methods.first { it.name == "startBunkerWithProxy" }
+        method.invoke(handler, relays, callbacks, proxyHost, proxyPort)
     }
 
     @Volatile

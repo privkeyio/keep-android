@@ -160,7 +160,8 @@ class MainActivity : FragmentActivity() {
                             },
                             onBunkerServiceChanged = { enabled ->
                                 app.updateBunkerService(enabled)
-                            }
+                            },
+                            onReconnectRelays = { app.reconnectRelays() }
                         )
                     } else {
                         ErrorScreen("Failed to initialize")
@@ -195,7 +196,8 @@ fun MainScreen(
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
-    onBunkerServiceChanged: (Boolean) -> Unit = {}
+    onBunkerServiceChanged: (Boolean) -> Unit = {},
+    onReconnectRelays: () -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -478,7 +480,7 @@ fun MainScreen(
                     coroutineScope.launch {
                         withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
                         proxyEnabled = enabled
-                        if (isConnected) app.reconnectRelays()
+                        if (isConnected) onReconnectRelays()
                     }
                 },
                 onConfigChange = { host, port ->

@@ -241,11 +241,25 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeWithProxy(mobile: KeepMobile, relays: List<String>, proxy: ProxyConfig?) {
-        if (proxy != null) {
-            mobile.initializeWithProxy(relays, proxy.host, proxy.port.toUShort())
+        if (proxy != null && hasProxySupport(mobile)) {
+            invokeInitializeWithProxy(mobile, relays, proxy.host, proxy.port.toUShort())
         } else {
             mobile.initialize(relays)
         }
+    }
+
+    private fun hasProxySupport(mobile: KeepMobile): Boolean = runCatching {
+        mobile.javaClass.methods.any { it.name == "initializeWithProxy" }
+    }.getOrDefault(false)
+
+    private fun invokeInitializeWithProxy(
+        mobile: KeepMobile,
+        relays: List<String>,
+        proxyHost: String,
+        proxyPort: UShort
+    ) {
+        val method = mobile.javaClass.methods.first { it.name == "initializeWithProxy" }
+        method.invoke(mobile, relays, proxyHost, proxyPort)
     }
 
     private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
