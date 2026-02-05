@@ -160,6 +160,18 @@ class RiskAssessorTest {
     }
 
     @Test
+    fun `unknown app treated as new`() = runTest {
+        val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
+        val appSettingsDao = FakeAppSettingsDao(returnNull = true)
+
+        val assessor = createAssessor(auditDao, appSettingsDao)
+        val result = assessor.assess("com.example.unknown", 1)
+
+        assertTrue(result.factors.contains(RiskFactor.NEW_APP))
+        assertEquals(15, result.score)
+    }
+
+    @Test
     fun `new app with monotonic time tracking adds 15 points`() = runTest {
         val auditDao = FakeAuditLogDao(kindCount = 5, recentCount = 2)
         val appSettingsDao = FakeAppSettingsDao(
@@ -217,9 +229,11 @@ class RiskAssessorTest {
         private val appAge: Long = 0,
         private val wallClock: Long = 1_700_000_000_000L,
         private val elapsedTime: Long = 1_000_000_000L,
-        private val useMonotonicTime: Boolean = false
+        private val useMonotonicTime: Boolean = false,
+        private val returnNull: Boolean = false
     ) : Nip55AppSettingsDao {
         override suspend fun getSettings(callerPackage: String): Nip55AppSettings? {
+            if (returnNull) return null
             return Nip55AppSettings(
                 callerPackage = callerPackage,
                 expiresAt = null,

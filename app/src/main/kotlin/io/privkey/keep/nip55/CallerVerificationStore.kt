@@ -80,16 +80,20 @@ class CallerVerificationStore(context: Context) {
         prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
     }
 
+    private val nonceLock = Any()
+
     fun generateNonce(packageName: String): String {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         val nonce = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         val expiresAtElapsed = SystemClock.elapsedRealtime() + NONCE_EXPIRY_MS
-        activeNonces[nonce] = NonceData(packageName, expiresAtElapsed)
-        if (activeNonces.size > MAX_ACTIVE_NONCES) {
-            cleanupExpiredNonces()
+        synchronized(nonceLock) {
+            activeNonces[nonce] = NonceData(packageName, expiresAtElapsed)
             if (activeNonces.size > MAX_ACTIVE_NONCES) {
-                evictOldestNonces()
+                cleanupExpiredNonces()
+                if (activeNonces.size > MAX_ACTIVE_NONCES) {
+                    evictOldestNonces()
+                }
             }
         }
         return nonce

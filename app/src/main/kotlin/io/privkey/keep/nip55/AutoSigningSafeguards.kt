@@ -169,7 +169,7 @@ class AutoSigningSafeguards(context: Context) {
         val value = prefs.getString(key, null) ?: return null
         val parts = value.split(":")
         if (parts.size < 2) return null
-        val count = parts[0].toIntOrNull() ?: return null
+        val count = (parts[0].toIntOrNull() ?: return null).coerceIn(0, DAILY_LIMIT + 1)
         val windowStartElapsed = parts[1].toLongOrNull() ?: return null
 
         if (windowStartElapsed <= nowElapsed) {

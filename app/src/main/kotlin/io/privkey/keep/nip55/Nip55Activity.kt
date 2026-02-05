@@ -110,7 +110,13 @@ class Nip55Activity : FragmentActivity() {
         lifecycleScope.launch {
             riskAssessment = runCatching {
                 store.riskAssessor.assess(pkg, req.eventKind())
-            }.getOrNull()
+            }.getOrElse {
+                RiskAssessment(
+                    score = 100,
+                    factors = listOf(RiskFactor.HIGH_FREQUENCY),
+                    requiredAuth = AuthLevel.BIOMETRIC
+                )
+            }
             setupContent()
         }
     }
@@ -231,7 +237,8 @@ class Nip55Activity : FragmentActivity() {
         }
         val store = permissionStore
         val eventKind = req.eventKind()
-        val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY
+        val riskRequiresBiometric = riskAssessment?.requiredAuth?.let { it >= AuthLevel.PIN } == true
+        val needsBiometric = riskRequiresBiometric || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         if (callerPendingFirstUse && callerSignatureHash != null) {
             val verificationStore = callerVerificationStore

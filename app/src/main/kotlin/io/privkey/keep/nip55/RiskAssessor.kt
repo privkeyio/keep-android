@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.os.SystemClock
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 
 data class RiskAssessment(
     val score: Int,
@@ -37,9 +38,10 @@ class RiskAssessor(
         private const val NEW_APP_THRESHOLD_MS = 24 * 60 * 60 * 1000L
     }
 
+    private data class FrequencyWindow(val windowStart: Long, val wallClock: Long)
+
     private val frequencyLock = Any()
-    @Volatile private var frequencyWindowStart: Long = elapsedRealtimeProvider()
-    @Volatile private var frequencyWindowWallClock: Long = currentTimeMillisProvider()
+    private val frequencyWindows = ConcurrentHashMap<String, FrequencyWindow>()
 
     suspend fun assess(packageName: String, eventKind: Int?): RiskAssessment {
         val factors = mutableListOf<RiskFactor>()
@@ -55,13 +57,26 @@ class RiskAssessor(
 
         val frequencySince = synchronized(frequencyLock) {
             val nowElapsedFreq = elapsedRealtimeProvider()
-            val elapsedSinceWindowStart = nowElapsedFreq - frequencyWindowStart
-            if (elapsedSinceWindowStart < 0 || elapsedSinceWindowStart > FREQUENCY_WINDOW_MS * 2) {
-                frequencyWindowStart = nowElapsedFreq
-                frequencyWindowWallClock = currentTimeMillisProvider()
+            val window = frequencyWindows[packageName]
+            val windowStart: Long
+            val wallClock: Long
+            if (window == null) {
+                windowStart = nowElapsedFreq
+                wallClock = currentTimeMillisProvider()
+                frequencyWindows[packageName] = FrequencyWindow(windowStart, wallClock)
+            } else {
+                val elapsedSinceWindowStart = nowElapsedFreq - window.windowStart
+                if (elapsedSinceWindowStart < 0 || elapsedSinceWindowStart > FREQUENCY_WINDOW_MS * 2) {
+                    windowStart = nowElapsedFreq
+                    wallClock = currentTimeMillisProvider()
+                    frequencyWindows[packageName] = FrequencyWindow(windowStart, wallClock)
+                } else {
+                    windowStart = window.windowStart
+                    wallClock = window.wallClock
+                }
             }
-            (frequencyWindowWallClock - FREQUENCY_WINDOW_MS +
-                (nowElapsedFreq - frequencyWindowStart)).coerceAtLeast(0)
+            (wallClock - FREQUENCY_WINDOW_MS +
+                (nowElapsedFreq - windowStart)).coerceAtLeast(0)
         }
         val recentCount = auditDao.countSince(packageName, frequencySince)
         if (recentCount > HIGH_FREQUENCY_THRESHOLD) {
@@ -79,12 +94,12 @@ class RiskAssessor(
             val appAge = if (useMonotonic) {
                 nowElapsed - appSettings.createdAtElapsed
             } else {
-                currentTimeMillisProvider() - appSettings.createdAt
+                (currentTimeMillisProvider() - appSettings.createdAt).coerceAtLeast(0)
             }
             if (appAge < NEW_APP_THRESHOLD_MS) {
                 factors.add(RiskFactor.NEW_APP)
             }
-        }
+        } ?: run { factors.add(RiskFactor.NEW_APP) }
 
         val score = factors.sumOf { it.weight }.coerceAtMost(100)
         val requiredAuth = when {

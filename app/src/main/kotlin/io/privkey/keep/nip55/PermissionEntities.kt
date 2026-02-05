@@ -54,7 +54,13 @@ data class Nip55Permission(
         get() = if (eventKind == EVENT_KIND_GENERIC) null else eventKind
 }
 
-@Entity(tableName = "nip55_audit_log")
+@Entity(
+    tableName = "nip55_audit_log",
+    indices = [
+        Index(value = ["callerPackage", "eventKind"]),
+        Index(value = ["callerPackage", "timestamp"])
+    ]
+)
 data class Nip55AuditLog(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Long,
