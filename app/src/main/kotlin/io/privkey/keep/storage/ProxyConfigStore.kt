@@ -26,14 +26,14 @@ class ProxyConfigStore(context: Context) {
     fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
 
     fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
+        prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()
     }
 
     fun getHost(): String = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
 
     fun setHost(host: String) {
         if (isValidHost(host)) {
-            prefs.edit().putString(KEY_HOST, host).apply()
+            prefs.edit().putString(KEY_HOST, host).commit()
         }
     }
 
@@ -41,19 +41,24 @@ class ProxyConfigStore(context: Context) {
 
     fun setPort(port: Int) {
         if (isValidPort(port)) {
-            prefs.edit().putInt(KEY_PORT, port).apply()
+            prefs.edit().putInt(KEY_PORT, port).commit()
         }
     }
 
-    fun getProxyConfig(): ProxyConfig? =
-        if (isEnabled()) ProxyConfig(getHost(), getPort()) else null
+    fun getProxyConfig(): ProxyConfig? {
+        if (!isEnabled()) return null
+        val host = getHost()
+        val port = getPort()
+        if (!isValidHost(host) || !isValidPort(port)) return null
+        return ProxyConfig(host, port)
+    }
 
     fun setProxyConfig(host: String, port: Int): Boolean {
         if (!isValidHost(host) || !isValidPort(port)) return false
         prefs.edit()
             .putString(KEY_HOST, host)
             .putInt(KEY_PORT, port)
-            .apply()
+            .commit()
         return true
     }
 }

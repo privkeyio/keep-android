@@ -478,13 +478,16 @@ fun MainScreen(
                     coroutineScope.launch {
                         withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
                         proxyEnabled = enabled
+                        if (isConnected) app.reconnectRelays()
                     }
                 },
                 onConfigChange = { host, port ->
                     coroutineScope.launch {
-                        withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
-                        proxyHost = host
-                        proxyPort = port
+                        val saved = withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
+                        if (saved) {
+                            proxyHost = host
+                            proxyPort = port
+                        }
                     }
                 }
             )

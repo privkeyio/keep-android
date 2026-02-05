@@ -22,6 +22,7 @@ import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.storage.BunkerConfigStore
+import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.uniffi.BunkerApprovalRequest
 import io.privkey.keep.uniffi.BunkerCallbacks
 import io.privkey.keep.uniffi.BunkerHandler
@@ -278,7 +279,12 @@ class BunkerService : Service() {
                 }
             }
 
-            handler.startBunker(relays, callbacks)
+            val proxy = ProxyConfigStore(this@BunkerService).getProxyConfig()
+            if (proxy != null) {
+                handler.startBunkerWithProxy(relays, callbacks, proxy.host, proxy.port.toUShort())
+            } else {
+                handler.startBunker(relays, callbacks)
+            }
 
             val url = handler.getBunkerUrl()
             _bunkerUrl.value = url
