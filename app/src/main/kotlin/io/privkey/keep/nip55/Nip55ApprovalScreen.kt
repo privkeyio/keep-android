@@ -61,7 +61,7 @@ internal data class EventPreview(
     val kind: Int,
     val content: String,
     val pTags: List<String>,
-    val eTags: List<String>,
+    val eTags: List<Pair<String, String?>>,
     val tTags: List<String>,
     val recipientPubkey: String?
 )
@@ -79,7 +79,7 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
     val tagsArray = json.optJSONArray("tags") ?: JSONArray()
 
     val pTags = mutableListOf<String>()
-    val eTags = mutableListOf<String>()
+    val eTags = mutableListOf<Pair<String, String?>>()
     val tTags = mutableListOf<String>()
 
     val tagCount = minOf(tagsArray.length(), MAX_TAG_COUNT)
@@ -89,7 +89,10 @@ internal fun parseEventPreview(eventJson: String): EventPreview? = runCatching {
         val tagValue = tag.optString(1).take(MAX_TAG_VALUE_LENGTH)
         when (tag.optString(0)) {
             "p" -> if (isHex64(tagValue)) pTags.add(tagValue)
-            "e" -> if (isHex64(tagValue)) eTags.add(tagValue)
+            "e" -> if (isHex64(tagValue)) {
+                val relay = tag.optString(2).takeIf { it.isNotEmpty() }
+                eTags.add(tagValue to relay)
+            }
             "t" -> sanitizeTTag(tagValue).takeIf { it.isNotEmpty() }?.let { tTags.add(it) }
         }
     }
@@ -420,7 +423,7 @@ private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
 
 @Composable
 private fun TagsSummarySection(
-    eTags: List<String>,
+    eTags: List<Pair<String, String?>>,
     otherPubkeys: List<String>,
     tTags: List<String>
 ) {
@@ -433,7 +436,7 @@ private fun TagsSummarySection(
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
-            val eventsPreview = eTags.take(2).joinToString(", ") { formatEventIdDisplay(it) }
+            val eventsPreview = eTags.take(2).joinToString(", ") { (id, relay) -> formatEventIdDisplay(id, relay) }
             val suffix = if (eTags.size > 2) " +${eTags.size - 2} more" else ""
             TagSummaryRow("Events:", "$eventsPreview$suffix")
         }

@@ -11,10 +11,30 @@ private fun truncate(value: String): String =
 fun formatPubkeyDisplay(pubkey: String): String =
     hexToBech32(pubkey, "npub")?.let { truncate(it) } ?: truncate(pubkey)
 
-fun formatEventIdDisplay(eventId: String): String =
-    hexToBech32(eventId, "note")?.let { truncate(it) } ?: truncate(eventId)
+fun formatEventIdDisplay(eventId: String, relayUrl: String? = null): String =
+    hexToNevent(eventId, relayUrl)?.let { truncate(it) } ?: truncate(eventId)
 
 fun hexToNpub(hex: String): String = hexToBech32(hex, "npub") ?: ""
+
+private fun hexToNevent(eventId: String, relayUrl: String?): String? {
+    if (!isHex64(eventId)) return null
+    return try {
+        val idBytes = eventId.chunked(2).map { it.toInt(16).toByte() }
+        val tlv = mutableListOf<Byte>()
+        tlv.add(0) // type 0: special (event id)
+        tlv.add(32) // length: 32 bytes
+        tlv.addAll(idBytes)
+        if (!relayUrl.isNullOrEmpty()) {
+            val relayBytes = relayUrl.toByteArray(Charsets.US_ASCII)
+            tlv.add(1) // type 1: relay
+            tlv.add(relayBytes.size.toByte())
+            tlv.addAll(relayBytes.toList())
+        }
+        bech32Encode("nevent", convertBits(tlv, 8, 5, true))
+    } catch (_: Exception) {
+        null
+    }
+}
 
 private fun hexToBech32(hex: String, hrp: String): String? {
     if (!isHex64(hex)) return null
