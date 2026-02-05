@@ -21,6 +21,58 @@ class PermissionDatabaseIntegrationTest {
     private lateinit var auditLogDao: Nip55AuditLogDao
     private lateinit var appSettingsDao: Nip55AppSettingsDao
 
+    private fun createPermission(
+        callerPackage: String = "com.test.app",
+        requestType: String = "SIGN_EVENT",
+        eventKind: Int = 1,
+        decision: String = "allow",
+        expiresAt: Long? = null,
+        createdAt: Long = System.currentTimeMillis(),
+        createdAtElapsed: Long = 0,
+        durationMs: Long? = null
+    ) = Nip55Permission(
+        callerPackage = callerPackage,
+        requestType = requestType,
+        eventKind = eventKind,
+        decision = decision,
+        expiresAt = expiresAt,
+        createdAt = createdAt,
+        createdAtElapsed = createdAtElapsed,
+        durationMs = durationMs
+    )
+
+    private fun createAuditLog(
+        timestamp: Long = System.currentTimeMillis(),
+        callerPackage: String = "com.test.app",
+        requestType: String = "SIGN_EVENT",
+        eventKind: Int? = 1,
+        decision: String = "allow",
+        wasAutomatic: Boolean = false
+    ) = Nip55AuditLog(
+        timestamp = timestamp,
+        callerPackage = callerPackage,
+        requestType = requestType,
+        eventKind = eventKind,
+        decision = decision,
+        wasAutomatic = wasAutomatic
+    )
+
+    private fun createAppSettings(
+        callerPackage: String,
+        expiresAt: Long? = null,
+        signPolicyOverride: Int? = null,
+        createdAt: Long = System.currentTimeMillis(),
+        createdAtElapsed: Long = 0,
+        durationMs: Long? = null
+    ) = Nip55AppSettings(
+        callerPackage = callerPackage,
+        expiresAt = expiresAt,
+        signPolicyOverride = signPolicyOverride,
+        createdAt = createdAt,
+        createdAtElapsed = createdAtElapsed,
+        durationMs = durationMs
+    )
+
     @Before
     fun setup() {
         database = Room.inMemoryDatabaseBuilder(
@@ -39,14 +91,7 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun insertAndRetrievePermission() = runBlocking {
-        val permission = Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = System.currentTimeMillis()
-        )
+        val permission = createPermission()
         permissionDao.insertPermission(permission)
 
         val retrieved = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1)
@@ -59,14 +104,7 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun getPermissionWithGenericEventKind() = runBlocking {
-        val permission = Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "GET_PUBLIC_KEY",
-            eventKind = EVENT_KIND_GENERIC,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = System.currentTimeMillis()
-        )
+        val permission = createPermission(requestType = "GET_PUBLIC_KEY", eventKind = EVENT_KIND_GENERIC)
         permissionDao.insertPermission(permission)
 
         val retrieved = permissionDao.getPermission("com.test.app", "GET_PUBLIC_KEY", EVENT_KIND_GENERIC)
@@ -77,14 +115,7 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun updateExistingPermission() = runBlocking {
-        val permission = Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = System.currentTimeMillis()
-        )
+        val permission = createPermission()
         permissionDao.insertPermission(permission)
 
         val updated = permission.copy(decision = "deny")
@@ -97,69 +128,72 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun deleteExpiredPermissions() = runBlocking {
         val now = System.currentTimeMillis()
-        val expired = Nip55Permission(
-            callerPackage = "com.test.expired",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
+        val nowElapsed = 100000L
+
+        val expiredByWallClock = createPermission(
+            callerPackage = "com.test.expired.wallclock",
             expiresAt = now - 1000,
             createdAt = now - 2000
         )
-        val valid = Nip55Permission(
-            callerPackage = "com.test.valid",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
+        val expiredByClockManipulation = createPermission(
+            callerPackage = "com.test.expired.manipulation",
+            expiresAt = now + 60000,
+            createdAt = now + 120000
+        )
+        val expiredByMonotonicTime = createPermission(
+            callerPackage = "com.test.expired.monotonic",
+            createdAt = now - 70000,
+            createdAtElapsed = nowElapsed - 70000,
+            durationMs = 60000
+        )
+        val expiredByElapsedRegression = createPermission(
+            callerPackage = "com.test.expired.elapsed_regression",
+            createdAt = now,
+            createdAtElapsed = nowElapsed + 50000,
+            durationMs = 60000
+        )
+        val validByWallClock = createPermission(
+            callerPackage = "com.test.valid.wallclock",
             expiresAt = now + 60000,
             createdAt = now
         )
-        val permanent = Nip55Permission(
+        val validByMonotonicTime = createPermission(
+            callerPackage = "com.test.valid.monotonic",
+            createdAt = now,
+            createdAtElapsed = nowElapsed - 10000,
+            durationMs = 60000
+        )
+        val permanent = createPermission(
             callerPackage = "com.test.permanent",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
             createdAt = now
         )
 
-        permissionDao.insertPermission(expired)
-        permissionDao.insertPermission(valid)
-        permissionDao.insertPermission(permanent)
+        listOf(
+            expiredByWallClock,
+            expiredByClockManipulation,
+            expiredByMonotonicTime,
+            expiredByElapsedRegression,
+            validByWallClock,
+            validByMonotonicTime,
+            permanent
+        ).forEach { permissionDao.insertPermission(it) }
 
-        permissionDao.deleteExpired(now)
+        permissionDao.deleteExpired(now, nowElapsed)
 
-        assertNull(permissionDao.getPermission("com.test.expired", "SIGN_EVENT", 1))
-        assertNotNull(permissionDao.getPermission("com.test.valid", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.wallclock", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.manipulation", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.monotonic", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.elapsed_regression", "SIGN_EVENT", 1))
+        assertNotNull(permissionDao.getPermission("com.test.valid.wallclock", "SIGN_EVENT", 1))
+        assertNotNull(permissionDao.getPermission("com.test.valid.monotonic", "SIGN_EVENT", 1))
         assertNotNull(permissionDao.getPermission("com.test.permanent", "SIGN_EVENT", 1))
     }
 
     @Test
     fun deleteForCaller() = runBlocking {
-        val now = System.currentTimeMillis()
-        permissionDao.insertPermission(Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = now
-        ))
-        permissionDao.insertPermission(Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "GET_PUBLIC_KEY",
-            eventKind = EVENT_KIND_GENERIC,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = now
-        ))
-        permissionDao.insertPermission(Nip55Permission(
-            callerPackage = "com.other.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = now
-        ))
+        permissionDao.insertPermission(createPermission())
+        permissionDao.insertPermission(createPermission(requestType = "GET_PUBLIC_KEY", eventKind = EVENT_KIND_GENERIC))
+        permissionDao.insertPermission(createPermission(callerPackage = "com.other.app"))
 
         permissionDao.deleteForCaller("com.test.app")
 
@@ -170,16 +204,8 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun getDistinctCallers() = runBlocking {
-        val now = System.currentTimeMillis()
-        listOf("com.app1", "com.app2", "com.app1", "com.app3").forEach { pkg ->
-            permissionDao.insertPermission(Nip55Permission(
-                callerPackage = pkg,
-                requestType = "SIGN_EVENT",
-                eventKind = (1..100).random(),
-                decision = "allow",
-                expiresAt = null,
-                createdAt = now
-            ))
+        listOf("com.app1", "com.app2", "com.app1", "com.app3").forEachIndexed { index, pkg ->
+            permissionDao.insertPermission(createPermission(callerPackage = pkg, eventKind = index + 1))
         }
 
         val callers = permissionDao.getDistinctCallers()
@@ -189,15 +215,7 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun insertAndRetrieveAuditLog() = runBlocking {
-        val log = Nip55AuditLog(
-            timestamp = System.currentTimeMillis(),
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            wasAutomatic = true
-        )
-        auditLogDao.insert(log)
+        auditLogDao.insert(createAuditLog(wasAutomatic = true))
 
         val retrieved = auditLogDao.getRecent(10)
         assertEquals(1, retrieved.size)
@@ -209,14 +227,7 @@ class PermissionDatabaseIntegrationTest {
     fun auditLogPagination() = runBlocking {
         val now = System.currentTimeMillis()
         repeat(25) { i ->
-            auditLogDao.insert(Nip55AuditLog(
-                timestamp = now - i * 1000,
-                callerPackage = "com.test.app",
-                requestType = "SIGN_EVENT",
-                eventKind = i,
-                decision = "allow",
-                wasAutomatic = false
-            ))
+            auditLogDao.insert(createAuditLog(timestamp = now - i * 1000, eventKind = i))
         }
 
         val page1 = auditLogDao.getPage(10, 0)
@@ -231,30 +242,9 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun getLastUsedTime() = runBlocking {
         val now = System.currentTimeMillis()
-        auditLogDao.insert(Nip55AuditLog(
-            timestamp = now - 10000,
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            wasAutomatic = false
-        ))
-        auditLogDao.insert(Nip55AuditLog(
-            timestamp = now - 5000,
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            wasAutomatic = false
-        ))
-        auditLogDao.insert(Nip55AuditLog(
-            timestamp = now - 3000,
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "deny",
-            wasAutomatic = false
-        ))
+        auditLogDao.insert(createAuditLog(timestamp = now - 10000))
+        auditLogDao.insert(createAuditLog(timestamp = now - 5000))
+        auditLogDao.insert(createAuditLog(timestamp = now - 3000, decision = "deny"))
 
         val lastUsed = auditLogDao.getLastUsedTime("com.test.app")
         assertNotNull(lastUsed)
@@ -264,22 +254,8 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun deleteOldAuditLogs() = runBlocking {
         val now = System.currentTimeMillis()
-        auditLogDao.insert(Nip55AuditLog(
-            timestamp = now - 100000,
-            callerPackage = "com.old.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            wasAutomatic = false
-        ))
-        auditLogDao.insert(Nip55AuditLog(
-            timestamp = now - 1000,
-            callerPackage = "com.recent.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            wasAutomatic = false
-        ))
+        auditLogDao.insert(createAuditLog(timestamp = now - 100000, callerPackage = "com.old.app"))
+        auditLogDao.insert(createAuditLog(timestamp = now - 1000, callerPackage = "com.recent.app"))
 
         auditLogDao.deleteOlderThan(now - 50000)
 
@@ -290,11 +266,12 @@ class PermissionDatabaseIntegrationTest {
 
     @Test
     fun insertAndRetrieveAppSettings() = runBlocking {
-        val settings = Nip55AppSettings(
+        val now = System.currentTimeMillis()
+        val settings = createAppSettings(
             callerPackage = "com.test.app",
-            expiresAt = System.currentTimeMillis() + 60000,
+            expiresAt = now + 60000,
             signPolicyOverride = 1,
-            createdAt = System.currentTimeMillis()
+            createdAt = now
         )
         appSettingsDao.insertOrUpdate(settings)
 
@@ -306,39 +283,63 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun appSettingsExpiry() = runBlocking {
         val now = System.currentTimeMillis()
-        appSettingsDao.insertOrUpdate(Nip55AppSettings(
-            callerPackage = "com.expired.app",
-            expiresAt = now - 1000,
-            signPolicyOverride = null,
-            createdAt = now - 2000
-        ))
-        appSettingsDao.insertOrUpdate(Nip55AppSettings(
-            callerPackage = "com.valid.app",
-            expiresAt = now + 60000,
-            signPolicyOverride = null,
-            createdAt = now
-        ))
+        val nowElapsed = 100000L
 
-        val expired = appSettingsDao.getExpiredPackages(now)
-        assertEquals(1, expired.size)
-        assertEquals("com.expired.app", expired[0])
+        listOf(
+            createAppSettings(
+                callerPackage = "com.expired.wallclock",
+                expiresAt = now - 1000,
+                createdAt = now - 2000
+            ),
+            createAppSettings(
+                callerPackage = "com.expired.manipulation",
+                expiresAt = now + 60000,
+                createdAt = now + 120000
+            ),
+            createAppSettings(
+                callerPackage = "com.expired.monotonic",
+                createdAt = now - 70000,
+                createdAtElapsed = nowElapsed - 70000,
+                durationMs = 60000
+            ),
+            createAppSettings(
+                callerPackage = "com.expired.elapsed_regression",
+                createdAt = now,
+                createdAtElapsed = nowElapsed + 50000,
+                durationMs = 60000
+            ),
+            createAppSettings(
+                callerPackage = "com.valid.wallclock",
+                expiresAt = now + 60000,
+                createdAt = now
+            ),
+            createAppSettings(
+                callerPackage = "com.valid.monotonic",
+                createdAt = now,
+                createdAtElapsed = nowElapsed - 10000,
+                durationMs = 60000
+            )
+        ).forEach { appSettingsDao.insertOrUpdate(it) }
 
-        appSettingsDao.deleteExpired(now)
-        assertNull(appSettingsDao.getSettings("com.expired.app"))
-        assertNotNull(appSettingsDao.getSettings("com.valid.app"))
+        val expired = appSettingsDao.getExpiredPackages(now, nowElapsed)
+        assertEquals(4, expired.size)
+        assertTrue(expired.contains("com.expired.wallclock"))
+        assertTrue(expired.contains("com.expired.manipulation"))
+        assertTrue(expired.contains("com.expired.monotonic"))
+        assertTrue(expired.contains("com.expired.elapsed_regression"))
+
+        appSettingsDao.deleteExpired(now, nowElapsed)
+        assertNull(appSettingsDao.getSettings("com.expired.wallclock"))
+        assertNull(appSettingsDao.getSettings("com.expired.manipulation"))
+        assertNull(appSettingsDao.getSettings("com.expired.monotonic"))
+        assertNull(appSettingsDao.getSettings("com.expired.elapsed_regression"))
+        assertNotNull(appSettingsDao.getSettings("com.valid.wallclock"))
+        assertNotNull(appSettingsDao.getSettings("com.valid.monotonic"))
     }
 
     @Test
     fun updateDecision() = runBlocking {
-        val permission = Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = System.currentTimeMillis()
-        )
-        permissionDao.insertPermission(permission)
+        permissionDao.insertPermission(createPermission())
 
         val inserted = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1)
         assertNotNull(inserted)
@@ -352,22 +353,8 @@ class PermissionDatabaseIntegrationTest {
     @Test
     fun uniqueConstraintOnPermission() = runBlocking {
         val now = System.currentTimeMillis()
-        permissionDao.insertPermission(Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "allow",
-            expiresAt = null,
-            createdAt = now
-        ))
-        permissionDao.insertPermission(Nip55Permission(
-            callerPackage = "com.test.app",
-            requestType = "SIGN_EVENT",
-            eventKind = 1,
-            decision = "deny",
-            expiresAt = null,
-            createdAt = now + 1000
-        ))
+        permissionDao.insertPermission(createPermission(createdAt = now))
+        permissionDao.insertPermission(createPermission(decision = "deny", createdAt = now + 1000))
 
         val all = permissionDao.getAll()
         assertEquals(1, all.size)
