@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -23,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
+import io.privkey.keep.nip46.Nip46ClientStore
+import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,6 +35,7 @@ private data class AppState(
     val label: String? = null,
     val icon: Drawable? = null,
     val isVerified: Boolean = true,
+    val isNip46Client: Boolean = false,
     val permissions: List<Nip55Permission> = emptyList(),
     val signPolicyOverride: Int? = null,
     val isLoading: Boolean = true
@@ -53,43 +57,70 @@ fun AppPermissionsScreen(
     var expiryDropdownExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(packageName) {
+        val isNip46 = packageName.startsWith("nip46:")
         val (newAppState, settings) = withContext(Dispatchers.IO) {
-            val pm = context.packageManager
-            val pkgHash = packageName.hashCode().toString(16).takeLast(8)
-            val appInfo = runCatching { pm.getApplicationInfo(packageName, 0) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to verify app package [hash:$pkgHash]", it) }
-                .getOrNull()
+            if (isNip46) {
+                val pubkey = packageName.removePrefix("nip46:")
+                val clientInfo = Nip46ClientStore.getClient(context, pubkey)
+                val label = clientInfo?.name ?: "NIP-46 Client"
 
-            val label = appInfo?.let { pm.getApplicationLabel(it).toString() }
-            val icon = appInfo?.let { pm.getApplicationIcon(it) }
-            val verified = appInfo != null
+                val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
+                    .getOrDefault(emptyList())
 
-            val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to load permissions [hash:$pkgHash]", it) }
-                .getOrDefault(emptyList())
+                val loadedSettings = permissionStore.getAppSettings(packageName)
+                val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                    .getOrNull()
 
-            val loadedSettings = permissionStore.getAppSettings(packageName)
-            val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to load sign policy [hash:$pkgHash]", it) }
-                .getOrNull()
+                Pair(AppState(label, null, true, true, permissions, signPolicyOverride, isLoading = false), loadedSettings)
+            } else {
+                val pm = context.packageManager
+                val pkgHash = packageName.hashCode().toString(16).takeLast(8)
+                val appInfo = runCatching { pm.getApplicationInfo(packageName, 0) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to verify app package [hash:$pkgHash]", it) }
+                    .getOrNull()
 
-            Pair(AppState(label, icon, verified, permissions, signPolicyOverride, isLoading = false), loadedSettings)
+                val label = appInfo?.let { pm.getApplicationLabel(it).toString() }
+                val icon = appInfo?.let { pm.getApplicationIcon(it) }
+                val verified = appInfo != null
+
+                val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to load permissions [hash:$pkgHash]", it) }
+                    .getOrDefault(emptyList())
+
+                val loadedSettings = permissionStore.getAppSettings(packageName)
+                val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to load sign policy [hash:$pkgHash]", it) }
+                    .getOrNull()
+
+                Pair(AppState(label, icon, verified, false, permissions, signPolicyOverride, isLoading = false), loadedSettings)
+            }
         }
         appState = newAppState
         appSettings = settings
     }
 
     if (showRevokeAllDialog) {
+        val isNip46 = packageName.startsWith("nip46:")
+        val dialogTitle = if (isNip46) "Disconnect Client?" else "Disconnect App?"
+        val dialogText = if (isNip46) {
+            "This will remove all saved permissions and revoke authorization for ${appState.label ?: packageName}. The client will need to reconnect."
+        } else {
+            "This will remove all saved permissions for ${appState.label ?: packageName}. The app will need to request permission again."
+        }
         AlertDialog(
             onDismissRequest = { showRevokeAllDialog = false },
-            title = { Text("Disconnect App?") },
-            text = { Text("This will remove all saved permissions for ${appState.label ?: packageName}. The app will need to request permission again.") },
+            title = { Text(dialogTitle) },
+            text = { Text(dialogText) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
-                                permissionStore.revokePermission(packageName)
+                                runCatching { permissionStore.revokePermission(packageName) }
+                                if (isNip46) {
+                                    val pubkey = packageName.removePrefix("nip46:")
+                                    runCatching { revokeNip46Client(context, pubkey) }
+                                }
                             }
                             showRevokeAllDialog = false
                             onDismiss()
@@ -130,7 +161,8 @@ fun AppPermissionsScreen(
                     packageName = packageName,
                     appLabel = appState.label,
                     appIcon = appState.icon,
-                    isVerified = appState.isVerified
+                    isVerified = appState.isVerified,
+                    isNip46Client = appState.isNip46Client
                 )
             }
 
@@ -260,11 +292,16 @@ fun AppPermissionsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Disconnect App")
+                    Text(if (packageName.startsWith("nip46:")) "Disconnect Client" else "Disconnect App")
                 }
             }
         }
     }
+}
+
+private fun revokeNip46Client(context: android.content.Context, pubkey: String) {
+    runCatching { Nip46ClientStore.removeClient(context, pubkey) }
+    runCatching { BunkerConfigStore(context).revokeClient(pubkey) }
 }
 
 @Composable
@@ -272,7 +309,8 @@ private fun AppHeaderCard(
     packageName: String,
     appLabel: String?,
     appIcon: Drawable?,
-    isVerified: Boolean
+    isVerified: Boolean,
+    isNip46Client: Boolean = false
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -290,7 +328,14 @@ private fun AppHeaderCard(
                     modifier = Modifier.size(64.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!isVerified) {
+                    if (isNip46Client) {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "NIP-46 Client",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                    } else if (!isVerified) {
                         Icon(
                             Icons.Default.Warning,
                             contentDescription = "Unverified",
@@ -308,14 +353,21 @@ private fun AppHeaderCard(
                     text = appLabel ?: packageName,
                     style = MaterialTheme.typography.titleLarge
                 )
-                if (appLabel != null) {
+                if (isNip46Client) {
+                    val pubkey = packageName.removePrefix("nip46:")
+                    Text(
+                        text = "NIP-46 Client (${pubkey.take(8)}...${pubkey.takeLast(6)})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (appLabel != null) {
                     Text(
                         text = packageName,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                if (!isVerified) {
+                if (!isVerified && !isNip46Client) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Card(
                         colors = CardDefaults.cardColors(

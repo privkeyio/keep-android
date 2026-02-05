@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.nip55.EventKind
+import io.privkey.keep.nip55.PermissionDuration
 
 private fun sanitizeDisplayContent(content: String): String {
     return content
@@ -27,10 +28,12 @@ fun Nip46ApprovalScreen(
     eventKind: Int?,
     eventContent: String?,
     isConnectRequest: Boolean = false,
-    onApprove: (onComplete: (success: Boolean) -> Unit) -> Unit,
+    onApprove: (duration: PermissionDuration, onComplete: (success: Boolean) -> Unit) -> Unit,
     onReject: () -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
+    var selectedDuration by remember { mutableStateOf(if (isConnectRequest) PermissionDuration.FOREVER else PermissionDuration.JUST_THIS_TIME) }
+    var durationDropdownExpanded by remember { mutableStateOf(false) }
     val sanitizedContent = remember(eventContent) {
         eventContent?.let { sanitizeDisplayContent(it) }
     }
@@ -83,11 +86,11 @@ fun Nip46ApprovalScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                DetailRow("Method", formatMethod(method))
+                Nip46DetailRow("Method", formatNip46Method(method))
 
                 if (eventKind != null) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    DetailRow("Event Kind", EventKind.displayName(eventKind))
+                    Nip46DetailRow("Event Kind", EventKind.displayName(eventKind))
                 }
 
                 if (!sanitizedContent.isNullOrBlank()) {
@@ -114,11 +117,22 @@ fun Nip46ApprovalScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatPubkey(appPubkey),
+                    text = formatNip46Pubkey(appPubkey),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+
+        if (!isConnectRequest) {
+            Spacer(modifier = Modifier.height(16.dp))
+            PermissionDurationSelector(
+                label = "Remember this decision",
+                selectedDuration = selectedDuration,
+                expanded = durationDropdownExpanded,
+                onExpandedChange = { durationDropdownExpanded = it },
+                onDurationSelected = { selectedDuration = it }
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -139,7 +153,7 @@ fun Nip46ApprovalScreen(
                 Button(
                     onClick = {
                         isLoading = true
-                        onApprove { success ->
+                        onApprove(selectedDuration) { success ->
                             if (!success) {
                                 isLoading = false
                             }
@@ -154,27 +168,3 @@ fun Nip46ApprovalScreen(
     }
 }
 
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Text(text = value, style = MaterialTheme.typography.bodyLarge)
-}
-
-private fun formatMethod(method: String): String = when (method) {
-    "connect" -> "Connect"
-    "get_public_key" -> "Get Public Key"
-    "sign_event" -> "Sign Event"
-    "nip44_encrypt" -> "Encrypt (NIP-44)"
-    "nip44_decrypt" -> "Decrypt (NIP-44)"
-    "nip04_encrypt" -> "Encrypt (NIP-04)"
-    "nip04_decrypt" -> "Decrypt (NIP-04)"
-    "ping" -> "Ping"
-    else -> method
-}
-
-private fun formatPubkey(pubkey: String): String =
-    if (pubkey.length > 24) "${pubkey.take(12)}...${pubkey.takeLast(8)}" else pubkey

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.privkey.keep.BuildConfig
@@ -17,6 +18,7 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
 import io.privkey.keep.nip55.Nip55Database
+import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.storage.BunkerConfigStore
@@ -34,7 +36,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -47,6 +51,7 @@ class BunkerService : Service() {
         private const val NOTIFICATION_ID = 2
 
         private const val MAX_PENDING_APPROVALS = 10
+        private const val MAX_PENDING_NOSTR_CONNECT_REQUESTS = 10
         private const val MAX_CONCURRENT_PER_CLIENT = 3
         private const val RATE_LIMIT_WINDOW_MS = 60_000L
         private const val MAX_REQUESTS_PER_WINDOW = 30
@@ -75,8 +80,17 @@ class BunkerService : Service() {
         private val globalRequestHistory = ArrayDeque<Long>(GLOBAL_REQUEST_HISTORY_MAX_SIZE)
         private val globalRequestLock = Any()
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
+        private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
+
+        fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
+            return pendingNostrConnectRequests.offer(request)
+        }
+
+        fun dequeueNostrConnectRequest(request: NostrConnectRequest): Boolean {
+            return pendingNostrConnectRequests.remove(request)
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, BunkerService::class.java)
@@ -103,32 +117,33 @@ class BunkerService : Service() {
             }
         }
 
+        private val approvalLock = Any()
+
         internal fun addPendingApproval(requestId: String, approval: PendingApproval): Boolean {
-            val newGlobalCount = globalPendingCount.incrementAndGet()
-            if (newGlobalCount > MAX_PENDING_APPROVALS) {
-                globalPendingCount.decrementAndGet()
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request: max pending approvals reached")
-                return false
-            }
-
             val clientPubkey = approval.request.appPubkey
-            val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
-            val newClientCount = clientCount.incrementAndGet()
-            if (newClientCount > MAX_CONCURRENT_PER_CLIENT) {
-                clientCount.decrementAndGet()
-                globalPendingCount.decrementAndGet()
-                if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from ${truncatePubkey(clientPubkey)}: max concurrent per client reached")
-                return false
-            }
+            synchronized(approvalLock) {
+                if (globalPendingCount.get() >= MAX_PENDING_APPROVALS) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request: max pending approvals reached")
+                    return false
+                }
 
-            pendingApprovals[requestId] = approval
-            return true
+                val clientCount = clientPendingCounts.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
+                if (clientCount.get() >= MAX_CONCURRENT_PER_CLIENT) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from ${truncatePubkey(clientPubkey)}: max concurrent per client reached")
+                    return false
+                }
+
+                globalPendingCount.incrementAndGet()
+                clientCount.incrementAndGet()
+                pendingApprovals[requestId] = approval
+                return true
+            }
         }
 
         fun getPendingApproval(requestId: String): PendingApproval? = pendingApprovals[requestId]
 
         internal fun isRateLimited(clientPubkey: String): Boolean {
-            val now = System.currentTimeMillis()
+            val now = SystemClock.elapsedRealtime()
 
             synchronized(globalRequestLock) {
                 while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
@@ -270,17 +285,57 @@ class BunkerService : Service() {
             _status.value = handler.getBunkerStatus()
 
             updateNotification(isActive = true)
+
+            processQueuedNostrConnectRequests()
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
         }
     }
 
+    @Volatile
+    private var cachedSendConnectMethod: java.lang.reflect.Method? = null
+
+    fun processQueuedNostrConnectRequests() {
+        val handler = bunkerHandler ?: return
+        serviceScope.launch {
+            while (true) {
+                val request = pendingNostrConnectRequests.poll() ?: break
+                sendConnectResponse(handler, request)
+            }
+        }
+    }
+
+    private fun sendConnectResponse(handler: BunkerHandler, request: NostrConnectRequest) {
+        runCatching {
+            val method = cachedSendConnectMethod ?: handler::class.java.getMethod(
+                "sendConnectResponse",
+                String::class.java,
+                List::class.java,
+                String::class.java
+            ).also { cachedSendConnectMethod = it }
+            method.invoke(handler, request.clientPubkey, request.relays, request.secret)
+            if (BuildConfig.DEBUG) Log.d(TAG, "Sent connect response to ${truncatePubkey(request.clientPubkey)}")
+        }.onFailure { e ->
+            handleSendConnectError(e)
+        }
+    }
+
+    private fun handleSendConnectError(e: Throwable) {
+        val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause else e
+        if (cause is NoSuchMethodException || cause is NoSuchMethodError) {
+            cachedSendConnectMethod = null
+            if (BuildConfig.DEBUG) Log.w(TAG, "sendConnectResponse not available in library")
+        } else {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${(cause ?: e)::class.simpleName}")
+        }
+    }
+
     private fun logBunkerEvent(event: BunkerLogEvent) {
         val store = permissionStore ?: return
+        val requestType = mapMethodToRequestType(event.action) ?: return
         serviceScope.launch {
             runCatching {
-                val requestType = mapMethodToRequestType(event.action)
                 store.logOperation(
                     callerPackage = "nip46:${event.app}",
                     requestType = requestType,
@@ -294,13 +349,8 @@ class BunkerService : Service() {
         }
     }
 
-    private fun mapMethodToRequestType(method: String): Nip55RequestType = when (method) {
-        "sign_event" -> Nip55RequestType.SIGN_EVENT
-        "nip44_encrypt", "nip04_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
-        "nip44_decrypt", "nip04_decrypt" -> Nip55RequestType.NIP44_DECRYPT
-        "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
-        else -> Nip55RequestType.SIGN_EVENT
-    }
+    private fun mapMethodToRequestType(method: String): Nip55RequestType? =
+        mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -327,6 +377,19 @@ class BunkerService : Service() {
         if (!isAuthorized && !isConnectRequest) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
             return false
+        }
+
+        if (!isConnectRequest) {
+            val storedDecision = checkStoredPermission(clientPubkey, request)
+            if (storedDecision != null) {
+                val allowed = storedDecision == PermissionDecision.ALLOW
+                if (allowed) {
+                    clientConsecutiveRequests[clientPubkey]?.set(0)
+                }
+                logBunkerEventWithDecision(request, allowed, wasAutomatic = true)
+                if (BuildConfig.DEBUG) Log.d(TAG, "Auto-${if (allowed) "approved" else "denied"} request from ${truncatePubkey(clientPubkey)} based on stored permission")
+                return allowed
+            }
         }
 
         val requestId = UUID.randomUUID().toString()
@@ -366,6 +429,37 @@ class BunkerService : Service() {
         }
 
         return result
+    }
+
+    private fun checkStoredPermission(clientPubkey: String, request: BunkerApprovalRequest): PermissionDecision? {
+        val store = permissionStore ?: return null
+        val callerPackage = "nip46:$clientPubkey"
+        val requestType = mapMethodToRequestType(request.method) ?: return null
+        val eventKind = request.eventKind?.toInt()
+
+        return runCatching {
+            runBlocking(Dispatchers.IO) {
+                store.getPermissionDecision(callerPackage, requestType, eventKind)
+            }
+        }.getOrNull()
+    }
+
+    private fun logBunkerEventWithDecision(request: BunkerApprovalRequest, allowed: Boolean, wasAutomatic: Boolean) {
+        val store = permissionStore ?: return
+        val requestType = mapMethodToRequestType(request.method) ?: return
+        serviceScope.launch {
+            runCatching {
+                store.logOperation(
+                    callerPackage = "nip46:${request.appPubkey}",
+                    requestType = requestType,
+                    eventKind = request.eventKind?.toInt(),
+                    decision = if (allowed) "allow" else "deny",
+                    wasAutomatic = wasAutomatic
+                )
+            }.onFailure {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Failed to log bunker event: ${it::class.simpleName}")
+            }
+        }
     }
 
     private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
