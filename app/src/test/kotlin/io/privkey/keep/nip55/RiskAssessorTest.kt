@@ -136,7 +136,6 @@ class RiskAssessorTest {
             elapsedTime = TEST_ELAPSED_TIME
         )
 
-        // Use unusual hour (3 AM) to trigger UNUSUAL_TIME factor
         val assessor = createAssessor(auditDao, appSettingsDao, currentHour = 3)
         val result = assessor.assess("com.example.app", 0)
 

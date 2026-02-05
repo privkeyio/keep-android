@@ -60,13 +60,6 @@ class AutoSigningSafeguards(context: Context) {
         return cooledOffUntilWall > 0 && System.currentTimeMillis() < cooledOffUntilWall
     }
 
-    /**
-     * Returns the earliest time the cooling-off period will expire.
-     *
-     * This considers both the wall-clock timestamp and the elapsed-time-based expiry
-     * to stay consistent with [isCooledOff] after sleep/clock changes.
-     * Returns 0 if not currently cooled off.
-     */
     fun getCooledOffUntil(packageName: String): Long {
         val nowElapsed = SystemClock.elapsedRealtime()
         val nowWall = System.currentTimeMillis()
