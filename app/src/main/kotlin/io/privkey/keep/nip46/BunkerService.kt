@@ -280,9 +280,9 @@ class BunkerService : Service() {
             }
 
             val proxy = ProxyConfigStore(this@BunkerService).getProxyConfig()
-            if (proxy != null && hasStartBunkerWithProxy(handler)) {
+            val proxyStarted = proxy != null && proxy.port in 1..65535 &&
                 invokeStartBunkerWithProxy(handler, relays, callbacks, proxy.host, proxy.port.toUShort())
-            } else {
+            if (!proxyStarted) {
                 handler.startBunker(relays, callbacks)
             }
 
@@ -299,20 +299,20 @@ class BunkerService : Service() {
         }
     }
 
-    private fun hasStartBunkerWithProxy(handler: BunkerHandler): Boolean = runCatching {
-        handler.javaClass.methods.any { it.name == "startBunkerWithProxy" }
-    }.getOrDefault(false)
-
     private fun invokeStartBunkerWithProxy(
         handler: BunkerHandler,
         relays: List<String>,
         callbacks: BunkerCallbacks,
         proxyHost: String,
         proxyPort: UShort
-    ) {
-        val method = handler.javaClass.methods.first { it.name == "startBunkerWithProxy" }
+    ): Boolean = runCatching {
+        val method = handler.javaClass.methods.firstOrNull { it.name == "startBunkerWithProxy" }
+            ?: return false
         method.invoke(handler, relays, callbacks, proxyHost, proxyPort)
-    }
+        true
+    }.onFailure {
+        if (BuildConfig.DEBUG) Log.w(TAG, "startBunkerWithProxy failed: ${it::class.simpleName}")
+    }.getOrDefault(false)
 
     @Volatile
     private var cachedSendConnectMethod: java.lang.reflect.Method? = null

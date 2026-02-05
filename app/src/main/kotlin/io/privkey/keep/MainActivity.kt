@@ -489,6 +489,7 @@ fun MainScreen(
                         if (saved) {
                             proxyHost = host
                             proxyPort = port
+                            if (proxyEnabled && isConnected) onReconnectRelays()
                         }
                     }
                 }

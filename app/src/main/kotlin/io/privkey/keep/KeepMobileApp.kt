@@ -86,7 +86,8 @@ class KeepMobileApp : Application() {
             foregroundServiceStore = ForegroundServiceStore(this)
             pinStore = PinStore(this)
             biometricTimeoutStore = BiometricTimeoutStore(this)
-            proxyConfigStore = ProxyConfigStore(this)
+            runCatching { proxyConfigStore = ProxyConfigStore(this) }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize ProxyConfigStore: ${it::class.simpleName}") }
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         }.onFailure { e ->
@@ -241,7 +242,7 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializeWithProxy(mobile: KeepMobile, relays: List<String>, proxy: ProxyConfig?) {
-        if (proxy != null && hasProxySupport(mobile)) {
+        if (proxy != null && proxy.port in 1..65535 && hasProxySupport(mobile)) {
             invokeInitializeWithProxy(mobile, relays, proxy.host, proxy.port.toUShort())
         } else {
             mobile.initialize(relays)
