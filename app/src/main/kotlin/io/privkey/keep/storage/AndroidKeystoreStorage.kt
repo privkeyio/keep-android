@@ -456,7 +456,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         if (groupPubkeyHex.isBlank()) return
 
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        if (existingKeys.contains(groupPubkeyHex)) return
+        if (existingKeys.contains(groupPubkeyHex)) {
+            prefs.edit().clear().apply()
+            return
+        }
 
         val sharePrefs = getSharePrefs(groupPubkeyHex)
         if (sharePrefs.contains(KEY_SHARE_DATA)) {

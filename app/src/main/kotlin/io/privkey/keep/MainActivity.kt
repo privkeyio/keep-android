@@ -453,7 +453,9 @@ fun MainScreen(
                                     keepMobile.deleteShareByKey(account.groupPubkeyHex)
                                 }
                                 relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
-                                allAccounts = storage.listAllShares().map { it.toAccountInfo() }
+                                allAccounts = withContext(Dispatchers.IO) {
+                                    storage.listAllShares().map { it.toAccountInfo() }
+                                }
 
                                 if (wasActive && allAccounts.isNotEmpty()) {
                                     val nextAccount = allAccounts.first()
