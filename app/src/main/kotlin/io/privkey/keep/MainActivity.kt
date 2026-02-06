@@ -38,7 +38,6 @@ import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.BunkerStatus
-import io.privkey.keep.uniffi.CertificatePin
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -238,10 +237,10 @@ fun MainScreen(
     var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
     var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
-    var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePins()) }
+    var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
 
     suspend fun refreshCertificatePins() {
-        certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePins() }
+        certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
     }
 
     LaunchedEffect(Unit) {
@@ -249,7 +248,7 @@ fun MainScreen(
             while (true) {
                 hasShare = keepMobile.hasShare()
                 shareInfo = keepMobile.getShareInfo()
-                certificatePins = keepMobile.getCertificatePins()
+                certificatePins = keepMobile.getCertificatePinsCompat()
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size

@@ -22,7 +22,6 @@ import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.Nip55Handler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -347,13 +346,19 @@ class KeepMobileApp : Application() {
     }
 
     fun clearCertificatePin(hostname: String) {
-        runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pin: ${it::class.simpleName}") }
+        runCatching {
+            val mobile = keepMobile ?: return
+            val method = mobile.javaClass.methods.firstOrNull { it.name == "clearCertificatePin" }
+            method?.invoke(mobile, hostname)
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
-        runCatching { keepMobile?.clearCertificatePins() }
-            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pins: ${it::class.simpleName}") }
+        runCatching {
+            val mobile = keepMobile ?: return
+            val method = mobile.javaClass.methods.firstOrNull { it.name == "clearCertificatePins" }
+            method?.invoke(mobile)
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pins: ${it::class.simpleName}") }
     }
 
     fun dismissPinMismatch() {
@@ -363,9 +368,16 @@ class KeepMobileApp : Application() {
     private fun findPinMismatch(e: Throwable): PinMismatchInfo? =
         generateSequence(e) { it.cause }
             .take(10)
-            .filterIsInstance<KeepMobileException.CertificatePinMismatch>()
-            .firstOrNull()
-            ?.let { PinMismatchInfo(it.hostname, it.expected, it.actual) }
+            .firstOrNull { it::class.simpleName == "CertificatePinMismatch" }
+            ?.let { mismatch ->
+                runCatching {
+                    val cls = mismatch::class.java
+                    val hostname = cls.getField("hostname").get(mismatch) as? String ?: return@runCatching null
+                    val expected = cls.getField("expected").get(mismatch) as? String ?: return@runCatching null
+                    val actual = cls.getField("actual").get(mismatch) as? String ?: return@runCatching null
+                    PinMismatchInfo(hostname, expected, actual)
+                }.getOrNull()
+            }
 
     private fun isCancellationException(e: Throwable): Boolean =
         generateSequence(e) { it.cause }

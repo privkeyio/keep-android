@@ -21,7 +21,6 @@ import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.BunkerStatus
-import io.privkey.keep.uniffi.CertificatePin
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ShareInfo
