@@ -891,3 +891,111 @@ fun ProxySettingsCard(
         )
     }
 }
+
+@Composable
+fun CertificatePinsCard(
+    pins: List<CertificatePin>,
+    onClearPin: (String) -> Unit,
+    onClearAllPins: () -> Unit
+) {
+    var showClearAllDialog by remember { mutableStateOf(false) }
+    var pinToDelete by remember { mutableStateOf<String?>(null) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Certificate Pins", style = MaterialTheme.typography.titleMedium)
+                if (pins.isNotEmpty()) {
+                    TextButton(onClick = { showClearAllDialog = true }) {
+                        Text("Clear All", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+            if (pins.isEmpty()) {
+                Text(
+                    "Pins are set on first connection to each relay",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                pins.forEach { pin ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                pin.hostname,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                pin.spkiHash.take(16) + "...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { pinToDelete = pin.hostname },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear pin",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pinToDelete?.let { hostname ->
+        AlertDialog(
+            onDismissRequest = { pinToDelete = null },
+            title = { Text("Clear Pin?") },
+            text = { Text("Remove the certificate pin for $hostname? A new pin will be set on next connection.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearPin(hostname)
+                    pinToDelete = null
+                }) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pinToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showClearAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllDialog = false },
+            title = { Text("Clear All Pins?") },
+            text = { Text("This will remove all stored certificate pins. New pins will be set on next connection.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearAllPins()
+                    showClearAllDialog = false
+                }) {
+                    Text("Clear All", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}

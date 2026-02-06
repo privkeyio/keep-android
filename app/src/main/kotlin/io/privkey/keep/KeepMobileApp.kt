@@ -32,12 +32,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
+private const val PIN_MISMATCH_ERROR = "Certificate pin mismatch"
 
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
@@ -59,6 +61,7 @@ class KeepMobileApp : Application() {
     private var proxyConfigStore: ProxyConfigStore? = null
     private var announceJob: Job? = null
     private var connectionJob: Job? = null
+    private var reconnectJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _connectionState = MutableStateFlow(ConnectionState())
@@ -197,6 +200,7 @@ class KeepMobileApp : Application() {
         if (relays.isEmpty()) return onError("No relays configured")
 
         connectionJob?.cancel()
+        reconnectJob?.cancel()
         _connectionState.value = ConnectionState(isConnecting = true)
 
         val connectId = UUID.randomUUID().toString()
@@ -224,8 +228,10 @@ class KeepMobileApp : Application() {
                         return@onFailure
                     }
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
-                    _connectionState.value = ConnectionState(error = "Connection failed")
-                    withContext(Dispatchers.Main) { onError("Connection failed") }
+                    val pinMismatch = findPinMismatch(e)
+                    val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Connection failed"
+                    _connectionState.value = ConnectionState(error = errorMsg, pinMismatch = pinMismatch)
+                    withContext(Dispatchers.Main) { onError(errorMsg) }
                 }
         }
     }
@@ -294,9 +300,27 @@ class KeepMobileApp : Application() {
         val relays = config.getRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
-        applicationScope.launch {
+        reconnectJob?.cancel()
+        connectionJob?.cancel()
+        _connectionState.value = ConnectionState(isConnecting = true)
+
+        reconnectJob = applicationScope.launch {
             runCatching { initializeWithProxy(mobile, relays, proxyConfigStore?.getProxyConfig()) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${it::class.simpleName}") }
+                .onSuccess {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
+                    _connectionState.value = ConnectionState(isConnected = true)
+                    startPeriodicPeerCheck(mobile, config)
+                }
+                .onFailure { e ->
+                    if (isCancellationException(e)) {
+                        _connectionState.value = ConnectionState()
+                        return@onFailure
+                    }
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
+                    val pinMismatch = findPinMismatch(e)
+                    val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Reconnection failed"
+                    _connectionState.value = ConnectionState(error = errorMsg, pinMismatch = pinMismatch)
+                }
         }
     }
 
@@ -327,6 +351,40 @@ class KeepMobileApp : Application() {
         manager.register()
     }
 
+    fun clearCertificatePin(hostname: String) {
+        invokeKeepMobileMethod("clearCertificatePin", hostname)
+    }
+
+    fun clearAllCertificatePins() {
+        invokeKeepMobileMethod("clearCertificatePins")
+    }
+
+    private fun invokeKeepMobileMethod(name: String, vararg args: Any) {
+        runCatching {
+            val mobile = keepMobile ?: return
+            val method = mobile.javaClass.methods.firstOrNull { it.name == name } ?: return
+            method.invoke(mobile, *args)
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to invoke $name: ${it::class.simpleName}") }
+    }
+
+    fun dismissPinMismatch() {
+        _connectionState.update { it.copy(error = null, pinMismatch = null) }
+    }
+
+    private fun findPinMismatch(e: Throwable): PinMismatchInfo? =
+        generateSequence(e) { it.cause }
+            .take(10)
+            .firstOrNull { it::class.simpleName == "CertificatePinMismatch" }
+            ?.let { mismatch ->
+                runCatching {
+                    val cls = mismatch::class.java
+                    val hostname = cls.getMethod("getHostname").invoke(mismatch) as? String ?: return@runCatching null
+                    val expected = cls.getMethod("getExpected").invoke(mismatch) as? String ?: return@runCatching null
+                    val actual = cls.getMethod("getActual").invoke(mismatch) as? String ?: return@runCatching null
+                    PinMismatchInfo(hostname, expected, actual)
+                }.getOrNull()
+            }
+
     private fun isCancellationException(e: Throwable): Boolean =
         generateSequence(e) { it.cause }
             .take(10)
@@ -336,5 +394,14 @@ class KeepMobileApp : Application() {
 data class ConnectionState(
     val isConnected: Boolean = false,
     val isConnecting: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val pinMismatch: PinMismatchInfo? = null
 )
+
+data class PinMismatchInfo(
+    val hostname: String,
+    val expected: String,
+    val actual: String
+) {
+    override fun toString(): String = "PinMismatchInfo(hostname=$hostname)"
+}
