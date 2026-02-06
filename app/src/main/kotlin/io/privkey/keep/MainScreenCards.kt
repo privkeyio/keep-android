@@ -21,6 +21,7 @@ import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.uniffi.CertificatePin
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ShareInfo
@@ -885,6 +886,92 @@ fun ProxySettingsCard(
             },
             dismissButton = {
                 TextButton(onClick = ::dismissDialog) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun CertificatePinsCard(
+    pins: List<CertificatePin>,
+    onClearPin: (String) -> Unit,
+    onClearAllPins: () -> Unit
+) {
+    var showClearAllDialog by remember { mutableStateOf(false) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Certificate Pins", style = MaterialTheme.typography.titleMedium)
+                if (pins.isNotEmpty()) {
+                    TextButton(onClick = { showClearAllDialog = true }) {
+                        Text("Clear All", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+            if (pins.isEmpty()) {
+                Text(
+                    "Pins are set on first connection to each relay",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                pins.forEach { pin ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                pin.hostname,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                pin.spkiHash.take(16) + "...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { onClearPin(pin.hostname) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear pin",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showClearAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearAllDialog = false },
+            title = { Text("Clear All Pins?") },
+            text = { Text("This will remove all stored certificate pins. New pins will be set on next connection.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearAllPins()
+                    showClearAllDialog = false
+                }) {
+                    Text("Clear All", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllDialog = false }) {
                     Text("Cancel")
                 }
             }

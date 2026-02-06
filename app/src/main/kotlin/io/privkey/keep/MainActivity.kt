@@ -38,6 +38,7 @@ import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.uniffi.CertificatePin
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -161,7 +162,10 @@ class MainActivity : FragmentActivity() {
                             onBunkerServiceChanged = { enabled ->
                                 app.updateBunkerService(enabled)
                             },
-                            onReconnectRelays = { app.reconnectRelays() }
+                            onReconnectRelays = { app.reconnectRelays() },
+                            onClearCertificatePin = { hostname -> app.clearCertificatePin(hostname) },
+                            onClearAllCertificatePins = { app.clearAllCertificatePins() },
+                            onDismissPinMismatch = { app.dismissPinMismatch() }
                         )
                     } else {
                         ErrorScreen("Failed to initialize")
@@ -197,7 +201,10 @@ fun MainScreen(
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
     onBunkerServiceChanged: (Boolean) -> Unit = {},
-    onReconnectRelays: () -> Unit = {}
+    onReconnectRelays: () -> Unit = {},
+    onClearCertificatePin: (String) -> Unit = {},
+    onClearAllCertificatePins: () -> Unit = {},
+    onDismissPinMismatch: () -> Unit = {}
 ) {
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
@@ -231,12 +238,18 @@ fun MainScreen(
     var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
     var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
+    var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePins()) }
+
+    suspend fun refreshCertificatePins() {
+        certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePins() }
+    }
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 hasShare = keepMobile.hasShare()
                 shareInfo = keepMobile.getShareInfo()
+                certificatePins = keepMobile.getCertificatePins()
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
@@ -443,6 +456,34 @@ fun MainScreen(
             )
         }
 
+        val pinMismatch = connectionState.pinMismatch
+        if (pinMismatch != null) {
+            AlertDialog(
+                onDismissRequest = { onDismissPinMismatch() },
+                title = { Text("Certificate Pin Mismatch") },
+                text = {
+                    Text("The certificate for ${pinMismatch.hostname} has changed. This could indicate a security issue or a legitimate certificate rotation.")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
+                            refreshCertificatePins()
+                            onDismissPinMismatch()
+                            onReconnectRelays()
+                        }
+                    }) {
+                        Text("Clear Pin & Retry")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { onDismissPinMismatch() }) {
+                        Text("Dismiss")
+                    }
+                }
+            )
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         val currentShareInfo = shareInfo
@@ -467,6 +508,24 @@ fun MainScreen(
                     val updated = relays - relay
                     relays = updated
                     onRelaysChanged(updated)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            CertificatePinsCard(
+                pins = certificatePins,
+                onClearPin = { hostname ->
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { onClearCertificatePin(hostname) }
+                        refreshCertificatePins()
+                    }
+                },
+                onClearAllPins = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { onClearAllCertificatePins() }
+                        refreshCertificatePins()
+                    }
                 }
             )
 
