@@ -80,10 +80,8 @@ class KeepMobileApp : Application() {
     private fun initializeKeepMobile() {
         runCatching {
             val newStorage = AndroidKeystoreStorage(this)
-            applicationScope.launch(Dispatchers.IO) {
-                runCatching { newStorage.migrateLegacyShareToRegistry() }
-                    .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
-            }
+            runCatching { newStorage.migrateLegacyShareToRegistrySync() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = RelayConfigStore(this)
@@ -306,16 +304,23 @@ class KeepMobileApp : Application() {
         }
     }
 
-    fun onAccountSwitched() {
+    suspend fun onAccountSwitched() {
         connectionJob?.cancel()
         reconnectJob?.cancel()
         announceJob?.cancel()
         _connectionState.value = ConnectionState()
         BunkerService.stop(this)
         bunkerConfigStore?.setEnabled(false)
-        applicationScope.launch {
-            runCatching { permissionStore?.revokeAllPermissions() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke permissions on account switch", it) }
+        withContext(Dispatchers.IO) {
+            runCatching {
+                permissionStore?.revokeAllPermissions()
+                permissionStore?.clearAllAppSettings()
+                permissionStore?.clearAllVelocity()
+            }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear permissions on account switch", it) }
+            runCatching { callerVerificationStore?.clearAllTrust() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear caller trust on account switch", it) }
+            runCatching { autoSigningSafeguards?.clearAll() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear auto-signing state on account switch", it) }
         }
     }
 

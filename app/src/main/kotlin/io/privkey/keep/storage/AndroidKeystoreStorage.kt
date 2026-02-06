@@ -295,18 +295,25 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     @Synchronized
     private fun getOrCreateKeyForShare(key: String): SecretKey {
-        if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
-            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+        val newAlias = getKeystoreAlias(key)
+        if (keyStore.containsAlias(newAlias)) {
+            return keyStore.getKey(newAlias, null) as SecretKey
         }
         val legacyAlias = getLegacyKeystoreAlias(key)
         if (keyStore.containsAlias(legacyAlias)) {
             return keyStore.getKey(legacyAlias, null) as SecretKey
         }
-        val newAlias = getKeystoreAlias(key)
-        if (keyStore.containsAlias(newAlias)) {
-            return keyStore.getKey(newAlias, null) as SecretKey
+        if (keyStore.containsAlias(KEYSTORE_ALIAS) && isLegacyAccount(key)) {
+            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
         }
         return getOrCreateKeyWithAlias(newAlias)
+    }
+
+    private fun isLegacyAccount(key: String): Boolean {
+        val sharePrefs = getSharePrefs(key)
+        if (!sharePrefs.contains(KEY_SHARE_DATA)) return false
+        return !keyStore.containsAlias(getKeystoreAlias(key)) &&
+            !keyStore.containsAlias(getLegacyKeystoreAlias(key))
     }
 
     @Synchronized
@@ -451,23 +458,31 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
+    fun migrateLegacyShareToRegistrySync() {
+        migrateLegacyShareToRegistryInternal()
+    }
+
     suspend fun migrateLegacyShareToRegistry() = withContext(Dispatchers.IO) {
-        if (!prefs.contains(KEY_SHARE_DATA)) return@withContext
-        val metadata = readMetadataFromPrefs(prefs) ?: return@withContext
+        migrateLegacyShareToRegistryInternal()
+    }
+
+    private fun migrateLegacyShareToRegistryInternal() {
+        if (!prefs.contains(KEY_SHARE_DATA)) return
+        val metadata = readMetadataFromPrefs(prefs) ?: return
         val groupPubkeyHex = metadata.groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        if (groupPubkeyHex.isBlank()) return@withContext
+        if (groupPubkeyHex.isBlank()) return
 
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         if (existingKeys.contains(groupPubkeyHex)) {
             prefs.edit().clear().apply()
-            return@withContext
+            return
         }
 
         val sharePrefs = getSharePrefs(groupPubkeyHex)
         if (sharePrefs.contains(KEY_SHARE_DATA)) {
             addKeyToRegistry(groupPubkeyHex)
             prefs.edit().clear().apply()
-            return@withContext
+            return
         }
 
         val saved = sharePrefs.edit()
@@ -479,7 +494,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
             .commit()
-        if (!saved) return@withContext
+        if (!saved) return
 
         addKeyToRegistry(groupPubkeyHex)
         if (getActiveShareKey() == null) {

@@ -105,6 +105,15 @@ class AutoSigningSafeguards(context: Context) {
         }
     }
 
+    fun clearAll() {
+        synchronized(usageLock) {
+            prefs.edit().clear().commit()
+            hourlyUsage.clear()
+            dailyUsage.clear()
+            recentActivity.clear()
+        }
+    }
+
     fun checkAndRecordUsage(packageName: String): UsageCheckResult {
         val nowElapsed = SystemClock.elapsedRealtime()
         synchronized(usageLock) {

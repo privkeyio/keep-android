@@ -86,6 +86,11 @@ class CallerVerificationStore(context: Context) {
         prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
     }
 
+    fun clearAllTrust() {
+        prefs.edit().clear().commit()
+        synchronized(nonceLock) { activeNonces.clear() }
+    }
+
     private val nonceLock = Any()
 
     fun generateNonce(packageName: String): String {
