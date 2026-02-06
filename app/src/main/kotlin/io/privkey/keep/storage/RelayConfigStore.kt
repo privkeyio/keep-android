@@ -24,7 +24,9 @@ class RelayConfigStore(context: Context) {
     }
 
     fun setRelays(relays: List<String>) {
-        val validated = relays.filter { it.matches(RELAY_URL_REGEX) }.take(MAX_RELAYS)
+        val validated = relays
+            .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) }
+            .take(MAX_RELAYS)
         prefs.edit()
             .putString(KEY_RELAYS, validated.joinToString(RELAY_SEPARATOR))
             .apply()
