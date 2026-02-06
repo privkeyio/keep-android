@@ -5,7 +5,7 @@ import androidx.room.*
 import androidx.room.migration.Migration
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import io.privkey.keep.storage.LegacyPrefsMigration
-import net.sqlcipher.database.SupportFactory
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.security.SecureRandom
 
 @Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 7)
@@ -16,6 +16,10 @@ abstract class Nip55Database : RoomDatabase() {
     abstract fun velocityDao(): VelocityDao
 
     companion object {
+        init {
+            System.loadLibrary("sqlcipher")
+        }
+
         @Volatile
         private var INSTANCE: Nip55Database? = null
 
@@ -123,7 +127,7 @@ abstract class Nip55Database : RoomDatabase() {
                 INSTANCE ?: run {
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
-                    val factory = SupportFactory(passphrase)
+                    val factory = SupportOpenHelperFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,
                         Nip55Database::class.java,
