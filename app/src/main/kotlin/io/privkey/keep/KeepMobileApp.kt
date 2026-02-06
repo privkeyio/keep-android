@@ -320,7 +320,7 @@ class KeepMobileApp : Application() {
         }
     }
 
-    private suspend inline fun runAccountSwitchCleanup(label: String, action: () -> Unit) {
+    private suspend fun runAccountSwitchCleanup(label: String, action: suspend () -> Unit) {
         runCatching { action() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to $label on account switch", it) }
     }
