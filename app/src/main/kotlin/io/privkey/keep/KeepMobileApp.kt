@@ -184,7 +184,7 @@ class KeepMobileApp : Application() {
         action(this)
     }
 
-    fun initializeWithRelays(relays: List<String>) {
+    suspend fun initializeWithRelays(relays: List<String>) {
         relayConfigStore?.setRelays(relays)
     }
 
