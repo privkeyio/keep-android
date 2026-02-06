@@ -13,6 +13,8 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -449,23 +451,23 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         }
     }
 
-    fun migrateLegacyShareToRegistry() {
-        if (!prefs.contains(KEY_SHARE_DATA)) return
-        val metadata = readMetadataFromPrefs(prefs) ?: return
+    suspend fun migrateLegacyShareToRegistry() = withContext(Dispatchers.IO) {
+        if (!prefs.contains(KEY_SHARE_DATA)) return@withContext
+        val metadata = readMetadataFromPrefs(prefs) ?: return@withContext
         val groupPubkeyHex = metadata.groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        if (groupPubkeyHex.isBlank()) return
+        if (groupPubkeyHex.isBlank()) return@withContext
 
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         if (existingKeys.contains(groupPubkeyHex)) {
             prefs.edit().clear().apply()
-            return
+            return@withContext
         }
 
         val sharePrefs = getSharePrefs(groupPubkeyHex)
         if (sharePrefs.contains(KEY_SHARE_DATA)) {
             addKeyToRegistry(groupPubkeyHex)
             prefs.edit().clear().apply()
-            return
+            return@withContext
         }
 
         val saved = sharePrefs.edit()
@@ -477,12 +479,12 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
             .commit()
-        if (!saved) return
+        if (!saved) return@withContext
 
         addKeyToRegistry(groupPubkeyHex)
         if (getActiveShareKey() == null) {
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
         }
-        prefs.edit().clear().commit()
+        prefs.edit().clear().apply()
     }
 }

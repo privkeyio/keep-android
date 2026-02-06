@@ -80,7 +80,10 @@ class KeepMobileApp : Application() {
     private fun initializeKeepMobile() {
         runCatching {
             val newStorage = AndroidKeystoreStorage(this)
-            newStorage.migrateLegacyShareToRegistry()
+            applicationScope.launch(Dispatchers.IO) {
+                runCatching { newStorage.migrateLegacyShareToRegistry() }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
+            }
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = RelayConfigStore(this)
@@ -305,6 +308,7 @@ class KeepMobileApp : Application() {
 
     fun onAccountSwitched() {
         connectionJob?.cancel()
+        reconnectJob?.cancel()
         announceJob?.cancel()
         _connectionState.value = ConnectionState()
         BunkerService.stop(this)
