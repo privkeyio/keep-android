@@ -146,7 +146,7 @@ fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "$accountCount accounts",
+                if (accountCount == 1) "1 account" else "$accountCount accounts",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )

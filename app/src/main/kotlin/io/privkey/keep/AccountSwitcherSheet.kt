@@ -81,32 +81,42 @@ fun AccountSwitcherSheet(
 
     deleteTarget?.let { target ->
         val isActive = target.groupPubkeyHex == activeAccountKey
+        val isOnlyAccount = accounts.size == 1
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("Delete Account?") },
+            title = { Text(if (isOnlyAccount) "Cannot Delete Account" else "Delete Account?") },
             text = {
                 Column {
-                    Text("This will permanently delete \"${target.name}\" and its FROST share from this device.")
-                    if (isActive) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "This is your active account. You will need to switch to another account or import a new share.",
-                            color = MaterialTheme.colorScheme.error
-                        )
+                    if (isOnlyAccount) {
+                        Text("You cannot delete your only account. Import another account first before removing this one.")
+                    } else {
+                        Text("This will permanently delete \"${target.name}\" and its FROST share from this device.")
+                        if (isActive) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "This is your active account. You will need to switch to another account or import a new share.",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    onDeleteAccount(target)
-                    deleteTarget = null
-                }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                TextButton(
+                    onClick = {
+                        if (!isOnlyAccount) {
+                            onDeleteAccount(target)
+                            deleteTarget = null
+                        }
+                    },
+                    enabled = !isOnlyAccount
+                ) {
+                    Text("Delete", color = if (isOnlyAccount) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
-                    Text("Cancel")
+                    Text(if (isOnlyAccount) "OK" else "Cancel")
                 }
             }
         )

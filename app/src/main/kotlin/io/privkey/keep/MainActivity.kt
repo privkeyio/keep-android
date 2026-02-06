@@ -388,13 +388,20 @@ fun MainScreen(
         }
     }
 
-    fun refreshAccountState() {
-        hasShare = keepMobile.hasShare()
-        shareInfo = keepMobile.getShareInfo()
-        activeAccountKey = storage.getActiveShareKey()
-        allAccounts = storage.listAllShares().map { it.toAccountInfo() }
-        val key = activeAccountKey
-        relays = if (key != null) relayConfigStore.getRelaysForAccount(key) else relayConfigStore.getRelays()
+    suspend fun refreshAccountState() {
+        val result = withContext(Dispatchers.IO) {
+            val h = keepMobile.hasShare()
+            val s = keepMobile.getShareInfo()
+            val k = storage.getActiveShareKey()
+            val a = storage.listAllShares().map { it.toAccountInfo() }
+            val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
+            AccountStateResult(h, s, k, a, r)
+        }
+        hasShare = result.hasShare
+        shareInfo = result.shareInfo
+        activeAccountKey = result.activeAccountKey
+        allAccounts = result.allAccounts
+        relays = result.relays
     }
 
     if (showAccountSwitcher) {
@@ -841,4 +848,12 @@ private data class PollResult(
     val activeAccountKey: String?,
     val peers: List<PeerInfo>,
     val pendingCount: Int
+)
+
+private data class AccountStateResult(
+    val hasShare: Boolean,
+    val shareInfo: ShareInfo?,
+    val activeAccountKey: String?,
+    val allAccounts: List<AccountInfo>,
+    val relays: List<String>
 )

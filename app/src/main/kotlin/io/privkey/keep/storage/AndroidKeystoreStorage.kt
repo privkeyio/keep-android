@@ -461,6 +461,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         val sharePrefs = getSharePrefs(groupPubkeyHex)
         if (sharePrefs.contains(KEY_SHARE_DATA)) {
             addKeyToRegistry(groupPubkeyHex)
+            prefs.edit().clear().apply()
             return
         }
 

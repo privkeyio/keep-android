@@ -40,8 +40,10 @@ class RelayConfigStore(context: Context) {
         saveRelays(accountPrefsKey(accountKey), relays)
     }
 
-    fun deleteRelaysForAccount(accountKey: String) {
-        prefs.edit().remove(accountPrefsKey(accountKey)).commit()
+    suspend fun deleteRelaysForAccount(accountKey: String) {
+        withContext(Dispatchers.IO) {
+            prefs.edit().remove(accountPrefsKey(accountKey)).commit()
+        }
     }
 
     private fun accountPrefsKey(accountKey: String): String {
@@ -56,13 +58,15 @@ class RelayConfigStore(context: Context) {
     }
 
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
-        val validated = withContext(Dispatchers.IO) {
+        val validated = withContext(Dispatchers.Default) {
             relays
                 .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) }
                 .take(MAX_RELAYS)
         }
-        prefs.edit()
-            .putString(prefsKey, validated.joinToString(RELAY_SEPARATOR))
-            .commit()
+        withContext(Dispatchers.IO) {
+            prefs.edit()
+                .putString(prefsKey, validated.joinToString(RELAY_SEPARATOR))
+                .commit()
+        }
     }
 }
