@@ -247,5 +247,6 @@ class RiskAssessorTest {
         override suspend fun getExpiredPackages(now: Long, nowElapsed: Long): List<String> = emptyList()
         override suspend fun deleteExpired(now: Long, nowElapsed: Long) {}
         override suspend fun getAll(): List<Nip55AppSettings> = emptyList()
+        override suspend fun deleteAll() {}
     }
 }

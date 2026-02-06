@@ -80,6 +80,8 @@ class KeepMobileApp : Application() {
     private fun initializeKeepMobile() {
         runCatching {
             val newStorage = AndroidKeystoreStorage(this)
+            runCatching { newStorage.migrateLegacyShareToRegistrySync() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = RelayConfigStore(this)
@@ -113,7 +115,7 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializePermissionStore() {
-        try {
+        runCatching {
             val store = PermissionStore(Nip55Database.getInstance(this))
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
@@ -122,7 +124,7 @@ class KeepMobileApp : Application() {
                 store.cleanupExpired()
                 callerVerificationStore?.cleanupExpiredNonces()
             }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
     }
@@ -187,16 +189,26 @@ class KeepMobileApp : Application() {
         action(this)
     }
 
+    private fun getActiveRelays(): List<String> {
+        val config = relayConfigStore ?: return emptyList()
+        val activeKey = storage?.getActiveShareKey()
+        return if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
+    }
+
     suspend fun initializeWithRelays(relays: List<String>) {
-        relayConfigStore?.setRelays(relays)
+        val activeKey = storage?.getActiveShareKey()
+        if (activeKey != null) {
+            relayConfigStore?.setRelaysForAccount(activeKey, relays)
+        } else {
+            relayConfigStore?.setRelays(relays)
+        }
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: return onError("KeepMobile not initialized")
         val store = storage ?: return onError("Storage not available")
-        val config = relayConfigStore ?: return onError("Relay configuration not available")
 
-        val relays = config.getRelays()
+        val relays = getActiveRelays()
         if (relays.isEmpty()) return onError("No relays configured")
 
         connectionJob?.cancel()
@@ -214,7 +226,7 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicPeerCheck(mobile, config)
+                startPeriodicPeerCheck(mobile)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
@@ -269,13 +281,13 @@ class KeepMobileApp : Application() {
         method.invoke(mobile, relays, proxyHost, proxyPort)
     }
 
-    private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
+    private fun startPeriodicPeerCheck(mobile: KeepMobile) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
                 delay(5000)
                 runCatching {
-                    val currentRelays = config.getRelays()
+                    val currentRelays = getActiveRelays()
                     if (currentRelays.isEmpty()) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
@@ -292,12 +304,31 @@ class KeepMobileApp : Application() {
         }
     }
 
+    suspend fun onAccountSwitched() {
+        connectionJob?.cancel()
+        reconnectJob?.cancel()
+        announceJob?.cancel()
+        _connectionState.value = ConnectionState()
+        BunkerService.stop(this)
+        bunkerConfigStore?.setEnabled(false)
+        withContext(Dispatchers.IO) {
+            runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
+            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings() }
+            runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
+            runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
+            runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
+        }
+    }
+
+    private suspend fun runAccountSwitchCleanup(label: String, action: suspend () -> Unit) {
+        runCatching { action() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to $label on account switch", it) }
+    }
+
     fun reconnectRelays() {
         val mobile = keepMobile ?: return
-        val config = relayConfigStore ?: return
         val store = storage ?: return
-
-        val relays = config.getRelays()
+        val relays = getActiveRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
         reconnectJob?.cancel()
@@ -309,7 +340,7 @@ class KeepMobileApp : Application() {
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
                     _connectionState.value = ConnectionState(isConnected = true)
-                    startPeriodicPeerCheck(mobile, config)
+                    startPeriodicPeerCheck(mobile)
                 }
                 .onFailure { e ->
                     if (isCancellationException(e)) {

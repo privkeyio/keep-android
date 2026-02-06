@@ -132,6 +132,35 @@ fun PinSettingsCard(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (accountCount == 1) "1 account" else "$accountCount accounts",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Text(
+                "Switch",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),

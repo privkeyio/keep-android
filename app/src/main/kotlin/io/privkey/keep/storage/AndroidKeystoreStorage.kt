@@ -13,6 +13,8 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -151,6 +153,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
+        cleanupExpiredCiphers()
         val data = PendingCipherData(
             cipher = cipher,
             creatingThreadId = Thread.currentThread().id,
@@ -159,6 +162,15 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         pendingCiphers[requestId] = data
         if (onConsumed != null) {
             cipherConsumedCallbacks[requestId] = onConsumed
+        }
+    }
+
+    private fun cleanupExpiredCiphers() {
+        val now = SystemClock.elapsedRealtime()
+        val expired = pendingCiphers.entries.filter { now - it.value.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+        expired.forEach { entry ->
+            pendingCiphers.remove(entry.key)
+            cipherConsumedCallbacks.remove(entry.key)
         }
     }
 
@@ -283,18 +295,25 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     @Synchronized
     private fun getOrCreateKeyForShare(key: String): SecretKey {
-        if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
-            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+        val newAlias = getKeystoreAlias(key)
+        if (keyStore.containsAlias(newAlias)) {
+            return keyStore.getKey(newAlias, null) as SecretKey
         }
         val legacyAlias = getLegacyKeystoreAlias(key)
         if (keyStore.containsAlias(legacyAlias)) {
             return keyStore.getKey(legacyAlias, null) as SecretKey
         }
-        val newAlias = getKeystoreAlias(key)
-        if (keyStore.containsAlias(newAlias)) {
-            return keyStore.getKey(newAlias, null) as SecretKey
+        if (keyStore.containsAlias(KEYSTORE_ALIAS) && isLegacyAccount(key)) {
+            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
         }
         return getOrCreateKeyWithAlias(newAlias)
+    }
+
+    private fun isLegacyAccount(key: String): Boolean {
+        val sharePrefs = getSharePrefs(key)
+        if (!sharePrefs.contains(KEY_SHARE_DATA)) return false
+        return !keyStore.containsAlias(getKeystoreAlias(key)) &&
+            !keyStore.containsAlias(getLegacyKeystoreAlias(key))
     }
 
     @Synchronized
@@ -437,5 +456,50 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         if (!editor.commit()) {
             throw KeepMobileException.StorageException("Failed to save active share key")
         }
+    }
+
+    fun migrateLegacyShareToRegistrySync() {
+        migrateLegacyShareToRegistryInternal()
+    }
+
+    suspend fun migrateLegacyShareToRegistry() = withContext(Dispatchers.IO) {
+        migrateLegacyShareToRegistryInternal()
+    }
+
+    private fun migrateLegacyShareToRegistryInternal() {
+        if (!prefs.contains(KEY_SHARE_DATA)) return
+        val metadata = readMetadataFromPrefs(prefs) ?: return
+        val groupPubkeyHex = metadata.groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        if (groupPubkeyHex.isBlank()) return
+
+        val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        if (existingKeys.contains(groupPubkeyHex)) {
+            prefs.edit().clear().apply()
+            return
+        }
+
+        val sharePrefs = getSharePrefs(groupPubkeyHex)
+        if (sharePrefs.contains(KEY_SHARE_DATA)) {
+            addKeyToRegistry(groupPubkeyHex)
+            prefs.edit().clear().apply()
+            return
+        }
+
+        val saved = sharePrefs.edit()
+            .putString(KEY_SHARE_DATA, prefs.getString(KEY_SHARE_DATA, null))
+            .putString(KEY_SHARE_IV, prefs.getString(KEY_SHARE_IV, null))
+            .putString(KEY_SHARE_NAME, metadata.name)
+            .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
+            .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
+            .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
+            .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
+            .commit()
+        if (!saved) return
+
+        addKeyToRegistry(groupPubkeyHex)
+        if (getActiveShareKey() == null) {
+            multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
+        }
+        prefs.edit().clear().apply()
     }
 }

@@ -77,6 +77,9 @@ interface Nip55PermissionDao {
 
     @Query("SELECT * FROM nip55_permissions WHERE id = :id")
     suspend fun getById(id: Long): Nip55Permission?
+
+    @Query("DELETE FROM nip55_permissions")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -143,6 +146,9 @@ interface VelocityDao {
 
     @Query("SELECT MIN(timestamp) FROM velocity_tracker WHERE packageName = :packageName AND timestamp >= :since")
     suspend fun getOldestInWindow(packageName: String, since: Long): Long?
+
+    @Query("DELETE FROM velocity_tracker")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -176,4 +182,7 @@ interface Nip55AppSettingsDao {
 
     @Query("SELECT * FROM nip55_app_settings")
     suspend fun getAll(): List<Nip55AppSettings>
+
+    @Query("DELETE FROM nip55_app_settings")
+    suspend fun deleteAll()
 }
