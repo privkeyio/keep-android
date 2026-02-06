@@ -16,6 +16,10 @@ abstract class Nip55Database : RoomDatabase() {
     abstract fun velocityDao(): VelocityDao
 
     companion object {
+        init {
+            System.loadLibrary("sqlcipher")
+        }
+
         @Volatile
         private var INSTANCE: Nip55Database? = null
 
@@ -123,7 +127,6 @@ abstract class Nip55Database : RoomDatabase() {
                 INSTANCE ?: run {
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
-                    System.loadLibrary("sqlcipher")
                     val factory = SupportOpenHelperFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,
