@@ -10,8 +10,7 @@ data class CertificatePin(
 fun KeepMobile.getCertificatePinsCompat(): List<CertificatePin> = runCatching {
     val method = javaClass.methods.firstOrNull { it.name == "getCertificatePins" } ?: return emptyList()
     val result = method.invoke(this) as? List<*> ?: return emptyList()
-    result.mapNotNull { pin ->
-        if (pin == null) return@mapNotNull null
+    result.filterNotNull().mapNotNull { pin ->
         val cls = pin::class.java
         val hostname = cls.getField("hostname").get(pin) as? String ?: return@mapNotNull null
         val spkiHash = cls.getField("spkiHash").get(pin) as? String ?: return@mapNotNull null

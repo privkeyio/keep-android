@@ -162,9 +162,9 @@ class MainActivity : FragmentActivity() {
                                 app.updateBunkerService(enabled)
                             },
                             onReconnectRelays = { app.reconnectRelays() },
-                            onClearCertificatePin = { hostname -> app.clearCertificatePin(hostname) },
-                            onClearAllCertificatePins = { app.clearAllCertificatePins() },
-                            onDismissPinMismatch = { app.dismissPinMismatch() }
+                            onClearCertificatePin = app::clearCertificatePin,
+                            onClearAllCertificatePins = app::clearAllCertificatePins,
+                            onDismissPinMismatch = app::dismissPinMismatch
                         )
                     } else {
                         ErrorScreen("Failed to initialize")
@@ -248,7 +248,7 @@ fun MainScreen(
             while (true) {
                 hasShare = keepMobile.hasShare()
                 shareInfo = keepMobile.getShareInfo()
-                certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
+                refreshCertificatePins()
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
@@ -458,7 +458,7 @@ fun MainScreen(
         val pinMismatch = connectionState.pinMismatch
         if (pinMismatch != null) {
             AlertDialog(
-                onDismissRequest = { onDismissPinMismatch() },
+                onDismissRequest = onDismissPinMismatch,
                 title = { Text("Certificate Pin Mismatch") },
                 text = {
                     Text("The certificate for ${pinMismatch.hostname} has changed. This could indicate a security issue or a legitimate certificate rotation.")
@@ -475,7 +475,7 @@ fun MainScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { onDismissPinMismatch() }) {
+                    TextButton(onClick = onDismissPinMismatch) {
                         Text("Dismiss")
                     }
                 }

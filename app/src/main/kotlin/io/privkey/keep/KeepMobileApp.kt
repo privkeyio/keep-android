@@ -309,17 +309,11 @@ class KeepMobileApp : Application() {
                     startPeriodicPeerCheck(mobile, config)
                 }
                 .onFailure { e ->
-                    if (isCancellationException(e)) {
-                        _connectionState.value = ConnectionState()
-                        return@onFailure
-                    }
+                    if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
                     val pinMismatch = findPinMismatch(e)
-                    if (pinMismatch != null) {
-                        _connectionState.value = ConnectionState(error = PIN_MISMATCH_ERROR, pinMismatch = pinMismatch)
-                    } else {
-                        _connectionState.value = ConnectionState(error = "Reconnection failed")
-                    }
+                    val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Reconnection failed"
+                    _connectionState.value = ConnectionState(error = errorMsg, pinMismatch = pinMismatch)
                 }
         }
     }
@@ -352,24 +346,23 @@ class KeepMobileApp : Application() {
     }
 
     fun clearCertificatePin(hostname: String) {
-        runCatching {
-            val mobile = keepMobile ?: return
-            val method = mobile.javaClass.methods.firstOrNull { it.name == "clearCertificatePin" }
-            method?.invoke(mobile, hostname)
-        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pin: ${it::class.simpleName}") }
+        invokeKeepMobileMethod("clearCertificatePin", hostname)
     }
 
     fun clearAllCertificatePins() {
+        invokeKeepMobileMethod("clearCertificatePins")
+    }
+
+    private fun invokeKeepMobileMethod(name: String, vararg args: Any) {
         runCatching {
             val mobile = keepMobile ?: return
-            val method = mobile.javaClass.methods.firstOrNull { it.name == "clearCertificatePins" }
-            method?.invoke(mobile)
-        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear certificate pins: ${it::class.simpleName}") }
+            val method = mobile.javaClass.methods.firstOrNull { it.name == name } ?: return
+            method.invoke(mobile, *args)
+        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to invoke $name: ${it::class.simpleName}") }
     }
 
     fun dismissPinMismatch() {
-        val current = _connectionState.value
-        _connectionState.value = current.copy(error = null, pinMismatch = null)
+        _connectionState.value = _connectionState.value.copy(error = null, pinMismatch = null)
     }
 
     private fun findPinMismatch(e: Throwable): PinMismatchInfo? =
@@ -379,9 +372,9 @@ class KeepMobileApp : Application() {
             ?.let { mismatch ->
                 runCatching {
                     val cls = mismatch::class.java
-                    val hostname = cls.getField("hostname").get(mismatch) as? String ?: return@runCatching null
-                    val expected = cls.getField("expected").get(mismatch) as? String ?: return@runCatching null
-                    val actual = cls.getField("actual").get(mismatch) as? String ?: return@runCatching null
+                    val hostname = cls.getMethod("getHostname").invoke(mismatch) as? String ?: return@runCatching null
+                    val expected = cls.getMethod("getExpected").invoke(mismatch) as? String ?: return@runCatching null
+                    val actual = cls.getMethod("getActual").invoke(mismatch) as? String ?: return@runCatching null
                     PinMismatchInfo(hostname, expected, actual)
                 }.getOrNull()
             }
