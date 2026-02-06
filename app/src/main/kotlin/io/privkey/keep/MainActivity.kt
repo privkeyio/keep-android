@@ -479,9 +479,11 @@ fun MainScreen(
                                                     showAccountSwitcher = false
                                                 }
                                             } else {
-                                                onAccountSwitched()
-                                                refreshAccountState()
-                                                showAccountSwitcher = false
+                                                coroutineScope.launch {
+                                                    onAccountSwitched()
+                                                    refreshAccountState()
+                                                    showAccountSwitcher = false
+                                                }
                                             }
                                         }
                                     } else {

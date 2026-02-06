@@ -330,7 +330,7 @@ class KeepMobileApp : Application() {
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
                     _connectionState.value = ConnectionState(isConnected = true)
-                    startPeriodicPeerCheck(mobile, config)
+                    startPeriodicPeerCheck(mobile)
                 }
                 .onFailure { e ->
                     if (isCancellationException(e)) {
