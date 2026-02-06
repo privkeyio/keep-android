@@ -77,6 +77,9 @@ interface Nip55PermissionDao {
 
     @Query("SELECT * FROM nip55_permissions WHERE id = :id")
     suspend fun getById(id: Long): Nip55Permission?
+
+    @Query("DELETE FROM nip55_permissions")
+    suspend fun deleteAll()
 }
 
 @Dao

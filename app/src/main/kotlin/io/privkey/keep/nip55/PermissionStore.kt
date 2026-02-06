@@ -325,6 +325,8 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun revokeAllForApp(callerPackage: String) = dao.deleteForCaller(callerPackage)
 
+    suspend fun revokeAllPermissions() = dao.deleteAll()
+
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 
     suspend fun getAuditLogPage(

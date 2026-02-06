@@ -80,6 +80,7 @@ class KeepMobileApp : Application() {
     private fun initializeKeepMobile() {
         runCatching {
             val newStorage = AndroidKeystoreStorage(this)
+            newStorage.migrateLegacyShareToRegistry()
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             relayConfigStore = RelayConfigStore(this)
@@ -196,7 +197,8 @@ class KeepMobileApp : Application() {
         val store = storage ?: return onError("Storage not available")
         val config = relayConfigStore ?: return onError("Relay configuration not available")
 
-        val relays = config.getRelays()
+        val activeKey = store.getActiveShareKey()
+        val relays = if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
         if (relays.isEmpty()) return onError("No relays configured")
 
         connectionJob?.cancel()
@@ -275,7 +277,8 @@ class KeepMobileApp : Application() {
             repeat(10) { iteration ->
                 delay(5000)
                 runCatching {
-                    val currentRelays = config.getRelays()
+                    val currentActiveKey = storage?.getActiveShareKey()
+                    val currentRelays = if (currentActiveKey != null) config.getRelaysForAccount(currentActiveKey) else config.getRelays()
                     if (currentRelays.isEmpty()) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
@@ -292,12 +295,25 @@ class KeepMobileApp : Application() {
         }
     }
 
+    fun onAccountSwitched() {
+        connectionJob?.cancel()
+        announceJob?.cancel()
+        _connectionState.value = ConnectionState()
+        BunkerService.stop(this)
+        bunkerConfigStore?.setEnabled(false)
+        applicationScope.launch {
+            runCatching { permissionStore?.revokeAllPermissions() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke permissions on account switch", it) }
+        }
+    }
+
     fun reconnectRelays() {
         val mobile = keepMobile ?: return
         val config = relayConfigStore ?: return
         val store = storage ?: return
 
-        val relays = config.getRelays()
+        val activeKey = store.getActiveShareKey()
+        val relays = if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
         reconnectJob?.cancel()
