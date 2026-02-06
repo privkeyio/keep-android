@@ -257,15 +257,22 @@ fun MainScreen(
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                hasShare = keepMobile.hasShare()
-                shareInfo = keepMobile.getShareInfo()
-                refreshCertificatePins()
-                allAccounts = storage.listAllShares().map { it.toAccountInfo() }
-                activeAccountKey = storage.getActiveShareKey()
-                if (hasShare) {
-                    peers = keepMobile.getPeers()
-                    pendingCount = keepMobile.getPendingRequests().size
+                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount) = withContext(Dispatchers.IO) {
+                    val h = keepMobile.hasShare()
+                    val s = keepMobile.getShareInfo()
+                    val a = storage.listAllShares().map { it.toAccountInfo() }
+                    val k = storage.getActiveShareKey()
+                    val p = if (h) keepMobile.getPeers() else emptyList()
+                    val pc = if (h) keepMobile.getPendingRequests().size else 0
+                    PollResult(h, s, a, k, p, pc)
                 }
+                hasShare = newHasShare
+                shareInfo = newShareInfo
+                allAccounts = newAccounts
+                activeAccountKey = newActiveKey
+                peers = newPeers
+                pendingCount = newPendingCount
+                refreshCertificatePins()
                 delay(10_000)
             }
         }
@@ -364,6 +371,32 @@ fun MainScreen(
         return
     }
 
+    suspend fun activateShare(authedCipher: Cipher, groupPubkeyHex: String) {
+        val switchId = UUID.randomUUID().toString()
+        storage.setPendingCipher(switchId, authedCipher)
+        try {
+            withContext(Dispatchers.IO) {
+                storage.setRequestIdContext(switchId)
+                try {
+                    keepMobile.setActiveShare(groupPubkeyHex)
+                } finally {
+                    storage.clearRequestIdContext()
+                }
+            }
+        } finally {
+            storage.clearPendingCipher(switchId)
+        }
+    }
+
+    fun refreshAccountState() {
+        hasShare = keepMobile.hasShare()
+        shareInfo = keepMobile.getShareInfo()
+        activeAccountKey = storage.getActiveShareKey()
+        allAccounts = storage.listAllShares().map { it.toAccountInfo() }
+        val key = activeAccountKey
+        relays = if (key != null) relayConfigStore.getRelaysForAccount(key) else relayConfigStore.getRelays()
+    }
+
     if (showAccountSwitcher) {
         AccountSwitcherSheet(
             accounts = allAccounts,
@@ -379,26 +412,14 @@ fun MainScreen(
                 onBiometricRequest("Switch Account", "Authenticate to switch", cipher) { authedCipher ->
                     if (authedCipher != null) {
                         coroutineScope.launch {
-                            val switchId = UUID.randomUUID().toString()
-                            storage.setPendingCipher(switchId, authedCipher)
                             try {
                                 val currentKey = storage.getActiveShareKey()
                                 if (currentKey != null) {
                                     relayConfigStore.setRelaysForAccount(currentKey, relays)
                                 }
-                                withContext(Dispatchers.IO) {
-                                    storage.setRequestIdContext(switchId)
-                                    try {
-                                        keepMobile.setActiveShare(account.groupPubkeyHex)
-                                    } finally {
-                                        storage.clearRequestIdContext()
-                                    }
-                                }
+                                activateShare(authedCipher, account.groupPubkeyHex)
                                 onAccountSwitched()
-                                hasShare = keepMobile.hasShare()
-                                shareInfo = keepMobile.getShareInfo()
-                                activeAccountKey = account.groupPubkeyHex
-                                relays = relayConfigStore.getRelaysForAccount(account.groupPubkeyHex)
+                                refreshAccountState()
                                 onRelaysChanged(relays)
                                 showAccountSwitcher = false
                             } catch (e: Exception) {
@@ -406,8 +427,6 @@ fun MainScreen(
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(appContext, "Failed to switch account", Toast.LENGTH_SHORT).show()
                                 }
-                            } finally {
-                                storage.clearPendingCipher(switchId)
                             }
                         }
                     }
@@ -438,41 +457,35 @@ fun MainScreen(
                                         onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
                                             if (switchAuthed != null) {
                                                 coroutineScope.launch {
-                                                    val switchId = UUID.randomUUID().toString()
-                                                    storage.setPendingCipher(switchId, switchAuthed)
                                                     try {
-                                                        withContext(Dispatchers.IO) {
-                                                            storage.setRequestIdContext(switchId)
-                                                            try {
-                                                                keepMobile.setActiveShare(nextAccount.groupPubkeyHex)
-                                                            } finally {
-                                                                storage.clearRequestIdContext()
-                                                            }
-                                                        }
-                                                        activeAccountKey = nextAccount.groupPubkeyHex
-                                                    } finally {
-                                                        storage.clearPendingCipher(switchId)
+                                                        activateShare(switchAuthed, nextAccount.groupPubkeyHex)
+                                                        onAccountSwitched()
+                                                        refreshAccountState()
+                                                        onRelaysChanged(relays)
+                                                    } catch (e: Exception) {
+                                                        if (BuildConfig.DEBUG) Log.e("MainActivity", "Post-delete switch failed: ${e::class.simpleName}")
+                                                        onAccountSwitched()
+                                                        refreshAccountState()
                                                     }
-                                                    onAccountSwitched()
-                                                    hasShare = keepMobile.hasShare()
-                                                    shareInfo = keepMobile.getShareInfo()
-                                                    relays = relayConfigStore.getRelaysForAccount(nextAccount.groupPubkeyHex)
-                                                    onRelaysChanged(relays)
                                                     showAccountSwitcher = false
                                                 }
+                                            } else {
+                                                onAccountSwitched()
+                                                refreshAccountState()
+                                                showAccountSwitcher = false
                                             }
                                         }
+                                    } else {
+                                        onAccountSwitched()
+                                        refreshAccountState()
+                                        showAccountSwitcher = false
                                     }
-                                } else if (allAccounts.isEmpty()) {
-                                    activeAccountKey = null
+                                } else if (wasActive) {
                                     onAccountSwitched()
-                                    hasShare = false
-                                    shareInfo = null
+                                    refreshAccountState()
                                     showAccountSwitcher = false
                                 } else {
-                                    activeAccountKey = storage.getActiveShareKey()
-                                    hasShare = keepMobile.hasShare()
-                                    shareInfo = keepMobile.getShareInfo()
+                                    refreshAccountState()
                                 }
                             } catch (e: Exception) {
                                 if (BuildConfig.DEBUG) Log.e("MainActivity", "Delete failed: ${e::class.simpleName}")
@@ -513,10 +526,7 @@ fun MainScreen(
                             }
                         }
                         importState = ImportState.Success(result.name)
-                        hasShare = keepMobile.hasShare()
-                        shareInfo = keepMobile.getShareInfo()
-                        allAccounts = storage.listAllShares().map { it.toAccountInfo() }
-                        activeAccountKey = storage.getActiveShareKey()
+                        refreshAccountState()
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
                         importState = ImportState.Error("Import failed. Please try again.")
@@ -823,3 +833,12 @@ fun MainScreen(
         )
     }
 }
+
+private data class PollResult(
+    val hasShare: Boolean,
+    val shareInfo: ShareInfo?,
+    val allAccounts: List<AccountInfo>,
+    val activeAccountKey: String?,
+    val peers: List<PeerInfo>,
+    val pendingCount: Int
+)

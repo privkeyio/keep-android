@@ -188,17 +188,26 @@ class KeepMobileApp : Application() {
         action(this)
     }
 
+    private fun getActiveRelays(): List<String> {
+        val config = relayConfigStore ?: return emptyList()
+        val activeKey = storage?.getActiveShareKey()
+        return if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
+    }
+
     suspend fun initializeWithRelays(relays: List<String>) {
-        relayConfigStore?.setRelays(relays)
+        val activeKey = storage?.getActiveShareKey()
+        if (activeKey != null) {
+            relayConfigStore?.setRelaysForAccount(activeKey, relays)
+        } else {
+            relayConfigStore?.setRelays(relays)
+        }
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: return onError("KeepMobile not initialized")
         val store = storage ?: return onError("Storage not available")
-        val config = relayConfigStore ?: return onError("Relay configuration not available")
 
-        val activeKey = store.getActiveShareKey()
-        val relays = if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
+        val relays = getActiveRelays()
         if (relays.isEmpty()) return onError("No relays configured")
 
         connectionJob?.cancel()
@@ -216,7 +225,7 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicPeerCheck(mobile, config)
+                startPeriodicPeerCheck(mobile)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
@@ -271,14 +280,13 @@ class KeepMobileApp : Application() {
         method.invoke(mobile, relays, proxyHost, proxyPort)
     }
 
-    private fun startPeriodicPeerCheck(mobile: KeepMobile, config: RelayConfigStore) {
+    private fun startPeriodicPeerCheck(mobile: KeepMobile) {
         announceJob?.cancel()
         announceJob = applicationScope.launch {
             repeat(10) { iteration ->
                 delay(5000)
                 runCatching {
-                    val currentActiveKey = storage?.getActiveShareKey()
-                    val currentRelays = if (currentActiveKey != null) config.getRelaysForAccount(currentActiveKey) else config.getRelays()
+                    val currentRelays = getActiveRelays()
                     if (currentRelays.isEmpty()) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
                         return@runCatching
@@ -309,11 +317,8 @@ class KeepMobileApp : Application() {
 
     fun reconnectRelays() {
         val mobile = keepMobile ?: return
-        val config = relayConfigStore ?: return
         val store = storage ?: return
-
-        val activeKey = store.getActiveShareKey()
-        val relays = if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
+        val relays = getActiveRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
         reconnectJob?.cancel()
