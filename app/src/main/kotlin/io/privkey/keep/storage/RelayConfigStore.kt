@@ -2,6 +2,8 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class RelayConfigStore(context: Context) {
 
@@ -10,7 +12,7 @@ class RelayConfigStore(context: Context) {
         private const val KEY_RELAYS = "relay_urls"
         private const val RELAY_SEPARATOR = "\n"
         internal const val MAX_RELAYS = 20
-        internal val RELAY_URL_REGEX = Regex("^wss://[a-zA-Z0-9.-]+(:\\d{1,5})?(/[a-zA-Z0-9._~:/?#\\[\\]@!\$&'()*+,;=-]*)?$")
+        internal val RELAY_URL_REGEX = BunkerConfigStore.RELAY_URL_REGEX
     }
 
     private val prefs: SharedPreferences = run {
@@ -23,8 +25,12 @@ class RelayConfigStore(context: Context) {
         return stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
     }
 
-    fun setRelays(relays: List<String>) {
-        val validated = relays.filter { it.matches(RELAY_URL_REGEX) }.take(MAX_RELAYS)
+    suspend fun setRelays(relays: List<String>) {
+        val validated = withContext(Dispatchers.IO) {
+            relays
+                .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) }
+                .take(MAX_RELAYS)
+        }
         prefs.edit()
             .putString(KEY_RELAYS, validated.joinToString(RELAY_SEPARATOR))
             .apply()

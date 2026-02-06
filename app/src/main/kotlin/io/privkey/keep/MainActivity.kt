@@ -120,7 +120,7 @@ class MainActivity : FragmentActivity() {
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             onRelaysChanged = { relays ->
-                                app.initializeWithRelays(relays)
+                                lifecycleScope.launch { app.initializeWithRelays(relays) }
                             },
                             onConnect = { cipher, onResult ->
                                 app.connectWithCipher(
