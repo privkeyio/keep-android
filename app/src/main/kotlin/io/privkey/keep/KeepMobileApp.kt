@@ -298,13 +298,22 @@ class KeepMobileApp : Application() {
         val relays = config.getRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
+        _connectionState.value = ConnectionState(isConnecting = true)
+
         applicationScope.launch {
             runCatching { initializeWithProxy(mobile, relays, proxyConfigStore?.getProxyConfig()) }
+                .onSuccess {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
+                    _connectionState.value = ConnectionState(isConnected = true)
+                    startPeriodicPeerCheck(mobile, config)
+                }
                 .onFailure { e ->
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
                     val pinMismatch = findPinMismatch(e)
                     if (pinMismatch != null) {
                         _connectionState.value = ConnectionState(error = PIN_MISMATCH_ERROR, pinMismatch = pinMismatch)
+                    } else {
+                        _connectionState.value = ConnectionState(error = "Reconnection failed")
                     }
                 }
         }
