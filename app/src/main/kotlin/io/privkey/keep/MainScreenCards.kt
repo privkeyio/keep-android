@@ -899,6 +899,7 @@ fun CertificatePinsCard(
     onClearAllPins: () -> Unit
 ) {
     var showClearAllDialog by remember { mutableStateOf(false) }
+    var pinToDelete by remember { mutableStateOf<String?>(null) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -941,7 +942,7 @@ fun CertificatePinsCard(
                             )
                         }
                         IconButton(
-                            onClick = { onClearPin(pin.hostname) },
+                            onClick = { pinToDelete = pin.hostname },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
@@ -954,6 +955,27 @@ fun CertificatePinsCard(
                 }
             }
         }
+    }
+
+    pinToDelete?.let { hostname ->
+        AlertDialog(
+            onDismissRequest = { pinToDelete = null },
+            title = { Text("Clear Pin?") },
+            text = { Text("Remove the certificate pin for $hostname? A new pin will be set on next connection.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClearPin(hostname)
+                    pinToDelete = null
+                }) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pinToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showClearAllDialog) {

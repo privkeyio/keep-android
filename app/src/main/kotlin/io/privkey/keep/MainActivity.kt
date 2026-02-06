@@ -248,7 +248,7 @@ fun MainScreen(
             while (true) {
                 hasShare = keepMobile.hasShare()
                 shareInfo = keepMobile.getShareInfo()
-                certificatePins = keepMobile.getCertificatePinsCompat()
+                certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
                 if (hasShare) {
                     peers = keepMobile.getPeers()
                     pendingCount = keepMobile.getPendingRequests().size
@@ -468,7 +468,6 @@ fun MainScreen(
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
                             refreshCertificatePins()
-                            onDismissPinMismatch()
                             onReconnectRelays()
                         }
                     }) {

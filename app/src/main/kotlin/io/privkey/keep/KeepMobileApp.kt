@@ -60,6 +60,7 @@ class KeepMobileApp : Application() {
     private var proxyConfigStore: ProxyConfigStore? = null
     private var announceJob: Job? = null
     private var connectionJob: Job? = null
+    private var reconnectJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _connectionState = MutableStateFlow(ConnectionState())
@@ -297,9 +298,10 @@ class KeepMobileApp : Application() {
         val relays = config.getRelays()
         if (!store.hasShare() || relays.isEmpty()) return
 
+        reconnectJob?.cancel()
         _connectionState.value = ConnectionState(isConnecting = true)
 
-        applicationScope.launch {
+        reconnectJob = applicationScope.launch {
             runCatching { initializeWithProxy(mobile, relays, proxyConfigStore?.getProxyConfig()) }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
@@ -307,6 +309,10 @@ class KeepMobileApp : Application() {
                     startPeriodicPeerCheck(mobile, config)
                 }
                 .onFailure { e ->
+                    if (isCancellationException(e)) {
+                        _connectionState.value = ConnectionState()
+                        return@onFailure
+                    }
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
                     val pinMismatch = findPinMismatch(e)
                     if (pinMismatch != null) {
@@ -362,7 +368,8 @@ class KeepMobileApp : Application() {
     }
 
     fun dismissPinMismatch() {
-        _connectionState.value = ConnectionState()
+        val current = _connectionState.value
+        _connectionState.value = current.copy(error = null, pinMismatch = null)
     }
 
     private fun findPinMismatch(e: Throwable): PinMismatchInfo? =
