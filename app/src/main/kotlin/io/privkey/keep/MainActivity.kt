@@ -595,8 +595,8 @@ fun MainScreen(
             currentTimeout = biometricTimeout,
             onTimeoutChanged = { newTimeout ->
                 coroutineScope.launch {
-                    withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
-                    biometricTimeout = newTimeout
+                    val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
+                    if (saved) biometricTimeout = newTimeout
                 }
             }
         )
