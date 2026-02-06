@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -199,6 +200,7 @@ class KeepMobileApp : Application() {
         if (relays.isEmpty()) return onError("No relays configured")
 
         connectionJob?.cancel()
+        reconnectJob?.cancel()
         _connectionState.value = ConnectionState(isConnecting = true)
 
         val connectId = UUID.randomUUID().toString()
@@ -299,6 +301,7 @@ class KeepMobileApp : Application() {
         if (!store.hasShare() || relays.isEmpty()) return
 
         reconnectJob?.cancel()
+        connectionJob?.cancel()
         _connectionState.value = ConnectionState(isConnecting = true)
 
         reconnectJob = applicationScope.launch {
@@ -309,7 +312,10 @@ class KeepMobileApp : Application() {
                     startPeriodicPeerCheck(mobile, config)
                 }
                 .onFailure { e ->
-                    if (isCancellationException(e)) return@onFailure
+                    if (isCancellationException(e)) {
+                        _connectionState.value = ConnectionState()
+                        return@onFailure
+                    }
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
                     val pinMismatch = findPinMismatch(e)
                     val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Reconnection failed"
@@ -362,7 +368,7 @@ class KeepMobileApp : Application() {
     }
 
     fun dismissPinMismatch() {
-        _connectionState.value = _connectionState.value.copy(error = null, pinMismatch = null)
+        _connectionState.update { it.copy(error = null, pinMismatch = null) }
     }
 
     private fun findPinMismatch(e: Throwable): PinMismatchInfo? =
