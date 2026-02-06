@@ -492,6 +492,7 @@ fun MainScreen(
                                                     coroutineScope.launch {
                                                         onAccountSwitched()
                                                         refreshAccountState()
+                                                        showAccountSwitcher = false
                                                     }
                                                 }
                                             }

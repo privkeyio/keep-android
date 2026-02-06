@@ -33,7 +33,11 @@ class RelayConfigStore(context: Context) {
     fun getRelaysForAccount(accountKey: String): List<String> {
         val stored = prefs.getString(accountPrefsKey(accountKey), null)
         if (stored != null) return stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
-        return emptyList()
+        val globalRelays = getRelays()
+        if (globalRelays.isNotEmpty()) {
+            prefs.edit().putString(accountPrefsKey(accountKey), globalRelays.joinToString(RELAY_SEPARATOR)).apply()
+        }
+        return globalRelays
     }
 
     suspend fun setRelaysForAccount(accountKey: String, relays: List<String>) {

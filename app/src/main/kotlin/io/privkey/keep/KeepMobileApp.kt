@@ -312,11 +312,12 @@ class KeepMobileApp : Application() {
         BunkerService.stop(this)
         bunkerConfigStore?.setEnabled(false)
         withContext(Dispatchers.IO) {
-            runCatching {
-                permissionStore?.revokeAllPermissions()
-                permissionStore?.clearAllAppSettings()
-                permissionStore?.clearAllVelocity()
-            }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear permissions on account switch", it) }
+            runCatching { permissionStore?.revokeAllPermissions() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke permissions on account switch", it) }
+            runCatching { permissionStore?.clearAllAppSettings() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear app settings on account switch", it) }
+            runCatching { permissionStore?.clearAllVelocity() }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear velocity on account switch", it) }
             runCatching { callerVerificationStore?.clearAllTrust() }
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear caller trust on account switch", it) }
             runCatching { autoSigningSafeguards?.clearAll() }
