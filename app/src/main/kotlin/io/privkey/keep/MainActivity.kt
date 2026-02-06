@@ -744,15 +744,14 @@ fun MainScreen(
                 relaysConfigured = relays.isNotEmpty(),
                 onConnect = {
                     coroutineScope.launch {
-                        val (activeKey, cipher) = withContext(Dispatchers.IO) {
+                        val cipher = withContext(Dispatchers.IO) {
                             val key = storage.getActiveShareKey()
-                            val c = runCatching {
+                            runCatching {
                                 if (key != null) storage.getCipherForShareDecryption(key)
                                 else storage.getCipherForDecryption()
                             }.onFailure {
                                 if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
                             }.getOrNull()
-                            Pair(key, c)
                         }
                         if (cipher == null) return@launch
 

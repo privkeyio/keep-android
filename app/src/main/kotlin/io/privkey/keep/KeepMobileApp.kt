@@ -115,7 +115,7 @@ class KeepMobileApp : Application() {
     }
 
     private fun initializePermissionStore() {
-        try {
+        runCatching {
             val store = PermissionStore(Nip55Database.getInstance(this))
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
@@ -124,7 +124,7 @@ class KeepMobileApp : Application() {
                 store.cleanupExpired()
                 callerVerificationStore?.cleanupExpiredNonces()
             }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
         }
     }
@@ -312,17 +312,17 @@ class KeepMobileApp : Application() {
         BunkerService.stop(this)
         bunkerConfigStore?.setEnabled(false)
         withContext(Dispatchers.IO) {
-            runCatching { permissionStore?.revokeAllPermissions() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke permissions on account switch", it) }
-            runCatching { permissionStore?.clearAllAppSettings() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear app settings on account switch", it) }
-            runCatching { permissionStore?.clearAllVelocity() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear velocity on account switch", it) }
-            runCatching { callerVerificationStore?.clearAllTrust() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear caller trust on account switch", it) }
-            runCatching { autoSigningSafeguards?.clearAll() }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clear auto-signing state on account switch", it) }
+            runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
+            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings() }
+            runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
+            runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
+            runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
         }
+    }
+
+    private suspend inline fun runAccountSwitchCleanup(label: String, action: () -> Unit) {
+        runCatching { action() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to $label on account switch", it) }
     }
 
     fun reconnectRelays() {
