@@ -142,9 +142,12 @@ internal class AccountActions(
         if (wasActive && remainingAccounts.isNotEmpty()) {
             switchToNextAccountAfterDelete(remainingAccounts.first(), onDismiss)
         } else if (wasActive) {
-            onAccountSwitched()
-            refreshAccountState()
-            onDismiss()
+            try {
+                onAccountSwitched()
+            } finally {
+                refreshAccountState()
+                onDismiss()
+            }
         } else {
             refreshAccountState()
         }
