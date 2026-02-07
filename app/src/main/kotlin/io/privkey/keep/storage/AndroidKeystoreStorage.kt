@@ -91,6 +91,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         } catch (_: KeepMobileException.StorageException) {
             sharePrefs.edit().clear().apply()
             throw KeepMobileException.StorageNotFound()
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
+            sharePrefs.edit().clear().apply()
+            throw KeepMobileException.StorageNotFound()
         }
     }
 
@@ -317,9 +321,6 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         try {
             if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
                 keyStore.deleteEntry(KEYSTORE_ALIAS)
-            }
-            if (keyStore.containsAlias(METADATA_KEY_ALIAS)) {
-                keyStore.deleteEntry(METADATA_KEY_ALIAS)
             }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
