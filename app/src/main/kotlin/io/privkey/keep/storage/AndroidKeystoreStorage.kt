@@ -43,6 +43,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
+        private const val METADATA_KEY_ALIAS = "keep_metadata"
+        private const val METADATA_KEY_PREFIX = "__keep_"
     }
 
     private data class PendingCipherData(
@@ -63,6 +65,43 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private val prefs: SharedPreferences by lazy { createEncryptedPrefs(PREFS_NAME) }
 
     private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs(MULTI_PREFS_NAME) }
+
+    private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
+
+    @Synchronized
+    private fun getOrCreateMetadataKey(): SecretKey {
+        if (!keyStore.containsAlias(METADATA_KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                "AndroidKeyStore"
+            )
+            val builder = KeyGenParameterSpec.Builder(
+                METADATA_KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+            keyGenerator.init(builder.build())
+            keyGenerator.generateKey()
+        }
+        return keyStore.getKey(METADATA_KEY_ALIAS, null) as SecretKey
+    }
+
+    private fun storeMetadata(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+        val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.ENCRYPT_MODE, null)
+        writeShareToPrefs(getSharePrefs(key), encryptWithCipher(cipher, data), cipher.iv, metadata)
+    }
+
+    private fun loadMetadata(key: String): ByteArray {
+        val sharePrefs = getSharePrefs(key)
+        val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
+            ?: throw KeepMobileException.StorageNotFound()
+        val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
+            ?: throw KeepMobileException.StorageException("No IV stored for metadata key")
+        val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
+        return decryptWithCipher(cipher, encryptedData)
+    }
 
     private fun sanitizeKey(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -383,6 +422,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+        if (isMetadataKey(key)) {
+            storeMetadata(key, data, metadata)
+            return
+        }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -391,6 +434,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShareByKey(key: String): ByteArray {
+        if (isMetadataKey(key)) {
+            return loadMetadata(key)
+        }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -410,6 +456,14 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun deleteShareByKey(key: String) {
+        if (isMetadataKey(key)) {
+            val cleared = getSharePrefs(key).edit().clear().commit()
+            if (!cleared) {
+                throw KeepMobileException.StorageException("Failed to clear metadata")
+            }
+            return
+        }
+
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
