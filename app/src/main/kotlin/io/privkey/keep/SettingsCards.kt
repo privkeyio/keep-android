@@ -9,13 +9,17 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.ProxyConfigStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PinSettingsCard(
     enabled: Boolean,
     onSetupPin: () -> Unit,
-    onDisablePin: (String) -> Boolean
+    onDisablePin: suspend (String) -> Boolean
 ) {
+    val coroutineScope = rememberCoroutineScope()
     var showDisableDialog by remember { mutableStateOf(false) }
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -88,13 +92,18 @@ fun PinSettingsCard(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (onDisablePin(pinInput)) {
-                            showDisableDialog = false
-                            pinInput = ""
-                            error = null
-                        } else {
-                            error = "Incorrect PIN"
-                            pinInput = ""
+                        coroutineScope.launch {
+                            val disabled = withContext(Dispatchers.IO) {
+                                onDisablePin(pinInput)
+                            }
+                            if (disabled) {
+                                showDisableDialog = false
+                                pinInput = ""
+                                error = null
+                            } else {
+                                error = "Incorrect PIN"
+                                pinInput = ""
+                            }
                         }
                     },
                     enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH

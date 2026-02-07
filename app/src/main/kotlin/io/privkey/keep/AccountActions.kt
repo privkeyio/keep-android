@@ -80,9 +80,11 @@ internal class AccountActions(
                 if (authedCipher != null) {
                     coroutineScope.launch {
                         try {
-                            val currentKey = storage.getActiveShareKey()
-                            if (currentKey != null) {
-                                relayConfigStore.setRelaysForAccount(currentKey, currentRelays)
+                            withContext(Dispatchers.IO) {
+                                val currentKey = storage.getActiveShareKey()
+                                if (currentKey != null) {
+                                    relayConfigStore.setRelaysForAccount(currentKey, currentRelays)
+                                }
                             }
                             activateShare(authedCipher, account.groupPubkeyHex)
                             onAccountSwitched()
@@ -131,8 +133,8 @@ internal class AccountActions(
         val wasActive = account.groupPubkeyHex == activeAccountKey
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)
+            relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
         }
-        relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }
         }
