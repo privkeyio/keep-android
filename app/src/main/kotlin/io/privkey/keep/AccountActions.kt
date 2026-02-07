@@ -38,7 +38,7 @@ internal class AccountActions(
         currentRelays = relays
     }
 
-    suspend fun activateShare(authedCipher: Cipher, groupPubkeyHex: String) {
+    private suspend fun activateShare(authedCipher: Cipher, groupPubkeyHex: String) {
         val switchId = UUID.randomUUID().toString()
         storage.setPendingCipher(switchId, authedCipher)
         try {
@@ -55,7 +55,7 @@ internal class AccountActions(
         }
     }
 
-    suspend fun refreshAccountState() {
+    private suspend fun refreshAccountState() {
         val result = withContext(Dispatchers.IO) {
             val h = keepMobile.hasShare()
             val s = keepMobile.getShareInfo()
@@ -100,17 +100,20 @@ internal class AccountActions(
         }
     }
 
-    fun deleteAccount(account: AccountInfo, activeAccountKey: String?, onDismiss: () -> Unit) {
+    fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
         coroutineScope.launch {
             val cipher = withContext(Dispatchers.IO) {
                 runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
             }
-            if (cipher == null) return@launch
+            if (cipher == null) {
+                onDismiss()
+                return@launch
+            }
             onBiometricRequest("Delete Account", "Authenticate to delete account", cipher) { authedCipher ->
                 if (authedCipher != null) {
                     coroutineScope.launch {
                         try {
-                            performDelete(account, activeAccountKey, onDismiss)
+                            performDelete(account, onDismiss)
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("AccountActions", "Delete failed: ${e::class.simpleName}")
                             withContext(Dispatchers.Main) {
@@ -123,7 +126,8 @@ internal class AccountActions(
         }
     }
 
-    private suspend fun performDelete(account: AccountInfo, activeAccountKey: String?, onDismiss: () -> Unit) {
+    private suspend fun performDelete(account: AccountInfo, onDismiss: () -> Unit) {
+        val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
         val wasActive = account.groupPubkeyHex == activeAccountKey
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)

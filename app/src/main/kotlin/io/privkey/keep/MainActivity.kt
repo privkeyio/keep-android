@@ -38,7 +38,6 @@ import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
-import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -410,7 +409,7 @@ fun MainScreen(
                 accountActions.switchAccount(account) { showAccountSwitcher = false }
             },
             onDeleteAccount = { account ->
-                accountActions.deleteAccount(account, activeAccountKey) { showAccountSwitcher = false }
+                accountActions.deleteAccount(account) { showAccountSwitcher = false }
             },
             onImportAccount = {
                 showAccountSwitcher = false
