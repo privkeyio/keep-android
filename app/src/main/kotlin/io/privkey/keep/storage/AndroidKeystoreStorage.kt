@@ -82,17 +82,24 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
+
+            if (isStrongBoxAvailable()) {
+                builder.setIsStrongBoxBacked(true)
+            }
+
             keyGenerator.init(builder.build())
             keyGenerator.generateKey()
         }
         return keyStore.getKey(METADATA_KEY_ALIAS, null) as SecretKey
     }
 
+    @Synchronized
     private fun storeMetadata(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.ENCRYPT_MODE, null)
         writeShareToPrefs(getSharePrefs(key), encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
+    @Synchronized
     private fun loadMetadata(key: String): ByteArray {
         val sharePrefs = getSharePrefs(key)
         val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
@@ -326,6 +333,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         try {
             if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
                 keyStore.deleteEntry(KEYSTORE_ALIAS)
+            }
+            if (keyStore.containsAlias(METADATA_KEY_ALIAS)) {
+                keyStore.deleteEntry(METADATA_KEY_ALIAS)
             }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
