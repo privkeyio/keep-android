@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "io.privkey.keep"
     compileSdk = 36
-    ndkVersion = "29.0.13113456"
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "io.privkey.keep"
