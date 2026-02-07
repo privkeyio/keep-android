@@ -69,29 +69,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
 
     @Synchronized
-    private fun getOrCreateMetadataKey(): SecretKey {
-        if (!keyStore.containsAlias(METADATA_KEY_ALIAS)) {
-            val keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES,
-                "AndroidKeyStore"
-            )
-            val builder = KeyGenParameterSpec.Builder(
-                METADATA_KEY_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-
-            if (isStrongBoxAvailable()) {
-                builder.setIsStrongBoxBacked(true)
-            }
-
-            keyGenerator.init(builder.build())
-            keyGenerator.generateKey()
-        }
-        return keyStore.getKey(METADATA_KEY_ALIAS, null) as SecretKey
-    }
+    private fun getOrCreateMetadataKey(): SecretKey =
+        getOrCreateKeyWithAlias(METADATA_KEY_ALIAS, requireUserAuth = false)
 
     @Synchronized
     private fun storeMetadata(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
@@ -105,9 +84,14 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
             ?: throw KeepMobileException.StorageNotFound()
         val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
-            ?: throw KeepMobileException.StorageException("No IV stored for metadata key")
-        val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
-        return decryptWithCipher(cipher, encryptedData)
+            ?: throw KeepMobileException.StorageNotFound()
+        return try {
+            val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
+            decryptWithCipher(cipher, encryptedData)
+        } catch (_: KeepMobileException.StorageException) {
+            sharePrefs.edit().clear().apply()
+            throw KeepMobileException.StorageNotFound()
+        }
     }
 
     private fun sanitizeKey(key: String): String {
@@ -366,7 +350,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     @Synchronized
-    private fun getOrCreateKeyWithAlias(alias: String): SecretKey {
+    private fun getOrCreateKeyWithAlias(alias: String, requireUserAuth: Boolean = true): SecretKey {
         if (!keyStore.containsAlias(alias)) {
             val keyGenerator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES,
@@ -380,9 +364,12 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-                .setInvalidatedByBiometricEnrollment(true)
+
+            if (requireUserAuth) {
+                builder.setUserAuthenticationRequired(true)
+                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                    .setInvalidatedByBiometricEnrollment(true)
+            }
 
             if (isStrongBoxAvailable()) {
                 builder.setIsStrongBoxBacked(true)
