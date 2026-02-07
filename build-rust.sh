@@ -23,7 +23,7 @@ cd "$RUST_PROJECT"
 
 for target in "${TARGETS[@]}"; do
     echo "Building for $target..."
-    cargo ndk -t "$target" -p 33 -o "$JNILIBS_DIR" build --release
+    cargo ndk -t "$target" -P 33 -o "$JNILIBS_DIR" build --release
 done
 
 rm -f "$JNILIBS_DIR"/*/libredb-*.so
