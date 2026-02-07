@@ -38,7 +38,6 @@ import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
-import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -47,7 +46,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.UUID
 import javax.crypto.Cipher
 
 class MainActivity : FragmentActivity() {
@@ -247,6 +245,29 @@ fun MainScreen(
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
 
+    val accountActions = remember {
+        AccountActions(
+            keepMobile = keepMobile,
+            storage = storage,
+            relayConfigStore = relayConfigStore,
+            coroutineScope = coroutineScope,
+            appContext = appContext,
+            onBiometricRequest = onBiometricRequest,
+            onAccountSwitched = onAccountSwitched,
+            onStateChanged = { state ->
+                hasShare = state.hasShare
+                shareInfo = state.shareInfo
+                activeAccountKey = state.activeAccountKey
+                allAccounts = state.allAccounts
+                relays = state.relays
+            }
+        )
+    }
+
+    LaunchedEffect(relays) {
+        accountActions.setCurrentRelays(relays)
+    }
+
     suspend fun refreshCertificatePins() {
         certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
     }
@@ -380,144 +401,15 @@ fun MainScreen(
         return
     }
 
-    suspend fun activateShare(authedCipher: Cipher, groupPubkeyHex: String) {
-        val switchId = UUID.randomUUID().toString()
-        storage.setPendingCipher(switchId, authedCipher)
-        try {
-            withContext(Dispatchers.IO) {
-                storage.setRequestIdContext(switchId)
-                try {
-                    keepMobile.setActiveShare(groupPubkeyHex)
-                } finally {
-                    storage.clearRequestIdContext()
-                }
-            }
-        } finally {
-            storage.clearPendingCipher(switchId)
-        }
-    }
-
-    suspend fun refreshAccountState() {
-        val result = withContext(Dispatchers.IO) {
-            val h = keepMobile.hasShare()
-            val s = keepMobile.getShareInfo()
-            val k = storage.getActiveShareKey()
-            val a = storage.listAllShares().map { it.toAccountInfo() }
-            val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            AccountStateResult(h, s, k, a, r)
-        }
-        hasShare = result.hasShare
-        shareInfo = result.shareInfo
-        activeAccountKey = result.activeAccountKey
-        allAccounts = result.allAccounts
-        relays = result.relays
-    }
-
     if (showAccountSwitcher) {
         AccountSwitcherSheet(
             accounts = allAccounts,
             activeAccountKey = activeAccountKey,
             onSwitchAccount = { account ->
-                coroutineScope.launch {
-                    val cipher = withContext(Dispatchers.IO) {
-                        runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
-                    }
-                    if (cipher == null) {
-                        showAccountSwitcher = false
-                        return@launch
-                    }
-                    onBiometricRequest("Switch Account", "Authenticate to switch", cipher) { authedCipher ->
-                        if (authedCipher != null) {
-                            coroutineScope.launch {
-                            try {
-                                val currentKey = storage.getActiveShareKey()
-                                if (currentKey != null) {
-                                    relayConfigStore.setRelaysForAccount(currentKey, relays)
-                                }
-                                activateShare(authedCipher, account.groupPubkeyHex)
-                                onAccountSwitched()
-                                refreshAccountState()
-                                showAccountSwitcher = false
-                            } catch (e: Exception) {
-                                if (BuildConfig.DEBUG) Log.e("MainActivity", "Switch failed: ${e::class.simpleName}")
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(appContext, "Failed to switch account", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    }
-                }
-                }
+                accountActions.switchAccount(account) { showAccountSwitcher = false }
             },
             onDeleteAccount = { account ->
-                coroutineScope.launch {
-                    val cipher = withContext(Dispatchers.IO) {
-                        runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
-                    }
-                    if (cipher == null) return@launch
-                    onBiometricRequest("Delete Account", "Authenticate to delete account", cipher) { authedCipher ->
-                        if (authedCipher != null) {
-                            coroutineScope.launch {
-                                try {
-                                    val wasActive = account.groupPubkeyHex == activeAccountKey
-                                    withContext(Dispatchers.IO) {
-                                        keepMobile.deleteShareByKey(account.groupPubkeyHex)
-                                    }
-                                    relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
-                                    allAccounts = withContext(Dispatchers.IO) {
-                                        storage.listAllShares().map { it.toAccountInfo() }
-                                    }
-
-                                    if (wasActive && allAccounts.isNotEmpty()) {
-                                        val nextAccount = allAccounts.first()
-                                        val switchCipher = withContext(Dispatchers.IO) {
-                                            runCatching { storage.getCipherForShareDecryption(nextAccount.groupPubkeyHex) }.getOrNull()
-                                        }
-                                        if (switchCipher != null) {
-                                            onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
-                                                if (switchAuthed != null) {
-                                                    coroutineScope.launch {
-                                                        try {
-                                                            activateShare(switchAuthed, nextAccount.groupPubkeyHex)
-                                                            onAccountSwitched()
-                                                            refreshAccountState()
-                                                        } catch (e: Exception) {
-                                                            if (BuildConfig.DEBUG) Log.e("MainActivity", "Post-delete switch failed: ${e::class.simpleName}")
-                                                            onAccountSwitched()
-                                                            refreshAccountState()
-                                                        }
-                                                        showAccountSwitcher = false
-                                                    }
-                                                } else {
-                                                    coroutineScope.launch {
-                                                        onAccountSwitched()
-                                                        refreshAccountState()
-                                                        showAccountSwitcher = false
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            onAccountSwitched()
-                                            refreshAccountState()
-                                            showAccountSwitcher = false
-                                        }
-                                    } else if (wasActive) {
-                                        onAccountSwitched()
-                                        refreshAccountState()
-                                        showAccountSwitcher = false
-                                    } else {
-                                        refreshAccountState()
-                                    }
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Delete failed: ${e::class.simpleName}")
-                                    withContext(Dispatchers.Main) {
-                                        Toast.makeText(appContext, "Failed to delete account", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                accountActions.deleteAccount(account) { showAccountSwitcher = false }
             },
             onImportAccount = {
                 showAccountSwitcher = false
@@ -530,32 +422,7 @@ fun MainScreen(
     if (showImportScreen) {
         ImportShareScreen(
             onImport = { data, passphrase, name, cipher ->
-                importState = ImportState.Importing
-                if (!isValidKshareFormat(data)) {
-                    importState = ImportState.Error("Invalid share format")
-                    return@ImportShareScreen
-                }
-                coroutineScope.launch {
-                    val importId = UUID.randomUUID().toString()
-                    storage.setPendingCipher(importId, cipher)
-                    try {
-                        val result = withContext(Dispatchers.IO) {
-                            storage.setRequestIdContext(importId)
-                            try {
-                                keepMobile.importShare(data, passphrase, name)
-                            } finally {
-                                storage.clearRequestIdContext()
-                            }
-                        }
-                        importState = ImportState.Success(result.name)
-                        refreshAccountState()
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("MainActivity", "Import failed: ${e::class.simpleName}")
-                        importState = ImportState.Error("Import failed. Please try again.")
-                    } finally {
-                        storage.clearPendingCipher(importId)
-                    }
-                }
+                accountActions.importShare(data, passphrase, name, cipher) { importState = it }
             },
             onGetCipher = { storage.getCipherForEncryption() },
             onBiometricAuth = { cipher, callback ->
@@ -578,15 +445,9 @@ fun MainScreen(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Keep",
-            style = MaterialTheme.typography.headlineLarge
-        )
-
+        Text(text = "Keep", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(4.dp))
-
         SecurityLevelBadge(securityLevel)
-
         Spacer(modifier = Modifier.height(16.dp))
 
         KillSwitchCard(
@@ -673,7 +534,6 @@ fun MainScreen(
                 info = currentShareInfo,
                 onClick = { showShareDetails = true }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             RelaysCard(
@@ -691,7 +551,6 @@ fun MainScreen(
                     onRelaysChanged(updated)
                 }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             CertificatePinsCard(
@@ -709,7 +568,6 @@ fun MainScreen(
                     }
                 }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             ProxySettingsCard(
@@ -734,7 +592,6 @@ fun MainScreen(
                     }
                 }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             ConnectCard(
@@ -761,11 +618,9 @@ fun MainScreen(
                     }
                 }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             ConnectedAppsCard(onClick = { showConnectedApps = true })
-
             Spacer(modifier = Modifier.height(16.dp))
 
             PeersCard(peers)
@@ -782,14 +637,12 @@ fun MainScreen(
                 onPermissionsClick = { showPermissionsScreen = true },
                 onHistoryClick = { showHistoryScreen = true }
             )
-
             Spacer(modifier = Modifier.height(16.dp))
 
             BunkerCard(
                 status = bunkerStatus,
                 onClick = { showBunkerScreen = true }
             )
-
         } else {
             if (allAccounts.isNotEmpty()) {
                 AccountSelectorCard(
@@ -815,7 +668,6 @@ fun MainScreen(
                 }
             }
         )
-
         Spacer(modifier = Modifier.height(16.dp))
 
         ForegroundServiceCard(
@@ -828,7 +680,6 @@ fun MainScreen(
                 }
             }
         )
-
         Spacer(modifier = Modifier.height(16.dp))
 
         PinSettingsCard(
@@ -840,7 +691,6 @@ fun MainScreen(
                 disabled
             }
         )
-
         Spacer(modifier = Modifier.height(16.dp))
 
         BiometricTimeoutCard(
@@ -862,12 +712,4 @@ private data class PollResult(
     val activeAccountKey: String?,
     val peers: List<PeerInfo>,
     val pendingCount: Int
-)
-
-private data class AccountStateResult(
-    val hasShare: Boolean,
-    val shareInfo: ShareInfo?,
-    val activeAccountKey: String?,
-    val allAccounts: List<AccountInfo>,
-    val relays: List<String>
 )
