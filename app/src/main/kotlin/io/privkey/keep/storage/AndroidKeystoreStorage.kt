@@ -43,6 +43,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
+        private const val METADATA_KEY_ALIAS = "keep_metadata"
+        private const val METADATA_KEY_PREFIX = "__keep_"
     }
 
     private data class PendingCipherData(
@@ -63,6 +65,35 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private val prefs: SharedPreferences by lazy { createEncryptedPrefs(PREFS_NAME) }
 
     private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs(MULTI_PREFS_NAME) }
+
+    private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
+
+    @Synchronized
+    private fun getOrCreateMetadataKey(): SecretKey =
+        getOrCreateKeyWithAlias(METADATA_KEY_ALIAS, requireUserAuth = false)
+
+    @Synchronized
+    private fun storeMetadata(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+        val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.ENCRYPT_MODE, null)
+        writeShareToPrefs(getSharePrefs(key), encryptWithCipher(cipher, data), cipher.iv, metadata)
+    }
+
+    @Synchronized
+    private fun loadMetadata(key: String): ByteArray {
+        val sharePrefs = getSharePrefs(key)
+        val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
+            ?: throw KeepMobileException.StorageException("No metadata stored")
+        val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
+            ?: throw KeepMobileException.StorageException("No metadata stored")
+        return try {
+            val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
+            decryptWithCipher(cipher, encryptedData)
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
+            sharePrefs.edit().clear().apply()
+            throw KeepMobileException.StorageException("No metadata stored")
+        }
+    }
 
     private fun sanitizeKey(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -317,7 +348,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     @Synchronized
-    private fun getOrCreateKeyWithAlias(alias: String): SecretKey {
+    private fun getOrCreateKeyWithAlias(alias: String, requireUserAuth: Boolean = true): SecretKey {
         if (!keyStore.containsAlias(alias)) {
             val keyGenerator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES,
@@ -331,9 +362,12 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
-                .setUserAuthenticationRequired(true)
-                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-                .setInvalidatedByBiometricEnrollment(true)
+
+            if (requireUserAuth) {
+                builder.setUserAuthenticationRequired(true)
+                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                    .setInvalidatedByBiometricEnrollment(true)
+            }
 
             if (isStrongBoxAvailable()) {
                 builder.setIsStrongBoxBacked(true)
@@ -383,6 +417,10 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+        if (isMetadataKey(key)) {
+            storeMetadata(key, data, metadata)
+            return
+        }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -391,6 +429,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShareByKey(key: String): ByteArray {
+        if (isMetadataKey(key)) {
+            return loadMetadata(key)
+        }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -410,6 +451,14 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun deleteShareByKey(key: String) {
+        if (isMetadataKey(key)) {
+            val cleared = getSharePrefs(key).edit().clear().commit()
+            if (!cleared) {
+                throw KeepMobileException.StorageException("Failed to clear metadata")
+            }
+            return
+        }
+
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
