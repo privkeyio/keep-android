@@ -60,9 +60,11 @@ fun ImportNsecScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                nsecData.update(code)
-                nsecDisplay = code
-                showScanner = false
+                if (code.length <= MAX_NSEC_LENGTH) {
+                    nsecData.update(code)
+                    nsecDisplay = code
+                    showScanner = false
+                }
             },
             onDismiss = { showScanner = false },
             validator = ::isValidNsecFormat,
