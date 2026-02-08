@@ -33,6 +33,7 @@ fun ImportNsecScreen(
     var nsecDisplay by remember { mutableStateOf("") }
     var keyName by remember { mutableStateOf("Mobile Key") }
     var showScanner by remember { mutableStateOf(false) }
+    var scanError by remember { mutableStateOf<String?>(null) }
     var isNsecVisible by remember { mutableStateOf(false) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
@@ -59,13 +60,18 @@ fun ImportNsecScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                if (code.length <= MAX_NSEC_LENGTH) {
+                showScanner = false
+                if (code.length > MAX_NSEC_LENGTH) {
+                    scanError = "Scanned code is too long"
+                } else {
+                    scanError = null
                     nsecData.update(code)
                     nsecDisplay = code
-                    showScanner = false
                 }
             },
-            onDismiss = { showScanner = false },
+            onDismiss = {
+                showScanner = false
+            },
             validator = ::isValidNsecFormat,
             title = "Scan nsec QR Code"
         )
@@ -91,6 +97,7 @@ fun ImportNsecScreen(
             value = nsecDisplay,
             onValueChange = {
                 if (it.length <= MAX_NSEC_LENGTH) {
+                    scanError = null
                     nsecData.update(it)
                     nsecDisplay = it
                 }
@@ -137,6 +144,15 @@ fun ImportNsecScreen(
         )
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        if (scanError != null) {
+            StatusCard(
+                text = scanError!!,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         if (importState is ImportState.Error) {
             StatusCard(
