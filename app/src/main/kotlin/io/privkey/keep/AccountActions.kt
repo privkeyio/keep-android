@@ -203,15 +203,18 @@ internal class AccountActions(
         onImportStateChanged: (ImportState) -> Unit
     ) {
         onImportStateChanged(ImportState.Importing)
-        if (!isValidNsecFormat(nsec)) {
+        val keyBytes = nsecToBytes(nsec) ?: run {
             onImportStateChanged(ImportState.Error("Invalid nsec format"))
             return
         }
-        val hexKey = nsecToHex(nsec) ?: run {
-            onImportStateChanged(ImportState.Error("Failed to decode nsec"))
-            return
+        executeImport(cipher, onImportStateChanged) {
+            try {
+                val hexKey = keyBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                keepMobile.importNsec(hexKey, name)
+            } finally {
+                java.util.Arrays.fill(keyBytes, 0.toByte())
+            }
         }
-        executeImport(cipher, onImportStateChanged) { keepMobile.importNsec(hexKey, name) }
     }
 
     private fun executeImport(

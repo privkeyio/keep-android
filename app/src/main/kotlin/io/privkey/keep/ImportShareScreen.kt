@@ -62,6 +62,7 @@ fun ImportShareScreen(
     onDismiss: () -> Unit,
     importState: ImportState
 ) {
+    val context = LocalContext.current
     val shareData = remember { SecureShareData(MAX_SHARE_LENGTH) }
     var shareDataDisplay by remember { mutableStateOf("") }
     val passphrase = remember { SecurePassphrase() }
@@ -70,6 +71,11 @@ fun ImportShareScreen(
     var showScanner by remember { mutableStateOf(false) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose { setSecureScreen(context, false) }
+    }
 
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {

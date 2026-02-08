@@ -11,15 +11,17 @@ internal fun isValidNsecFormat(data: String): Boolean {
     if (!lower.startsWith("nsec1")) return false
     val payload = lower.removePrefix("nsec1")
     if (payload.length != NSEC_PAYLOAD_LENGTH || !payload.all { it in BECH32_CHARSET }) return false
-    return nsecToHex(lower) != null
+    val key = nsecToBytes(lower) ?: return false
+    java.util.Arrays.fill(key, 0.toByte())
+    return true
 }
 
-internal fun nsecToHex(nsec: String): String? {
+internal fun nsecToBytes(nsec: String): ByteArray? {
     val decoded = bech32Decode(nsec) ?: return null
     if (decoded.first != "nsec") return null
-    val bytes = convertBits(decoded.second, 5, 8, false)
-    if (bytes.size != 32) return null
-    return bytes.joinToString("") { "%02x".format(it and 0xFF) }
+    val values = convertBits(decoded.second, 5, 8, false) ?: return null
+    if (values.size != 32) return null
+    return ByteArray(values.size) { (values[it] and 0xFF).toByte() }
 }
 
 private fun bech32Decode(bech32: String): Pair<String, List<Int>>? {
@@ -60,7 +62,7 @@ private fun hexToNevent(eventId: String, relayUrl: String?): String? {
             tlv.add(relayBytes.size.toByte())
             tlv.addAll(relayBytes.toList())
         }
-        bech32Encode("nevent", convertBits(tlv.map { it.toInt() and 0xFF }, 8, 5, true))
+        bech32Encode("nevent", convertBits(tlv.map { it.toInt() and 0xFF }, 8, 5, true) ?: return null)
     } catch (_: Exception) {
         null
     }
@@ -70,13 +72,13 @@ private fun hexToBech32(hex: String, hrp: String): String? {
     if (!isHex64(hex)) return null
     return try {
         val bytes = hex.chunked(2).map { it.toInt(16) }
-        bech32Encode(hrp, convertBits(bytes, 8, 5, true))
+        bech32Encode(hrp, convertBits(bytes, 8, 5, true) ?: return null)
     } catch (_: Exception) {
         null
     }
 }
 
-private fun convertBits(data: List<Int>, fromBits: Int, toBits: Int, pad: Boolean): List<Int> {
+private fun convertBits(data: List<Int>, fromBits: Int, toBits: Int, pad: Boolean): List<Int>? {
     var acc = 0
     var bits = 0
     val result = mutableListOf<Int>()
@@ -92,7 +94,7 @@ private fun convertBits(data: List<Int>, fromBits: Int, toBits: Int, pad: Boolea
     if (pad && bits > 0) {
         result.add((acc shl (toBits - bits)) and maxV)
     } else if (!pad && bits > 0) {
-        if ((acc shl (toBits - bits)) and maxV != 0) return emptyList()
+        if ((acc shl (toBits - bits)) and maxV != 0) return null
     }
     return result
 }
