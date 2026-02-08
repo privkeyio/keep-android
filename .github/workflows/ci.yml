@@ -57,6 +57,9 @@ jobs:
         with:
           tool: cargo-ndk
 
+      - name: Install Rust targets
+        run: rustup target add aarch64-linux-android
+
       - name: Build native libraries
         run: ./build-rust.sh
         env:
@@ -112,6 +115,9 @@ jobs:
         uses: taiki-e/install-action@3f67faa728964808f52294a9cd15561b15550b28 # v2
         with:
           tool: cargo-ndk
+
+      - name: Install Rust targets
+        run: rustup target add x86_64-linux-android
 
       - name: Build native libraries
         run: ./build-rust.sh
