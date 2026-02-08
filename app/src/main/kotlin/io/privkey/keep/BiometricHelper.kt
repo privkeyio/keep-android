@@ -37,9 +37,10 @@ class BiometricHelper(
     suspend fun authenticate(
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
-        negativeButtonText: String = "Cancel"
+        negativeButtonText: String = "Cancel",
+        forcePrompt: Boolean = false
     ): Boolean {
-        if (timeoutStore?.requiresBiometric() == false) {
+        if (!forcePrompt && timeoutStore?.requiresBiometric() == false) {
             return true
         }
         return suspendCoroutine { continuation ->

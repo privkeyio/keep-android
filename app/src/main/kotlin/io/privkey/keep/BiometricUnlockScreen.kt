@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -13,8 +14,14 @@ fun BiometricUnlockScreen(
     onAuthenticate: suspend () -> Boolean,
     onUnlocked: () -> Unit
 ) {
+    val context = LocalContext.current
     var authFailed by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose { setSecureScreen(context, false) }
+    }
 
     LaunchedEffect(Unit) {
         val success = onAuthenticate()

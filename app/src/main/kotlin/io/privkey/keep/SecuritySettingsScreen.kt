@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -25,6 +26,13 @@ fun SecuritySettingsScreen(
     onKillSwitchToggle: (Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose { setSecureScreen(context, false) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(

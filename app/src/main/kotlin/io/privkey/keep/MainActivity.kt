@@ -87,9 +87,12 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
 
+            val biometricAvailable = biometricHelper?.checkBiometricStatus() ==
+                BiometricHelper.BiometricStatus.AVAILABLE
+
             var isBiometricUnlocked by remember {
                 mutableStateOf(
-                    biometricTimeoutStore?.isLockOnLaunchEnabled() != true
+                    biometricTimeoutStore?.isLockOnLaunchEnabled() != true || !biometricAvailable
                 )
             }
 
@@ -121,8 +124,9 @@ class MainActivity : FragmentActivity() {
                             onAuthenticate = {
                                 biometricHelper?.authenticate(
                                     title = "Unlock Keep",
-                                    subtitle = "Authenticate to open app"
-                                ) ?: true
+                                    subtitle = "Authenticate to open app",
+                                    forcePrompt = true
+                                ) ?: false
                             },
                             onUnlocked = { isBiometricUnlocked = true }
                         )
@@ -277,7 +281,7 @@ fun MainScreen(
             showKillSwitchConfirmDialog = true
         } else {
             coroutineScope.launch {
-                val authenticated = onBiometricAuth?.invoke() ?: true
+                val authenticated = onBiometricAuth?.invoke() ?: false
                 if (authenticated) {
                     withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
                     killSwitchEnabled = false
