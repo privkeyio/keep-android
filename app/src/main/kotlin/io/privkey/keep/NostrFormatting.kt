@@ -2,8 +2,38 @@ package io.privkey.keep
 
 internal const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private val HEX_REGEX = Regex("^[0-9a-fA-F]+$")
+private const val NSEC_LENGTH = 63
 
 internal fun isHex64(value: String): Boolean = value.length == 64 && HEX_REGEX.matches(value)
+
+internal fun isValidNsecFormat(data: String): Boolean {
+    val lower = data.lowercase()
+    if (!lower.startsWith("nsec1")) return false
+    val payload = lower.removePrefix("nsec1")
+    if (payload.length != NSEC_LENGTH - 5 || !payload.all { it in BECH32_CHARSET }) return false
+    return nsecToHex(lower) != null
+}
+
+internal fun nsecToHex(nsec: String): String? {
+    val decoded = bech32Decode(nsec) ?: return null
+    if (decoded.first != "nsec") return null
+    val bytes = convertBits(decoded.second, 5, 8, false)
+    if (bytes.size != 32) return null
+    return bytes.joinToString("") { "%02x".format(it and 0xFF) }
+}
+
+private fun bech32Decode(bech32: String): Pair<String, List<Int>>? {
+    if (bech32 != bech32.lowercase() && bech32 != bech32.uppercase()) return null
+    val lower = bech32.lowercase()
+    val pos = lower.lastIndexOf('1')
+    if (pos < 1 || pos + 7 > lower.length) return null
+    val hrp = lower.substring(0, pos)
+    val dataChars = lower.substring(pos + 1)
+    val data = dataChars.map { BECH32_CHARSET.indexOf(it) }.takeIf { vals -> vals.all { it >= 0 } } ?: return null
+    val values = bech32HrpExpand(hrp) + data
+    if (bech32Polymod(values) != 1) return null
+    return hrp to data.dropLast(6)
+}
 
 private fun truncate(value: String): String =
     if (value.length > 20) "${value.take(12)}...${value.takeLast(8)}" else value
@@ -30,7 +60,7 @@ private fun hexToNevent(eventId: String, relayUrl: String?): String? {
             tlv.add(relayBytes.size.toByte())
             tlv.addAll(relayBytes.toList())
         }
-        bech32Encode("nevent", convertBits(tlv, 8, 5, true))
+        bech32Encode("nevent", convertBits(tlv.map { it.toInt() and 0xFF }, 8, 5, true))
     } catch (_: Exception) {
         null
     }
@@ -39,20 +69,19 @@ private fun hexToNevent(eventId: String, relayUrl: String?): String? {
 private fun hexToBech32(hex: String, hrp: String): String? {
     if (!isHex64(hex)) return null
     return try {
-        val bytes = hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        bech32Encode(hrp, convertBits(bytes.toList(), 8, 5, true))
+        val bytes = hex.chunked(2).map { it.toInt(16) }
+        bech32Encode(hrp, convertBits(bytes, 8, 5, true))
     } catch (_: Exception) {
         null
     }
 }
 
-private fun convertBits(data: List<Byte>, fromBits: Int, toBits: Int, pad: Boolean): List<Int> {
+private fun convertBits(data: List<Int>, fromBits: Int, toBits: Int, pad: Boolean): List<Int> {
     var acc = 0
     var bits = 0
     val result = mutableListOf<Int>()
     val maxV = (1 shl toBits) - 1
-    for (value in data) {
-        val v = value.toInt() and 0xFF
+    for (v in data) {
         acc = (acc shl fromBits) or v
         bits += fromBits
         while (bits >= toBits) {
@@ -62,6 +91,8 @@ private fun convertBits(data: List<Byte>, fromBits: Int, toBits: Int, pad: Boole
     }
     if (pad && bits > 0) {
         result.add((acc shl (toBits - bits)) and maxV)
+    } else if (!pad && bits > 0) {
+        if ((acc shl (toBits - bits)) and maxV != 0) return emptyList()
     }
     return result
 }

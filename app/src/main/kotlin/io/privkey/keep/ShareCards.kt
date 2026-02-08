@@ -66,16 +66,20 @@ fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
 }
 
 @Composable
-fun NoShareCard(onImport: () -> Unit) {
+fun NoShareCard(onImport: () -> Unit, onImportNsec: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("No FROST share stored")
+            Text("No key stored")
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onImport) {
-                Text("Import Share")
+            Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
+                Text("Import FROST Share")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onImportNsec, modifier = Modifier.fillMaxWidth()) {
+                Text("Import nsec")
             }
         }
     }

@@ -215,4 +215,42 @@ internal class AccountActions(
             }
         }
     }
+
+    fun importNsec(
+        nsec: String,
+        name: String,
+        cipher: Cipher,
+        onImportStateChanged: (ImportState) -> Unit
+    ) {
+        onImportStateChanged(ImportState.Importing)
+        if (!isValidNsecFormat(nsec)) {
+            onImportStateChanged(ImportState.Error("Invalid nsec format"))
+            return
+        }
+        val hexKey = nsecToHex(nsec) ?: run {
+            onImportStateChanged(ImportState.Error("Failed to decode nsec"))
+            return
+        }
+        coroutineScope.launch {
+            val importId = UUID.randomUUID().toString()
+            storage.setPendingCipher(importId, cipher)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    storage.setRequestIdContext(importId)
+                    try {
+                        keepMobile.importNsec(hexKey, name)
+                    } finally {
+                        storage.clearRequestIdContext()
+                    }
+                }
+                onImportStateChanged(ImportState.Success(result.name))
+                refreshAccountState()
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e("AccountActions", "nsec import failed: ${e::class.simpleName}")
+                onImportStateChanged(ImportState.Error("Import failed. Please try again."))
+            } finally {
+                storage.clearPendingCipher(importId)
+            }
+        }
+    }
 }

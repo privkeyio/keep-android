@@ -37,6 +37,7 @@ fun AccountSwitcherSheet(
     onSwitchAccount: (AccountInfo) -> Unit,
     onDeleteAccount: (AccountInfo) -> Unit,
     onImportAccount: () -> Unit,
+    onImportNsec: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var deleteTarget by remember { mutableStateOf<AccountInfo?>(null) }
@@ -74,7 +75,16 @@ fun AccountSwitcherSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Text("Import Account")
+                Text("Import FROST Share")
+            }
+
+            TextButton(
+                onClick = onImportNsec,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text("Import nsec")
             }
         }
     }

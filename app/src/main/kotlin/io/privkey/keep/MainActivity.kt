@@ -216,6 +216,7 @@ fun MainScreen(
     var activeAccountKey by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
+    var showImportNsecScreen by remember { mutableStateOf(false) }
     var showShareDetails by remember { mutableStateOf(false) }
     var showExportScreen by remember { mutableStateOf(false) }
     var showPermissionsScreen by remember { mutableStateOf(false) }
@@ -415,6 +416,10 @@ fun MainScreen(
                 showAccountSwitcher = false
                 showImportScreen = true
             },
+            onImportNsec = {
+                showAccountSwitcher = false
+                showImportNsecScreen = true
+            },
             onDismiss = { showAccountSwitcher = false }
         )
     }
@@ -430,6 +435,24 @@ fun MainScreen(
             },
             onDismiss = {
                 showImportScreen = false
+                importState = ImportState.Idle
+            },
+            importState = importState
+        )
+        return
+    }
+
+    if (showImportNsecScreen) {
+        ImportNsecScreen(
+            onImport = { nsec, name, cipher ->
+                accountActions.importNsec(nsec, name, cipher) { importState = it }
+            },
+            onGetCipher = { storage.getCipherForEncryption() },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Import nsec", "Authenticate to store key securely", cipher, callback)
+            },
+            onDismiss = {
+                showImportNsecScreen = false
                 importState = ImportState.Idle
             },
             importState = importState
@@ -652,7 +675,8 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
             NoShareCard(
-                onImport = { showImportScreen = true }
+                onImport = { showImportScreen = true },
+                onImportNsec = { showImportNsecScreen = true }
             )
         }
 
