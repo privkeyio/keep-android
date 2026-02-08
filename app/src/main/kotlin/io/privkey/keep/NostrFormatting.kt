@@ -2,7 +2,7 @@ package io.privkey.keep
 
 internal const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private val HEX_REGEX = Regex("^[0-9a-fA-F]+$")
-private const val NSEC_LENGTH = 63
+private const val NSEC_PAYLOAD_LENGTH = 58
 
 internal fun isHex64(value: String): Boolean = value.length == 64 && HEX_REGEX.matches(value)
 
@@ -10,7 +10,7 @@ internal fun isValidNsecFormat(data: String): Boolean {
     val lower = data.lowercase()
     if (!lower.startsWith("nsec1")) return false
     val payload = lower.removePrefix("nsec1")
-    if (payload.length != NSEC_LENGTH - 5 || !payload.all { it in BECH32_CHARSET }) return false
+    if (payload.length != NSEC_PAYLOAD_LENGTH || !payload.all { it in BECH32_CHARSET }) return false
     return nsecToHex(lower) != null
 }
 

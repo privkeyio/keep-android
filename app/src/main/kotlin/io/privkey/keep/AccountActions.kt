@@ -193,27 +193,7 @@ internal class AccountActions(
             onImportStateChanged(ImportState.Error("Invalid share format"))
             return
         }
-        coroutineScope.launch {
-            val importId = UUID.randomUUID().toString()
-            storage.setPendingCipher(importId, cipher)
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    storage.setRequestIdContext(importId)
-                    try {
-                        keepMobile.importShare(data, passphrase, name)
-                    } finally {
-                        storage.clearRequestIdContext()
-                    }
-                }
-                onImportStateChanged(ImportState.Success(result.name))
-                refreshAccountState()
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
-                onImportStateChanged(ImportState.Error("Import failed. Please try again."))
-            } finally {
-                storage.clearPendingCipher(importId)
-            }
-        }
+        executeImport(cipher, onImportStateChanged) { keepMobile.importShare(data, passphrase, name) }
     }
 
     fun importNsec(
@@ -231,6 +211,14 @@ internal class AccountActions(
             onImportStateChanged(ImportState.Error("Failed to decode nsec"))
             return
         }
+        executeImport(cipher, onImportStateChanged) { keepMobile.importNsec(hexKey, name) }
+    }
+
+    private fun executeImport(
+        cipher: Cipher,
+        onImportStateChanged: (ImportState) -> Unit,
+        apiCall: suspend () -> ShareInfo
+    ) {
         coroutineScope.launch {
             val importId = UUID.randomUUID().toString()
             storage.setPendingCipher(importId, cipher)
@@ -238,7 +226,7 @@ internal class AccountActions(
                 val result = withContext(Dispatchers.IO) {
                     storage.setRequestIdContext(importId)
                     try {
-                        keepMobile.importNsec(hexKey, name)
+                        apiCall()
                     } finally {
                         storage.clearRequestIdContext()
                     }
@@ -246,7 +234,7 @@ internal class AccountActions(
                 onImportStateChanged(ImportState.Success(result.name))
                 refreshAccountState()
             } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("AccountActions", "nsec import failed: ${e::class.simpleName}")
+                if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
                 onImportStateChanged(ImportState.Error("Import failed. Please try again."))
             } finally {
                 storage.clearPendingCipher(importId)
