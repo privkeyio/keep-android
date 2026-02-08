@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Arrays
 import java.util.UUID
 import javax.crypto.Cipher
 
@@ -212,7 +213,7 @@ internal class AccountActions(
                 val hexKey = keyBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
                 keepMobile.importNsec(hexKey, name)
             } finally {
-                java.util.Arrays.fill(keyBytes, 0.toByte())
+                Arrays.fill(keyBytes, 0.toByte())
             }
         }
     }

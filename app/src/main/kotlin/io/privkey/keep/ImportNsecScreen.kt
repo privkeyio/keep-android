@@ -20,7 +20,6 @@ import javax.crypto.Cipher
 
 private const val MAX_NSEC_LENGTH = 128
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportNsecScreen(
     onImport: (nsec: String, name: String, cipher: Cipher) -> Unit,

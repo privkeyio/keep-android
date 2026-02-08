@@ -1,5 +1,7 @@
 package io.privkey.keep
 
+import java.util.Arrays
+
 internal const val BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 private val HEX_REGEX = Regex("^[0-9a-fA-F]+$")
 private const val NSEC_PAYLOAD_LENGTH = 58
@@ -12,7 +14,7 @@ internal fun isValidNsecFormat(data: String): Boolean {
     val payload = lower.removePrefix("nsec1")
     if (payload.length != NSEC_PAYLOAD_LENGTH || !payload.all { it in BECH32_CHARSET }) return false
     val key = nsecToBytes(lower) ?: return false
-    java.util.Arrays.fill(key, 0.toByte())
+    Arrays.fill(key, 0.toByte())
     return true
 }
 
