@@ -19,6 +19,13 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import io.privkey.keep.navigation.Route
 import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
@@ -80,6 +87,12 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
 
+            var isBiometricUnlocked by remember {
+                mutableStateOf(
+                    biometricTimeoutStore?.isLockOnLaunchEnabled() != true
+                )
+            }
+
             DisposableEffect(pinStore) {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
@@ -96,11 +109,22 @@ class MainActivity : FragmentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val requiresPin = pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked
+                    val requiresBiometric = !isBiometricUnlocked
 
                     if (requiresPin) {
                         PinUnlockScreen(
                             pinStore = pinStore!!,
                             onUnlocked = { isPinUnlocked = true }
+                        )
+                    } else if (requiresBiometric) {
+                        BiometricUnlockScreen(
+                            onAuthenticate = {
+                                biometricHelper?.authenticate(
+                                    title = "Unlock Keep",
+                                    subtitle = "Authenticate to open app"
+                                ) ?: true
+                            },
+                            onUnlocked = { isBiometricUnlocked = true }
                         )
                     } else if (allDependenciesAvailable) {
                         MainScreen(
@@ -238,6 +262,7 @@ fun MainScreen(
     var showPinSetup by remember { mutableStateOf(false) }
     var pinEnabled by remember { mutableStateOf(pinStore.isPinEnabled()) }
     var biometricTimeout by remember { mutableStateOf(biometricTimeoutStore.getTimeout()) }
+    var biometricLockOnLaunch by remember { mutableStateOf(biometricTimeoutStore.isLockOnLaunchEnabled()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
@@ -245,6 +270,21 @@ fun MainScreen(
     var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
+    var showSecuritySettings by remember { mutableStateOf(false) }
+
+    val handleKillSwitchToggle: (Boolean) -> Unit = { newValue ->
+        if (newValue) {
+            showKillSwitchConfirmDialog = true
+        } else {
+            coroutineScope.launch {
+                val authenticated = onBiometricAuth?.invoke() ?: true
+                if (authenticated) {
+                    withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
+                    killSwitchEnabled = false
+                }
+            }
+        }
+    }
 
     val accountActions = remember {
         AccountActions(
@@ -309,6 +349,30 @@ fun MainScreen(
         }
     }
 
+    if (showKillSwitchConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showKillSwitchConfirmDialog = false },
+            title = { Text("Enable Kill Switch?") },
+            text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
+                        killSwitchEnabled = true
+                        showKillSwitchConfirmDialog = false
+                    }
+                }) {
+                    Text("Enable")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKillSwitchConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showPinSetup) {
         PinSetupScreen(
             pinStore = pinStore,
@@ -317,6 +381,36 @@ fun MainScreen(
                 showPinSetup = false
             },
             onDismiss = { showPinSetup = false }
+        )
+        return
+    }
+
+    if (showSecuritySettings) {
+        SecuritySettingsScreen(
+            pinEnabled = pinEnabled,
+            onSetupPin = { showPinSetup = true },
+            onDisablePin = { currentPin ->
+                val disabled = pinStore.disablePin(currentPin)
+                if (disabled) pinEnabled = false
+                disabled
+            },
+            biometricTimeout = biometricTimeout,
+            onTimeoutChanged = { newTimeout ->
+                coroutineScope.launch {
+                    val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
+                    if (saved) biometricTimeout = newTimeout
+                }
+            },
+            biometricLockOnLaunch = biometricLockOnLaunch,
+            onBiometricLockOnLaunchChanged = { enabled ->
+                coroutineScope.launch {
+                    val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setLockOnLaunch(enabled) }
+                    if (saved) biometricLockOnLaunch = enabled
+                }
+            },
+            killSwitchEnabled = killSwitchEnabled,
+            onKillSwitchToggle = handleKillSwitchToggle,
+            onDismiss = { showSecuritySettings = false }
         )
         return
     }
@@ -460,6 +554,220 @@ fun MainScreen(
         return
     }
 
+    val pinMismatch = connectionState.pinMismatch
+    if (pinMismatch != null) {
+        AlertDialog(
+            onDismissRequest = onDismissPinMismatch,
+            title = { Text("Certificate Pin Mismatch") },
+            text = {
+                Text("The certificate for ${pinMismatch.hostname} has changed. This could indicate a security issue or a legitimate certificate rotation.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
+                        refreshCertificatePins()
+                        onReconnectRelays()
+                    }
+                }) {
+                    Text("Clear Pin & Retry")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissPinMismatch) {
+                    Text("Dismiss")
+                }
+            }
+        )
+    }
+
+    val navController = rememberNavController()
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentDestination = navBackStackEntry?.destination
+                Route.items.forEach { route ->
+                    NavigationBarItem(
+                        icon = { Icon(route.icon, contentDescription = route.label) },
+                        label = { Text(route.label) },
+                        selected = currentDestination?.hierarchy?.any { it.route == route.route } == true,
+                        onClick = {
+                            navController.navigate(route.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = Route.Home.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable(Route.Home.route) {
+                HomeTab(
+                    hasShare = hasShare,
+                    shareInfo = shareInfo,
+                    allAccounts = allAccounts,
+                    peers = peers,
+                    pendingCount = pendingCount,
+                    isConnected = isConnected,
+                    isConnecting = isConnecting,
+                    connectionError = connectionError,
+                    relays = relays,
+                    securityLevel = securityLevel,
+                    killSwitchEnabled = killSwitchEnabled,
+                    onShareDetailsClick = { showShareDetails = true },
+                    onAccountSwitcherClick = { showAccountSwitcher = true },
+                    onImport = { showImportScreen = true },
+                    onImportNsec = { showImportNsecScreen = true },
+                    onConnect = {
+                        coroutineScope.launch {
+                            val cipher = withContext(Dispatchers.IO) {
+                                val key = storage.getActiveShareKey()
+                                runCatching {
+                                    if (key != null) storage.getCipherForShareDecryption(key)
+                                    else storage.getCipherForDecryption()
+                                }.onFailure {
+                                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
+                                }.getOrNull()
+                            }
+                            if (cipher == null) return@launch
+                            onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
+                                authedCipher?.let { onConnect(it) { _, _ -> } }
+                            }
+                        }
+                    },
+                    onKillSwitchToggle = handleKillSwitchToggle
+                )
+            }
+
+            composable(Route.Apps.route) {
+                AppsTab(
+                    hasShare = hasShare,
+                    bunkerStatus = bunkerStatus,
+                    onConnectedAppsClick = { showConnectedApps = true },
+                    onSignPolicyClick = { showSignPolicyScreen = true },
+                    onPermissionsClick = { showPermissionsScreen = true },
+                    onHistoryClick = { showHistoryScreen = true },
+                    onBunkerClick = { showBunkerScreen = true }
+                )
+            }
+
+            composable(Route.Settings.route) {
+                SettingsTab(
+                    hasShare = hasShare,
+                    relays = relays,
+                    certificatePins = certificatePins,
+                    proxyEnabled = proxyEnabled,
+                    proxyHost = proxyHost,
+                    proxyPort = proxyPort,
+                    autoStartEnabled = autoStartEnabled,
+                    foregroundServiceEnabled = foregroundServiceEnabled,
+                    isConnected = isConnected,
+                    onAddRelay = { relay ->
+                        if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
+                            val updated = relays + relay
+                            relays = updated
+                            onRelaysChanged(updated)
+                        }
+                    },
+                    onRemoveRelay = { relay ->
+                        val updated = relays - relay
+                        relays = updated
+                        onRelaysChanged(updated)
+                    },
+                    onClearPin = { hostname ->
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { onClearCertificatePin(hostname) }
+                            refreshCertificatePins()
+                        }
+                    },
+                    onClearAllPins = {
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { onClearAllCertificatePins() }
+                            refreshCertificatePins()
+                        }
+                    },
+                    onProxyToggle = { enabled ->
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
+                            proxyEnabled = enabled
+                            if (isConnected) onReconnectRelays()
+                        }
+                    },
+                    onProxyConfigChange = { host, port ->
+                        coroutineScope.launch {
+                            val saved = withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
+                            if (saved) {
+                                proxyHost = host
+                                proxyPort = port
+                                if (proxyEnabled && isConnected) onReconnectRelays()
+                            }
+                        }
+                    },
+                    onAutoStartToggle = { newValue ->
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { autoStartStore.setEnabled(newValue) }
+                            autoStartEnabled = newValue
+                            onAutoStartChanged(newValue)
+                        }
+                    },
+                    onForegroundServiceToggle = { newValue ->
+                        coroutineScope.launch {
+                            withContext(Dispatchers.IO) { foregroundServiceStore.setEnabled(newValue) }
+                            foregroundServiceEnabled = newValue
+                            onForegroundServiceChanged(newValue)
+                        }
+                    },
+                    onSecurityClick = { showSecuritySettings = true }
+                )
+            }
+
+            composable(Route.Account.route) {
+                AccountTab(
+                    hasShare = hasShare,
+                    shareInfo = shareInfo,
+                    allAccounts = allAccounts,
+                    onAccountSwitcherClick = { showAccountSwitcher = true },
+                    onShareDetailsClick = { showShareDetails = true },
+                    onExportClick = { showExportScreen = true },
+                    onImport = { showImportScreen = true },
+                    onImportNsec = { showImportNsecScreen = true }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeTab(
+    hasShare: Boolean,
+    shareInfo: ShareInfo?,
+    allAccounts: List<AccountInfo>,
+    peers: List<PeerInfo>,
+    pendingCount: Int,
+    isConnected: Boolean,
+    isConnecting: Boolean,
+    connectionError: String?,
+    relays: List<String>,
+    securityLevel: String,
+    killSwitchEnabled: Boolean,
+    onShareDetailsClick: () -> Unit,
+    onAccountSwitcherClick: () -> Unit,
+    onImport: () -> Unit,
+    onImportNsec: () -> Unit,
+    onConnect: () -> Unit,
+    onKillSwitchToggle: (Boolean) -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -475,145 +783,24 @@ fun MainScreen(
 
         KillSwitchCard(
             enabled = killSwitchEnabled,
-            onToggle = { newValue ->
-                if (newValue) {
-                    showKillSwitchConfirmDialog = true
-                } else {
-                    coroutineScope.launch {
-                        val authenticated = onBiometricAuth?.invoke() ?: true
-                        if (authenticated) {
-                            withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
-                            killSwitchEnabled = false
-                        }
-                    }
-                }
-            }
+            onToggle = onKillSwitchToggle
         )
-
-        if (showKillSwitchConfirmDialog) {
-            AlertDialog(
-                onDismissRequest = { showKillSwitchConfirmDialog = false },
-                title = { Text("Enable Kill Switch?") },
-                text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
-                            killSwitchEnabled = true
-                            showKillSwitchConfirmDialog = false
-                        }
-                    }) {
-                        Text("Enable")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showKillSwitchConfirmDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        val pinMismatch = connectionState.pinMismatch
-        if (pinMismatch != null) {
-            AlertDialog(
-                onDismissRequest = onDismissPinMismatch,
-                title = { Text("Certificate Pin Mismatch") },
-                text = {
-                    Text("The certificate for ${pinMismatch.hostname} has changed. This could indicate a security issue or a legitimate certificate rotation.")
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
-                            refreshCertificatePins()
-                            onReconnectRelays()
-                        }
-                    }) {
-                        Text("Clear Pin & Retry")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = onDismissPinMismatch) {
-                        Text("Dismiss")
-                    }
-                }
-            )
-        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        if (allAccounts.isNotEmpty()) {
+            AccountSelectorCard(
+                accountCount = allAccounts.size,
+                onClick = onAccountSwitcherClick
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         val currentShareInfo = shareInfo
         if (hasShare && currentShareInfo != null) {
-            if (allAccounts.isNotEmpty()) {
-                AccountSelectorCard(
-                    accountCount = allAccounts.size,
-                    onClick = { showAccountSwitcher = true }
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
             ShareInfoCard(
                 info = currentShareInfo,
-                onClick = { showShareDetails = true }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            RelaysCard(
-                relays = relays,
-                onAddRelay = { relay ->
-                    if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
-                        val updated = relays + relay
-                        relays = updated
-                        onRelaysChanged(updated)
-                    }
-                },
-                onRemoveRelay = { relay ->
-                    val updated = relays - relay
-                    relays = updated
-                    onRelaysChanged(updated)
-                }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            CertificatePinsCard(
-                pins = certificatePins,
-                onClearPin = { hostname ->
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { onClearCertificatePin(hostname) }
-                        refreshCertificatePins()
-                    }
-                },
-                onClearAllPins = {
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { onClearAllCertificatePins() }
-                        refreshCertificatePins()
-                    }
-                }
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            ProxySettingsCard(
-                enabled = proxyEnabled,
-                host = proxyHost,
-                port = proxyPort,
-                onToggle = { enabled ->
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
-                        proxyEnabled = enabled
-                        if (isConnected) onReconnectRelays()
-                    }
-                },
-                onConfigChange = { host, port ->
-                    coroutineScope.launch {
-                        val saved = withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
-                        if (saved) {
-                            proxyHost = host
-                            proxyPort = port
-                            if (proxyEnabled && isConnected) onReconnectRelays()
-                        }
-                    }
-                }
+                onClick = onShareDetailsClick
             )
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -622,28 +809,8 @@ fun MainScreen(
                 isConnecting = isConnecting,
                 error = connectionError,
                 relaysConfigured = relays.isNotEmpty(),
-                onConnect = {
-                    coroutineScope.launch {
-                        val cipher = withContext(Dispatchers.IO) {
-                            val key = storage.getActiveShareKey()
-                            runCatching {
-                                if (key != null) storage.getCipherForShareDecryption(key)
-                                else storage.getCipherForDecryption()
-                            }.onFailure {
-                                if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
-                            }.getOrNull()
-                        }
-                        if (cipher == null) return@launch
-
-                        onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
-                            authedCipher?.let { onConnect(it) { _, _ -> } }
-                        }
-                    }
-                }
+                onConnect = onConnect
             )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            ConnectedAppsCard(onClick = { showConnectedApps = true })
             Spacer(modifier = Modifier.height(16.dp))
 
             PeersCard(peers)
@@ -652,80 +819,245 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 Badge { Text("$pendingCount pending") }
             }
+        } else {
+            NoShareCard(
+                onImport = onImport,
+                onImportNsec = onImportNsec
+            )
+        }
 
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun AppsTab(
+    hasShare: Boolean,
+    bunkerStatus: io.privkey.keep.uniffi.BunkerStatus,
+    onConnectedAppsClick: () -> Unit,
+    onSignPolicyClick: () -> Unit,
+    onPermissionsClick: () -> Unit,
+    onHistoryClick: () -> Unit,
+    onBunkerClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = "Apps", style = MaterialTheme.typography.headlineLarge)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (hasShare) {
+            ConnectedAppsCard(onClick = onConnectedAppsClick)
             Spacer(modifier = Modifier.height(16.dp))
 
             Nip55SettingsCard(
-                onSignPolicyClick = { showSignPolicyScreen = true },
-                onPermissionsClick = { showPermissionsScreen = true },
-                onHistoryClick = { showHistoryScreen = true }
+                onSignPolicyClick = onSignPolicyClick,
+                onPermissionsClick = onPermissionsClick,
+                onHistoryClick = onHistoryClick
             )
             Spacer(modifier = Modifier.height(16.dp))
 
             BunkerCard(
                 status = bunkerStatus,
-                onClick = { showBunkerScreen = true }
+                onClick = onBunkerClick
             )
         } else {
-            if (allAccounts.isNotEmpty()) {
-                AccountSelectorCard(
-                    accountCount = allAccounts.size,
-                    onClick = { showAccountSwitcher = true }
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Import a key to manage connected apps",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            NoShareCard(
-                onImport = { showImportScreen = true },
-                onImportNsec = { showImportNsecScreen = true }
-            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun SettingsTab(
+    hasShare: Boolean,
+    relays: List<String>,
+    certificatePins: List<CertificatePin>,
+    proxyEnabled: Boolean,
+    proxyHost: String,
+    proxyPort: Int,
+    autoStartEnabled: Boolean,
+    foregroundServiceEnabled: Boolean,
+    isConnected: Boolean,
+    onAddRelay: (String) -> Unit,
+    onRemoveRelay: (String) -> Unit,
+    onClearPin: (String) -> Unit,
+    onClearAllPins: () -> Unit,
+    onProxyToggle: (Boolean) -> Unit,
+    onProxyConfigChange: (String, Int) -> Unit,
+    onAutoStartToggle: (Boolean) -> Unit,
+    onForegroundServiceToggle: (Boolean) -> Unit,
+    onSecurityClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = "Settings", style = MaterialTheme.typography.headlineLarge)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (hasShare) {
+            RelaysCard(
+                relays = relays,
+                onAddRelay = onAddRelay,
+                onRemoveRelay = onRemoveRelay
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            CertificatePinsCard(
+                pins = certificatePins,
+                onClearPin = onClearPin,
+                onClearAllPins = onClearAllPins
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            ProxySettingsCard(
+                enabled = proxyEnabled,
+                host = proxyHost,
+                port = proxyPort,
+                onToggle = onProxyToggle,
+                onConfigChange = onProxyConfigChange
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         AutoStartCard(
             enabled = autoStartEnabled,
-            onToggle = { newValue ->
-                coroutineScope.launch {
-                    withContext(Dispatchers.IO) { autoStartStore.setEnabled(newValue) }
-                    autoStartEnabled = newValue
-                    onAutoStartChanged(newValue)
-                }
-            }
+            onToggle = onAutoStartToggle
         )
         Spacer(modifier = Modifier.height(16.dp))
 
         ForegroundServiceCard(
             enabled = foregroundServiceEnabled,
-            onToggle = { newValue ->
-                coroutineScope.launch {
-                    withContext(Dispatchers.IO) { foregroundServiceStore.setEnabled(newValue) }
-                    foregroundServiceEnabled = newValue
-                    onForegroundServiceChanged(newValue)
-                }
-            }
+            onToggle = onForegroundServiceToggle
         )
         Spacer(modifier = Modifier.height(16.dp))
 
-        PinSettingsCard(
-            enabled = pinEnabled,
-            onSetupPin = { showPinSetup = true },
-            onDisablePin = { currentPin ->
-                val disabled = pinStore.disablePin(currentPin)
-                if (disabled) pinEnabled = false
-                disabled
+        SecuritySettingsCard(onClick = onSecurityClick)
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SecuritySettingsCard(onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Security", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "PIN, biometrics, kill switch",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        )
+            Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun AccountTab(
+    hasShare: Boolean,
+    shareInfo: ShareInfo?,
+    allAccounts: List<AccountInfo>,
+    onAccountSwitcherClick: () -> Unit,
+    onShareDetailsClick: () -> Unit,
+    onExportClick: () -> Unit,
+    onImport: () -> Unit,
+    onImportNsec: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = "Account", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
-        BiometricTimeoutCard(
-            currentTimeout = biometricTimeout,
-            onTimeoutChanged = { newTimeout ->
-                coroutineScope.launch {
-                    val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
-                    if (saved) biometricTimeout = newTimeout
+        if (allAccounts.isNotEmpty()) {
+            AccountSelectorCard(
+                accountCount = allAccounts.size,
+                onClick = onAccountSwitcherClick
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        val currentShareInfo = shareInfo
+        if (hasShare && currentShareInfo != null) {
+            ShareInfoCard(
+                info = currentShareInfo,
+                onClick = onShareDetailsClick
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Key Management", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onExportClick,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Export Share")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onImport,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Import Share")
+                        }
+                        OutlinedButton(
+                            onClick = onImportNsec,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Import nsec")
+                        }
+                    }
                 }
             }
-        )
+        } else {
+            NoShareCard(
+                onImport = onImport,
+                onImportNsec = onImportNsec
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
