@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Arrays
 import java.util.UUID
 import javax.crypto.Cipher
 
@@ -193,6 +194,35 @@ internal class AccountActions(
             onImportStateChanged(ImportState.Error("Invalid share format"))
             return
         }
+        executeImport(cipher, onImportStateChanged) { keepMobile.importShare(data, passphrase, name) }
+    }
+
+    fun importNsec(
+        nsec: String,
+        name: String,
+        cipher: Cipher,
+        onImportStateChanged: (ImportState) -> Unit
+    ) {
+        onImportStateChanged(ImportState.Importing)
+        val keyBytes = nsecToBytes(nsec) ?: run {
+            onImportStateChanged(ImportState.Error("Invalid nsec format"))
+            return
+        }
+        executeImport(cipher, onImportStateChanged) {
+            try {
+                val hexKey = keyBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                keepMobile.importNsec(hexKey, name)
+            } finally {
+                Arrays.fill(keyBytes, 0.toByte())
+            }
+        }
+    }
+
+    private fun executeImport(
+        cipher: Cipher,
+        onImportStateChanged: (ImportState) -> Unit,
+        apiCall: suspend () -> ShareInfo
+    ) {
         coroutineScope.launch {
             val importId = UUID.randomUUID().toString()
             storage.setPendingCipher(importId, cipher)
@@ -200,7 +230,7 @@ internal class AccountActions(
                 val result = withContext(Dispatchers.IO) {
                     storage.setRequestIdContext(importId)
                     try {
-                        keepMobile.importShare(data, passphrase, name)
+                        apiCall()
                     } finally {
                         storage.clearRequestIdContext()
                     }

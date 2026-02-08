@@ -62,6 +62,7 @@ fun ImportShareScreen(
     onDismiss: () -> Unit,
     importState: ImportState
 ) {
+    val context = LocalContext.current
     val shareData = remember { SecureShareData(MAX_SHARE_LENGTH) }
     var shareDataDisplay by remember { mutableStateOf("") }
     val passphrase = remember { SecurePassphrase() }
@@ -70,6 +71,11 @@ fun ImportShareScreen(
     var showScanner by remember { mutableStateOf(false) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose { setSecureScreen(context, false) }
+    }
 
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {
@@ -226,7 +232,7 @@ fun ImportShareScreen(
 }
 
 @Composable
-private fun ImportButtons(
+internal fun ImportButtons(
     importState: ImportState,
     canImport: Boolean,
     onDismiss: () -> Unit,
@@ -268,7 +274,7 @@ private fun ImportButtons(
 }
 
 @Composable
-private fun StatusCard(
+internal fun StatusCard(
     text: String,
     containerColor: Color,
     contentColor: Color
@@ -284,7 +290,9 @@ private fun StatusCard(
 @Composable
 fun QrScannerScreen(
     onCodeScanned: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    validator: (String) -> Boolean = ::isValidKshareFormat,
+    title: String = "Scan FROST Share QR Code"
 ) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -312,14 +320,16 @@ fun QrScannerScreen(
         return
     }
 
-    CameraPreview(context, onCodeScanned, onDismiss)
+    CameraPreview(context, onCodeScanned, onDismiss, validator, title)
 }
 
 @Composable
 private fun CameraPreview(
     context: Context,
     onCodeScanned: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    validator: (String) -> Boolean,
+    title: String
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -371,7 +381,7 @@ private fun CameraPreview(
                         if (scanned.get()) return@addOnSuccessListener
                         barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
                             ?.rawValue
-                            ?.takeIf { isValidKshareFormat(it) }
+                            ?.takeIf { validator(it) }
                             ?.let {
                                 if (scanned.compareAndSet(false, true)) {
                                     onCodeScanned(it)
@@ -397,19 +407,19 @@ private fun CameraPreview(
 
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-        ScannerOverlay(onDismiss)
+        ScannerOverlay(title, onDismiss)
     }
 }
 
 @Composable
-private fun ScannerOverlay(onDismiss: () -> Unit) {
+private fun ScannerOverlay(title: String, onDismiss: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().statusBarsPadding().padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Scan FROST Share QR Code",
+            text = title,
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface
         )
