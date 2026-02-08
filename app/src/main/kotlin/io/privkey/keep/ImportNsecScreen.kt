@@ -5,11 +5,16 @@ import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import javax.crypto.Cipher
 
@@ -29,6 +34,7 @@ fun ImportNsecScreen(
     var nsecDisplay by remember { mutableStateOf("") }
     var keyName by remember { mutableStateOf("Mobile Key") }
     var showScanner by remember { mutableStateOf(false) }
+    var isNsecVisible by remember { mutableStateOf(false) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
@@ -93,7 +99,19 @@ fun ImportNsecScreen(
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 3,
-            enabled = isInputEnabled
+            enabled = isInputEnabled,
+            visualTransformation = if (isNsecVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(
+                    onClick = { isNsecVisible = !isNsecVisible },
+                    enabled = isInputEnabled
+                ) {
+                    Icon(
+                        if (isNsecVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (isNsecVisible) "Hide nsec" else "Show nsec"
+                    )
+                }
+            }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
