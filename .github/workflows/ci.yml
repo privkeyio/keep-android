@@ -12,8 +12,6 @@ concurrency:
 
 env:
   NDK_VERSION: "29.0.14206865"
-  RUST_VERSION: "1.85.0"
-  RUST_TARGETS: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
 jobs:
   build:
@@ -41,12 +39,6 @@ jobs:
       - name: Install Android NDK
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: ${{ env.RUST_TARGETS }}
-
       - name: Cache Rust
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
@@ -56,9 +48,6 @@ jobs:
         uses: taiki-e/install-action@3f67faa728964808f52294a9cd15561b15550b28 # v2
         with:
           tool: cargo-ndk
-
-      - name: Install Rust targets
-        run: rustup target add aarch64-linux-android
 
       - name: Build native libraries
         run: ./build-rust.sh
@@ -100,12 +89,6 @@ jobs:
       - name: Install Android NDK
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: ${{ env.RUST_TARGETS }}
-
       - name: Cache Rust
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
@@ -115,9 +98,6 @@ jobs:
         uses: taiki-e/install-action@3f67faa728964808f52294a9cd15561b15550b28 # v2
         with:
           tool: cargo-ndk
-
-      - name: Install Rust targets
-        run: rustup target add x86_64-linux-android
 
       - name: Build native libraries
         run: ./build-rust.sh
