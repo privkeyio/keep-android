@@ -14,14 +14,14 @@ class RelayConfigStore(context: Context) {
         private const val RELAY_SEPARATOR = "\n"
         internal const val MAX_RELAYS = 20
         internal val RELAY_URL_REGEX = BunkerConfigStore.RELAY_URL_REGEX
-        private val PORT_REGEX = Regex(":(\\d{1,5})")
+        private val PORT_REGEX = Regex(":(\\d+)")
 
         internal fun isValidPort(url: String): Boolean {
             val port = PORT_REGEX.find(url.removePrefix("wss://"))
                 ?.groupValues?.get(1)?.toIntOrNull()
             return port == null || port in 1..65535
         }
-        val DEFAULT_RELAYS = listOf(
+        internal val DEFAULT_RELAYS = listOf(
             "wss://relay.primal.net/",
             "wss://relay.nsec.app/",
             "wss://relay.damus.io/",

@@ -797,10 +797,8 @@ fun MainScreen(
                     },
                     onSecurityClick = { showSecuritySettings = true },
                     onClearLogsAndActivity = {
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
-                                permissionStore.cleanupExpired()
-                            }
+                        withContext(Dispatchers.IO) {
+                            permissionStore.cleanupExpired()
                         }
                     }
                 )
@@ -983,7 +981,7 @@ private fun SettingsTab(
     onAutoStartToggle: (Boolean) -> Unit,
     onForegroundServiceToggle: (Boolean) -> Unit,
     onSecurityClick: () -> Unit,
-    onClearLogsAndActivity: () -> Unit
+    onClearLogsAndActivity: suspend () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1064,8 +1062,10 @@ private fun SettingsTab(
 
         OutlinedButton(
             onClick = {
-                onClearLogsAndActivity()
-                scope.launch { refreshDatabaseSize() }
+                scope.launch {
+                    onClearLogsAndActivity()
+                    refreshDatabaseSize()
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
