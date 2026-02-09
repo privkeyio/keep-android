@@ -34,24 +34,43 @@ class BiometricHelper(
         }
     }
 
+    enum class AuthResult {
+        SUCCESS,
+        FAILED,
+        LOCKOUT,
+        LOCKOUT_PERMANENT
+    }
+
     suspend fun authenticate(
         title: String = "Authenticate",
         subtitle: String = "Confirm your identity",
         negativeButtonText: String = "Cancel",
         forcePrompt: Boolean = false
-    ): Boolean {
+    ): Boolean = authenticateWithResult(title, subtitle, negativeButtonText, forcePrompt) == AuthResult.SUCCESS
+
+    suspend fun authenticateWithResult(
+        title: String = "Authenticate",
+        subtitle: String = "Confirm your identity",
+        negativeButtonText: String = "Cancel",
+        forcePrompt: Boolean = false
+    ): AuthResult {
         if (!forcePrompt && timeoutStore?.requiresBiometric() == false) {
-            return true
+            return AuthResult.SUCCESS
         }
         return suspendCoroutine { continuation ->
             val callback = object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     timeoutStore?.recordAuthentication()
-                    continuation.resume(true)
+                    continuation.resume(AuthResult.SUCCESS)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    continuation.resume(false)
+                    val result = when (errorCode) {
+                        BiometricPrompt.ERROR_LOCKOUT -> AuthResult.LOCKOUT
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> AuthResult.LOCKOUT_PERMANENT
+                        else -> AuthResult.FAILED
+                    }
+                    continuation.resume(result)
                 }
 
                 override fun onAuthenticationFailed() {}

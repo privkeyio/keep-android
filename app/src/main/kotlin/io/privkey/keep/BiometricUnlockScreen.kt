@@ -11,16 +11,17 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun BiometricUnlockScreen(
-    onAuthenticate: suspend () -> Boolean,
+    onAuthenticate: suspend () -> BiometricHelper.AuthResult,
     onUnlocked: () -> Unit
 ) {
     val context = LocalContext.current
-    var authFailed by remember { mutableStateOf(false) }
+    var authResult by remember { mutableStateOf<BiometricHelper.AuthResult?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
     suspend fun attemptAuth() {
-        authFailed = false
-        if (onAuthenticate()) onUnlocked() else authFailed = true
+        authResult = null
+        val result = onAuthenticate()
+        if (result == BiometricHelper.AuthResult.SUCCESS) onUnlocked() else authResult = result
     }
 
     DisposableEffect(context) {
@@ -55,11 +56,30 @@ fun BiometricUnlockScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            if (authFailed) {
+            val result = authResult
+            if (result != null) {
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
-                    Text("Try Again")
+                when (result) {
+                    BiometricHelper.AuthResult.LOCKOUT -> {
+                        Text(
+                            text = "Too many attempts. Try again shortly.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    BiometricHelper.AuthResult.LOCKOUT_PERMANENT -> {
+                        Text(
+                            text = "Biometric locked. Use device PIN/password to unlock, then try again.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    else -> {
+                        Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
+                            Text("Try Again")
+                        }
+                    }
                 }
             }
         }

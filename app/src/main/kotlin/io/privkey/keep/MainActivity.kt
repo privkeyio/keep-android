@@ -87,8 +87,10 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
 
-            val biometricAvailable = biometricHelper?.checkBiometricStatus() ==
-                BiometricHelper.BiometricStatus.AVAILABLE
+            val biometricAvailable = remember {
+                biometricHelper?.checkBiometricStatus() ==
+                    BiometricHelper.BiometricStatus.AVAILABLE
+            }
 
             var isBiometricUnlocked by remember {
                 mutableStateOf(
@@ -100,6 +102,9 @@ class MainActivity : FragmentActivity() {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         isPinUnlocked = pinStore?.isSessionValid() ?: true
+                        if (biometricAvailable && biometricTimeoutStore?.isLockOnLaunchEnabled() == true) {
+                            isBiometricUnlocked = false
+                        }
                     }
                 }
                 lifecycle.addObserver(observer)
@@ -122,7 +127,8 @@ class MainActivity : FragmentActivity() {
                                 {
                                     biometricHelper?.authenticate(
                                         title = "Unlock Keep",
-                                        subtitle = "Authenticate to open app"
+                                        subtitle = "Authenticate to open app",
+                                        forcePrompt = true
                                     ) ?: false
                                 }
                             } else null,
@@ -131,11 +137,11 @@ class MainActivity : FragmentActivity() {
                     } else if (requiresBiometric) {
                         BiometricUnlockScreen(
                             onAuthenticate = {
-                                biometricHelper?.authenticate(
+                                biometricHelper?.authenticateWithResult(
                                     title = "Unlock Keep",
                                     subtitle = "Authenticate to open app",
                                     forcePrompt = true
-                                ) ?: false
+                                ) ?: BiometricHelper.AuthResult.FAILED
                             },
                             onUnlocked = { isBiometricUnlocked = true }
                         )
@@ -641,6 +647,7 @@ fun MainScreen(
                     relays = relays,
                     securityLevel = securityLevel,
                     killSwitchEnabled = killSwitchEnabled,
+                    biometricAvailable = biometricAvailable,
                     onShareDetailsClick = { showShareDetails = true },
                     onAccountSwitcherClick = { showAccountSwitcher = true },
                     onImport = { showImportScreen = true },
@@ -782,6 +789,7 @@ private fun HomeTab(
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
     onConnect: () -> Unit,
+    biometricAvailable: Boolean,
     onKillSwitchToggle: (Boolean) -> Unit
 ) {
     Column(
@@ -799,7 +807,8 @@ private fun HomeTab(
 
         KillSwitchCard(
             enabled = killSwitchEnabled,
-            onToggle = onKillSwitchToggle
+            onToggle = onKillSwitchToggle,
+            toggleEnabled = biometricAvailable
         )
 
         Spacer(modifier = Modifier.height(16.dp))

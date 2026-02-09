@@ -17,7 +17,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit, toggleEnabled: Boolean = true) {
     val colors = MaterialTheme.colorScheme
     val (containerColor, contentColor) = if (enabled) {
         colors.errorContainer to colors.onErrorContainer
@@ -50,6 +50,7 @@ fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             Switch(
                 checked = enabled,
                 onCheckedChange = onToggle,
+                enabled = toggleEnabled,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = colors.error,
                     checkedTrackColor = containerColor
