@@ -1,10 +1,13 @@
 package io.privkey.keep
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.PinStore
@@ -72,9 +75,9 @@ fun PinSettingsCard(
                         },
                         label = { Text("Current PIN") },
                         singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.NumberPassword
                         ),
                         isError = error != null,
                         modifier = Modifier.fillMaxWidth()
@@ -223,136 +226,96 @@ fun BiometricTimeoutCard(
 }
 
 @Composable
-fun ProxySettingsCard(
+fun TorOrbotCard(
     enabled: Boolean,
-    host: String,
     port: Int,
-    onToggle: (Boolean) -> Unit,
-    onConfigChange: (String, Int) -> Unit
+    onActivate: (Int) -> Unit,
+    onDeactivate: () -> Unit
 ) {
-    var showConfigDialog by remember { mutableStateOf(false) }
-    var hostInput by remember(host) { mutableStateOf(host) }
     var portInput by remember(port) { mutableStateOf(port.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun dismissDialog() {
-        showConfigDialog = false
-        hostInput = host
-        portInput = port.toString()
-        error = null
-    }
-
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("SOCKS Proxy", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (enabled) "$host:$port" else "Route connections through Tor",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(checked = enabled, onCheckedChange = onToggle)
+            Text("Tor/Orbot setup", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Connect through Tor with Orbot",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            val steps = listOf(
+                "Install Orbot.",
+                "Start Orbot.",
+                "In Orbot, check the Socks port. The default uses 9050.",
+                "If necessary change the port in Orbot.",
+                "Configure the Socks port below.",
+                "Press the Activate button to use Orbot as a proxy."
+            )
+            steps.forEachIndexed { index, step ->
+                Text(
+                    "${index + 1}. $step",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = portInput,
+                onValueChange = { value ->
+                    if (value.isEmpty() || value.all { it.isDigit() }) {
+                        portInput = value
+                        error = null
+                    }
+                },
+                label = { Text("Socks Port") },
+                placeholder = { Text("9050") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number
+                ),
+                isError = error != null,
+                modifier = Modifier.fillMaxWidth()
+            )
+            error?.let {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
             if (enabled) {
-                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = { onConfigChange("127.0.0.1", 9050) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Tor (9050)")
+                    Text(
+                        "Proxy active on port $port",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    OutlinedButton(onClick = onDeactivate) {
+                        Text("Deactivate")
                     }
-                    OutlinedButton(
-                        onClick = { showConfigDialog = true },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Configure")
-                    }
+                }
+            } else {
+                Button(
+                    onClick = {
+                        val p = portInput.toIntOrNull()
+                        if (p == null || !ProxyConfigStore.isValidPort(p)) {
+                            error = "Port must be 1-65535"
+                        } else {
+                            onActivate(p)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Activate")
                 }
             }
         }
-    }
-
-    if (showConfigDialog) {
-        AlertDialog(
-            onDismissRequest = ::dismissDialog,
-            title = { Text("Configure Proxy") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = hostInput,
-                        onValueChange = {
-                            hostInput = it
-                            error = null
-                        },
-                        label = { Text("Host") },
-                        placeholder = { Text("127.0.0.1") },
-                        singleLine = true,
-                        isError = error != null
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = portInput,
-                        onValueChange = { value ->
-                            if (value.isEmpty() || value.all { it.isDigit() }) {
-                                portInput = value
-                                error = null
-                            }
-                        },
-                        label = { Text("Port") },
-                        placeholder = { Text("9050") },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
-                        ),
-                        isError = error != null
-                    )
-                    error?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            it,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Only localhost addresses allowed",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val newHost = hostInput.trim()
-                    val newPort = portInput.toIntOrNull()
-                    if (!ProxyConfigStore.isValidHost(newHost)) {
-                        error = "Host must be localhost"
-                    } else if (newPort == null || !ProxyConfigStore.isValidPort(newPort)) {
-                        error = "Port must be 1-65535"
-                    } else {
-                        onConfigChange(newHost, newPort)
-                        dismissDialog()
-                    }
-                }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = ::dismissDialog) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 }

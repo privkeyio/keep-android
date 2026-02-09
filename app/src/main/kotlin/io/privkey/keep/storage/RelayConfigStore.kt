@@ -14,6 +14,19 @@ class RelayConfigStore(context: Context) {
         private const val RELAY_SEPARATOR = "\n"
         internal const val MAX_RELAYS = 20
         internal val RELAY_URL_REGEX = BunkerConfigStore.RELAY_URL_REGEX
+        private val PORT_REGEX = Regex(":(\\d{1,5})")
+
+        internal fun isValidPort(url: String): Boolean {
+            val port = PORT_REGEX.find(url.removePrefix("wss://"))
+                ?.groupValues?.get(1)?.toIntOrNull()
+            return port == null || port in 1..65535
+        }
+        val DEFAULT_RELAYS = listOf(
+            "wss://relay.primal.net/",
+            "wss://relay.nsec.app/",
+            "wss://relay.damus.io/",
+            "wss://nos.lol/"
+        )
     }
 
     private val prefs: SharedPreferences = run {
@@ -22,8 +35,9 @@ class RelayConfigStore(context: Context) {
     }
 
     fun getRelays(): List<String> {
-        val stored = prefs.getString(KEY_RELAYS, null) ?: return emptyList()
-        return stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
+        val stored = prefs.getString(KEY_RELAYS, null) ?: return DEFAULT_RELAYS
+        val relays = stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
+        return relays.ifEmpty { DEFAULT_RELAYS }
     }
 
     suspend fun setRelays(relays: List<String>) {
@@ -64,7 +78,7 @@ class RelayConfigStore(context: Context) {
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
         val validated = withContext(Dispatchers.Default) {
             relays
-                .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) }
+                .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) && isValidPort(it) }
                 .take(MAX_RELAYS)
         }
         withContext(Dispatchers.IO) {

@@ -18,36 +18,127 @@ import io.privkey.keep.uniffi.PeerStatus
 fun RelaysCard(
     relays: List<String>,
     onAddRelay: (String) -> Unit,
-    onRemoveRelay: (String) -> Unit
+    onRemoveRelay: (String) -> Unit,
+    profileRelays: List<String>,
+    onAddProfileRelay: (String) -> Unit,
+    onRemoveProfileRelay: (String) -> Unit
 ) {
-    var showAddDialog by remember { mutableStateOf(false) }
-    var newRelayUrl by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun dismissDialog() {
-        showAddDialog = false
-        newRelayUrl = ""
-        error = null
-    }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Relays", style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = { showAddDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add relay")
-                }
-            }
+            Text("Relays", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text("Active relays", style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Manage the relays used for communication with external applications.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             if (relays.isEmpty()) {
                 Text(
                     "No relays configured",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
                 )
             } else {
+                relays.forEach { relay ->
+                    RelayRow(relay)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showEditDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Edit Relays")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text("Default profile relays", style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Manage the relays used to fetch your profile data.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (profileRelays.isEmpty()) {
+                Text(
+                    "No profile relays configured",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                profileRelays.forEach { relay ->
+                    RelayRow(relay)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showEditProfileDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Edit Profile Relays")
+            }
+        }
+    }
+
+    if (showEditDialog) {
+        EditRelaysDialog(
+            title = "Edit Relays",
+            relays = relays,
+            onAddRelay = onAddRelay,
+            onRemoveRelay = onRemoveRelay,
+            onDismiss = { showEditDialog = false }
+        )
+    }
+
+    if (showEditProfileDialog) {
+        EditRelaysDialog(
+            title = "Edit Profile Relays",
+            relays = profileRelays,
+            onAddRelay = onAddProfileRelay,
+            onRemoveRelay = onRemoveProfileRelay,
+            onDismiss = { showEditProfileDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun RelayRow(relay: String) {
+    Text(
+        relay.removePrefix("wss://"),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        style = MaterialTheme.typography.bodyMedium
+    )
+}
+
+@Composable
+private fun EditRelaysDialog(
+    title: String,
+    relays: List<String>,
+    onAddRelay: (String) -> Unit,
+    onRemoveRelay: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newRelayUrl by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
                 relays.forEach { relay ->
                     Row(
                         modifier = Modifier
@@ -73,16 +164,12 @@ fun RelaysCard(
                         }
                     }
                 }
-            }
-        }
-    }
-
-    if (showAddDialog) {
-        AlertDialog(
-            onDismissRequest = ::dismissDialog,
-            title = { Text("Add Relay") },
-            text = {
-                Column {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedTextField(
                         value = newRelayUrl,
                         onValueChange = {
@@ -92,46 +179,48 @@ fun RelaysCard(
                         label = { Text("Relay URL") },
                         placeholder = { Text("wss://relay.example.com") },
                         singleLine = true,
-                        isError = error != null
+                        isError = error != null,
+                        modifier = Modifier.weight(1f)
                     )
-                    error?.let {
-                        Text(
-                            it,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val raw = newRelayUrl.trim()
-                    val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
-                    when {
-                        url.length > 256 -> error = "URL too long"
-                        !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
-                        else -> {
-                            val port = Regex(":(\\d{1,5})").find(url.removePrefix("wss://"))
-                                ?.groupValues?.get(1)?.toIntOrNull()
-                            if (port != null && port !in 1..65535) {
-                                error = "Port must be between 1 and 65535"
-                                return@TextButton
-                            }
-                            onAddRelay(url)
-                            dismissDialog()
+                    IconButton(onClick = {
+                        val raw = newRelayUrl.trim()
+                        if (raw.contains("://") && !raw.startsWith("wss://")) {
+                            error = "Only wss:// URLs are supported"
+                            return@IconButton
                         }
+                        val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
+                        when {
+                            url.length > 256 -> error = "URL too long"
+                            !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
+                            else -> {
+                                if (!RelayConfigStore.isValidPort(url)) {
+                                    error = "Port must be between 1 and 65535"
+                                    return@IconButton
+                                }
+                                onAddRelay(url)
+                                newRelayUrl = ""
+                                error = null
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add relay")
                     }
-                }) {
-                    Text("Add")
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = ::dismissDialog) {
-                    Text("Cancel")
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
-        )
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        }
+    )
 }
 
 @Composable

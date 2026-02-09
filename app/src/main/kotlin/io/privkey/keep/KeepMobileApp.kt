@@ -17,6 +17,7 @@ import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.ProfileRelayConfigStore
 import io.privkey.keep.storage.ProxyConfig
 import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
@@ -59,6 +60,7 @@ class KeepMobileApp : Application() {
     private var signingNotificationManager: SigningNotificationManager? = null
     private var bunkerConfigStore: BunkerConfigStore? = null
     private var proxyConfigStore: ProxyConfigStore? = null
+    private var profileRelayConfigStore: ProfileRelayConfigStore? = null
     private var announceJob: Job? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
@@ -93,6 +95,8 @@ class KeepMobileApp : Application() {
             biometricTimeoutStore = BiometricTimeoutStore(this)
             runCatching { proxyConfigStore = ProxyConfigStore(this) }
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize ProxyConfigStore: ${it::class.simpleName}") }
+            runCatching { profileRelayConfigStore = ProfileRelayConfigStore(this) }
+                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize ProfileRelayConfigStore: ${it::class.simpleName}") }
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         }.onFailure { e ->
@@ -182,6 +186,8 @@ class KeepMobileApp : Application() {
     fun getBunkerConfigStore(): BunkerConfigStore? = bunkerConfigStore
 
     fun getProxyConfigStore(): ProxyConfigStore? = proxyConfigStore
+
+    fun getProfileRelayConfigStore(): ProfileRelayConfigStore? = profileRelayConfigStore
 
     fun updateBunkerService(enabled: Boolean) {
         bunkerConfigStore?.setEnabled(enabled)
@@ -317,6 +323,7 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
+            runAccountSwitchCleanup("clear profile relays") { profileRelayConfigStore?.clearRelays() }
         }
     }
 
