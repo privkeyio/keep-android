@@ -1,9 +1,12 @@
 package io.privkey.keep.storage
 
+import android.content.ContextWrapper
+import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -130,7 +133,7 @@ class ProfileRelayConfigStoreTest {
 
     @Test
     fun maxRelaysEnforced() = runBlocking {
-        val tooMany = (1..25).map { "wss://relay$it.example.com/" }
+        val tooMany = (1..25).map { "wss://relay.damus.io/path$it" }
 
         store.setRelaysForAccount("account_a", tooMany)
         val saved = store.getRelaysForAccount("account_a")
@@ -140,13 +143,15 @@ class ProfileRelayConfigStoreTest {
 
     @Test
     fun storeInitFailureDoesNotCrash() {
-        val store: ProfileRelayConfigStore? = runCatching {
-            ProfileRelayConfigStore(ApplicationProvider.getApplicationContext())
-        }.getOrNull()
-
-        if (store != null) {
-            val relays = store.getRelaysForAccount("test_account")
-            assertTrue(relays is List<String>)
+        val brokenContext = object : ContextWrapper(ApplicationProvider.getApplicationContext()) {
+            override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences {
+                throw RuntimeException("Simulated storage failure")
+            }
         }
+
+        val result = runCatching { ProfileRelayConfigStore(brokenContext) }
+
+        assertTrue("Construction with broken context should fail", result.isFailure)
+        assertNull("runCatching should yield null on failure", result.getOrNull())
     }
 }
