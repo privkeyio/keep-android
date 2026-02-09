@@ -87,9 +87,11 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
 
-            val biometricAvailable = remember {
-                biometricHelper?.checkBiometricStatus() ==
-                    BiometricHelper.BiometricStatus.AVAILABLE
+            var biometricAvailable by remember {
+                mutableStateOf(
+                    biometricHelper?.checkBiometricStatus() ==
+                        BiometricHelper.BiometricStatus.AVAILABLE
+                )
             }
 
             var isBiometricUnlocked by remember {
@@ -102,7 +104,11 @@ class MainActivity : FragmentActivity() {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         isPinUnlocked = pinStore?.isSessionValid() ?: true
-                        if (biometricAvailable && biometricTimeoutStore?.isLockOnLaunchEnabled() == true) {
+                        biometricAvailable = biometricHelper?.checkBiometricStatus() ==
+                            BiometricHelper.BiometricStatus.AVAILABLE
+                        if (biometricAvailable &&
+                            biometricTimeoutStore?.isLockOnLaunchEnabled() == true &&
+                            biometricTimeoutStore.requiresBiometric()) {
                             isBiometricUnlocked = false
                         }
                     }
