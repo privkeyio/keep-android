@@ -323,7 +323,6 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
-            runAccountSwitchCleanup("clear profile relays") { profileRelayConfigStore?.clearRelays() }
         }
     }
 

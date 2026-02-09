@@ -308,7 +308,7 @@ fun MainScreen(
     var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
-    var profileRelays by remember { mutableStateOf(profileRelayConfigStore?.getRelays() ?: emptyList()) }
+    var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
 
     val handleKillSwitchToggle: (Boolean) -> Unit = { newValue ->
@@ -352,16 +352,28 @@ fun MainScreen(
         certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
     }
 
+    fun loadProfileRelays(accountKey: String?): List<String> {
+        if (accountKey == null) return emptyList()
+        return profileRelayConfigStore?.getRelaysForAccount(accountKey) ?: emptyList()
+    }
+
+    suspend fun saveProfileRelays(updated: List<String>) {
+        val key = withContext(Dispatchers.IO) { storage.getActiveShareKey() } ?: return
+        withContext(Dispatchers.IO) { profileRelayConfigStore?.setRelaysForAccount(key, updated) }
+    }
+
     LaunchedEffect(Unit) {
         val initial = withContext(Dispatchers.IO) {
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val k = storage.getActiveShareKey()
             val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            Triple(a, k, r)
+            val pr = loadProfileRelays(k)
+            AccountInitial(a, k, r, pr)
         }
-        allAccounts = initial.first
-        activeAccountKey = initial.second
-        relays = initial.third
+        allAccounts = initial.accounts
+        activeAccountKey = initial.activeKey
+        relays = initial.relays
+        profileRelays = initial.profileRelays
     }
 
     LaunchedEffect(Unit) {
@@ -383,9 +395,7 @@ fun MainScreen(
                 peers = newPeers
                 pendingCount = newPendingCount
                 refreshCertificatePins()
-                profileRelays = withContext(Dispatchers.IO) {
-                    profileRelayConfigStore?.getRelays() ?: emptyList()
-                }
+                profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(newActiveKey) }
                 delay(10_000)
             }
         }
@@ -733,17 +743,13 @@ fun MainScreen(
                         if (!profileRelays.contains(relay) && profileRelays.size < RelayConfigStore.MAX_RELAYS) {
                             val updated = profileRelays + relay
                             profileRelays = updated
-                            coroutineScope.launch {
-                                withContext(Dispatchers.IO) { profileRelayConfigStore?.setRelays(updated) }
-                            }
+                            coroutineScope.launch { saveProfileRelays(updated) }
                         }
                     },
                     onRemoveProfileRelay = { relay ->
                         val updated = profileRelays - relay
                         profileRelays = updated
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) { profileRelayConfigStore?.setRelays(updated) }
-                        }
+                        coroutineScope.launch { saveProfileRelays(updated) }
                     },
                     onClearPin = { hostname ->
                         coroutineScope.launch {
@@ -1214,6 +1220,13 @@ private fun AccountTab(
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
+
+private data class AccountInitial(
+    val accounts: List<AccountInfo>,
+    val activeKey: String?,
+    val relays: List<String>,
+    val profileRelays: List<String>
+)
 
 private data class PollResult(
     val hasShare: Boolean,
