@@ -117,7 +117,16 @@ class MainActivity : FragmentActivity() {
                     if (requiresPin) {
                         PinUnlockScreen(
                             pinStore = pinStore!!,
-                            onUnlocked = { isPinUnlocked = true }
+                            onUnlocked = { isPinUnlocked = true },
+                            onBiometricAuth = if (biometricAvailable) {
+                                {
+                                    biometricHelper?.authenticate(
+                                        title = "Unlock Keep",
+                                        subtitle = "Authenticate to open app"
+                                    ) ?: false
+                                }
+                            } else null,
+                            onBiometricSuccess = { isBiometricUnlocked = true }
                         )
                     } else if (requiresBiometric) {
                         BiometricUnlockScreen(
@@ -147,6 +156,7 @@ class MainActivity : FragmentActivity() {
                             connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
+                            biometricAvailable = biometricAvailable,
                             onRelaysChanged = { relays ->
                                 lifecycleScope.launch { app.initializeWithRelays(relays) }
                             },
@@ -225,6 +235,7 @@ fun MainScreen(
     onRelaysChanged: (List<String>) -> Unit,
     onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
+    biometricAvailable: Boolean = false,
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
@@ -412,6 +423,7 @@ fun MainScreen(
                     if (saved) biometricLockOnLaunch = enabled
                 }
             },
+            biometricAvailable = biometricAvailable,
             killSwitchEnabled = killSwitchEnabled,
             onKillSwitchToggle = handleKillSwitchToggle,
             onDismiss = { showSecuritySettings = false }

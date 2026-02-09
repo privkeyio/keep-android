@@ -22,6 +22,7 @@ fun SecuritySettingsScreen(
     onTimeoutChanged: (Long) -> Unit,
     biometricLockOnLaunch: Boolean,
     onBiometricLockOnLaunchChanged: (Boolean) -> Unit,
+    biometricAvailable: Boolean,
     killSwitchEnabled: Boolean,
     onKillSwitchToggle: (Boolean) -> Unit,
     onDismiss: () -> Unit
@@ -71,7 +72,8 @@ fun SecuritySettingsScreen(
 
             BiometricLockOnLaunchCard(
                 enabled = biometricLockOnLaunch,
-                onToggle = onBiometricLockOnLaunchChanged
+                onToggle = onBiometricLockOnLaunchChanged,
+                biometricAvailable = biometricAvailable
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -80,7 +82,11 @@ fun SecuritySettingsScreen(
 }
 
 @Composable
-private fun BiometricLockOnLaunchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+private fun BiometricLockOnLaunchCard(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    biometricAvailable: Boolean
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -89,13 +95,25 @@ private fun BiometricLockOnLaunchCard(enabled: Boolean, onToggle: (Boolean) -> U
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Biometric on Launch", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Require biometric authentication when opening app",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (biometricAvailable) {
+                    Text(
+                        "Require biometric authentication when opening app",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        "Biometric hardware not available",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
             }
-            Switch(checked = enabled, onCheckedChange = onToggle)
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggle,
+                enabled = biometricAvailable
+            )
         }
     }
 }
