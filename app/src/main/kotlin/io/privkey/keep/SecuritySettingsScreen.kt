@@ -80,7 +80,7 @@ fun SecuritySettingsScreen(
 }
 
 @Composable
-fun BiometricLockOnLaunchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+private fun BiometricLockOnLaunchCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),

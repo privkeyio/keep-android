@@ -18,19 +18,17 @@ fun BiometricUnlockScreen(
     var authFailed by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    suspend fun attemptAuth() {
+        authFailed = false
+        if (onAuthenticate()) onUnlocked() else authFailed = true
+    }
+
     DisposableEffect(context) {
         setSecureScreen(context, true)
         onDispose { setSecureScreen(context, false) }
     }
 
-    LaunchedEffect(Unit) {
-        val success = onAuthenticate()
-        if (success) {
-            onUnlocked()
-        } else {
-            authFailed = true
-        }
-    }
+    LaunchedEffect(Unit) { attemptAuth() }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -60,15 +58,7 @@ fun BiometricUnlockScreen(
             if (authFailed) {
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Button(
-                    onClick = {
-                        authFailed = false
-                        coroutineScope.launch {
-                            val success = onAuthenticate()
-                            if (success) onUnlocked() else authFailed = true
-                        }
-                    }
-                ) {
+                Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
                     Text("Try Again")
                 }
             }
