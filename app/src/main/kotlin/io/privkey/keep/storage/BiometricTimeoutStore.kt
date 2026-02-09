@@ -8,6 +8,7 @@ class BiometricTimeoutStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "keep_biometric_timeout"
         private const val KEY_TIMEOUT = "biometric_timeout"
+        private const val KEY_LOCK_ON_LAUNCH = "biometric_lock_on_launch"
 
         const val TIMEOUT_EVERY_TIME = 0L
         const val TIMEOUT_1_MINUTE = 60_000L
@@ -38,6 +39,13 @@ class BiometricTimeoutStore(context: Context) {
 
     private var lastAuthRealtime: Long = 0L
     private var lastAuthWall: Long = 0L
+
+    @Synchronized
+    fun isLockOnLaunchEnabled(): Boolean = prefs.getBoolean(KEY_LOCK_ON_LAUNCH, false)
+
+    @Synchronized
+    fun setLockOnLaunch(enabled: Boolean): Boolean =
+        prefs.edit().putBoolean(KEY_LOCK_ON_LAUNCH, enabled).commit()
 
     @Synchronized
     fun getTimeout(): Long = prefs.getLong(KEY_TIMEOUT, TIMEOUT_EVERY_TIME)

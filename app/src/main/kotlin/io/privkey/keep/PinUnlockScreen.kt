@@ -17,18 +17,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.PinStore
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun PinUnlockScreen(
     pinStore: PinStore,
     onUnlocked: () -> Unit,
-    onBiometricFallback: (() -> Unit)? = null
+    onBiometricAuth: (suspend () -> Boolean)? = null,
+    onBiometricSuccess: () -> Unit = {}
 ) {
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
     val focusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
     DisposableEffect(context) {
@@ -155,9 +158,16 @@ fun PinUnlockScreen(
                     Text("Unlock")
                 }
 
-                onBiometricFallback?.let { fallback ->
+                onBiometricAuth?.let { auth ->
                     Spacer(modifier = Modifier.height(16.dp))
-                    TextButton(onClick = fallback) {
+                    TextButton(onClick = {
+                        coroutineScope.launch {
+                            if (auth()) {
+                                onBiometricSuccess()
+                                onUnlocked()
+                            }
+                        }
+                    }) {
                         Text("Use Biometrics")
                     }
                 }
