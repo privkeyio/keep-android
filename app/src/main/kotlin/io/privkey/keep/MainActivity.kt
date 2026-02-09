@@ -93,9 +93,9 @@ class MainActivity : FragmentActivity() {
             }
 
             var isBiometricUnlocked by remember {
-                mutableStateOf(
-                    biometricTimeoutStore?.isLockOnLaunchEnabled() != true || !biometricAvailable
-                )
+                val lockOnLaunch = biometricAvailable &&
+                    biometricTimeoutStore?.isLockOnLaunchEnabled() == true
+                mutableStateOf(!lockOnLaunch)
             }
 
             DisposableEffect(pinStore) {

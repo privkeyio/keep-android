@@ -60,26 +60,25 @@ fun BiometricUnlockScreen(
             if (result != null) {
                 Spacer(modifier = Modifier.height(24.dp))
 
-                when (result) {
-                    BiometricHelper.AuthResult.LOCKOUT -> {
-                        Text(
-                            text = "Too many attempts. Try again shortly.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    BiometricHelper.AuthResult.LOCKOUT_PERMANENT -> {
-                        Text(
-                            text = "Biometric locked. Use device PIN/password to unlock, then try again.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    else -> {
-                        Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
-                            Text("Try Again")
-                        }
-                    }
+                val errorMessage = when (result) {
+                    BiometricHelper.AuthResult.LOCKOUT ->
+                        "Too many attempts. Try again shortly."
+                    BiometricHelper.AuthResult.LOCKOUT_PERMANENT ->
+                        "Biometric locked. Use device PIN/password to unlock, then try again."
+                    else -> null
+                }
+
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
+                    Text("Try Again")
                 }
             }
         }

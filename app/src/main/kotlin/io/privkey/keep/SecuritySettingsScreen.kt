@@ -96,19 +96,12 @@ private fun BiometricLockOnLaunchCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Biometric on Launch", style = MaterialTheme.typography.titleMedium)
-                if (biometricAvailable) {
-                    Text(
-                        "Require biometric authentication when opening app",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                val (subtitle, subtitleColor) = if (biometricAvailable) {
+                    "Require biometric authentication when opening app" to MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
-                    Text(
-                        "Biometric hardware not available",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    "Biometric hardware not available" to MaterialTheme.colorScheme.error
                 }
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = subtitleColor)
             }
             Switch(
                 checked = enabled,
