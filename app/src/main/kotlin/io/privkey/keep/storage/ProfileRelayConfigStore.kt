@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 class ProfileRelayConfigStore(context: Context) {
@@ -47,13 +50,17 @@ class ProfileRelayConfigStore(context: Context) {
 
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
         withContext(Dispatchers.IO) {
-            val validated = relays
+            val candidates = relays
                 .filter {
                     it.matches(RelayConfigStore.RELAY_URL_REGEX) &&
-                        !BunkerConfigStore.isInternalHost(it) &&
                         RelayConfigStore.isValidPort(it)
                 }
                 .take(RelayConfigStore.MAX_RELAYS)
+            val validated = coroutineScope {
+                candidates.map { url -> async { url.takeUnless { BunkerConfigStore.isInternalHost(it) } } }
+                    .awaitAll()
+                    .filterNotNull()
+            }
             prefs.edit()
                 .putString(prefsKey, validated.joinToString(RELAY_SEPARATOR))
                 .commit()

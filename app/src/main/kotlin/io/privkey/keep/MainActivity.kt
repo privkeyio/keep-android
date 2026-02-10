@@ -731,9 +731,14 @@ fun MainScreen(
                     isConnected = isConnected,
                     onAddRelay = { relay ->
                         if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
-                            val updated = relays + relay
-                            relays = updated
-                            onRelaysChanged(updated)
+                            coroutineScope.launch {
+                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                if (!isInternal) {
+                                    val updated = relays + relay
+                                    relays = updated
+                                    onRelaysChanged(updated)
+                                }
+                            }
                         }
                     },
                     onRemoveRelay = { relay ->
@@ -743,9 +748,14 @@ fun MainScreen(
                     },
                     onAddProfileRelay = { relay ->
                         if (!profileRelays.contains(relay) && profileRelays.size < RelayConfigStore.MAX_RELAYS) {
-                            val updated = profileRelays + relay
-                            profileRelays = updated
-                            coroutineScope.launch { saveProfileRelays(updated) }
+                            coroutineScope.launch {
+                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                if (!isInternal) {
+                                    val updated = profileRelays + relay
+                                    profileRelays = updated
+                                    saveProfileRelays(updated)
+                                }
+                            }
                         }
                     },
                     onRemoveProfileRelay = { relay ->
