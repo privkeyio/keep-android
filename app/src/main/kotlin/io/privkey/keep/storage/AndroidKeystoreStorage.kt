@@ -82,9 +82,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun loadMetadata(key: String): ByteArray {
         val sharePrefs = getSharePrefs(key)
         val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
-            ?: throw KeepMobileException.StorageException("No metadata stored")
+            ?: throw KeepMobileException.StorageNotFound()
         val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
-            ?: throw KeepMobileException.StorageException("No metadata stored")
+            ?: throw KeepMobileException.StorageNotFound()
         return try {
             val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
             decryptWithCipher(cipher, encryptedData)

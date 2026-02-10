@@ -229,7 +229,7 @@ class MainActivity : FragmentActivity() {
                             onAccountSwitched = { app.onAccountSwitched() }
                         )
                     } else {
-                        ErrorScreen("Failed to initialize")
+                        ErrorScreen(app.getInitError() ?: "Failed to initialize")
                     }
                 }
             }
