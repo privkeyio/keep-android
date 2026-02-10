@@ -61,6 +61,7 @@ class KeepMobileApp : Application() {
     private var bunkerConfigStore: BunkerConfigStore? = null
     private var proxyConfigStore: ProxyConfigStore? = null
     private var profileRelayConfigStore: ProfileRelayConfigStore? = null
+    private var initError: String? = null
     private var announceJob: Job? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
@@ -100,6 +101,7 @@ class KeepMobileApp : Application() {
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         }.onFailure { e ->
+            initError = "${e::class.simpleName}: ${e.message}"
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
@@ -188,6 +190,8 @@ class KeepMobileApp : Application() {
     fun getProxyConfigStore(): ProxyConfigStore? = proxyConfigStore
 
     fun getProfileRelayConfigStore(): ProfileRelayConfigStore? = profileRelayConfigStore
+
+    fun getInitError(): String? = initError
 
     fun updateBunkerService(enabled: Boolean) {
         bunkerConfigStore?.setEnabled(enabled)
