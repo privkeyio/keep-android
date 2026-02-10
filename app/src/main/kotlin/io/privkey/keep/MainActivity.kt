@@ -330,6 +330,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             relayConfigStore = relayConfigStore,
+            profileRelayConfigStore = profileRelayConfigStore,
             coroutineScope = coroutineScope,
             appContext = appContext,
             onBiometricRequest = onBiometricRequest,
@@ -340,6 +341,7 @@ fun MainScreen(
                 activeAccountKey = state.activeAccountKey
                 allAccounts = state.allAccounts
                 relays = state.relays
+                profileRelays = state.profileRelays
             }
         )
     }
@@ -1069,7 +1071,7 @@ private fun SettingsTab(
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Clear logs and activity")
+            Text("Clean up expired data")
         }
 
         Spacer(modifier = Modifier.height(16.dp))

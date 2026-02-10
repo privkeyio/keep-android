@@ -46,16 +46,14 @@ class ProfileRelayConfigStore(context: Context) {
     }
 
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
-        val validated = withContext(Dispatchers.Default) {
-            relays
+        withContext(Dispatchers.IO) {
+            val validated = relays
                 .filter {
                     it.matches(RelayConfigStore.RELAY_URL_REGEX) &&
                         !BunkerConfigStore.isInternalHost(it) &&
                         RelayConfigStore.isValidPort(it)
                 }
                 .take(RelayConfigStore.MAX_RELAYS)
-        }
-        withContext(Dispatchers.IO) {
             prefs.edit()
                 .putString(prefsKey, validated.joinToString(RELAY_SEPARATOR))
                 .commit()

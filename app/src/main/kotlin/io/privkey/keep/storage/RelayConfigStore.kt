@@ -14,11 +14,11 @@ class RelayConfigStore(context: Context) {
         private const val RELAY_SEPARATOR = "\n"
         internal const val MAX_RELAYS = 20
         internal val RELAY_URL_REGEX = BunkerConfigStore.RELAY_URL_REGEX
-        private val PORT_REGEX = Regex(":(\\d+)")
+        private val HOST_PORT_REGEX = Regex("^([^/:]+)(:(\\d+))?(/|$)")
 
         internal fun isValidPort(url: String): Boolean {
-            val port = PORT_REGEX.find(url.removePrefix("wss://"))
-                ?.groupValues?.get(1)?.toIntOrNull()
+            val port = HOST_PORT_REGEX.find(url.removePrefix("wss://"))
+                ?.groupValues?.get(3)?.takeIf { it.isNotEmpty() }?.toIntOrNull()
             return port == null || port in 1..65535
         }
         internal val DEFAULT_RELAYS = listOf(
@@ -76,12 +76,10 @@ class RelayConfigStore(context: Context) {
     }
 
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
-        val validated = withContext(Dispatchers.Default) {
-            relays
+        withContext(Dispatchers.IO) {
+            val validated = relays
                 .filter { it.matches(RELAY_URL_REGEX) && !BunkerConfigStore.isInternalHost(it) && isValidPort(it) }
                 .take(MAX_RELAYS)
-        }
-        withContext(Dispatchers.IO) {
             prefs.edit()
                 .putString(prefsKey, validated.joinToString(RELAY_SEPARATOR))
                 .commit()
