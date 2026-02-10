@@ -9,27 +9,12 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
-class RelayConfigStore(context: Context) {
+class ProfileRelayConfigStore(context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "keep_relay_config"
-        private const val KEY_RELAYS = "relay_urls"
+        private const val PREFS_NAME = "keep_profile_relay_config"
+        private const val KEY_RELAYS = "profile_relay_urls"
         private const val RELAY_SEPARATOR = "\n"
-        internal const val MAX_RELAYS = 20
-        internal val RELAY_URL_REGEX = BunkerConfigStore.RELAY_URL_REGEX
-        private val HOST_PORT_REGEX = Regex("^([^/:]+)(:(\\d+))?(/|$)")
-
-        internal fun isValidPort(url: String): Boolean {
-            val port = HOST_PORT_REGEX.find(url.removePrefix("wss://"))
-                ?.groupValues?.get(3)?.takeIf { it.isNotEmpty() }?.toIntOrNull()
-            return port == null || port in 1..65535
-        }
-        internal val DEFAULT_RELAYS = listOf(
-            "wss://relay.primal.net/",
-            "wss://relay.nsec.app/",
-            "wss://relay.damus.io/",
-            "wss://nos.lol/"
-        )
     }
 
     private val prefs: SharedPreferences = run {
@@ -37,24 +22,9 @@ class RelayConfigStore(context: Context) {
         LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
     }
 
-    fun getRelays(): List<String> {
-        val stored = prefs.getString(KEY_RELAYS, null) ?: return DEFAULT_RELAYS
-        val relays = stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
-        return relays.ifEmpty { DEFAULT_RELAYS }
-    }
-
-    suspend fun setRelays(relays: List<String>) {
-        saveRelays(KEY_RELAYS, relays)
-    }
-
     fun getRelaysForAccount(accountKey: String): List<String> {
-        val stored = prefs.getString(accountPrefsKey(accountKey), null)
-        if (stored != null) return stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
-        val globalRelays = getRelays()
-        if (globalRelays.isNotEmpty()) {
-            prefs.edit().putString(accountPrefsKey(accountKey), globalRelays.joinToString(RELAY_SEPARATOR)).apply()
-        }
-        return globalRelays
+        val stored = prefs.getString(accountPrefsKey(accountKey), null) ?: return emptyList()
+        return stored.split(RELAY_SEPARATOR).filter { it.isNotBlank() }
     }
 
     suspend fun setRelaysForAccount(accountKey: String, relays: List<String>) {
@@ -81,8 +51,11 @@ class RelayConfigStore(context: Context) {
     private suspend fun saveRelays(prefsKey: String, relays: List<String>) {
         withContext(Dispatchers.IO) {
             val candidates = relays
-                .filter { it.matches(RELAY_URL_REGEX) && isValidPort(it) }
-                .take(MAX_RELAYS)
+                .filter {
+                    it.matches(RelayConfigStore.RELAY_URL_REGEX) &&
+                        RelayConfigStore.isValidPort(it)
+                }
+                .take(RelayConfigStore.MAX_RELAYS)
             val validated = coroutineScope {
                 candidates.map { url -> async { url.takeUnless { BunkerConfigStore.isInternalHost(it) } } }
                     .awaitAll()

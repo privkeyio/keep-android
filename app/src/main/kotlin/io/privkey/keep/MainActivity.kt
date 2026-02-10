@@ -12,6 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -41,10 +48,12 @@ import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.ProfileRelayConfigStore
 import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -75,6 +84,7 @@ class MainActivity : FragmentActivity() {
         val permissionStore = app.getPermissionStore()
         val bunkerConfigStore = app.getBunkerConfigStore()
         val proxyConfigStore = app.getProxyConfigStore()
+        val profileRelayConfigStore = app.getProfileRelayConfigStore()
 
         val allDependenciesAvailable = listOf(
             keepMobile, storage, relayConfigStore, killSwitchStore, signPolicyStore,
@@ -165,6 +175,7 @@ class MainActivity : FragmentActivity() {
                             permissionStore = permissionStore!!,
                             bunkerConfigStore = bunkerConfigStore!!,
                             proxyConfigStore = proxyConfigStore!!,
+                            profileRelayConfigStore = profileRelayConfigStore,
                             connectionStateFlow = app.connectionState,
                             securityLevel = storage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
@@ -241,6 +252,7 @@ fun MainScreen(
     permissionStore: PermissionStore,
     bunkerConfigStore: BunkerConfigStore,
     proxyConfigStore: ProxyConfigStore,
+    profileRelayConfigStore: ProfileRelayConfigStore?,
     connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
@@ -294,9 +306,9 @@ fun MainScreen(
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
     var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
-    var proxyHost by remember { mutableStateOf(proxyConfigStore.getHost()) }
     var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
+    var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
 
     val handleKillSwitchToggle: (Boolean) -> Unit = { newValue ->
@@ -318,6 +330,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             relayConfigStore = relayConfigStore,
+            profileRelayConfigStore = profileRelayConfigStore,
             coroutineScope = coroutineScope,
             appContext = appContext,
             onBiometricRequest = onBiometricRequest,
@@ -328,6 +341,7 @@ fun MainScreen(
                 activeAccountKey = state.activeAccountKey
                 allAccounts = state.allAccounts
                 relays = state.relays
+                profileRelays = state.profileRelays
             }
         )
     }
@@ -340,16 +354,28 @@ fun MainScreen(
         certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
     }
 
+    fun loadProfileRelays(accountKey: String?): List<String> {
+        if (accountKey == null) return emptyList()
+        return profileRelayConfigStore?.getRelaysForAccount(accountKey) ?: emptyList()
+    }
+
+    suspend fun saveProfileRelays(updated: List<String>) {
+        val key = withContext(Dispatchers.IO) { storage.getActiveShareKey() } ?: return
+        withContext(Dispatchers.IO) { profileRelayConfigStore?.setRelaysForAccount(key, updated) }
+    }
+
     LaunchedEffect(Unit) {
         val initial = withContext(Dispatchers.IO) {
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val k = storage.getActiveShareKey()
             val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            Triple(a, k, r)
+            val pr = loadProfileRelays(k)
+            AccountInitial(a, k, r, pr)
         }
-        allAccounts = initial.first
-        activeAccountKey = initial.second
-        relays = initial.third
+        allAccounts = initial.accounts
+        activeAccountKey = initial.activeKey
+        relays = initial.relays
+        profileRelays = initial.profileRelays
     }
 
     LaunchedEffect(Unit) {
@@ -371,6 +397,7 @@ fun MainScreen(
                 peers = newPeers
                 pendingCount = newPendingCount
                 refreshCertificatePins()
+                profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(newActiveKey) }
                 delay(10_000)
             }
         }
@@ -695,24 +722,46 @@ fun MainScreen(
                 SettingsTab(
                     hasShare = hasShare,
                     relays = relays,
+                    profileRelays = profileRelays,
                     certificatePins = certificatePins,
                     proxyEnabled = proxyEnabled,
-                    proxyHost = proxyHost,
                     proxyPort = proxyPort,
                     autoStartEnabled = autoStartEnabled,
                     foregroundServiceEnabled = foregroundServiceEnabled,
                     isConnected = isConnected,
                     onAddRelay = { relay ->
                         if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
-                            val updated = relays + relay
-                            relays = updated
-                            onRelaysChanged(updated)
+                            coroutineScope.launch {
+                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                if (!isInternal) {
+                                    val updated = relays + relay
+                                    relays = updated
+                                    onRelaysChanged(updated)
+                                }
+                            }
                         }
                     },
                     onRemoveRelay = { relay ->
                         val updated = relays - relay
                         relays = updated
                         onRelaysChanged(updated)
+                    },
+                    onAddProfileRelay = { relay ->
+                        if (!profileRelays.contains(relay) && profileRelays.size < RelayConfigStore.MAX_RELAYS) {
+                            coroutineScope.launch {
+                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                if (!isInternal) {
+                                    val updated = profileRelays + relay
+                                    profileRelays = updated
+                                    saveProfileRelays(updated)
+                                }
+                            }
+                        }
+                    },
+                    onRemoveProfileRelay = { relay ->
+                        val updated = profileRelays - relay
+                        profileRelays = updated
+                        coroutineScope.launch { saveProfileRelays(updated) }
                     },
                     onClearPin = { hostname ->
                         coroutineScope.launch {
@@ -726,21 +775,22 @@ fun MainScreen(
                             refreshCertificatePins()
                         }
                     },
-                    onProxyToggle = { enabled ->
+                    onProxyActivate = { port ->
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(enabled) }
-                            proxyEnabled = enabled
+                            withContext(Dispatchers.IO) {
+                                proxyConfigStore.setProxyConfig("127.0.0.1", port)
+                                proxyConfigStore.setEnabled(true)
+                            }
+                            proxyEnabled = true
+                            proxyPort = port
                             if (isConnected) onReconnectRelays()
                         }
                     },
-                    onProxyConfigChange = { host, port ->
+                    onProxyDeactivate = {
                         coroutineScope.launch {
-                            val saved = withContext(Dispatchers.IO) { proxyConfigStore.setProxyConfig(host, port) }
-                            if (saved) {
-                                proxyHost = host
-                                proxyPort = port
-                                if (proxyEnabled && isConnected) onReconnectRelays()
-                            }
+                            withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(false) }
+                            proxyEnabled = false
+                            if (isConnected) onReconnectRelays()
                         }
                     },
                     onAutoStartToggle = { newValue ->
@@ -757,7 +807,12 @@ fun MainScreen(
                             onForegroundServiceChanged(newValue)
                         }
                     },
-                    onSecurityClick = { showSecuritySettings = true }
+                    onSecurityClick = { showSecuritySettings = true },
+                    onClearLogsAndActivity = {
+                        withContext(Dispatchers.IO) {
+                            permissionStore.cleanupExpired()
+                        }
+                    }
                 )
             }
 
@@ -864,7 +919,7 @@ private fun HomeTab(
 @Composable
 private fun AppsTab(
     hasShare: Boolean,
-    bunkerStatus: io.privkey.keep.uniffi.BunkerStatus,
+    bunkerStatus: BunkerStatus,
     onConnectedAppsClick: () -> Unit,
     onSignPolicyClick: () -> Unit,
     onPermissionsClick: () -> Unit,
@@ -920,23 +975,40 @@ private fun AppsTab(
 private fun SettingsTab(
     hasShare: Boolean,
     relays: List<String>,
+    profileRelays: List<String>,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
-    proxyHost: String,
     proxyPort: Int,
     autoStartEnabled: Boolean,
     foregroundServiceEnabled: Boolean,
     isConnected: Boolean,
     onAddRelay: (String) -> Unit,
     onRemoveRelay: (String) -> Unit,
+    onAddProfileRelay: (String) -> Unit,
+    onRemoveProfileRelay: (String) -> Unit,
     onClearPin: (String) -> Unit,
     onClearAllPins: () -> Unit,
-    onProxyToggle: (Boolean) -> Unit,
-    onProxyConfigChange: (String, Int) -> Unit,
+    onProxyActivate: (Int) -> Unit,
+    onProxyDeactivate: () -> Unit,
     onAutoStartToggle: (Boolean) -> Unit,
     onForegroundServiceToggle: (Boolean) -> Unit,
-    onSecurityClick: () -> Unit
+    onSecurityClick: () -> Unit,
+    onClearLogsAndActivity: suspend () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var databaseSizeMb by remember { mutableStateOf("") }
+
+    suspend fun refreshDatabaseSize() {
+        withContext(Dispatchers.IO) {
+            val dbFile = context.getDatabasePath("nip55_permissions.db")
+            val size = if (dbFile.exists()) dbFile.length() else 0L
+            databaseSizeMb = "%.2f".format(size / (1024.0 * 1024.0))
+        }
+    }
+
+    LaunchedEffect(Unit) { refreshDatabaseSize() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -952,7 +1024,10 @@ private fun SettingsTab(
             RelaysCard(
                 relays = relays,
                 onAddRelay = onAddRelay,
-                onRemoveRelay = onRemoveRelay
+                onRemoveRelay = onRemoveRelay,
+                profileRelays = profileRelays,
+                onAddProfileRelay = onAddProfileRelay,
+                onRemoveProfileRelay = onRemoveProfileRelay
             )
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -963,12 +1038,11 @@ private fun SettingsTab(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            ProxySettingsCard(
+            TorOrbotCard(
                 enabled = proxyEnabled,
-                host = proxyHost,
                 port = proxyPort,
-                onToggle = onProxyToggle,
-                onConfigChange = onProxyConfigChange
+                onActivate = onProxyActivate,
+                onDeactivate = onProxyDeactivate
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -987,7 +1061,74 @@ private fun SettingsTab(
 
         SecuritySettingsCard(onClick = onSecurityClick)
 
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            "Database: $databaseSizeMb MB",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = {
+                scope.launch {
+                    onClearLogsAndActivity()
+                    refreshDatabaseSize()
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Clean up expired data")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            "v${BuildConfig.VERSION_NAME}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val primaryColor = MaterialTheme.colorScheme.primary
+        Text(
+            buildAnnotatedString {
+                withLink(
+                    LinkAnnotation.Url(
+                        "https://github.com/privkeyio/keep-android",
+                        styles = TextLinkStyles(
+                            style = SpanStyle(
+                                color = primaryColor,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        )
+                    )
+                ) {
+                    append("Source code")
+                }
+                append("  |  ")
+                withLink(
+                    LinkAnnotation.Url(
+                        "https://privkey.io",
+                        styles = TextLinkStyles(
+                            style = SpanStyle(
+                                color = primaryColor,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        )
+                    )
+                ) {
+                    append("Support development")
+                }
+            },
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -1091,6 +1232,13 @@ private fun AccountTab(
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
+
+private data class AccountInitial(
+    val accounts: List<AccountInfo>,
+    val activeKey: String?,
+    val relays: List<String>,
+    val profileRelays: List<String>
+)
 
 private data class PollResult(
     val hasShare: Boolean,

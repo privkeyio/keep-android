@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.storage.ProfileRelayConfigStore
 import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -19,6 +20,7 @@ internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
     private val relayConfigStore: RelayConfigStore,
+    private val profileRelayConfigStore: ProfileRelayConfigStore?,
     private val coroutineScope: CoroutineScope,
     private val appContext: Context,
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
@@ -30,7 +32,8 @@ internal class AccountActions(
         val shareInfo: ShareInfo?,
         val activeAccountKey: String?,
         val allAccounts: List<AccountInfo>,
-        val relays: List<String>
+        val relays: List<String>,
+        val profileRelays: List<String>
     )
 
     private var currentRelays: List<String> = emptyList()
@@ -63,7 +66,8 @@ internal class AccountActions(
             val k = storage.getActiveShareKey()
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            AccountState(h, s, k, a, r)
+            val pr = k?.let { profileRelayConfigStore?.getRelaysForAccount(it) } ?: emptyList()
+            AccountState(h, s, k, a, r, pr)
         }
         onStateChanged(result)
     }
@@ -135,6 +139,7 @@ internal class AccountActions(
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)
             relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
+            profileRelayConfigStore?.deleteRelaysForAccount(account.groupPubkeyHex)
         }
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }
