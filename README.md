@@ -31,14 +31,13 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 
 # Download
 
-[<img src="https://github.com/machiav3lli/oandbackupx/raw/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png" alt="Get it on GitHub"
-height="70">](https://github.com/privkeyio/keep-android/releases)
+[<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
 
 # Usage
 
 Any Nostr client that supports NIP-55 or NIP-46 can use Keep for signing.
 
-Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip44_encrypt`, `nip44_decrypt`.
+Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`, `decrypt_zap_event`.
 
 # Building
 
