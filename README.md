@@ -1,8 +1,44 @@
-# Keep Android
+# Keep: FROST threshold signer for Android
 
-Android app for FROST threshold signing with NIP-55 support.
+Keep is a FROST threshold signing app for Android. It allows users to hold FROST key shares on their phone and sign Nostr events without any single device ever holding the full private key. Keep implements the [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) Android Signer protocol and [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) remote signing, so any compatible Nostr client can request signatures directly.
 
-## Building
+<div align="center">
+
+[![CI](https://img.shields.io/github/actions/workflow/status/privkeyio/keep-android/ci.yml?labelColor=27303D)](https://github.com/privkeyio/keep-android/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/github/license/privkeyio/keep-android?labelColor=27303D&color=0877d2)](/LICENSE)
+
+</div>
+
+# Features
+
+- FROST threshold signing (2-of-3, 3-of-5, etc.)
+- NIP-55 Android Signer protocol (intents + content provider)
+- NIP-46 remote signing (bunker service)
+- Import and export FROST shares via QR code or text
+- Import existing nsec keys
+- Multiple account support
+- Per-app signing permissions and policies
+- Signing history and audit log
+- Biometric and PIN authentication
+- Hardware-backed key storage (Android Keystore)
+- Kill switch for emergency key deletion
+- SOCKS proxy support (Tor)
+- NIP-44 encryption and decryption
+- Background signing with configurable rate limits
+- Certificate pinning for relay connections
+
+# Download
+
+[<img src="https://github.com/machiav3lli/oandbackupx/raw/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png" alt="Get it on GitHub"
+height="70">](https://github.com/privkeyio/keep-android/releases)
+
+# Usage
+
+Any Nostr client that supports NIP-55 or NIP-46 can use Keep for signing.
+
+Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip44_encrypt`, `nip44_decrypt`.
+
+# Building
 
 ```bash
 ./gradlew assembleDebug
@@ -10,15 +46,7 @@ Android app for FROST threshold signing with NIP-55 support.
 
 APK output: `app/build/outputs/apk/debug/app-debug.apk`
 
-## Features
-
-- NIP-55 Android Signer protocol
-- FROST threshold signing (2-of-3, 3-of-5, etc.)
-- Biometric authentication
-- Hardware-backed key storage (Android Keystore)
-- Background signing with persistent permissions
-
-## Development
+# Development
 
 To rebuild the native libraries from source:
 
@@ -32,6 +60,12 @@ git clone https://github.com/privkeyio/keep ../keep
 KEEP_REPO=../keep ./build-rust.sh
 ```
 
-## License
+# Contributing
+
+[GitHub issues](https://github.com/privkeyio/keep-android/issues) and [pull requests](https://github.com/privkeyio/keep-android/pulls) are welcome.
+
+By contributing to this repository, you agree to license your work under the AGPL-3.0 license. Any work contributed where you are not the original author must contain its license header with the original author(s) and source.
+
+# License
 
 AGPL-3.0-or-later
