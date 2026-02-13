@@ -147,8 +147,7 @@ class BunkerService : Service() {
             val now = SystemClock.elapsedRealtime()
 
             synchronized(globalRequestLock) {
-                repeat(GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
-                    if (globalRequestHistory.isEmpty() || globalRequestHistory.first() >= now - GLOBAL_RATE_LIMIT_WINDOW_MS) return@repeat
+                while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
                     globalRequestHistory.removeFirst()
                 }
                 if (globalRequestHistory.size >= GLOBAL_MAX_REQUESTS_PER_WINDOW) {

@@ -265,7 +265,7 @@ class Nip55ContentProvider : ContentProvider() {
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
                     if (response.result.isEmpty()) {
-                        throw IllegalStateException("Handler returned null pubkey")
+                        throw IllegalStateException("Handler returned empty pubkey")
                     }
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
                     if (groupPubkey == null || groupPubkey.isEmpty()) {

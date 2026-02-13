@@ -139,8 +139,7 @@ class PinStore(private val context: Context) {
                 val oldNormalizedBytes = Base64.decode(oldNormalizedHash, Base64.NO_WRAP)
                 if (MessageDigest.isEqual(storedBytes, oldNormalizedBytes)) {
                     hashesMatch = true
-                    val newHash = hashPinFromChars(normalizedPin, effectiveSalt)
-                    if (!prefs.edit().putString(KEY_PIN_HASH, newHash).commit()) {
+                    if (!prefs.edit().putString(KEY_PIN_HASH, normalizedHash).commit()) {
                         if (BuildConfig.DEBUG) Log.w("PinStore", "Failed to persist migrated PIN hash")
                     }
                 }
@@ -152,8 +151,7 @@ class PinStore(private val context: Context) {
                 val legacyMatch = MessageDigest.isEqual(storedBytes, legacyBytes)
                 if (legacyMatch) {
                     hashesMatch = true
-                    val newHash = hashPinFromChars(normalizedPin, effectiveSalt)
-                    if (!prefs.edit().putString(KEY_PIN_HASH, newHash).commit()) {
+                    if (!prefs.edit().putString(KEY_PIN_HASH, normalizedHash).commit()) {
                         if (BuildConfig.DEBUG) Log.w("PinStore", "Failed to persist migrated PIN hash")
                     }
                 }
