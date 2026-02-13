@@ -29,7 +29,7 @@ class PinStore(private val context: Context) {
         private const val KEY_LAST_LOCKOUT_CLEARED = "last_lockout_cleared"
 
         const val MIN_PIN_LENGTH = 4
-        const val MAX_PIN_LENGTH = 8
+        const val MAX_PIN_LENGTH = 16
         const val MAX_FAILED_ATTEMPTS = 5
         const val DEFAULT_SESSION_TIMEOUT_MS = 300_000L
         val SESSION_TIMEOUT_OPTIONS_MS = longArrayOf(0L, 60_000L, 300_000L, 600_000L)
@@ -53,7 +53,8 @@ class PinStore(private val context: Context) {
             "0000", "1111", "2222", "3333", "4444", "5555", "6666", "7777", "8888", "9999",
             "1234", "4321", "1212", "2121", "0123", "3210", "9876", "6789",
             "12345", "54321", "123456", "654321", "1234567", "7654321", "12345678", "87654321",
-            "00000", "11111", "000000", "111111", "0000000", "1111111", "00000000", "11111111"
+            "00000", "11111", "000000", "111111", "0000000", "1111111", "00000000", "11111111",
+            "123456789", "1234567890", "9876543210"
         )
     }
 
@@ -136,7 +137,7 @@ class PinStore(private val context: Context) {
                 val legacyMatch = MessageDigest.isEqual(storedBytes, legacyBytes)
                 if (legacyMatch) {
                     hashesMatch = true
-                    val newHash = hashPinFromChars(normalizedPin, salt!!)
+                    val newHash = hashPinFromChars(normalizedPin, effectiveSalt)
                     prefs.edit().putString(KEY_PIN_HASH, newHash).commit()
                 }
             }
@@ -342,6 +343,8 @@ class PinStore(private val context: Context) {
     }
 
     private fun hashPinFromChars(pinChars: CharArray, salt: String): String {
+        require(salt.isNotBlank()) { "Salt must not be blank" }
+        require(pinChars.isNotEmpty()) { "PIN chars must not be empty" }
         val saltBytes = Base64.decode(salt, Base64.NO_WRAP)
         val spec = PBEKeySpec(pinChars, saltBytes, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
         try {

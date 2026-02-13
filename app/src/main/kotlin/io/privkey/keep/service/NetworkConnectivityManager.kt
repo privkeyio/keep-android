@@ -11,7 +11,8 @@ class NetworkConnectivityManager(
     context: Context,
     private val onNetworkChanged: () -> Unit
 ) {
-    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: throw IllegalStateException("ConnectivityManager not available")
     private val lock = Any()
     private var lastNetwork: Network? = null
     private var isRegistered = false

@@ -40,11 +40,13 @@ fun PinUnlockScreen(
     }
 
     LaunchedEffect(isLockedOut) {
-        while (isLockedOut) {
+        repeat(3600) {
+            if (!isLockedOut) return@LaunchedEffect
             lockoutRemaining = pinStore.getLockoutRemainingMs()
             if (lockoutRemaining <= 0) {
                 isLockedOut = false
                 error = null
+                return@LaunchedEffect
             }
             delay(1000)
         }

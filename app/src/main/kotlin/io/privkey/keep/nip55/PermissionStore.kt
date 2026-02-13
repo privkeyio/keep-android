@@ -52,6 +52,7 @@ class PermissionStore(private val database: Nip55Database) {
         eventKind: Int?,
         duration: PermissionDuration
     ) {
+        require(callerPackage.isNotBlank()) { "callerPackage must not be blank" }
         val effectiveDuration = if (eventKind != null && isSensitiveKind(eventKind) && duration == PermissionDuration.FOREVER) {
             PermissionDuration.ONE_DAY
         } else {
@@ -65,7 +66,10 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration
-    ) = savePermission(callerPackage, requestType, eventKind, duration, "deny")
+    ) {
+        require(callerPackage.isNotBlank()) { "callerPackage must not be blank" }
+        savePermission(callerPackage, requestType, eventKind, duration, "deny")
+    }
 
     private suspend fun savePermission(
         callerPackage: String,

@@ -201,7 +201,7 @@ fun BiometricTimeoutCard(
                     readOnly = true,
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                     modifier = Modifier
-                        .menuAnchor()
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                         .width(140.dp),
                     textStyle = MaterialTheme.typography.bodySmall,
                     singleLine = true

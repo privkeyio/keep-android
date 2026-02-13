@@ -65,7 +65,8 @@ private fun hexToNevent(eventId: String, relayUrl: String?): String? {
             tlv.addAll(relayBytes.toList())
         }
         bech32Encode("nevent", convertBits(tlv.map { it.toInt() and 0xFF }, 8, 5, true) ?: return null)
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        if (io.privkey.keep.BuildConfig.DEBUG) android.util.Log.w("NostrFormatting", "hexToNevent failed", e)
         null
     }
 }
@@ -75,7 +76,8 @@ private fun hexToBech32(hex: String, hrp: String): String? {
     return try {
         val bytes = hex.chunked(2).map { it.toInt(16) }
         bech32Encode(hrp, convertBits(bytes, 8, 5, true) ?: return null)
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        if (io.privkey.keep.BuildConfig.DEBUG) android.util.Log.w("NostrFormatting", "hexToBech32 failed", e)
         null
     }
 }

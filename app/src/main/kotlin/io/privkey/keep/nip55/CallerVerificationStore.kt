@@ -3,6 +3,8 @@ package io.privkey.keep.nip55
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.SystemClock
+import android.util.Log
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import io.privkey.keep.storage.LegacyPrefsMigration
 import java.security.MessageDigest
@@ -56,7 +58,8 @@ class CallerVerificationStore(context: Context) {
             val digest = MessageDigest.getInstance("SHA-256")
             sortedSignatureBytes.forEach { digest.update(it) }
             digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("CallerVerificationStore", "Failed to get package signature for $packageName", e)
             null
         }
     }

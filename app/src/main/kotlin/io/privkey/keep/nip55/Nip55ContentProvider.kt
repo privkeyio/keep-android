@@ -22,6 +22,7 @@ import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
@@ -56,7 +57,7 @@ class Nip55ContentProvider : ContentProvider() {
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private fun <T> runWithTimeout(block: suspend () -> T): T? = runBlocking {
+    private fun <T> runWithTimeout(block: suspend () -> T): T? = runBlocking(Dispatchers.IO) {
         withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
     }
 
@@ -96,18 +97,22 @@ class Nip55ContentProvider : ContentProvider() {
         val store = currentApp.getPermissionStore()
 
         val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        require(callerPackage.isNotBlank()) { "Caller package must not be blank" }
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
-        val requestType = when (uri.authority) {
+        val requestType = when (val authority = uri.authority) {
             AUTHORITY_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
             AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
-            else -> return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            else -> {
+                require(authority == null || authority.startsWith("io.privkey.keep.")) { "Unexpected authority" }
+                return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            }
         }
 
         val rawContent = projection?.getOrNull(0) ?: ""
@@ -246,7 +251,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .mapCatching { response ->
-                if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
+                if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
                     if (groupPubkey == null || groupPubkey.isEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")

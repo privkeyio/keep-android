@@ -19,7 +19,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 class SigningNotificationManager(private val context: Context) {
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        ?: throw IllegalStateException("NotificationManager not available")
     private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID_START)
     private val pendingLock = Any()
 

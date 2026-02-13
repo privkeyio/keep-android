@@ -58,6 +58,7 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        allWarningsAsErrors = true
     }
 
     buildFeatures {
@@ -71,9 +72,6 @@ android {
         }
     }
 
-    lint {
-        disable += listOf("MutableCollectionMutableState", "AutoboxingStateCreation")
-    }
 }
 
 dependencies {

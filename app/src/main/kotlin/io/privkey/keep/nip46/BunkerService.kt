@@ -147,7 +147,8 @@ class BunkerService : Service() {
             val now = SystemClock.elapsedRealtime()
 
             synchronized(globalRequestLock) {
-                while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
+                repeat(GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
+                    if (globalRequestHistory.isEmpty() || globalRequestHistory.first() >= now - GLOBAL_RATE_LIMIT_WINDOW_MS) return@repeat
                     globalRequestHistory.removeFirst()
                 }
                 if (globalRequestHistory.size >= GLOBAL_MAX_REQUESTS_PER_WINDOW) {
@@ -320,10 +321,9 @@ class BunkerService : Service() {
     fun processQueuedNostrConnectRequests() {
         val handler = bunkerHandler ?: return
         serviceScope.launch {
-            while (true) {
-                val request = pendingNostrConnectRequests.poll() ?: break
-                sendConnectResponse(handler, request)
-            }
+            generateSequence { pendingNostrConnectRequests.poll() }
+                .take(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
+                .forEach { request -> sendConnectResponse(handler, request) }
         }
     }
 
@@ -374,12 +374,11 @@ class BunkerService : Service() {
         mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread - rejecting to avoid ANR")
-            return false
-        }
+        check(Looper.myLooper() != Looper.getMainLooper()) { "handleApprovalRequest must not be called from main thread" }
 
         val clientPubkey = request.appPubkey
+        require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
+        require(request.method.isNotBlank()) { "Request method must not be blank" }
 
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Invalid client pubkey format")

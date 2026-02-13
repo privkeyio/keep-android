@@ -3,6 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +56,10 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
         val app = application as? KeepMobileApp
         biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         handler = app?.getNip55Handler()
@@ -240,10 +245,11 @@ class Nip55Activity : FragmentActivity() {
         val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE) >= AuthLevel.PIN
         val needsBiometric = riskRequiresAuth || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
-        if (callerPendingFirstUse && callerSignatureHash != null) {
+        if (callerPendingFirstUse) {
+            val sigHash = callerSignatureHash
             val verificationStore = callerVerificationStore
-            if (verificationStore != null) {
-                verificationStore.trustPackage(callerId, callerSignatureHash!!)
+            if (sigHash != null && verificationStore != null) {
+                verificationStore.trustPackage(callerId, sigHash)
                 callerPendingFirstUse = false
                 callerVerified = true
             } else {
@@ -340,7 +346,7 @@ class Nip55Activity : FragmentActivity() {
         notificationManager?.cancelNotification(notificationRequestId)
         val req = request
 
-        if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
+        if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
             val groupPubkey = storage?.getShareMetadata()?.groupPubkey
             if (groupPubkey == null || groupPubkey.isEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")

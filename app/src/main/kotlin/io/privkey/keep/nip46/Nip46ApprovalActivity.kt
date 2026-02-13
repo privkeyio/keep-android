@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -69,12 +70,19 @@ class Nip46ApprovalActivity : FragmentActivity() {
             return
         }
 
-        val pendingApproval = BunkerService.getPendingApproval(requestId!!)
+        val reqId = requestId ?: return
+        val pendingApproval = BunkerService.getPendingApproval(reqId)
         if (pendingApproval == null) {
-            if (BuildConfig.DEBUG) Log.e(TAG, "No pending approval found for $requestId")
+            if (BuildConfig.DEBUG) Log.e(TAG, "No pending approval found for $reqId")
             finish()
             return
         }
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                respond(false, null)
+            }
+        })
 
         if (killSwitchStore?.isEnabled() == true) {
             respond(false, null)
@@ -138,7 +146,10 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 return@launch
             }
 
-            val reqId = requestId!!
+            val reqId = requestId ?: run {
+                respond(false, null)
+                return@launch
+            }
             try {
                 keystoreStorage.setPendingCipher(reqId, authedCipher) {
                     keystoreStorage.clearPendingCipher(reqId)
@@ -207,9 +218,4 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    @Deprecated("Use OnBackPressedCallback", ReplaceWith("onBackPressedDispatcher"))
-    override fun onBackPressed() {
-        respond(false, null)
-        super.onBackPressed()
-    }
 }
