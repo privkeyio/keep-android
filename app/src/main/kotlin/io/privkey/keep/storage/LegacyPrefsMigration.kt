@@ -1,9 +1,13 @@
+@file:Suppress("DEPRECATION")
+
 package io.privkey.keep.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import io.privkey.keep.BuildConfig
 
 object LegacyPrefsMigration {
 
@@ -51,7 +55,8 @@ object LegacyPrefsMigration {
             if (editor.commit()) {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
             markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
 
@@ -83,7 +88,8 @@ object LegacyPrefsMigration {
             } else {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
             markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
 
@@ -118,7 +124,8 @@ object LegacyPrefsMigration {
             } else {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
             markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
 
@@ -137,7 +144,8 @@ object LegacyPrefsMigration {
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Failed to open legacy prefs: $prefsName", e)
             null
         }
     }

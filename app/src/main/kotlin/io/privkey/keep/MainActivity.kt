@@ -70,7 +70,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val app = application as KeepMobileApp
+        val app = application as? KeepMobileApp ?: run { finish(); return }
         biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
@@ -132,12 +132,12 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val requiresPin = pinStore != null && pinStore.isPinEnabled() && !isPinUnlocked
                     val requiresBiometric = !isBiometricUnlocked
+                    val pinStoreForUnlock = pinStore?.takeIf { it.isPinEnabled() && !isPinUnlocked }
 
-                    if (requiresPin) {
+                    if (pinStoreForUnlock != null) {
                         PinUnlockScreen(
-                            pinStore = pinStore!!,
+                            pinStore = pinStoreForUnlock,
                             onUnlocked = { isPinUnlocked = true },
                             onBiometricAuth = if (biometricAvailable) {
                                 {
@@ -162,22 +162,34 @@ class MainActivity : FragmentActivity() {
                             onUnlocked = { isBiometricUnlocked = true }
                         )
                     } else if (allDependenciesAvailable) {
+                        val safeKeepMobile = keepMobile ?: return@Surface
+                        val safeStorage = storage ?: return@Surface
+                        val safeRelayConfigStore = relayConfigStore ?: return@Surface
+                        val safeKillSwitchStore = killSwitchStore ?: return@Surface
+                        val safeSignPolicyStore = signPolicyStore ?: return@Surface
+                        val safeAutoStartStore = autoStartStore ?: return@Surface
+                        val safeForegroundServiceStore = foregroundServiceStore ?: return@Surface
+                        val safePinStore = pinStore ?: return@Surface
+                        val safeBiometricTimeoutStore = biometricTimeoutStore ?: return@Surface
+                        val safePermissionStore = permissionStore ?: return@Surface
+                        val safeBunkerConfigStore = bunkerConfigStore ?: return@Surface
+                        val safeProxyConfigStore = proxyConfigStore ?: return@Surface
                         MainScreen(
-                            keepMobile = keepMobile!!,
-                            storage = storage!!,
-                            relayConfigStore = relayConfigStore!!,
-                            killSwitchStore = killSwitchStore!!,
-                            signPolicyStore = signPolicyStore!!,
-                            autoStartStore = autoStartStore!!,
-                            foregroundServiceStore = foregroundServiceStore!!,
-                            pinStore = pinStore!!,
-                            biometricTimeoutStore = biometricTimeoutStore!!,
-                            permissionStore = permissionStore!!,
-                            bunkerConfigStore = bunkerConfigStore!!,
-                            proxyConfigStore = proxyConfigStore!!,
+                            keepMobile = safeKeepMobile,
+                            storage = safeStorage,
+                            relayConfigStore = safeRelayConfigStore,
+                            killSwitchStore = safeKillSwitchStore,
+                            signPolicyStore = safeSignPolicyStore,
+                            autoStartStore = safeAutoStartStore,
+                            foregroundServiceStore = safeForegroundServiceStore,
+                            pinStore = safePinStore,
+                            biometricTimeoutStore = safeBiometricTimeoutStore,
+                            permissionStore = safePermissionStore,
+                            bunkerConfigStore = safeBunkerConfigStore,
+                            proxyConfigStore = safeProxyConfigStore,
                             profileRelayConfigStore = profileRelayConfigStore,
                             connectionStateFlow = app.connectionState,
-                            securityLevel = storage.getSecurityLevel(),
+                            securityLevel = safeStorage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             biometricAvailable = biometricAvailable,
                             onRelaysChanged = { relays ->
@@ -274,7 +286,7 @@ fun MainScreen(
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
-    var pendingCount by remember { mutableStateOf(0) }
+    var pendingCount by remember { mutableIntStateOf(0) }
     var allAccounts by remember { mutableStateOf<List<AccountInfo>>(emptyList()) }
     var activeAccountKey by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
@@ -380,7 +392,7 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
+            repeat(Int.MAX_VALUE) {
                 val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount) = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()

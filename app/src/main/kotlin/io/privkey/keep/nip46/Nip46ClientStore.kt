@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package io.privkey.keep.nip46
 
 import android.content.Context

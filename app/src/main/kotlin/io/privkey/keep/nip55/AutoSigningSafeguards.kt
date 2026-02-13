@@ -158,8 +158,9 @@ class AutoSigningSafeguards(context: Context) {
         val entry = if (windowExpired) {
             UsageWindow(1, nowElapsed)
         } else {
-            existing!!.count++
-            existing
+            val current = checkNotNull(existing) { "Usage window should not be null when windowExpired is false" }
+            current.count++
+            current
         }
         map[packageName] = entry
         persistKeyPrefix?.let { persistUsage(it, packageName, entry) }

@@ -320,10 +320,9 @@ class BunkerService : Service() {
     fun processQueuedNostrConnectRequests() {
         val handler = bunkerHandler ?: return
         serviceScope.launch {
-            while (true) {
-                val request = pendingNostrConnectRequests.poll() ?: break
-                sendConnectResponse(handler, request)
-            }
+            generateSequence { pendingNostrConnectRequests.poll() }
+                .take(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
+                .forEach { request -> sendConnectResponse(handler, request) }
         }
     }
 
@@ -375,14 +374,17 @@ class BunkerService : Service() {
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread - rejecting to avoid ANR")
+            if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread")
             return false
         }
 
         val clientPubkey = request.appPubkey
-
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Invalid client pubkey format")
+            return false
+        }
+        if (request.method.isBlank()) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Request method must not be blank")
             return false
         }
 

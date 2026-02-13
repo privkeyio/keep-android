@@ -223,6 +223,7 @@ class PermissionDurationTest {
         assertFalse(PermissionDuration.JUST_THIS_TIME.shouldPersist)
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun `FOREVER persists and has null expiry`() {
         assertTrue(PermissionDuration.FOREVER.shouldPersist)
@@ -238,6 +239,7 @@ class PermissionDurationTest {
         assertEquals(24 * 60 * 60 * 1000L, PermissionDuration.ONE_DAY.millis)
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun `expiresAt returns future timestamp for timed durations`() {
         val now = System.currentTimeMillis()

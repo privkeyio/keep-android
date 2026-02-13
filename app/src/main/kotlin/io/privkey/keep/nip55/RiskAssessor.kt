@@ -66,7 +66,7 @@ class RiskAssessor(
                     frequencyWindows[packageName] = it
                 }
             } else {
-                existing!!
+                checkNotNull(existing) { "Frequency window should not be null when windowStale is false" }
             }
 
             if (frequencyWindows.size > MAX_TRACKED_PACKAGES) {

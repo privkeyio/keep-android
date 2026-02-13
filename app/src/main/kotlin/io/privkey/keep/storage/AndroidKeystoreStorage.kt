@@ -183,6 +183,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return decryptWithCipher(cipher, encryptedData)
     }
 
+    @Suppress("DEPRECATION")
     fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
         cleanupExpiredCiphers()
         val data = PendingCipherData(
@@ -230,6 +231,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
+        require(data.isNotEmpty()) { "Share data must not be empty" }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
@@ -266,7 +268,9 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
-        return loadShareWithCipher(cipher)
+        val data = loadShareWithCipher(cipher)
+        check(data.isNotEmpty()) { "Loaded share data must not be empty" }
+        return data
     }
 
     @Synchronized
@@ -328,14 +332,17 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun getOrCreateKeyForShare(key: String): SecretKey {
         val newAlias = getKeystoreAlias(key)
         if (keyStore.containsAlias(newAlias)) {
-            return keyStore.getKey(newAlias, null) as SecretKey
+            return keyStore.getKey(newAlias, null) as? SecretKey
+                ?: throw KeepMobileException.StorageException("Key $newAlias is not a SecretKey")
         }
         val legacyAlias = getLegacyKeystoreAlias(key)
         if (keyStore.containsAlias(legacyAlias)) {
-            return keyStore.getKey(legacyAlias, null) as SecretKey
+            return keyStore.getKey(legacyAlias, null) as? SecretKey
+                ?: throw KeepMobileException.StorageException("Key $legacyAlias is not a SecretKey")
         }
         if (keyStore.containsAlias(KEYSTORE_ALIAS) && isLegacyAccount(key)) {
-            return keyStore.getKey(KEYSTORE_ALIAS, null) as SecretKey
+            return keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey
+                ?: throw KeepMobileException.StorageException("Key $KEYSTORE_ALIAS is not a SecretKey")
         }
         return getOrCreateKeyWithAlias(newAlias)
     }
@@ -377,7 +384,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             keyGenerator.generateKey()
         }
 
-        return keyStore.getKey(alias, null) as SecretKey
+        return keyStore.getKey(alias, null) as? SecretKey
+            ?: throw KeepMobileException.StorageException("Key $alias is not a SecretKey")
     }
 
     private fun initCipherForShare(key: String, mode: Int, ivBase64: String?): Cipher =

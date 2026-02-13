@@ -247,7 +247,7 @@ fun AnimatedQrCodeDisplay(
             }
             if (bitmaps.size > 1) {
                 LinearProgressIndicator(
-                    progress = (currentFrame + 1).toFloat() / bitmaps.size,
+                    progress = { (currentFrame + 1).toFloat() / bitmaps.size },
                     modifier = Modifier.width(QR_SIZE.dp)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -323,7 +323,7 @@ private object ClipboardClearManager {
 }
 
 internal fun copySensitiveText(context: Context, text: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     val clip = ClipData.newPlainText("share", text)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         clip.description.extras = PersistableBundle().apply {

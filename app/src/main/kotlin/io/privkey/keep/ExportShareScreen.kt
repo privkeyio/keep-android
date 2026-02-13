@@ -11,12 +11,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -217,7 +217,7 @@ fun ExportShareScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         LinearProgressIndicator(
-                            progress = (strength.ordinal + 1) / 4f,
+                            progress = { (strength.ordinal + 1) / 4f },
                             modifier = Modifier.weight(1f).height(4.dp),
                             color = strength.color(),
                             trackColor = MaterialTheme.colorScheme.surfaceVariant

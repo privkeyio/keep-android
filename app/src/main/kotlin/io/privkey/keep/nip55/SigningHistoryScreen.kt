@@ -9,7 +9,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,7 +35,7 @@ fun SigningHistoryScreen(
     var availableApps by remember { mutableStateOf<List<String>>(emptyList()) }
     var appFilterExpanded by remember { mutableStateOf(false) }
     var chainStatus by remember { mutableStateOf<ChainVerificationResult?>(null) }
-    var logCount by remember { mutableStateOf(0) }
+    var logCount by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -135,7 +135,7 @@ fun SigningHistoryScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(
                     expanded = appFilterExpanded,

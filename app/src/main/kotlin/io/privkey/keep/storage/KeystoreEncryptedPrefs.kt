@@ -7,8 +7,11 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
+import io.privkey.keep.BuildConfig
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -34,6 +37,8 @@ object KeystoreEncryptedPrefs {
     private const val STRING_SET_DELIMITER = "\u0000"
     private const val KEY_REGISTRY = "__keys__"
     private const val KEY_REGISTRY_DELIMITER = "\u0000"
+    private const val HMAC_KEY_PREF = "__hmac_key__"
+    private const val HMAC_KEY_LENGTH = 32
 
     fun create(context: Context, prefsName: String): SharedPreferences {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
@@ -50,7 +55,8 @@ object KeystoreEncryptedPrefs {
     private fun getOrCreateKey(context: Context, alias: String): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(alias)) {
-            return keyStore.getKey(alias, null) as SecretKey
+            return keyStore.getKey(alias, null) as? SecretKey
+                ?: throw IllegalStateException("Key $alias is not a SecretKey")
         }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
@@ -67,7 +73,8 @@ object KeystoreEncryptedPrefs {
                 builder.setIsStrongBoxBacked(true)
                 keyGenerator.init(builder.build())
                 return keyGenerator.generateKey()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "StrongBox unavailable, falling back", e)
                 builder.setIsStrongBoxBacked(false)
             }
         }
@@ -77,6 +84,7 @@ object KeystoreEncryptedPrefs {
     }
 
     private fun encrypt(key: SecretKey, plaintext: String): String {
+        require(plaintext.isNotEmpty()) { "Plaintext must not be empty" }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val iv = cipher.iv
@@ -88,6 +96,7 @@ object KeystoreEncryptedPrefs {
     }
 
     private fun decrypt(key: SecretKey, ciphertext: String): String {
+        require(ciphertext.isNotEmpty()) { "Ciphertext must not be empty" }
         val combined = Base64.decode(ciphertext, Base64.NO_WRAP)
         val iv = combined.copyOfRange(0, GCM_IV_BYTES)
         val encrypted = combined.copyOfRange(GCM_IV_BYTES, combined.size)
@@ -111,10 +120,27 @@ object KeystoreEncryptedPrefs {
             hmacKey?.let { return it }
             synchronized(this) {
                 hmacKey?.let { return it }
-                val derivedKey = MessageDigest.getInstance("SHA-256")
-                    .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
-                hmacKey = derivedKey
-                return derivedKey
+                val stored = basePrefs.getString(HMAC_KEY_PREF, null)
+                if (stored != null) {
+                    val decrypted = decrypt(secretKey, stored)
+                    val key = Base64.decode(decrypted, Base64.NO_WRAP)
+                    hmacKey = key
+                    return key
+                }
+                val hasExistingEntries = basePrefs.all.keys.any {
+                    it != HMAC_KEY_PREF && it != KEY_REGISTRY
+                }
+                val key = if (hasExistingEntries) {
+                    MessageDigest.getInstance("SHA-256")
+                        .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
+                } else {
+                    ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+                }
+                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
+                val encrypted = encrypt(secretKey, encoded)
+                basePrefs.edit().putString(HMAC_KEY_PREF, encrypted).commit()
+                hmacKey = key
+                return key
             }
         }
 
@@ -159,8 +185,8 @@ object KeystoreEncryptedPrefs {
                     keyCache[plainKey] = hash
                     reverseKeyCache[hash] = plainKey
                 }
-            } catch (_: Exception) {
-                // Registry corrupted, will rebuild as keys are accessed
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry corrupted, will rebuild as keys are accessed", e)
             }
         }
 
@@ -178,7 +204,8 @@ object KeystoreEncryptedPrefs {
                         else -> encValue
                     }
                     result[plainKey] = plainValue
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt value for key $encKey", e)
                     continue
                 }
             }
@@ -222,7 +249,8 @@ object KeystoreEncryptedPrefs {
             return try {
                 val decrypted = decrypt(secretKey, encValue)
                 if (decrypted.startsWith(prefix)) parse(decrypted.removePrefix(prefix)) else defValue
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt typed value for key $key", e)
                 defValue
             }
         }

@@ -22,9 +22,11 @@ import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 
 class Nip55ContentProvider : ContentProvider() {
@@ -53,11 +55,19 @@ class Nip55ContentProvider : ContentProvider() {
 
     private val rateLimiter = RateLimiter()
     private val backgroundNotificationId = AtomicInteger(2000)
+    private val concurrentRequestSemaphore = Semaphore(4)
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private fun <T> runWithTimeout(block: suspend () -> T): T? = runBlocking {
-        withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+    private fun <T> runWithTimeout(block: suspend () -> T): T? {
+        if (!concurrentRequestSemaphore.tryAcquire()) return null
+        return try {
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+            }
+        } finally {
+            concurrentRequestSemaphore.release()
+        }
     }
 
     override fun onCreate(): Boolean {
@@ -96,18 +106,25 @@ class Nip55ContentProvider : ContentProvider() {
         val store = currentApp.getPermissionStore()
 
         val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        if (callerPackage.isBlank()) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Caller package is blank")
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        }
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
         }
 
-        val requestType = when (uri.authority) {
+        val requestType = when (val authority = uri.authority) {
             AUTHORITY_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
             AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
-            else -> return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            else -> {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
+                return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            }
         }
 
         val rawContent = projection?.getOrNull(0) ?: ""
@@ -125,7 +142,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         val velocityResult = runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }
         if (velocityResult == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check timed out, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check failed (timeout or concurrency limit), denying request")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_velocity_timeout", wasAutomatic = true) }
             return rejectedCursor(null)
         }
@@ -246,7 +263,10 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .mapCatching { response ->
-                if (requestType == Nip55RequestType.GET_PUBLIC_KEY && response.result != null) {
+                if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+                    if (response.result.isEmpty()) {
+                        throw IllegalStateException("Handler returned empty pubkey")
+                    }
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
                     if (groupPubkey == null || groupPubkey.isEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")
