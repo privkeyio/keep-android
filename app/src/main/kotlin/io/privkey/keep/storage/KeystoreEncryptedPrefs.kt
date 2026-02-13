@@ -10,6 +10,7 @@ import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
@@ -126,13 +127,20 @@ object KeystoreEncryptedPrefs {
                     hmacKey = key
                     return key
                 }
-                val newKey = ByteArray(HMAC_KEY_LENGTH)
-                SecureRandom().nextBytes(newKey)
-                val encoded = Base64.encodeToString(newKey, Base64.NO_WRAP)
+                val hasExistingEntries = basePrefs.all.keys.any {
+                    it != HMAC_KEY_PREF && it != KEY_REGISTRY
+                }
+                val key = if (hasExistingEntries) {
+                    MessageDigest.getInstance("SHA-256")
+                        .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
+                } else {
+                    ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+                }
+                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
                 val encrypted = encrypt(secretKey, encoded)
                 basePrefs.edit().putString(HMAC_KEY_PREF, encrypted).commit()
-                hmacKey = newKey
-                return newKey
+                hmacKey = key
+                return key
             }
         }
 
