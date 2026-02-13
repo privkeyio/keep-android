@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 
 class Nip55ContentProvider : ContentProvider() {
@@ -54,11 +55,19 @@ class Nip55ContentProvider : ContentProvider() {
 
     private val rateLimiter = RateLimiter()
     private val backgroundNotificationId = AtomicInteger(2000)
+    private val concurrentRequestSemaphore = Semaphore(4)
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private fun <T> runWithTimeout(block: suspend () -> T): T? = runBlocking(Dispatchers.IO) {
-        withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+    private fun <T> runWithTimeout(block: suspend () -> T): T? {
+        if (!concurrentRequestSemaphore.tryAcquire()) return null
+        return try {
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+            }
+        } finally {
+            concurrentRequestSemaphore.release()
+        }
     }
 
     override fun onCreate(): Boolean {
@@ -133,7 +142,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         val velocityResult = runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }
         if (velocityResult == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check timed out, denying request")
+            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check failed (timeout or concurrency limit), denying request")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_velocity_timeout", wasAutomatic = true) }
             return rejectedCursor(null)
         }

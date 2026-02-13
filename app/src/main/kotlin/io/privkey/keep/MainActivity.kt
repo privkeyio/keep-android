@@ -70,7 +70,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val app = application as? KeepMobileApp ?: return
+        val app = application as? KeepMobileApp ?: run { finish(); return }
         biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()

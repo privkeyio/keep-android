@@ -374,7 +374,10 @@ class BunkerService : Service() {
         mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
-        check(Looper.myLooper() != Looper.getMainLooper()) { "handleApprovalRequest must not be called from main thread" }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread")
+            return false
+        }
 
         val clientPubkey = request.appPubkey
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
