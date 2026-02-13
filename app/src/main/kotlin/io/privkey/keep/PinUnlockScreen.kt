@@ -40,8 +40,9 @@ fun PinUnlockScreen(
     }
 
     LaunchedEffect(isLockedOut) {
-        repeat(3600) {
-            if (!isLockedOut) return@LaunchedEffect
+        if (!isLockedOut) return@LaunchedEffect
+        val maxTicks = ((pinStore.getLockoutRemainingMs() / 1000) + 60).coerceAtLeast(60)
+        repeat(maxTicks.toInt()) {
             lockoutRemaining = pinStore.getLockoutRemainingMs()
             if (lockoutRemaining <= 0) {
                 isLockedOut = false
@@ -49,6 +50,11 @@ fun PinUnlockScreen(
                 return@LaunchedEffect
             }
             delay(1000)
+        }
+        lockoutRemaining = pinStore.getLockoutRemainingMs()
+        if (lockoutRemaining <= 0) {
+            isLockedOut = false
+            error = null
         }
     }
 

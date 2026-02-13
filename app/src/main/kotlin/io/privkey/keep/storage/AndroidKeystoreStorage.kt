@@ -183,11 +183,12 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
         return decryptWithCipher(cipher, encryptedData)
     }
 
+    @Suppress("DEPRECATION")
     fun setPendingCipher(requestId: String, cipher: Cipher, onConsumed: (() -> Unit)? = null) {
         cleanupExpiredCiphers()
         val data = PendingCipherData(
             cipher = cipher,
-            creatingThreadId = Thread.currentThread().threadId(),
+            creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime()
         )
         pendingCiphers[requestId] = data

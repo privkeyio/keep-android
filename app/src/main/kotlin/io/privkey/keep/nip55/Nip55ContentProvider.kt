@@ -97,7 +97,10 @@ class Nip55ContentProvider : ContentProvider() {
         val store = currentApp.getPermissionStore()
 
         val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
-        require(callerPackage.isNotBlank()) { "Caller package must not be blank" }
+        if (callerPackage.isBlank()) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Caller package is blank")
+            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        }
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
@@ -110,7 +113,7 @@ class Nip55ContentProvider : ContentProvider() {
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
             else -> {
-                require(authority == null || authority.startsWith("io.privkey.keep.")) { "Unexpected authority" }
+                if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
                 return errorCursor(GENERIC_ERROR_MESSAGE, null)
             }
         }
@@ -252,6 +255,9 @@ class Nip55ContentProvider : ContentProvider() {
         return runCatching { h.handleRequest(request, callerPackage) }
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+                    if (response.result.isEmpty()) {
+                        throw IllegalStateException("Handler returned null pubkey")
+                    }
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
                     if (groupPubkey == null || groupPubkey.isEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")

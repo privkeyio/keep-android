@@ -347,6 +347,10 @@ class Nip55Activity : FragmentActivity() {
         val req = request
 
         if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+            if (response.result.isEmpty()) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Handler returned empty pubkey result")
+                return finishWithError("pubkey_verification_failed")
+            }
             val groupPubkey = storage?.getShareMetadata()?.groupPubkey
             if (groupPubkey == null || groupPubkey.isEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")

@@ -189,7 +189,7 @@ class MainActivity : FragmentActivity() {
                             proxyConfigStore = safeProxyConfigStore,
                             profileRelayConfigStore = profileRelayConfigStore,
                             connectionStateFlow = app.connectionState,
-                            securityLevel = storage.getSecurityLevel(),
+                            securityLevel = safeStorage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             biometricAvailable = biometricAvailable,
                             onRelaysChanged = { relays ->

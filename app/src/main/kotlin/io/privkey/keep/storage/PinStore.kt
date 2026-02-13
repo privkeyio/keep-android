@@ -30,6 +30,7 @@ class PinStore(private val context: Context) {
 
         const val MIN_PIN_LENGTH = 4
         const val MAX_PIN_LENGTH = 16
+        private const val OLD_MAX_PIN_LENGTH = 8
         const val MAX_FAILED_ATTEMPTS = 5
         const val DEFAULT_SESSION_TIMEOUT_MS = 300_000L
         val SESSION_TIMEOUT_OPTIONS_MS = longArrayOf(0L, 60_000L, 300_000L, 600_000L)
@@ -112,6 +113,7 @@ class PinStore(private val context: Context) {
 
     @Synchronized
     fun verifyPin(pin: String): Boolean {
+        if (pin.length < MIN_PIN_LENGTH) return false
         val invalidLength = pin.length > MAX_PIN_LENGTH
         val lockedOut = isLockedOut()
 
@@ -123,6 +125,7 @@ class PinStore(private val context: Context) {
         val effectiveStoredHash = storedHash ?: DUMMY_HASH
 
         val normalizedPin = CharArray(MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
+        val oldNormalizedPin = CharArray(OLD_MAX_PIN_LENGTH) { i -> if (i < pin.length) pin[i] else '\u0000' }
         val legacyPin = pin.toCharArray()
         try {
             val storedBytes = Base64.decode(effectiveStoredHash, Base64.NO_WRAP)
@@ -130,6 +133,16 @@ class PinStore(private val context: Context) {
             val normalizedHash = hashPinFromChars(normalizedPin, effectiveSalt)
             val normalizedBytes = Base64.decode(normalizedHash, Base64.NO_WRAP)
             var hashesMatch = MessageDigest.isEqual(storedBytes, normalizedBytes)
+
+            if (!hashesMatch && !pinNotSet && !invalidLength && !lockedOut) {
+                val oldNormalizedHash = hashPinFromChars(oldNormalizedPin, effectiveSalt)
+                val oldNormalizedBytes = Base64.decode(oldNormalizedHash, Base64.NO_WRAP)
+                if (MessageDigest.isEqual(storedBytes, oldNormalizedBytes)) {
+                    hashesMatch = true
+                    val newHash = hashPinFromChars(normalizedPin, effectiveSalt)
+                    prefs.edit().putString(KEY_PIN_HASH, newHash).commit()
+                }
+            }
 
             if (!hashesMatch && !pinNotSet && !invalidLength && !lockedOut) {
                 val legacyHash = hashPinFromChars(legacyPin, effectiveSalt)
@@ -154,6 +167,7 @@ class PinStore(private val context: Context) {
             return verified
         } finally {
             normalizedPin.fill('\u0000')
+            oldNormalizedPin.fill('\u0000')
             legacyPin.fill('\u0000')
         }
     }

@@ -377,11 +377,12 @@ class BunkerService : Service() {
         check(Looper.myLooper() != Looper.getMainLooper()) { "handleApprovalRequest must not be called from main thread" }
 
         val clientPubkey = request.appPubkey
-        require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
-        require(request.method.isNotBlank()) { "Request method must not be blank" }
-
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Invalid client pubkey format")
+            return false
+        }
+        if (request.method.isBlank()) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Request method must not be blank")
             return false
         }
 
