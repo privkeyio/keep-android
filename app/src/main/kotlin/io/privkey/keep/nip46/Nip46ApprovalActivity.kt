@@ -100,7 +100,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 ) {
                     Nip46ApprovalScreen(
                         appPubkey = request.appPubkey,
-                        appName = request.appName ?: "Unknown",
+                        appName = request.appName,
                         method = request.method,
                         eventKind = request.eventKind?.toInt(),
                         eventContent = request.eventContent,
