@@ -39,4 +39,9 @@ cargo run --bin uniffi-bindgen generate \
     --language kotlin \
     --out-dir "$SCRIPT_DIR/app/src/main/kotlin"
 
+GENERATED_KT="$SCRIPT_DIR/app/src/main/kotlin/io/privkey/keep/uniffi/keep_mobile.kt"
+if [ -f "$GENERATED_KT" ]; then
+    sed -i 's/@file:Suppress("NAME_SHADOWING")/@file:Suppress("NAME_SHADOWING", "REDUNDANT_CALL_OF_CONVERSION_METHOD")/' "$GENERATED_KT"
+fi
+
 echo "Done!"

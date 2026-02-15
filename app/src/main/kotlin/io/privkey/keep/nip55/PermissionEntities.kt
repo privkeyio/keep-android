@@ -5,7 +5,7 @@ import androidx.annotation.StringRes
 import androidx.room.*
 import io.privkey.keep.R
 
-enum class PermissionDecision(@StringRes val displayNameRes: Int) {
+enum class PermissionDecision(@param:StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
     DENY(R.string.permission_decision_deny),
     ASK(R.string.permission_decision_ask);
@@ -122,7 +122,7 @@ sealed class ChainVerificationResult {
     data class Tampered(val entryId: Long) : ChainVerificationResult()
 }
 
-enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
+enum class PermissionDuration(val millis: Long?, @param:StringRes val displayNameRes: Int) {
     JUST_THIS_TIME(null, R.string.permission_duration_just_this_time),
     ONE_MINUTE(60 * 1000L, R.string.permission_duration_one_minute),
     FIVE_MINUTES(5 * 60 * 1000L, R.string.permission_duration_five_minutes),
@@ -138,7 +138,7 @@ enum class PermissionDuration(val millis: Long?, @StringRes val displayNameRes: 
         get() = this != JUST_THIS_TIME
 }
 
-enum class AppExpiryDuration(val millis: Long?, @StringRes val displayNameRes: Int) {
+enum class AppExpiryDuration(val millis: Long?, @param:StringRes val displayNameRes: Int) {
     FIVE_MINUTES(5 * 60 * 1000L, R.string.app_expiry_five_minutes),
     ONE_HOUR(60 * 60 * 1000L, R.string.app_expiry_one_hour),
     ONE_DAY(24 * 60 * 60 * 1000L, R.string.app_expiry_one_day),

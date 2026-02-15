@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.annotation.StringRes
 import io.privkey.keep.R
 
-enum class SignPolicy(@StringRes val displayNameRes: Int, @StringRes val descriptionRes: Int) {
+enum class SignPolicy(@param:StringRes val displayNameRes: Int, @param:StringRes val descriptionRes: Int) {
     MANUAL(R.string.sign_policy_manual, R.string.sign_policy_manual_description),
     BASIC(R.string.sign_policy_basic, R.string.sign_policy_basic_description),
     AUTO(R.string.sign_policy_auto, R.string.sign_policy_auto_description);
