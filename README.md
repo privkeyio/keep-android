@@ -23,11 +23,11 @@ This approach is more efficient and private than traditional multisig (which blo
 
 Here's how the basic flow works visually:
 
-![FROST signing flow](docs/images/frost-signing-flow.png)
+![Two-round FROST signing protocol: signers send nonce commitments to a coordinator in round one, then produce partial signatures in round two which the coordinator combines into a single valid Schnorr signature](docs/images/frost-signing-flow.png)
 
-![FROST threshold diagram](docs/images/frost-threshold-diagram.png)
+![FROST threshold diagram showing how t-of-n secret shares held by individual participants each produce partial signatures that combine to meet the signing threshold and form one complete Schnorr signature](docs/images/frost-threshold-diagram.png)
 
-![FROST key sharing graph](docs/images/frost-key-sharing.png)
+![FROST key share distribution graph illustrating how a dealer or DKG distributes polynomial-derived shares to n participants, where any t participants can reconstruct signing capability without exposing the full secret](docs/images/frost-key-sharing.png)
 
 FROST is especially useful for Nostr because Nostr uses Schnorr keys for signing events (posts, zaps, etc.). Projects like Keep leverage FROST to enable shared or multisig Nostr accounts—letting friends or teams jointly control one profile without any single person holding the full key, perfect for group accounts or more resilient personal setups.
 
