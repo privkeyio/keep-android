@@ -1,6 +1,6 @@
 # Keep: FROST threshold signer for Android
 
-Keep is a FROST threshold signing app and dedicated Nostr event signer for Android. It allows users to hold FROST key shares on their phone and sign Nostr events without any single device ever holding the full private key. Keep implements the [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) Android Signer protocol and [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) remote signing, so any compatible Nostr client can request signatures directly.
+Keep is a [FROST](docs/README.md) (Flexible Round-Optimized Schnorr Threshold Signatures) threshold signing app and dedicated Nostr event signer for Android. It allows users to hold FROST key shares on their phone and sign Nostr events without any single device ever holding the full private key. Keep implements the [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) Android Signer protocol and [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md) remote signing, so any compatible Nostr client can request signatures directly.
 
 Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated Nostr event signer that keeps private key material segregated from client apps. Both implement NIP-55 and NIP-46 with per-app permissions, background signing, and multiple account support. Keep goes further by splitting keys into FROST threshold shares (2-of-3, 3-of-5, etc.) so that no single device ever holds the complete private key.
 
@@ -32,6 +32,7 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 # Download
 
 [<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
+[<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqqtkjmewwpexjantv4uju6m9v4czuctwv3ex76tyq3quu5)
 
 # Usage
 
