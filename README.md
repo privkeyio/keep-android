@@ -32,7 +32,7 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 # Download
 
 [<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
-[<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqqtkjmewwpexjantv4uju6m9v4czuctwv3ex76tyq3quu5)
+[<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqq8kjmewwpexjantv4uju6m9v4cqugmg4r)
 
 # Usage
 
