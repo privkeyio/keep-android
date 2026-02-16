@@ -52,6 +52,7 @@ FROST is especially useful for Nostr because Nostr uses Schnorr keys for signing
 # Download
 
 [<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
+[<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqqtkjmewwpexjantv4uju6m9v4czuctwv3ex76tyq3quu5)
 
 # Usage
 
