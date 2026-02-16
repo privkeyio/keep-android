@@ -23,11 +23,11 @@ This approach is more efficient and private than traditional multisig (which blo
 
 Here's how the basic flow works visually:
 
-![FROST signing flow](https://miro.medium.com/v2/resize:fit:1400/0*nw6uhbACMFbtMX4U)
+![FROST signing flow](docs/images/frost-signing-flow.png)
 
-![FROST threshold diagram](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSp_CNiVAUL8mkAyQ6Ca3pADw-51psfK-SHtw&s)
+![FROST threshold diagram](docs/images/frost-threshold-diagram.png)
 
-![FROST key sharing graph](https://images.ctfassets.net/v0qht4wq59vi/7fTVQDxfG1A7bqKsA00JsV/58c5e3ef61ea6c3b27c8fb82b232b6b4/2_Graph.png)
+![FROST key sharing graph](docs/images/frost-key-sharing.png)
 
 FROST is especially useful for Nostr because Nostr uses Schnorr keys for signing events (posts, zaps, etc.). Projects like Keep leverage FROST to enable shared or multisig Nostr accounts—letting friends or teams jointly control one profile without any single person holding the full key, perfect for group accounts or more resilient personal setups.
 
