@@ -11,6 +11,26 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 
 </div>
 
+# What is FROST?
+
+FROST (Flexible Round-Optimized Schnorr Threshold Signatures) is a cryptographic protocol that lets a group securely share control of a single private key without anyone ever seeing or reconstructing the full key.
+
+Participants start with distributed key generation (DKG): n people each create a share, ending up with one shared public key (just like a normal Schnorr key in Bitcoin or Nostr).
+
+To sign a message, only a threshold (e.g., 3-out-of-5) collaborate. They exchange messages in just two rounds (hence "round-optimized"), then combine partial signatures into one valid Schnorr signature that looks identical to a single-person signature—no one can tell it was threshold-based.
+
+This approach is more efficient and private than traditional multisig (which bloats data and exposes multiple keys) or basic secret sharing (which often requires a trusted dealer or risky full-key reconstruction).
+
+Here's how the basic flow works visually:
+
+![FROST signing flow](https://miro.medium.com/v2/resize:fit:1400/0*nw6uhbACMFbtMX4U)
+
+![FROST threshold diagram](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSp_CNiVAUL8mkAyQ6Ca3pADw-51psfK-SHtw&s)
+
+![FROST key sharing graph](https://images.ctfassets.net/v0qht4wq59vi/7fTVQDxfG1A7bqKsA00JsV/58c5e3ef61ea6c3b27c8fb82b232b6b4/2_Graph.png)
+
+FROST is especially useful for Nostr because Nostr uses Schnorr keys for signing events (posts, zaps, etc.). Projects like Keep leverage FROST to enable shared or multisig Nostr accounts—letting friends or teams jointly control one profile without any single person holding the full key, perfect for group accounts or more resilient personal setups.
+
 # Features
 
 - FROST threshold signing (2-of-3, 3-of-5, etc.)
