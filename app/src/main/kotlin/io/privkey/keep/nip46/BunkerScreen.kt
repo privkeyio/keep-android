@@ -28,6 +28,21 @@ private fun validateRelayUrl(url: String, existingRelays: List<String>): String?
     else -> null
 }
 
+private fun parseBunkerUrlRelays(input: String): List<String>? {
+    if (!input.startsWith("bunker://")) return null
+    val uri = runCatching { java.net.URI(input) }.getOrNull() ?: return null
+    val query = uri.rawQuery ?: return null
+    return query.split("&")
+        .filter { it.startsWith("relay=") }
+        .mapNotNull { param ->
+            runCatching {
+                java.net.URLDecoder.decode(param.removePrefix("relay="), "UTF-8")
+            }.getOrNull()
+        }
+        .filter { it.startsWith("wss://") }
+        .ifEmpty { null }
+}
+
 @Composable
 fun BunkerScreen(
     bunkerConfigStore: BunkerConfigStore,
@@ -163,7 +178,7 @@ fun BunkerScreen(
                             error = null
                         },
                         label = { Text("Relay URL") },
-                        placeholder = { Text("wss://relay.example.com") },
+                        placeholder = { Text("wss://relay.example.com or bunker://...") },
                         singleLine = true,
                         isError = error != null
                     )
@@ -178,15 +193,35 @@ fun BunkerScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = if (newRelayUrl.startsWith("wss://")) newRelayUrl else "wss://$newRelayUrl"
-                    val validationError = validateRelayUrl(url, relays)
-                    if (validationError != null) {
-                        error = validationError
+                    val trimmed = newRelayUrl.trim()
+                    val bunkerRelays = parseBunkerUrlRelays(trimmed)
+                    if (bunkerRelays != null) {
+                        val newRelays = bunkerRelays.filter { relay ->
+                            validateRelayUrl(relay, relays) == null
+                        }
+                        if (newRelays.isEmpty()) {
+                            error = if (bunkerRelays.all { relays.contains(it) }) {
+                                "Relays already added"
+                            } else {
+                                "No valid relay URLs found in bunker URL"
+                            }
+                        } else {
+                            val updated = relays + newRelays
+                            relays = updated
+                            scope.launch { bunkerConfigStore.setRelays(updated) }
+                            dismissDialog()
+                        }
                     } else {
-                        val updated = relays + url
-                        relays = updated
-                        scope.launch { bunkerConfigStore.setRelays(updated) }
-                        dismissDialog()
+                        val url = if (trimmed.startsWith("wss://")) trimmed else "wss://$trimmed"
+                        val validationError = validateRelayUrl(url, relays)
+                        if (validationError != null) {
+                            error = validationError
+                        } else {
+                            val updated = relays + url
+                            relays = updated
+                            scope.launch { bunkerConfigStore.setRelays(updated) }
+                            dismissDialog()
+                        }
                     }
                 }) {
                     Text("Add")
