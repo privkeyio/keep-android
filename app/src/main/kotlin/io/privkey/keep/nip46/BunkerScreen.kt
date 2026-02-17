@@ -199,18 +199,22 @@ fun BunkerScreen(
                         val newRelays = bunkerRelays.filter { relay ->
                             validateRelayUrl(relay, relays) == null
                         }
-                        if (newRelays.isEmpty()) {
+                        val remaining = BunkerConfigStore.MAX_RELAYS - relays.size
+                        val trimmedNewRelays = newRelays.take(remaining)
+                        if (trimmedNewRelays.isEmpty()) {
                             error = if (bunkerRelays.all { relays.contains(it) }) {
                                 "Relays already added"
                             } else {
                                 "No valid relay URLs found in bunker URL"
                             }
                         } else {
-                            val updated = relays + newRelays
+                            val updated = relays + trimmedNewRelays
                             relays = updated
                             scope.launch { bunkerConfigStore.setRelays(updated) }
                             dismissDialog()
                         }
+                    } else if (trimmed.startsWith("bunker://")) {
+                        error = "No relay URLs found in bunker URL"
                     } else {
                         val url = if (trimmed.startsWith("wss://")) trimmed else "wss://$trimmed"
                         val validationError = validateRelayUrl(url, relays)
