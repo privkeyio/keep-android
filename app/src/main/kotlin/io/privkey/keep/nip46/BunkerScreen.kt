@@ -57,18 +57,14 @@ private fun normalizeRelayUrl(input: String): String {
 private suspend fun addBunkerRelays(
     bunkerRelays: List<String>,
     existingRelays: List<String>,
-    onResult: (Result<List<String>>) -> Unit
-) {
+): Result<List<String>> {
     val validRelays = bunkerRelays.filter { validateRelayUrl(it, existingRelays) == null }
     val safeRelays = withContext(Dispatchers.IO) {
         validRelays.filter { !BunkerConfigStore.isInternalHost(it) }
     }
     val remaining = BunkerConfigStore.MAX_RELAYS - existingRelays.size
 
-    if (remaining <= 0) {
-        onResult(Result.failure(Exception("Maximum relays reached")))
-        return
-    }
+    if (remaining <= 0) return Result.failure(Exception("Maximum relays reached"))
 
     val toAdd = safeRelays.take(remaining)
     if (toAdd.isEmpty()) {
@@ -78,11 +74,10 @@ private suspend fun addBunkerRelays(
                 "Private/internal relay addresses are not allowed"
             else -> "No valid relay URLs found in bunker URL"
         }
-        onResult(Result.failure(Exception(message)))
-        return
+        return Result.failure(Exception(message))
     }
 
-    onResult(Result.success(toAdd))
+    return Result.success(toAdd)
 }
 
 @Composable
@@ -240,17 +235,15 @@ fun BunkerScreen(
 
                     when {
                         bunkerRelays != null -> scope.launch {
-                            addBunkerRelays(bunkerRelays, relays) { result ->
-                                result.fold(
-                                    onSuccess = { toAdd ->
-                                        val updated = relays + toAdd
-                                        relays = updated
-                                        bunkerConfigStore.setRelays(updated)
-                                        dismissDialog()
-                                    },
-                                    onFailure = { error = it.message }
-                                )
-                            }
+                            addBunkerRelays(bunkerRelays, relays).fold(
+                                onSuccess = { toAdd ->
+                                    val updated = relays + toAdd
+                                    relays = updated
+                                    bunkerConfigStore.setRelays(updated)
+                                    dismissDialog()
+                                },
+                                onFailure = { error = it.message }
+                            )
                         }
                         trimmed.startsWith("bunker://") ->
                             error = "No relay URLs found in bunker URL"
