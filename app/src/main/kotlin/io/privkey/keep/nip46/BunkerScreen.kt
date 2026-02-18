@@ -11,11 +11,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import io.privkey.keep.QrCodeDisplay
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.setSecureScreen
@@ -44,6 +44,45 @@ private fun parseBunkerUrlRelays(input: String): List<String>? {
         .filter { it.startsWith("wss://") }
         .distinct()
         .ifEmpty { null }
+}
+
+private fun normalizeRelayUrl(input: String): String {
+    val stripped = input
+        .removePrefix("https://")
+        .removePrefix("http://")
+        .removePrefix("ws://")
+    return if (stripped.startsWith("wss://")) stripped else "wss://$stripped"
+}
+
+private suspend fun addBunkerRelays(
+    bunkerRelays: List<String>,
+    existingRelays: List<String>,
+    onResult: (Result<List<String>>) -> Unit
+) {
+    val validRelays = bunkerRelays.filter { validateRelayUrl(it, existingRelays) == null }
+    val safeRelays = withContext(Dispatchers.IO) {
+        validRelays.filter { !BunkerConfigStore.isInternalHost(it) }
+    }
+    val remaining = BunkerConfigStore.MAX_RELAYS - existingRelays.size
+
+    if (remaining <= 0) {
+        onResult(Result.failure(Exception("Maximum relays reached")))
+        return
+    }
+
+    val toAdd = safeRelays.take(remaining)
+    if (toAdd.isEmpty()) {
+        val message = when {
+            bunkerRelays.all { existingRelays.contains(it) } -> "Relays already added"
+            validRelays.isNotEmpty() && safeRelays.isEmpty() ->
+                "Private/internal relay addresses are not allowed"
+            else -> "No valid relay URLs found in bunker URL"
+        }
+        onResult(Result.failure(Exception(message)))
+        return
+    }
+
+    onResult(Result.success(toAdd))
 }
 
 @Composable
@@ -198,56 +237,41 @@ fun BunkerScreen(
                 TextButton(onClick = {
                     val trimmed = newRelayUrl.trim()
                     val bunkerRelays = parseBunkerUrlRelays(trimmed)
-                    if (bunkerRelays != null) {
-                        scope.launch {
-                            val newRelays = bunkerRelays.filter { relay ->
-                                validateRelayUrl(relay, relays) == null
-                            }
-                            val safeRelays = withContext(Dispatchers.IO) {
-                                newRelays.filter { !BunkerConfigStore.isInternalHost(it) }
-                            }
-                            val remaining = BunkerConfigStore.MAX_RELAYS - relays.size
-                            if (remaining <= 0) {
-                                error = "Maximum relays reached"
-                            } else {
-                                val toAdd = safeRelays.take(remaining)
-                                if (toAdd.isEmpty()) {
-                                    error = if (bunkerRelays.all { relays.contains(it) }) {
-                                        "Relays already added"
-                                    } else {
-                                        "No valid relay URLs found in bunker URL"
-                                    }
-                                } else {
-                                    val updated = relays + toAdd
-                                    relays = updated
-                                    bunkerConfigStore.setRelays(updated)
-                                    dismissDialog()
-                                }
+
+                    when {
+                        bunkerRelays != null -> scope.launch {
+                            addBunkerRelays(bunkerRelays, relays) { result ->
+                                result.fold(
+                                    onSuccess = { toAdd ->
+                                        val updated = relays + toAdd
+                                        relays = updated
+                                        bunkerConfigStore.setRelays(updated)
+                                        dismissDialog()
+                                    },
+                                    onFailure = { error = it.message }
+                                )
                             }
                         }
-                    } else if (trimmed.startsWith("bunker://")) {
-                        error = "No relay URLs found in bunker URL"
-                    } else {
-                        val stripped = trimmed
-                            .removePrefix("https://")
-                            .removePrefix("http://")
-                            .removePrefix("ws://")
-                        val url = if (stripped.startsWith("wss://")) stripped else "wss://$stripped"
-                        val validationError = validateRelayUrl(url, relays)
-                        if (validationError != null) {
-                            error = validationError
-                        } else {
-                            scope.launch {
-                                val isInternal = withContext(Dispatchers.IO) {
-                                    BunkerConfigStore.isInternalHost(url)
-                                }
-                                if (isInternal) {
-                                    error = "Internal/private hosts are not allowed"
-                                } else {
-                                    val updated = relays + url
-                                    relays = updated
-                                    bunkerConfigStore.setRelays(updated)
-                                    dismissDialog()
+                        trimmed.startsWith("bunker://") ->
+                            error = "No relay URLs found in bunker URL"
+                        else -> {
+                            val url = normalizeRelayUrl(trimmed)
+                            val validationError = validateRelayUrl(url, relays)
+                            if (validationError != null) {
+                                error = validationError
+                            } else {
+                                scope.launch {
+                                    val isInternal = withContext(Dispatchers.IO) {
+                                        BunkerConfigStore.isInternalHost(url)
+                                    }
+                                    if (isInternal) {
+                                        error = "Internal/private hosts are not allowed"
+                                    } else {
+                                        val updated = relays + url
+                                        relays = updated
+                                        bunkerConfigStore.setRelays(updated)
+                                        dismissDialog()
+                                    }
                                 }
                             }
                         }
