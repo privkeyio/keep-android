@@ -513,8 +513,12 @@ fun MainScreen(
             shareInfo = currentShareInfoForScreens,
             storage = storage,
             onGetCipher = {
-                storage.getActiveShareKey()?.let { storage.getCipherForShareDecryption(it) }
-                    ?: storage.getCipherForDecryption()
+                runCatching {
+                    storage.getActiveShareKey()?.let { storage.getCipherForShareDecryption(it) }
+                        ?: storage.getCipherForDecryption()
+                }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for export", it)
+                }.getOrNull()
             },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
