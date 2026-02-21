@@ -11,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
 
 jobs:
