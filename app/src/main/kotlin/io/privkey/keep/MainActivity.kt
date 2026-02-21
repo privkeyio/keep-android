@@ -513,12 +513,13 @@ fun MainScreen(
             shareInfo = currentShareInfoForScreens,
             storage = storage,
             onGetCipher = {
-                runCatching {
+                try {
                     storage.getActiveShareKey()?.let { storage.getCipherForShareDecryption(it) }
                         ?: storage.getCipherForDecryption()
-                }.onFailure {
-                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for export", it)
-                }.getOrNull()
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for export: ${e::class.simpleName}")
+                    null
+                }
             },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
@@ -708,14 +709,18 @@ fun MainScreen(
                         coroutineScope.launch {
                             val cipher = withContext(Dispatchers.IO) {
                                 val key = storage.getActiveShareKey()
-                                runCatching {
+                                try {
                                     if (key != null) storage.getCipherForShareDecryption(key)
                                     else storage.getCipherForDecryption()
-                                }.onFailure {
-                                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
-                                }.getOrNull()
+                                } catch (e: Exception) {
+                                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection: ${e::class.simpleName}")
+                                    null
+                                }
                             }
-                            if (cipher == null) return@launch
+                            if (cipher == null) {
+                                Toast.makeText(appContext, "Failed to initialize encryption", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
                             onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
                                 authedCipher?.let { onConnect(it) { _, _ -> } }
                             }
