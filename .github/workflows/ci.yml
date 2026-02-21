@@ -33,9 +33,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
       - name: Install Android NDK
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
@@ -82,9 +79,6 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install Android NDK
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
