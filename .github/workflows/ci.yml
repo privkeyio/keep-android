@@ -34,7 +34,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Install Android NDK
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
@@ -81,7 +81,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Install Android NDK
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
