@@ -512,7 +512,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             shareInfo = currentShareInfoForScreens,
             storage = storage,
-            onGetCipher = { storage.getCipherForDecryption() },
+            onGetCipher = { getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
             },
@@ -700,15 +700,12 @@ fun MainScreen(
                     onConnect = {
                         coroutineScope.launch {
                             val cipher = withContext(Dispatchers.IO) {
-                                val key = storage.getActiveShareKey()
-                                runCatching {
-                                    if (key != null) storage.getCipherForShareDecryption(key)
-                                    else storage.getCipherForDecryption()
-                                }.onFailure {
-                                    if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher for connection", it)
-                                }.getOrNull()
+                                getShareAwareCipher(storage)
                             }
-                            if (cipher == null) return@launch
+                            if (cipher == null) {
+                                Toast.makeText(appContext, "Failed to initialize encryption", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
                             onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
                                 authedCipher?.let { onConnect(it) { _, _ -> } }
                             }
@@ -1260,3 +1257,12 @@ private data class PollResult(
     val peers: List<PeerInfo>,
     val pendingCount: Int
 )
+
+private fun getShareAwareCipher(storage: AndroidKeystoreStorage): Cipher? =
+    runCatching {
+        val key = storage.getActiveShareKey()
+        if (key != null) storage.getCipherForShareDecryption(key)
+        else storage.getCipherForDecryption()
+    }.onFailure {
+        if (BuildConfig.DEBUG) Log.e("MainActivity", "Failed to get cipher: ${it::class.simpleName}")
+    }.getOrNull()
