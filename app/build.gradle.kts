@@ -107,7 +107,7 @@ dependencies {
 
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:core:1.5.0")
-    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.room:room-testing:$roomVersion")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 
