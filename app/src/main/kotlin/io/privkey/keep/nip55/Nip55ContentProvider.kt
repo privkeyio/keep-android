@@ -174,12 +174,9 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     private sealed class PolicyResult {
-        val cursorOrNull: Cursor? get() = when (this) {
-            is Decided -> cursor
-            is FallToUi -> null
-        }
+        val cursorOrNull: Cursor? get() = (this as? Decided)?.cursor
         class Decided(val cursor: Cursor?) : PolicyResult()
-        class FallToUi : PolicyResult()
+        object FallToUi : PolicyResult()
     }
 
     private fun evaluateAutoSignPolicy(
@@ -200,12 +197,12 @@ class Nip55ContentProvider : ContentProvider() {
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
 
-        if (effectivePolicy == SignPolicy.MANUAL) return PolicyResult.FallToUi()
+        if (effectivePolicy == SignPolicy.MANUAL) return PolicyResult.FallToUi
 
         if (effectivePolicy == SignPolicy.AUTO) {
             if (eventKind != null && isSensitiveKind(eventKind)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi()
+                return PolicyResult.FallToUi
             }
 
             val safeguards = currentApp.getAutoSigningSafeguards()
@@ -217,7 +214,7 @@ class Nip55ContentProvider : ContentProvider() {
 
             if (!safeguards.isOptedIn(callerPackage)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi()
+                return PolicyResult.FallToUi
             }
 
             val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
