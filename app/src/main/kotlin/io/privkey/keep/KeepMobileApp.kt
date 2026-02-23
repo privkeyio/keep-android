@@ -101,7 +101,7 @@ class KeepMobileApp : Application() {
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         }.onFailure { e ->
-            initError = "${e::class.simpleName}: ${e.message}"
+            initError = "Failed to initialize application"
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
@@ -262,7 +262,7 @@ class KeepMobileApp : Application() {
         val proxy = proxyConfigStore?.getProxyConfig()
         if (BuildConfig.DEBUG) {
             val shareInfo = mobile.getShareInfo()
-            Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, group=${shareInfo?.groupPubkey?.take(16)}")
+            Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, hasGroup=${shareInfo?.groupPubkey != null}")
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxy != null}")
         }
         initializeWithProxy(mobile, relays, proxy)

@@ -95,6 +95,7 @@ fun ConnectedAppsScreen(
                 CircularProgressIndicator()
             }
         } else if (loadError != null) {
+            val currentLoadError = loadError
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
@@ -114,7 +115,7 @@ fun ConnectedAppsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        loadError!!,
+                        currentLoadError ?: "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

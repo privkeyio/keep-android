@@ -54,7 +54,7 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     private val rateLimiter = RateLimiter()
-    private val backgroundNotificationId = AtomicInteger(2000)
+    private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(4)
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
@@ -140,6 +140,25 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return null
 
+        val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
+        if (velocityCursor != null) return velocityCursor
+
+        val policyCursor = evaluateAutoSignPolicy(
+            currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
+        )
+        if (policyCursor != null) return policyCursor.cursorOrNull
+
+        return checkPermissionWithRisk(
+            store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
+        )
+    }
+
+    private fun checkVelocityLimits(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?
+    ): Cursor? {
         val velocityResult = runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }
         if (velocityResult == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check failed (timeout or concurrency limit), denying request")
@@ -151,7 +170,26 @@ class Nip55ContentProvider : ContentProvider() {
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "velocity_blocked", wasAutomatic = true) }
             return rejectedCursor(null)
         }
+        return null
+    }
 
+    private sealed class PolicyResult {
+        val cursorOrNull: Cursor? get() = (this as? Decided)?.cursor
+        class Decided(val cursor: Cursor?) : PolicyResult()
+        object FallToUi : PolicyResult()
+    }
+
+    private fun evaluateAutoSignPolicy(
+        currentApp: KeepMobileApp,
+        store: PermissionStore,
+        h: Nip55Handler,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        rawContent: String,
+        rawPubkey: String?,
+        eventKind: Int?,
+        currentUser: String?
+    ): PolicyResult? {
         val effectivePolicy = runWithTimeout {
             store.getAppSignPolicyOverride(callerPackage)
                 ?.let { SignPolicy.fromOrdinal(it) }
@@ -159,29 +197,29 @@ class Nip55ContentProvider : ContentProvider() {
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
 
-        if (effectivePolicy == SignPolicy.MANUAL) return null
+        if (effectivePolicy == SignPolicy.MANUAL) return PolicyResult.FallToUi
 
         if (effectivePolicy == SignPolicy.AUTO) {
             if (eventKind != null && isSensitiveKind(eventKind)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from ${hashPackageName(callerPackage)}")
-                return null
+                return PolicyResult.FallToUi
             }
 
             val safeguards = currentApp.getAutoSigningSafeguards()
             if (safeguards == null) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for ${hashPackageName(callerPackage)}")
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
-                return rejectedCursor(null)
+                return PolicyResult.Decided(rejectedCursor(null))
             }
 
             if (!safeguards.isOptedIn(callerPackage)) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for ${hashPackageName(callerPackage)}")
-                return null
+                return PolicyResult.FallToUi
             }
 
             val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
                 is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                    return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                    return PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
                 is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
                 is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
                 is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
@@ -189,9 +227,23 @@ class Nip55ContentProvider : ContentProvider() {
             }
             if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for ${hashPackageName(callerPackage)}: $denyReason")
             runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-            return rejectedCursor(null)
+            return PolicyResult.Decided(rejectedCursor(null))
         }
 
+        return null
+    }
+
+    private fun checkPermissionWithRisk(
+        store: PermissionStore,
+        h: Nip55Handler,
+        currentApp: KeepMobileApp,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        rawContent: String,
+        rawPubkey: String?,
+        eventKind: Int?,
+        currentUser: String?
+    ): Cursor? {
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "isAppExpired check timed out for ${hashPackageName(callerPackage)}, denying request")
@@ -320,7 +372,8 @@ class Nip55ContentProvider : ContentProvider() {
             .setAutoCancel(true)
             .build()
 
-        NotificationManagerCompat.from(ctx).notify(backgroundNotificationId.getAndIncrement(), notification)
+        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 1000)
+        NotificationManagerCompat.from(ctx).notify(notifId, notification)
     }
 
     private fun getVerifiedCaller(): String? {

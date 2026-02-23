@@ -302,11 +302,18 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
         val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
+        val identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0)
+        val threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0)
+        val totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0)
+        val ushortRange = UShort.MIN_VALUE.toInt()..UShort.MAX_VALUE.toInt()
+        require(identifier in ushortRange && threshold in ushortRange && totalShares in ushortRange) {
+            "Share metadata values out of UShort range"
+        }
         ShareMetadataInfo(
             name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
-            identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-            threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-            totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
+            identifier = identifier.toUShort(),
+            threshold = threshold.toUShort(),
+            totalShares = totalShares.toUShort(),
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
         )
     } catch (e: Exception) {
@@ -425,6 +432,8 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+        require(key.isNotBlank()) { "Share key must not be blank" }
+        require(data.isNotEmpty()) { "Share data must not be empty" }
         if (isMetadataKey(key)) {
             storeMetadata(key, data, metadata)
             return
@@ -437,6 +446,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun loadShareByKey(key: String): ByteArray {
+        require(key.isNotBlank()) { "Share key must not be blank" }
         if (isMetadataKey(key)) {
             return loadMetadata(key)
         }
@@ -459,6 +469,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun deleteShareByKey(key: String) {
+        require(key.isNotBlank()) { "Share key must not be blank" }
         if (isMetadataKey(key)) {
             val cleared = getSharePrefs(key).edit().clear().commit()
             if (!cleared) {
@@ -504,6 +515,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     override fun setActiveShareKey(key: String?) {
+        if (key != null) require(key.isNotBlank()) { "Active share key must not be blank" }
         val editor = multiSharePrefs.edit()
         if (key != null) {
             editor.putString(KEY_ACTIVE_SHARE, key)

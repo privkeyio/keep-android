@@ -94,8 +94,6 @@ fun BunkerScreen(
     var authorizedClients by remember { mutableStateOf(bunkerConfigStore.getAuthorizedClients()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
-    var newRelayUrl by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
 
     DisposableEffect(Unit) {
@@ -103,12 +101,6 @@ fun BunkerScreen(
         onDispose {
             setSecureScreen(context, false)
         }
-    }
-
-    fun dismissDialog() {
-        showAddDialog = false
-        newRelayUrl = ""
-        error = null
     }
 
     Column(
@@ -203,47 +195,90 @@ fun BunkerScreen(
     }
 
     if (showAddDialog) {
-        AlertDialog(
-            onDismissRequest = ::dismissDialog,
-            title = { Text("Add Bunker Relay") },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = newRelayUrl,
-                        onValueChange = {
-                            newRelayUrl = it
-                            error = null
-                        },
-                        label = { Text("Relay URL") },
-                        placeholder = { Text("wss://relay.example.com or bunker://...") },
-                        singleLine = true,
-                        isError = error != null
-                    )
-                    error?.let {
-                        Text(
-                            it,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+        AddBunkerRelayDialog(
+            relays = relays,
+            onRelaysUpdated = { updated ->
+                relays = updated
+                scope.launch { bunkerConfigStore.setRelays(updated) }
             },
-            confirmButton = {
-                TextButton(onClick = {
+            onDismiss = { showAddDialog = false }
+        )
+    }
+
+    if (showRevokeAllDialog) {
+        RevokeAllClientsDialog(
+            onConfirm = {
+                bunkerConfigStore.revokeAllClients()
+                authorizedClients = emptySet()
+                Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showRevokeAllDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun AddBunkerRelayDialog(
+    relays: List<String>,
+    onRelaysUpdated: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var newRelayUrl by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var isAdding by remember { mutableStateOf(false) }
+
+    fun dismissDialog() {
+        newRelayUrl = ""
+        error = null
+        onDismiss()
+    }
+
+    AlertDialog(
+        onDismissRequest = ::dismissDialog,
+        title = { Text("Add Bunker Relay") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = newRelayUrl,
+                    onValueChange = {
+                        newRelayUrl = it
+                        error = null
+                    },
+                    label = { Text("Relay URL") },
+                    placeholder = { Text("wss://relay.example.com or bunker://...") },
+                    singleLine = true,
+                    isError = error != null
+                )
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (isAdding) return@TextButton
                     val trimmed = newRelayUrl.trim()
                     val bunkerRelays = parseBunkerUrlRelays(trimmed)
 
                     when {
-                        bunkerRelays != null -> scope.launch {
-                            addBunkerRelays(bunkerRelays, relays).fold(
-                                onSuccess = { toAdd ->
-                                    val updated = relays + toAdd
-                                    relays = updated
-                                    bunkerConfigStore.setRelays(updated)
-                                    dismissDialog()
-                                },
-                                onFailure = { error = it.message }
-                            )
+                        bunkerRelays != null -> {
+                            isAdding = true
+                            scope.launch {
+                                addBunkerRelays(bunkerRelays, relays).fold(
+                                    onSuccess = { toAdd ->
+                                        onRelaysUpdated(relays + toAdd)
+                                        dismissDialog()
+                                    },
+                                    onFailure = { error = it.message }
+                                )
+                                isAdding = false
+                            }
                         }
                         trimmed.startsWith("bunker://") ->
                             error = "No relay URLs found in bunker URL"
@@ -253,6 +288,7 @@ fun BunkerScreen(
                             if (validationError != null) {
                                 error = validationError
                             } else {
+                                isAdding = true
                                 scope.launch {
                                     val isInternal = withContext(Dispatchers.IO) {
                                         BunkerConfigStore.isInternalHost(url)
@@ -260,56 +296,62 @@ fun BunkerScreen(
                                     if (isInternal) {
                                         error = "Internal/private hosts are not allowed"
                                     } else {
-                                        val updated = relays + url
-                                        relays = updated
-                                        bunkerConfigStore.setRelays(updated)
+                                        onRelaysUpdated(relays + url)
                                         dismissDialog()
                                     }
+                                    isAdding = false
                                 }
                             }
                         }
                     }
-                }) {
+                },
+                enabled = !isAdding
+            ) {
+                if (isAdding) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
                     Text("Add")
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = ::dismissDialog) {
-                    Text("Cancel")
-                }
             }
-        )
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = ::dismissDialog) {
+                Text("Cancel")
+            }
+        }
+    )
+}
 
-    if (showRevokeAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showRevokeAllDialog = false },
-            title = { Text("Revoke All Clients") },
-            text = {
-                Text("This will disconnect all authorized clients. They will need to reconnect and be approved again.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        bunkerConfigStore.revokeAllClients()
-                        authorizedClients = emptySet()
-                        showRevokeAllDialog = false
-                        Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Revoke All")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRevokeAllDialog = false }) {
-                    Text("Cancel")
-                }
+@Composable
+private fun RevokeAllClientsDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Revoke All Clients") },
+        text = {
+            Text("This will disconnect all authorized clients. They will need to reconnect and be approved again.")
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm()
+                    onDismiss()
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Revoke All")
             }
-        )
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

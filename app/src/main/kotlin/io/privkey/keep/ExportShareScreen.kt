@@ -101,6 +101,129 @@ private fun calculatePassphraseStrength(passphrase: SecurePassphrase): Passphras
     }
 }
 
+@Composable
+private fun PassphraseStrengthIndicator(strength: PassphraseStrength) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LinearProgressIndicator(
+            progress = { (strength.ordinal + 1) / 4f },
+            modifier = Modifier.weight(1f).height(4.dp),
+            color = strength.color(),
+            trackColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = strength.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = strength.color()
+        )
+    }
+}
+
+@Composable
+private fun ExportInputForm(
+    errorMessage: String?,
+    cipherError: String?,
+    passphrase: SecurePassphrase,
+    confirmPassphrase: SecurePassphrase,
+    passphraseDisplay: String,
+    confirmPassphraseDisplay: String,
+    onPassphraseChange: (String) -> Unit,
+    onConfirmPassphraseChange: (String) -> Unit,
+    onExport: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+    ) {
+        Text(
+            text = "Store this export securely. Anyone with this backup and passphrase can access your signing key share.",
+            modifier = Modifier.padding(16.dp),
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    errorMessage?.let {
+        ErrorCard(it)
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    cipherError?.let {
+        ErrorCard(it)
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    OutlinedTextField(
+        value = passphraseDisplay,
+        onValueChange = onPassphraseChange,
+        label = { Text("Export Passphrase") },
+        placeholder = { Text("Enter a passphrase to encrypt") },
+        modifier = Modifier.fillMaxWidth(),
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        singleLine = true
+    )
+
+    if (passphrase.length > 0) {
+        Spacer(modifier = Modifier.height(8.dp))
+        PassphraseStrengthIndicator(calculatePassphraseStrength(passphrase))
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    OutlinedTextField(
+        value = confirmPassphraseDisplay,
+        onValueChange = onConfirmPassphraseChange,
+        label = { Text("Confirm Passphrase") },
+        placeholder = { Text("Re-enter passphrase") },
+        modifier = Modifier.fillMaxWidth(),
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        singleLine = true,
+        isError = confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase),
+        supportingText = if (confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase)) {
+            { Text("Passphrases do not match") }
+        } else null
+    )
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        text = "This passphrase encrypts the exported share. You will need it to import the share on another device.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(modifier = Modifier.height(24.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        OutlinedButton(
+            onClick = onCancel,
+            modifier = Modifier.weight(1f)
+        ) {
+            Text("Cancel")
+        }
+        Button(
+            onClick = onExport,
+            modifier = Modifier.weight(1f),
+            enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH &&
+                passphrase.contentEquals(confirmPassphrase) &&
+                calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
+        ) {
+            Text("Export")
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportShareScreen(
@@ -171,186 +294,94 @@ fun ExportShareScreen(
 
         when (val state = exportState) {
             is ExportState.Idle, is ExportState.Error -> {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-                ) {
-                    Text(
-                        text = "Store this export securely. Anyone with this backup and passphrase can access your signing key share.",
-                        modifier = Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (state is ExportState.Error) {
-                    ErrorCard(state.message)
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                cipherError?.let {
-                    ErrorCard(it)
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                OutlinedTextField(
-                    value = passphraseDisplay,
-                    onValueChange = {
+                ExportInputForm(
+                    errorMessage = (state as? ExportState.Error)?.message,
+                    cipherError = cipherError,
+                    passphrase = passphrase,
+                    confirmPassphrase = confirmPassphrase,
+                    passphraseDisplay = passphraseDisplay,
+                    confirmPassphraseDisplay = confirmPassphraseDisplay,
+                    onPassphraseChange = {
                         passphrase.update(it)
                         passphraseDisplay = it
                     },
-                    label = { Text("Export Passphrase") },
-                    placeholder = { Text("Enter a passphrase to encrypt") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true
-                )
-
-                if (passphrase.length > 0) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val strength = calculatePassphraseStrength(passphrase)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        LinearProgressIndicator(
-                            progress = { (strength.ordinal + 1) / 4f },
-                            modifier = Modifier.weight(1f).height(4.dp),
-                            color = strength.color(),
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = strength.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = strength.color()
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                OutlinedTextField(
-                    value = confirmPassphraseDisplay,
-                    onValueChange = {
+                    onConfirmPassphraseChange = {
                         confirmPassphrase.update(it)
                         confirmPassphraseDisplay = it
                     },
-                    label = { Text("Confirm Passphrase") },
-                    placeholder = { Text("Re-enter passphrase") },
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true,
-                    isError = confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase),
-                    supportingText = if (confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase)) {
-                        { Text("Passphrases do not match") }
-                    } else null
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "This passphrase encrypts the exported share. You will need it to import the share on another device.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            passphrase.clear()
-                            confirmPassphrase.clear()
-                            passphraseDisplay = ""
-                            confirmPassphraseDisplay = ""
-                            onDismiss()
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Cancel")
-                    }
-                    Button(
-                        onClick = {
-                            if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-                                exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
-                                return@Button
-                            }
-                            if (!passphrase.contentEquals(confirmPassphrase)) {
-                                exportState = ExportState.Error("Passphrases do not match")
-                                return@Button
-                            }
-                            if (calculatePassphraseStrength(passphrase) == PassphraseStrength.WEAK) {
-                                exportState = ExportState.Error("Passphrase is too weak. Add length, mixed case, numbers, or symbols.")
-                                return@Button
-                            }
-                            cipherError = null
-                            val cipher = onGetCipher()
-                            if (cipher == null) {
-                                cipherError = "No encryption key available"
-                                return@Button
-                            }
-                            val passphraseChars = passphrase.toCharArray()
-                            fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
-                            try {
-                                onBiometricAuth(cipher) { authedCipher ->
-                                    if (authedCipher != null) {
-                                        val exportId = java.util.UUID.randomUUID().toString()
-                                        storage.setPendingCipher(exportId, authedCipher)
-                                        exportState = ExportState.Exporting
-                                        coroutineScope.launch {
-                                            currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-                                                if (cause is CancellationException) {
-                                                    clearChars()
-                                                    storage.clearPendingCipher(exportId)
-                                                }
-                                            }
-                                            try {
-                                                val data = withContext(Dispatchers.IO) {
-                                                    storage.setRequestIdContext(exportId)
-                                                    try {
-                                                        keepMobile.exportShare(String(passphraseChars))
-                                                    } finally {
-                                                        storage.clearRequestIdContext()
-                                                    }
-                                                }
-                                                (exportState as? ExportState.Success)?.clear()
-                                                exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
-                                            } catch (e: Exception) {
-                                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
-                                                exportState = ExportState.Error("Export failed. Please try again.")
-                                            } finally {
+                    onExport = {
+                        if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+                            exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
+                            return@ExportInputForm
+                        }
+                        if (!passphrase.contentEquals(confirmPassphrase)) {
+                            exportState = ExportState.Error("Passphrases do not match")
+                            return@ExportInputForm
+                        }
+                        if (calculatePassphraseStrength(passphrase) == PassphraseStrength.WEAK) {
+                            exportState = ExportState.Error("Passphrase is too weak. Add length, mixed case, numbers, or symbols.")
+                            return@ExportInputForm
+                        }
+                        cipherError = null
+                        val cipher = onGetCipher()
+                        if (cipher == null) {
+                            cipherError = "No encryption key available"
+                            return@ExportInputForm
+                        }
+                        val passphraseChars = passphrase.toCharArray()
+                        fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
+                        try {
+                            onBiometricAuth(cipher) { authedCipher ->
+                                if (authedCipher != null) {
+                                    val exportId = java.util.UUID.randomUUID().toString()
+                                    storage.setPendingCipher(exportId, authedCipher)
+                                    exportState = ExportState.Exporting
+                                    coroutineScope.launch {
+                                        currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+                                            if (cause is CancellationException) {
                                                 clearChars()
                                                 storage.clearPendingCipher(exportId)
                                             }
                                         }
-                                    } else {
-                                        clearChars()
-                                        exportState = ExportState.Error("Authentication cancelled")
-                                        Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
+                                        try {
+                                            val data = withContext(Dispatchers.IO) {
+                                                storage.setRequestIdContext(exportId)
+                                                try {
+                                                    keepMobile.exportShare(String(passphraseChars))
+                                                } finally {
+                                                    storage.clearRequestIdContext()
+                                                }
+                                            }
+                                            (exportState as? ExportState.Success)?.clear()
+                                            exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
+                                        } catch (e: Exception) {
+                                            if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
+                                            exportState = ExportState.Error("Export failed. Please try again.")
+                                        } finally {
+                                            clearChars()
+                                            storage.clearPendingCipher(exportId)
+                                        }
                                     }
+                                } else {
+                                    clearChars()
+                                    exportState = ExportState.Error("Authentication cancelled")
+                                    Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
                                 }
-                            } catch (e: Exception) {
-                                clearChars()
-                                if (BuildConfig.DEBUG) Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
-                                cipherError = "Failed to initialize encryption"
                             }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = passphrase.length >= MIN_PASSPHRASE_LENGTH &&
-                            passphrase.contentEquals(confirmPassphrase) &&
-                            calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
-                    ) {
-                        Text("Export")
+                        } catch (e: Exception) {
+                            clearChars()
+                            if (BuildConfig.DEBUG) Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
+                            cipherError = "Failed to initialize encryption"
+                        }
+                    },
+                    onCancel = {
+                        passphrase.clear()
+                        confirmPassphrase.clear()
+                        passphraseDisplay = ""
+                        confirmPassphraseDisplay = ""
+                        onDismiss()
                     }
-                }
+                )
             }
 
             is ExportState.Exporting -> {
