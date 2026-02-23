@@ -118,6 +118,15 @@ fun SigningHistoryScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        loadError?.let { error ->
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         if (availableApps.isNotEmpty()) {
             AppFilterDropdown(
                 availableApps = availableApps,

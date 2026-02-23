@@ -166,15 +166,21 @@ private fun RevokeAllPermissionsDialog(
             TextButton(
                 onClick = {
                     coroutineScope.launch {
-                        withContext(Dispatchers.IO) {
-                            runCatching { permissionStore.revokePermission(packageName) }
-                            if (isNip46) {
-                                val pubkey = packageName.removePrefix("nip46:")
-                                runCatching { revokeNip46Client(context, pubkey) }
+                        try {
+                            withContext(Dispatchers.IO) {
+                                permissionStore.revokePermission(packageName)
+                                if (isNip46) {
+                                    val pubkey = packageName.removePrefix("nip46:")
+                                    revokeNip46Client(context, pubkey)
+                                }
                             }
+                            onDismissDialog()
+                            onDismissScreen()
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("AppPermissions", "Revoke failed: ${e::class.simpleName}")
+                            onDismissDialog()
+                            Toast.makeText(context, "Failed to revoke permissions", Toast.LENGTH_SHORT).show()
                         }
-                        onDismissDialog()
-                        onDismissScreen()
                     }
                 },
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)

@@ -155,6 +155,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
                     keystoreStorage.clearPendingCipher(reqId)
                 }
                 respond(true, duration)
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 keystoreStorage.clearPendingCipher(reqId)
                 if (BuildConfig.DEBUG) Log.e(TAG, "Error during approval: ${e::class.simpleName}")
@@ -180,6 +182,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
                     eventKind = eventKind,
                     duration = duration
                 )
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist permission: ${e::class.simpleName}")
             }

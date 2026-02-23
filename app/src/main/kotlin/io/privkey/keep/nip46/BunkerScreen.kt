@@ -226,6 +226,7 @@ private fun AddBunkerRelayDialog(
     val scope = rememberCoroutineScope()
     var newRelayUrl by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var isAdding by remember { mutableStateOf(false) }
 
     fun dismissDialog() {
         newRelayUrl = ""
@@ -259,44 +260,58 @@ private fun AddBunkerRelayDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val trimmed = newRelayUrl.trim()
-                val bunkerRelays = parseBunkerUrlRelays(trimmed)
+            TextButton(
+                onClick = {
+                    if (isAdding) return@TextButton
+                    val trimmed = newRelayUrl.trim()
+                    val bunkerRelays = parseBunkerUrlRelays(trimmed)
 
-                when {
-                    bunkerRelays != null -> scope.launch {
-                        addBunkerRelays(bunkerRelays, relays).fold(
-                            onSuccess = { toAdd ->
-                                onRelaysUpdated(relays + toAdd)
-                                dismissDialog()
-                            },
-                            onFailure = { error = it.message }
-                        )
-                    }
-                    trimmed.startsWith("bunker://") ->
-                        error = "No relay URLs found in bunker URL"
-                    else -> {
-                        val url = normalizeRelayUrl(trimmed)
-                        val validationError = validateRelayUrl(url, relays)
-                        if (validationError != null) {
-                            error = validationError
-                        } else {
+                    when {
+                        bunkerRelays != null -> {
+                            isAdding = true
                             scope.launch {
-                                val isInternal = withContext(Dispatchers.IO) {
-                                    BunkerConfigStore.isInternalHost(url)
-                                }
-                                if (isInternal) {
-                                    error = "Internal/private hosts are not allowed"
-                                } else {
-                                    onRelaysUpdated(relays + url)
-                                    dismissDialog()
+                                addBunkerRelays(bunkerRelays, relays).fold(
+                                    onSuccess = { toAdd ->
+                                        onRelaysUpdated(relays + toAdd)
+                                        dismissDialog()
+                                    },
+                                    onFailure = { error = it.message }
+                                )
+                                isAdding = false
+                            }
+                        }
+                        trimmed.startsWith("bunker://") ->
+                            error = "No relay URLs found in bunker URL"
+                        else -> {
+                            val url = normalizeRelayUrl(trimmed)
+                            val validationError = validateRelayUrl(url, relays)
+                            if (validationError != null) {
+                                error = validationError
+                            } else {
+                                isAdding = true
+                                scope.launch {
+                                    val isInternal = withContext(Dispatchers.IO) {
+                                        BunkerConfigStore.isInternalHost(url)
+                                    }
+                                    if (isInternal) {
+                                        error = "Internal/private hosts are not allowed"
+                                    } else {
+                                        onRelaysUpdated(relays + url)
+                                        dismissDialog()
+                                    }
+                                    isAdding = false
                                 }
                             }
                         }
                     }
+                },
+                enabled = !isAdding
+            ) {
+                if (isAdding) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Add")
                 }
-            }) {
-                Text("Add")
             }
         },
         dismissButton = {

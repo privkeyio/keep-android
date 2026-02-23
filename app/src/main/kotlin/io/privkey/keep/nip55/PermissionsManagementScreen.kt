@@ -106,7 +106,11 @@ fun PermissionsManagementScreen(
                     modifier = Modifier.weight(1f),
                     onRevokeAll = { showRevokeAllDialog = it },
                     onDecisionChange = { permission, newDecision ->
-                        val requestType = findRequestType(permission.requestType) ?: return@PermissionsGroupedList
+                        val requestType = findRequestType(permission.requestType)
+                        if (requestType == null) {
+                            loadError = "Unknown request type: ${permission.requestType}"
+                            return@PermissionsGroupedList
+                        }
                         coroutineScope.launch {
                             try {
                                 permissionStore.updatePermissionDecision(
@@ -231,7 +235,7 @@ private fun PermissionsGroupedList(
     onDecisionChange: (Nip55Permission, PermissionDecision) -> Unit,
     onDelete: (Nip55Permission) -> Unit
 ) {
-    val groupedPermissions = permissions.groupBy { it.callerPackage }
+    val groupedPermissions = remember(permissions) { permissions.groupBy { it.callerPackage } }
 
     LazyColumn(
         modifier = modifier,

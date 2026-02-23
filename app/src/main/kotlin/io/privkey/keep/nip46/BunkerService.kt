@@ -169,7 +169,11 @@ class BunkerService : Service() {
             }
 
             if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
-                clientRequestHistory.keys.firstOrNull()?.let { clientRequestHistory.remove(it) }
+                clientRequestHistory.keys.firstOrNull()?.let { evictKey ->
+                    clientRequestHistory.remove(evictKey)
+                    clientBackoffUntil.remove(evictKey)
+                    clientConsecutiveRequests.remove(evictKey)
+                }
             }
             val history = clientRequestHistory.computeIfAbsent(clientPubkey) { mutableListOf() }
             synchronized(history) {
