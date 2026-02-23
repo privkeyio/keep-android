@@ -375,7 +375,8 @@ class Nip55ContentProvider : ContentProvider() {
             .setAutoCancel(true)
             .build()
 
-        NotificationManagerCompat.from(ctx).notify(backgroundNotificationId.getAndIncrement(), notification)
+        val notifId = 2000 + (backgroundNotificationId.getAndIncrement() % 1000)
+        NotificationManagerCompat.from(ctx).notify(notifId, notification)
     }
 
     private fun getVerifiedCaller(): String? {

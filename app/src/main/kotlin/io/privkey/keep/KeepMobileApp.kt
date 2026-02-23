@@ -101,7 +101,7 @@ class KeepMobileApp : Application() {
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
         }.onFailure { e ->
-            initError = "${e::class.simpleName}: ${e.message}"
+            initError = "Failed to initialize application"
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }

@@ -164,11 +164,11 @@ fun ImportShareScreen(
                     }
                 } catch (e: KeyPermanentlyInvalidatedException) {
                     clearChars()
-                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
+                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init: ${e::class.simpleName}")
                     onError("Biometric key invalidated. Please re-enroll biometrics.")
                 } catch (e: Exception) {
                     clearChars()
-                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
+                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth: ${e::class.simpleName}")
                     onError("Failed to initialize encryption")
                 }
             }

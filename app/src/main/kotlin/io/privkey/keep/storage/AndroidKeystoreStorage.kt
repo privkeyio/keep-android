@@ -302,11 +302,18 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
 
     private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
         val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
+        val identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0)
+        val threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0)
+        val totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0)
+        val ushortRange = UShort.MIN_VALUE.toInt()..UShort.MAX_VALUE.toInt()
+        require(identifier in ushortRange && threshold in ushortRange && totalShares in ushortRange) {
+            "Share metadata values out of UShort range"
+        }
         ShareMetadataInfo(
             name = sharePrefs.getString(KEY_SHARE_NAME, "") ?: "",
-            identifier = sharePrefs.getInt(KEY_SHARE_INDEX, 0).toUShort(),
-            threshold = sharePrefs.getInt(KEY_SHARE_THRESHOLD, 0).toUShort(),
-            totalShares = sharePrefs.getInt(KEY_SHARE_TOTAL, 0).toUShort(),
+            identifier = identifier.toUShort(),
+            threshold = threshold.toUShort(),
+            totalShares = totalShares.toUShort(),
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
         )
     } catch (e: Exception) {

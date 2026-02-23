@@ -62,6 +62,7 @@ class BunkerService : Service() {
         private const val APPROVAL_TIMEOUT_MS = 60_000L
         private const val GLOBAL_RATE_LIMIT_WINDOW_MS = 60_000L
         private const val GLOBAL_MAX_REQUESTS_PER_WINDOW = 100
+        private const val MAX_TRACKED_CLIENTS = 1000
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
@@ -167,6 +168,9 @@ class BunkerService : Service() {
                 return true
             }
 
+            if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
+                clientRequestHistory.keys.firstOrNull()?.let { clientRequestHistory.remove(it) }
+            }
             val history = clientRequestHistory.computeIfAbsent(clientPubkey) { mutableListOf() }
             synchronized(history) {
                 history.removeAll { it < now - RATE_LIMIT_WINDOW_MS }
