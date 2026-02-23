@@ -54,7 +54,7 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     private val rateLimiter = RateLimiter()
-    private val backgroundNotificationId = AtomicInteger(2000)
+    private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(4)
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
@@ -375,7 +375,7 @@ class Nip55ContentProvider : ContentProvider() {
             .setAutoCancel(true)
             .build()
 
-        val notifId = 2000 + (backgroundNotificationId.getAndIncrement() % 1000)
+        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 1000)
         NotificationManagerCompat.from(ctx).notify(notifId, notification)
     }
 
