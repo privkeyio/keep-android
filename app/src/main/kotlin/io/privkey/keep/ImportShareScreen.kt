@@ -123,112 +123,150 @@ fun ImportShareScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        OutlinedTextField(
-            value = shareDataDisplay,
-            onValueChange = {
-                if (it.length <= MAX_SHARE_LENGTH) {
-                    shareData.update(it)
-                    shareDataDisplay = it
+        ImportShareInputFields(
+            shareDataDisplay = shareDataDisplay,
+            onShareDataChange = { value ->
+                if (value.length <= MAX_SHARE_LENGTH) {
+                    shareData.update(value)
+                    shareDataDisplay = value
                 }
             },
-            label = { Text("Share Data") },
-            placeholder = { Text("kshare1q...") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-            maxLines = 5,
-            enabled = isInputEnabled
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedButton(
-            onClick = { showScanner = true },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isInputEnabled
-        ) {
-            Text("Scan QR Code")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = passphraseDisplay,
-            onValueChange = {
-                passphrase.update(it)
-                passphraseDisplay = it
+            passphraseDisplay = passphraseDisplay,
+            onPassphraseChange = { value ->
+                passphrase.update(value)
+                passphraseDisplay = value
             },
-            label = { Text("Passphrase") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            singleLine = true,
-            enabled = isInputEnabled
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = shareName,
-            onValueChange = { if (it.length <= 64) shareName = it },
-            label = { Text("Share Name") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = isInputEnabled
+            shareName = shareName,
+            onShareNameChange = { if (it.length <= 64) shareName = it },
+            onScanClick = { showScanner = true },
+            isInputEnabled = isInputEnabled
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (importState is ImportState.Error) {
-            StatusCard(
-                text = importState.message,
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        if (importState is ImportState.Success) {
-            StatusCard(
-                text = "Share '${importState.name}' imported successfully",
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        if (importState is ImportState.Importing) {
-            CircularProgressIndicator()
-        } else {
-            ImportButtons(
-                importState = importState,
-                canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
-                onDismiss = onDismiss,
-                onImportClick = { onError ->
-                    val passphraseChars = passphrase.toCharArray()
-                    fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
-                    try {
-                        val cipher = onGetCipher()
-                        onBiometricAuth(cipher) { authedCipher ->
-                            try {
-                                if (authedCipher != null) {
-                                    onImport(shareData.valueUnsafe(), String(passphraseChars), shareName, authedCipher)
-                                }
-                            } finally {
-                                clearChars()
+        ImportStatusAndActions(
+            importState = importState,
+            canImport = shareData.isNotBlank() && passphrase.length > 0 && isInputEnabled,
+            onDismiss = onDismiss,
+            onImportClick = { onError ->
+                val passphraseChars = passphrase.toCharArray()
+                fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
+                try {
+                    val cipher = onGetCipher()
+                    onBiometricAuth(cipher) { authedCipher ->
+                        try {
+                            if (authedCipher != null) {
+                                onImport(shareData.valueUnsafe(), String(passphraseChars), shareName, authedCipher)
                             }
+                        } finally {
+                            clearChars()
                         }
-                    } catch (e: KeyPermanentlyInvalidatedException) {
-                        clearChars()
-                        if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
-                        onError("Biometric key invalidated. Please re-enroll biometrics.")
-                    } catch (e: Exception) {
-                        clearChars()
-                        if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
-                        onError("Failed to initialize encryption")
                     }
+                } catch (e: KeyPermanentlyInvalidatedException) {
+                    clearChars()
+                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init", e)
+                    onError("Biometric key invalidated. Please re-enroll biometrics.")
+                } catch (e: Exception) {
+                    clearChars()
+                    if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth", e)
+                    onError("Failed to initialize encryption")
                 }
-            )
-        }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ImportShareInputFields(
+    shareDataDisplay: String,
+    onShareDataChange: (String) -> Unit,
+    passphraseDisplay: String,
+    onPassphraseChange: (String) -> Unit,
+    shareName: String,
+    onShareNameChange: (String) -> Unit,
+    onScanClick: () -> Unit,
+    isInputEnabled: Boolean
+) {
+    OutlinedTextField(
+        value = shareDataDisplay,
+        onValueChange = onShareDataChange,
+        label = { Text("Share Data") },
+        placeholder = { Text("kshare1q...") },
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 3,
+        maxLines = 5,
+        enabled = isInputEnabled
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    OutlinedButton(
+        onClick = onScanClick,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = isInputEnabled
+    ) {
+        Text("Scan QR Code")
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    OutlinedTextField(
+        value = passphraseDisplay,
+        onValueChange = onPassphraseChange,
+        label = { Text("Passphrase") },
+        modifier = Modifier.fillMaxWidth(),
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        singleLine = true,
+        enabled = isInputEnabled
+    )
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    OutlinedTextField(
+        value = shareName,
+        onValueChange = onShareNameChange,
+        label = { Text("Share Name") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        enabled = isInputEnabled
+    )
+}
+
+@Composable
+private fun ImportStatusAndActions(
+    importState: ImportState,
+    canImport: Boolean,
+    onDismiss: () -> Unit,
+    onImportClick: (onError: (String) -> Unit) -> Unit
+) {
+    if (importState is ImportState.Error) {
+        StatusCard(
+            text = importState.message,
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    if (importState is ImportState.Success) {
+        StatusCard(
+            text = "Share '${importState.name}' imported successfully",
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    if (importState is ImportState.Importing) {
+        CircularProgressIndicator()
+    } else {
+        ImportButtons(
+            importState = importState,
+            canImport = canImport,
+            onDismiss = onDismiss,
+            onImportClick = onImportClick
+        )
     }
 }
 

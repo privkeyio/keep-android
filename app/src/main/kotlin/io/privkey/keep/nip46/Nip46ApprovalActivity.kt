@@ -180,8 +180,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
                     eventKind = eventKind,
                     duration = duration
                 )
-            } catch (t: Throwable) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist permission: ${t::class.simpleName}")
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist permission: ${e::class.simpleName}")
             }
         }
     }

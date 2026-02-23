@@ -416,26 +416,15 @@ fun MainScreen(
     }
 
     if (showKillSwitchConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showKillSwitchConfirmDialog = false },
-            title = { Text("Enable Kill Switch?") },
-            text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
-                        killSwitchEnabled = true
-                        showKillSwitchConfirmDialog = false
-                    }
-                }) {
-                    Text("Enable")
+        KillSwitchConfirmDialog(
+            onConfirm = {
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
+                    killSwitchEnabled = true
+                    showKillSwitchConfirmDialog = false
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showKillSwitchConfirmDialog = false }) {
-                    Text("Cancel")
-                }
-            }
+            onDismiss = { showKillSwitchConfirmDialog = false }
         )
     }
 
@@ -623,28 +612,16 @@ fun MainScreen(
 
     val pinMismatch = connectionState.pinMismatch
     if (pinMismatch != null) {
-        AlertDialog(
-            onDismissRequest = onDismissPinMismatch,
-            title = { Text("Certificate Pin Mismatch") },
-            text = {
-                Text("The certificate for ${pinMismatch.hostname} has changed. This could indicate a security issue or a legitimate certificate rotation.")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
-                        refreshCertificatePins()
-                        onReconnectRelays()
-                    }
-                }) {
-                    Text("Clear Pin & Retry")
+        PinMismatchDialog(
+            hostname = pinMismatch.hostname,
+            onClearAndRetry = {
+                coroutineScope.launch {
+                    withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
+                    refreshCertificatePins()
+                    onReconnectRelays()
                 }
             },
-            dismissButton = {
-                TextButton(onClick = onDismissPinMismatch) {
-                    Text("Dismiss")
-                }
-            }
+            onDismiss = onDismissPinMismatch
         )
     }
 
@@ -1030,30 +1007,21 @@ private fun SettingsTab(
         Spacer(modifier = Modifier.height(16.dp))
 
         if (hasShare) {
-            RelaysCard(
+            ShareSettingsSection(
                 relays = relays,
+                profileRelays = profileRelays,
+                certificatePins = certificatePins,
+                proxyEnabled = proxyEnabled,
+                proxyPort = proxyPort,
                 onAddRelay = onAddRelay,
                 onRemoveRelay = onRemoveRelay,
-                profileRelays = profileRelays,
                 onAddProfileRelay = onAddProfileRelay,
-                onRemoveProfileRelay = onRemoveProfileRelay
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            CertificatePinsCard(
-                pins = certificatePins,
+                onRemoveProfileRelay = onRemoveProfileRelay,
                 onClearPin = onClearPin,
-                onClearAllPins = onClearAllPins
+                onClearAllPins = onClearAllPins,
+                onProxyActivate = onProxyActivate,
+                onProxyDeactivate = onProxyDeactivate
             )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            TorOrbotCard(
-                enabled = proxyEnabled,
-                port = proxyPort,
-                onActivate = onProxyActivate,
-                onDeactivate = onProxyDeactivate
-            )
-            Spacer(modifier = Modifier.height(16.dp))
         }
 
         AutoStartCard(
@@ -1074,70 +1042,17 @@ private fun SettingsTab(
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            "Database: $databaseSizeMb MB",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedButton(
-            onClick = {
+        DatabaseManagementSection(
+            databaseSizeMb = databaseSizeMb,
+            onCleanup = {
                 scope.launch {
                     onClearLogsAndActivity()
                     refreshDatabaseSize()
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Clean up expired data")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            "v${BuildConfig.VERSION_NAME}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val primaryColor = MaterialTheme.colorScheme.primary
-        Text(
-            buildAnnotatedString {
-                withLink(
-                    LinkAnnotation.Url(
-                        "https://github.com/privkeyio/keep-android",
-                        styles = TextLinkStyles(
-                            style = SpanStyle(
-                                color = primaryColor,
-                                textDecoration = TextDecoration.Underline
-                            )
-                        )
-                    )
-                ) {
-                    append("Source code")
-                }
-                append("  |  ")
-                withLink(
-                    LinkAnnotation.Url(
-                        "https://privkey.io",
-                        styles = TextLinkStyles(
-                            style = SpanStyle(
-                                color = primaryColor,
-                                textDecoration = TextDecoration.Underline
-                            )
-                        )
-                    )
-                ) {
-                    append("Support development")
-                }
-            },
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center
+            }
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        SettingsFooterLinks()
     }
 }
 
@@ -1257,6 +1172,156 @@ private data class PollResult(
     val peers: List<PeerInfo>,
     val pendingCount: Int
 )
+
+@Composable
+private fun KillSwitchConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enable Kill Switch?") },
+        text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Enable") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun PinMismatchDialog(
+    hostname: String,
+    onClearAndRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Certificate Pin Mismatch") },
+        text = {
+            Text("The certificate for $hostname has changed. This could indicate a security issue or a legitimate certificate rotation.")
+        },
+        confirmButton = {
+            TextButton(onClick = onClearAndRetry) { Text("Clear Pin & Retry") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
+        }
+    )
+}
+
+@Composable
+private fun ShareSettingsSection(
+    relays: List<String>,
+    profileRelays: List<String>,
+    certificatePins: List<CertificatePin>,
+    proxyEnabled: Boolean,
+    proxyPort: Int,
+    onAddRelay: (String) -> Unit,
+    onRemoveRelay: (String) -> Unit,
+    onAddProfileRelay: (String) -> Unit,
+    onRemoveProfileRelay: (String) -> Unit,
+    onClearPin: (String) -> Unit,
+    onClearAllPins: () -> Unit,
+    onProxyActivate: (Int) -> Unit,
+    onProxyDeactivate: () -> Unit
+) {
+    RelaysCard(
+        relays = relays,
+        onAddRelay = onAddRelay,
+        onRemoveRelay = onRemoveRelay,
+        profileRelays = profileRelays,
+        onAddProfileRelay = onAddProfileRelay,
+        onRemoveProfileRelay = onRemoveProfileRelay
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+
+    CertificatePinsCard(
+        pins = certificatePins,
+        onClearPin = onClearPin,
+        onClearAllPins = onClearAllPins
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+
+    TorOrbotCard(
+        enabled = proxyEnabled,
+        port = proxyPort,
+        onActivate = onProxyActivate,
+        onDeactivate = onProxyDeactivate
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+}
+
+@Composable
+private fun DatabaseManagementSection(
+    databaseSizeMb: String,
+    onCleanup: () -> Unit
+) {
+    Text(
+        "Database: $databaseSizeMb MB",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    OutlinedButton(
+        onClick = onCleanup,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Clean up expired data")
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Text(
+        "v${BuildConfig.VERSION_NAME}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+@Composable
+private fun SettingsFooterLinks() {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    Text(
+        buildAnnotatedString {
+            withLink(
+                LinkAnnotation.Url(
+                    "https://github.com/privkeyio/keep-android",
+                    styles = TextLinkStyles(
+                        style = SpanStyle(
+                            color = primaryColor,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    )
+                )
+            ) {
+                append("Source code")
+            }
+            append("  |  ")
+            withLink(
+                LinkAnnotation.Url(
+                    "https://privkey.io",
+                    styles = TextLinkStyles(
+                        style = SpanStyle(
+                            color = primaryColor,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    )
+                )
+            ) {
+                append("Support development")
+            }
+        },
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center
+    )
+
+    Spacer(modifier = Modifier.height(24.dp))
+}
 
 private fun getShareAwareCipher(storage: AndroidKeystoreStorage): Cipher? =
     runCatching {

@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
@@ -455,6 +456,7 @@ class BunkerService : Service() {
     }
 
     private fun checkStoredPermission(clientPubkey: String, request: BunkerApprovalRequest): PermissionDecision? {
+        require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
         val store = permissionStore ?: return null
         val callerPackage = "nip46:$clientPubkey"
         val requestType = mapMethodToRequestType(request.method) ?: return null
@@ -462,7 +464,9 @@ class BunkerService : Service() {
 
         return runCatching {
             runBlocking(Dispatchers.IO) {
-                store.getPermissionDecision(callerPackage, requestType, eventKind)
+                withTimeoutOrNull(5_000L) {
+                    store.getPermissionDecision(callerPackage, requestType, eventKind)
+                }
             }
         }.getOrNull()
     }

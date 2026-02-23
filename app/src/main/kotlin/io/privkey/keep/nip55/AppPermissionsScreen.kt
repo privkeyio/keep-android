@@ -27,6 +27,7 @@ import io.privkey.keep.R
 import io.privkey.keep.nip46.Nip46ClientStore
 import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.SignPolicyStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -100,42 +101,13 @@ fun AppPermissionsScreen(
     }
 
     if (showRevokeAllDialog) {
-        val isNip46 = packageName.startsWith("nip46:")
-        val dialogTitle = if (isNip46) "Disconnect Client?" else "Disconnect App?"
-        val dialogText = if (isNip46) {
-            "This will remove all saved permissions and revoke authorization for ${appState.label ?: packageName}. The client will need to reconnect."
-        } else {
-            "This will remove all saved permissions for ${appState.label ?: packageName}. The app will need to request permission again."
-        }
-        AlertDialog(
-            onDismissRequest = { showRevokeAllDialog = false },
-            title = { Text(dialogTitle) },
-            text = { Text(dialogText) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
-                                runCatching { permissionStore.revokePermission(packageName) }
-                                if (isNip46) {
-                                    val pubkey = packageName.removePrefix("nip46:")
-                                    runCatching { revokeNip46Client(context, pubkey) }
-                                }
-                            }
-                            showRevokeAllDialog = false
-                            onDismiss()
-                        }
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Disconnect")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRevokeAllDialog = false }) {
-                    Text("Cancel")
-                }
-            }
+        RevokeAllPermissionsDialog(
+            packageName = packageName,
+            appLabel = appState.label,
+            permissionStore = permissionStore,
+            coroutineScope = coroutineScope,
+            onDismissDialog = { showRevokeAllDialog = false },
+            onDismissScreen = onDismiss
         )
     }
 
@@ -151,149 +123,235 @@ fun AppPermissionsScreen(
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item {
-                AppHeaderCard(
-                    packageName = packageName,
-                    appLabel = appState.label,
-                    appIcon = appState.icon,
-                    isVerified = appState.isVerified,
-                    isNip46Client = appState.isNip46Client
-                )
-            }
+        AppPermissionsListContent(
+            padding = padding,
+            packageName = packageName,
+            appState = appState,
+            appSettings = appSettings,
+            expiryDropdownExpanded = expiryDropdownExpanded,
+            onExpiryDropdownExpandedChange = { expiryDropdownExpanded = it },
+            signPolicyStore = signPolicyStore,
+            permissionStore = permissionStore,
+            coroutineScope = coroutineScope,
+            onAppStateChange = { appState = it },
+            onAppSettingsChange = { appSettings = it },
+            onShowRevokeAllDialog = { showRevokeAllDialog = true },
+            onDismiss = onDismiss
+        )
+    }
+}
 
-            item {
-                AppExpirySelector(
-                    currentExpiry = appSettings?.expiresAt,
-                    expanded = expiryDropdownExpanded,
-                    onExpandedChange = { expiryDropdownExpanded = it },
-                    onDurationSelected = { duration ->
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
-                                permissionStore.setAppExpiry(packageName, duration)
+@Composable
+private fun RevokeAllPermissionsDialog(
+    packageName: String,
+    appLabel: String?,
+    permissionStore: PermissionStore,
+    coroutineScope: CoroutineScope,
+    onDismissDialog: () -> Unit,
+    onDismissScreen: () -> Unit
+) {
+    val context = LocalContext.current
+    val isNip46 = packageName.startsWith("nip46:")
+    val dialogTitle = if (isNip46) "Disconnect Client?" else "Disconnect App?"
+    val dialogText = if (isNip46) {
+        "This will remove all saved permissions and revoke authorization for ${appLabel ?: packageName}. The client will need to reconnect."
+    } else {
+        "This will remove all saved permissions for ${appLabel ?: packageName}. The app will need to request permission again."
+    }
+    AlertDialog(
+        onDismissRequest = onDismissDialog,
+        title = { Text(dialogTitle) },
+        text = { Text(dialogText) },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching { permissionStore.revokePermission(packageName) }
+                            if (isNip46) {
+                                val pubkey = packageName.removePrefix("nip46:")
+                                runCatching { revokeNip46Client(context, pubkey) }
                             }
-                            appSettings = withContext(Dispatchers.IO) {
+                        }
+                        onDismissDialog()
+                        onDismissScreen()
+                    }
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Disconnect")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissDialog) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun AppPermissionsListContent(
+    padding: PaddingValues,
+    packageName: String,
+    appState: AppState,
+    appSettings: Nip55AppSettings?,
+    expiryDropdownExpanded: Boolean,
+    onExpiryDropdownExpandedChange: (Boolean) -> Unit,
+    signPolicyStore: SignPolicyStore?,
+    permissionStore: PermissionStore,
+    coroutineScope: CoroutineScope,
+    onAppStateChange: (AppState) -> Unit,
+    onAppSettingsChange: (Nip55AppSettings?) -> Unit,
+    onShowRevokeAllDialog: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            AppHeaderCard(
+                packageName = packageName,
+                appLabel = appState.label,
+                appIcon = appState.icon,
+                isVerified = appState.isVerified,
+                isNip46Client = appState.isNip46Client
+            )
+        }
+
+        item {
+            AppExpirySelector(
+                currentExpiry = appSettings?.expiresAt,
+                expanded = expiryDropdownExpanded,
+                onExpandedChange = onExpiryDropdownExpandedChange,
+                onDurationSelected = { duration ->
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) {
+                            permissionStore.setAppExpiry(packageName, duration)
+                        }
+                        onAppSettingsChange(
+                            withContext(Dispatchers.IO) {
                                 permissionStore.getAppSettings(packageName)
                             }
+                        )
+                    }
+                }
+            )
+        }
+
+        if (signPolicyStore != null && !appState.isLoading) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        AppSignPolicySelector(
+                            currentOverride = appState.signPolicyOverride,
+                            globalPolicy = signPolicyStore.getGlobalPolicy(),
+                            onOverrideChange = { newOverride ->
+                                coroutineScope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            permissionStore.setAppSignPolicyOverride(packageName, newOverride)
+                                        }
+                                        onAppStateChange(appState.copy(signPolicyOverride = newOverride))
+                                    } catch (e: Exception) {
+                                        if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
+                                        Toast.makeText(context, "Failed to update sign policy", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (appState.isLoading) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else if (appState.permissions.isEmpty()) {
+            item {
+                Text(
+                    "No active permissions",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            item {
+                Text(
+                    "Permissions",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+            items(appState.permissions, key = { it.id }) { permission ->
+                var updateError by remember { mutableStateOf<String?>(null) }
+                val requestType = findRequestType(permission.requestType)
+
+                PermissionItem(
+                    permission = permission,
+                    onDecisionChange = { newDecision ->
+                        if (requestType == null) return@PermissionItem
+                        coroutineScope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    permissionStore.updatePermissionDecision(
+                                        permission.id,
+                                        newDecision,
+                                        packageName,
+                                        requestType,
+                                        permission.eventKind
+                                    )
+                                }
+                                val newPermissions = withContext(Dispatchers.IO) {
+                                    permissionStore.getPermissionsForCaller(packageName)
+                                }
+                                onAppStateChange(appState.copy(permissions = newPermissions))
+                                updateError = null
+                            } catch (e: Exception) {
+                                if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update permission", e)
+                                updateError = "Failed to update permission"
+                            }
+                        }
+                    },
+                    errorMessage = updateError,
+                    onRevoke = {
+                        coroutineScope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    permissionStore.deletePermission(permission.id)
+                                }
+                                val newPermissions = withContext(Dispatchers.IO) {
+                                    permissionStore.getPermissionsForCaller(packageName)
+                                }
+                                onAppStateChange(appState.copy(permissions = newPermissions))
+                                if (newPermissions.isEmpty()) onDismiss()
+                            } catch (e: Exception) {
+                                if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke permission", e)
+                                Toast.makeText(context, "Failed to revoke permission", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 )
             }
+        }
 
-            if (signPolicyStore != null && !appState.isLoading) {
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            AppSignPolicySelector(
-                                currentOverride = appState.signPolicyOverride,
-                                globalPolicy = signPolicyStore.getGlobalPolicy(),
-                                onOverrideChange = { newOverride ->
-                                    coroutineScope.launch {
-                                        try {
-                                            withContext(Dispatchers.IO) {
-                                                permissionStore.setAppSignPolicyOverride(packageName, newOverride)
-                                            }
-                                            appState = appState.copy(signPolicyOverride = newOverride)
-                                        } catch (e: Exception) {
-                                            if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
-                                            Toast.makeText(context, "Failed to update sign policy", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (appState.isLoading) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
-                }
-            } else if (appState.permissions.isEmpty()) {
-                item {
-                    Text(
-                        "No active permissions",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                item {
-                    Text(
-                        "Permissions",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
-                items(appState.permissions, key = { it.id }) { permission ->
-                    var updateError by remember { mutableStateOf<String?>(null) }
-                    val requestType = findRequestType(permission.requestType)
-
-                    PermissionItem(
-                        permission = permission,
-                        onDecisionChange = { newDecision ->
-                            if (requestType == null) return@PermissionItem
-                            coroutineScope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) {
-                                        permissionStore.updatePermissionDecision(
-                                            permission.id,
-                                            newDecision,
-                                            packageName,
-                                            requestType,
-                                            permission.eventKind
-                                        )
-                                    }
-                                    val newPermissions = withContext(Dispatchers.IO) {
-                                        permissionStore.getPermissionsForCaller(packageName)
-                                    }
-                                    appState = appState.copy(permissions = newPermissions)
-                                    updateError = null
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update permission", e)
-                                    updateError = "Failed to update permission"
-                                }
-                            }
-                        },
-                        errorMessage = updateError,
-                        onRevoke = {
-                            coroutineScope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) {
-                                        permissionStore.deletePermission(permission.id)
-                                    }
-                                    val newPermissions = withContext(Dispatchers.IO) {
-                                        permissionStore.getPermissionsForCaller(packageName)
-                                    }
-                                    appState = appState.copy(permissions = newPermissions)
-                                    if (newPermissions.isEmpty()) onDismiss()
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke permission", e)
-                                    Toast.makeText(context, "Failed to revoke permission", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { showRevokeAllDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(if (packageName.startsWith("nip46:")) "Disconnect Client" else "Disconnect App")
-                }
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onShowRevokeAllDialog,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text(if (packageName.startsWith("nip46:")) "Disconnect Client" else "Disconnect App")
             }
         }
     }

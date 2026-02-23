@@ -145,9 +145,10 @@ fun ImportNsecScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (scanError != null) {
+        val currentScanError = scanError
+        if (currentScanError != null) {
             StatusCard(
-                text = scanError!!,
+                text = currentScanError,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             )

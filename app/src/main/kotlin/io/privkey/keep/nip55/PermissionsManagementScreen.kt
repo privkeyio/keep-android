@@ -100,54 +100,30 @@ fun PermissionsManagementScreen(
                     )
                 }
             } else {
-                val groupedPermissions = permissions.groupBy { it.callerPackage }
-
-                LazyColumn(
+                PermissionsGroupedList(
+                    permissions = permissions,
+                    velocityUsage = velocityUsage,
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    groupedPermissions.forEach { (packageName, appPermissions) ->
-                        item(key = "header_$packageName") {
-                            AppPermissionHeader(
-                                packageName = packageName,
-                                permissionCount = appPermissions.size,
-                                velocityUsage = velocityUsage[packageName],
-                                onRevokeAll = { showRevokeAllDialog = packageName }
-                            )
+                    onRevokeAll = { showRevokeAllDialog = it },
+                    onDecisionChange = { permission, newDecision ->
+                        val requestType = findRequestType(permission.requestType) ?: return@PermissionsGroupedList
+                        coroutineScope.launch {
+                            try {
+                                permissionStore.updatePermissionDecision(
+                                    permission.id,
+                                    newDecision,
+                                    permission.callerPackage,
+                                    requestType,
+                                    permission.eventKind
+                                )
+                                refreshPermissions()
+                            } catch (e: Exception) {
+                                loadError = "Failed to update permission"
+                            }
                         }
-                        items(
-                            items = appPermissions,
-                            key = { it.id }
-                        ) { permission ->
-                            val requestType = findRequestType(permission.requestType)
-
-                            PermissionCard(
-                                permission = permission,
-                                onDecisionChange = { newDecision ->
-                                    if (requestType == null) return@PermissionCard
-                                    coroutineScope.launch {
-                                        try {
-                                            permissionStore.updatePermissionDecision(
-                                                permission.id,
-                                                newDecision,
-                                                permission.callerPackage,
-                                                requestType,
-                                                permission.eventKind
-                                            )
-                                            refreshPermissions()
-                                        } catch (e: Exception) {
-                                            loadError = "Failed to update permission"
-                                        }
-                                    }
-                                },
-                                onDelete = { showDeleteDialog = permission }
-                            )
-                        }
-                        item(key = "spacer_$packageName") {
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-                }
+                    },
+                    onDelete = { showDeleteDialog = it }
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -162,65 +138,130 @@ fun PermissionsManagementScreen(
     }
 
     showRevokeAllDialog?.let { packageName ->
-        AlertDialog(
-            onDismissRequest = { showRevokeAllDialog = null },
-            title = { Text("Revoke All Permissions") },
-            text = { Text("Revoke all permissions for $packageName? This app will need to request permissions again.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            try {
-                                permissionStore.revokeAllForApp(packageName)
-                                refreshPermissions()
-                            } catch (e: Exception) {
-                                loadError = "Failed to revoke permissions"
-                            }
-                        }
-                        showRevokeAllDialog = null
+        RevokeAllPermissionsDialog(
+            packageName = packageName,
+            onConfirm = {
+                coroutineScope.launch {
+                    try {
+                        permissionStore.revokeAllForApp(packageName)
+                        refreshPermissions()
+                    } catch (e: Exception) {
+                        loadError = "Failed to revoke permissions"
                     }
-                ) {
-                    Text("Revoke All", color = MaterialTheme.colorScheme.error)
                 }
+                showRevokeAllDialog = null
             },
-            dismissButton = {
-                TextButton(onClick = { showRevokeAllDialog = null }) {
-                    Text("Cancel")
-                }
-            }
+            onDismiss = { showRevokeAllDialog = null }
         )
     }
 
     showDeleteDialog?.let { permission ->
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = null },
-            title = { Text("Delete Permission") },
-            text = {
-                Text("Delete this ${formatRequestType(permission.requestType)} permission for ${permission.callerPackage}?")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            try {
-                                permissionStore.deletePermission(permission.id)
-                                refreshPermissions()
-                            } catch (e: Exception) {
-                                loadError = "Failed to delete permission"
-                            }
-                        }
-                        showDeleteDialog = null
+        DeletePermissionDialog(
+            permission = permission,
+            onConfirm = {
+                coroutineScope.launch {
+                    try {
+                        permissionStore.deletePermission(permission.id)
+                        refreshPermissions()
+                    } catch (e: Exception) {
+                        loadError = "Failed to delete permission"
                     }
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
+                showDeleteDialog = null
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = null }) {
-                    Text("Cancel")
-                }
-            }
+            onDismiss = { showDeleteDialog = null }
         )
+    }
+}
+
+@Composable
+private fun RevokeAllPermissionsDialog(
+    packageName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Revoke All Permissions") },
+        text = { Text("Revoke all permissions for $packageName? This app will need to request permissions again.") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Revoke All", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DeletePermissionDialog(
+    permission: Nip55Permission,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete Permission") },
+        text = {
+            Text("Delete this ${formatRequestType(permission.requestType)} permission for ${permission.callerPackage}?")
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun PermissionsGroupedList(
+    permissions: List<Nip55Permission>,
+    velocityUsage: Map<String, Triple<Int, Int, Int>>,
+    modifier: Modifier = Modifier,
+    onRevokeAll: (String) -> Unit,
+    onDecisionChange: (Nip55Permission, PermissionDecision) -> Unit,
+    onDelete: (Nip55Permission) -> Unit
+) {
+    val groupedPermissions = permissions.groupBy { it.callerPackage }
+
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        groupedPermissions.forEach { (packageName, appPermissions) ->
+            item(key = "header_$packageName") {
+                AppPermissionHeader(
+                    packageName = packageName,
+                    permissionCount = appPermissions.size,
+                    velocityUsage = velocityUsage[packageName],
+                    onRevokeAll = { onRevokeAll(packageName) }
+                )
+            }
+            items(
+                items = appPermissions,
+                key = { it.id }
+            ) { permission ->
+                PermissionCard(
+                    permission = permission,
+                    onDecisionChange = { newDecision ->
+                        onDecisionChange(permission, newDecision)
+                    },
+                    onDelete = { onDelete(permission) }
+                )
+            }
+            item(key = "spacer_$packageName") {
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
     }
 }
 

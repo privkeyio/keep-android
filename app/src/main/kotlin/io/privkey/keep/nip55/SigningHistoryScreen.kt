@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -118,90 +119,27 @@ fun SigningHistoryScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         if (availableApps.isNotEmpty()) {
-            ExposedDropdownMenuBox(
+            AppFilterDropdown(
+                availableApps = availableApps,
+                selectedApp = selectedApp,
                 expanded = appFilterExpanded,
-                onExpandedChange = { appFilterExpanded = it }
-            ) {
-                OutlinedTextField(
-                    value = selectedApp ?: "All apps",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Filter by app") },
-                    trailingIcon = {
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = null
-                        )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                )
-                ExposedDropdownMenu(
-                    expanded = appFilterExpanded,
-                    onDismissRequest = { appFilterExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("All apps") },
-                        onClick = {
-                            selectedApp = null
-                            appFilterExpanded = false
-                        }
-                    )
-                    availableApps.forEach { app ->
-                        DropdownMenuItem(
-                            text = { Text(app, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            onClick = {
-                                selectedApp = app
-                                appFilterExpanded = false
-                            }
-                        )
-                    }
+                onExpandedChange = { appFilterExpanded = it },
+                onAppSelected = { app ->
+                    selectedApp = app
+                    appFilterExpanded = false
                 }
-            }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        if (isLoading) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (logs.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "No signing history",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(
-                    items = logs,
-                    key = { it.id }
-                ) { log ->
-                    AuditLogCard(log)
-                }
-
-                if (isLoadingMore) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        }
-                    }
-                }
-            }
-        }
+        SigningHistoryLogsList(
+            logs = logs,
+            isLoading = isLoading,
+            isLoadingMore = isLoadingMore,
+            listState = listState,
+            modifier = Modifier.weight(1f)
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -210,6 +148,101 @@ fun SigningHistoryScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Back")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppFilterDropdown(
+    availableApps: List<String>,
+    selectedApp: String?,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onAppSelected: (String?) -> Unit
+) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange
+    ) {
+        OutlinedTextField(
+            value = selectedApp ?: "All apps",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Filter by app") },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = null
+                )
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) }
+        ) {
+            DropdownMenuItem(
+                text = { Text("All apps") },
+                onClick = { onAppSelected(null) }
+            )
+            availableApps.forEach { app ->
+                DropdownMenuItem(
+                    text = { Text(app, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = { onAppSelected(app) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SigningHistoryLogsList(
+    logs: List<Nip55AuditLog>,
+    isLoading: Boolean,
+    isLoadingMore: Boolean,
+    listState: LazyListState,
+    modifier: Modifier = Modifier
+) {
+    if (isLoading) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else if (logs.isEmpty()) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            Text(
+                text = "No signing history",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = modifier,
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(
+                items = logs,
+                key = { it.id }
+            ) { log ->
+                AuditLogCard(log)
+            }
+
+            if (isLoadingMore) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    }
+                }
+            }
         }
     }
 }
