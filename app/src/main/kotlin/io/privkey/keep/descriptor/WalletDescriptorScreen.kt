@@ -167,8 +167,8 @@ fun WalletDescriptorScreen(
                                 keepMobile.walletDescriptorApproveContribution(proposal.sessionId)
                             }
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                        }.onFailure {
-                            Toast.makeText(context, "Failed to approve", Toast.LENGTH_SHORT).show()
+                        }.onFailure { e ->
+                            Toast.makeText(context, e.message ?: "Failed to approve", Toast.LENGTH_LONG).show()
                         }
                     }
                 },
@@ -179,8 +179,8 @@ fun WalletDescriptorScreen(
                                 keepMobile.walletDescriptorCancel(proposal.sessionId)
                             }
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                        }.onFailure {
-                            Toast.makeText(context, "Failed to reject", Toast.LENGTH_SHORT).show()
+                        }.onFailure { e ->
+                            Toast.makeText(context, e.message ?: "Failed to reject", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -219,8 +219,8 @@ fun WalletDescriptorScreen(
                         withContext(Dispatchers.IO) {
                             keepMobile.walletDescriptorPropose(network, tiers)
                         }
-                    }.onFailure {
-                        Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_SHORT).show()
+                    }.onFailure { e ->
+                        Toast.makeText(context, e.message ?: "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
                     showProposeDialog = false
                 }
@@ -240,8 +240,8 @@ fun WalletDescriptorScreen(
                         }
                         copySensitiveText(context, exported)
                         Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                    }.onFailure {
-                        Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
+                    }.onFailure { e ->
+                        Toast.makeText(context, e.message ?: "Export failed", Toast.LENGTH_LONG).show()
                     }
                     showExportDialog = null
                 }
@@ -260,8 +260,8 @@ fun WalletDescriptorScreen(
                             keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
                         }
                         refreshDescriptors()
-                    }.onFailure {
-                        Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
+                    }.onFailure { e ->
+                        Toast.makeText(context, e.message ?: "Delete failed", Toast.LENGTH_LONG).show()
                     }
                     showDeleteConfirm = null
                 }
