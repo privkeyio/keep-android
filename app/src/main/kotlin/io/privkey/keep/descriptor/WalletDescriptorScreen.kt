@@ -33,6 +33,9 @@ private object ExportFormat {
     const val RAW = "raw"
 }
 
+private fun truncateGroupPubkey(key: String): String =
+    "${key.take(8)}...${key.takeLast(6)}"
+
 sealed class DescriptorSessionState {
     data object Idle : DescriptorSessionState()
     data class Proposed(val sessionId: String) : DescriptorSessionState()
@@ -72,12 +75,12 @@ object DescriptorSessionManager {
             externalDescriptor: String,
             internalDescriptor: String
         ) {
-            _pendingProposals.update { it.filter { p -> p.sessionId != sessionId } }
+            removePendingProposal(sessionId)
             _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
         }
 
         override fun onFailed(sessionId: String, error: String) {
-            _pendingProposals.update { it.filter { p -> p.sessionId != sessionId } }
+            removePendingProposal(sessionId)
             _state.value = DescriptorSessionState.Failed(sessionId, error)
         }
     }
@@ -373,7 +376,7 @@ private fun DescriptorRow(
 
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
-            "${descriptor.groupPubkey.take(8)}...${descriptor.groupPubkey.takeLast(6)}",
+            truncateGroupPubkey(descriptor.groupPubkey),
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(4.dp))
@@ -429,7 +432,7 @@ private fun ProposeDescriptorDialog(
             Column {
                 Text("Network", style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("bitcoin", "testnet", "signet").forEach { net ->
                         FilterChip(
                             selected = network == net,
@@ -488,7 +491,7 @@ private fun ExportDescriptorDialog(
         text = {
             Column {
                 Text(
-                    "${descriptor.groupPubkey.take(8)}...${descriptor.groupPubkey.takeLast(6)}",
+                    truncateGroupPubkey(descriptor.groupPubkey),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -518,11 +521,11 @@ private fun DeleteDescriptorDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete Descriptor?") },
         text = {
-            Text("This will permanently remove the wallet descriptor for ${descriptor.groupPubkey.take(8)}...${descriptor.groupPubkey.takeLast(6)}")
+            Text("This will permanently remove the wallet descriptor for ${truncateGroupPubkey(descriptor.groupPubkey)}")
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm() },
+                onClick = onConfirm,
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error
                 )
