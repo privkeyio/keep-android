@@ -230,10 +230,11 @@ fun WalletDescriptorScreen(
                         withContext(Dispatchers.IO) {
                             keepMobile.walletDescriptorPropose(network, tiers)
                         }
+                    }.onSuccess {
+                        showProposeDialog = false
                     }.onFailure { e ->
                         Toast.makeText(context, e.message ?: "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
-                    showProposeDialog = false
                 }
             },
             onDismiss = { showProposeDialog = false }
@@ -271,10 +272,11 @@ fun WalletDescriptorScreen(
                             keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
                         }
                         refreshDescriptors()
+                    }.onSuccess {
+                        showDeleteConfirm = null
                     }.onFailure { e ->
                         Toast.makeText(context, e.message ?: "Delete failed", Toast.LENGTH_LONG).show()
                     }
-                    showDeleteConfirm = null
                 }
             },
             onDismiss = { showDeleteConfirm = null }
