@@ -33,8 +33,11 @@ private object ExportFormat {
     const val RAW = "raw"
 }
 
+private fun truncateText(text: String, maxLength: Int): String =
+    if (text.length <= maxLength) text else "${text.take(maxLength)}..."
+
 private fun truncateGroupPubkey(key: String): String =
-    "${key.take(8)}...${key.takeLast(6)}"
+    if (key.length <= 14) key else "${key.take(8)}...${key.takeLast(6)}"
 
 sealed class DescriptorSessionState {
     data object Idle : DescriptorSessionState()
@@ -110,6 +113,7 @@ fun WalletDescriptorScreen(
     var showProposeDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
+    var inFlightSessions by remember { mutableStateOf(emptySet<String>()) }
     val sessionState by DescriptorSessionManager.state.collectAsState()
     val pendingProposals by DescriptorSessionManager.pendingProposals.collectAsState()
 
@@ -160,7 +164,10 @@ fun WalletDescriptorScreen(
             Spacer(modifier = Modifier.height(16.dp))
             PendingContributionsCard(
                 proposals = pendingProposals,
+                inFlightSessions = inFlightSessions,
                 onApprove = { proposal ->
+                    if (proposal.sessionId in inFlightSessions) return@PendingContributionsCard
+                    inFlightSessions = inFlightSessions + proposal.sessionId
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
@@ -170,9 +177,12 @@ fun WalletDescriptorScreen(
                         }.onFailure { e ->
                             Toast.makeText(context, e.message ?: "Failed to approve", Toast.LENGTH_LONG).show()
                         }
+                        inFlightSessions = inFlightSessions - proposal.sessionId
                     }
                 },
                 onReject = { proposal ->
+                    if (proposal.sessionId in inFlightSessions) return@PendingContributionsCard
+                    inFlightSessions = inFlightSessions + proposal.sessionId
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
@@ -182,6 +192,7 @@ fun WalletDescriptorScreen(
                         }.onFailure { e ->
                             Toast.makeText(context, e.message ?: "Failed to reject", Toast.LENGTH_LONG).show()
                         }
+                        inFlightSessions = inFlightSessions - proposal.sessionId
                     }
                 }
             )
@@ -280,7 +291,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
         is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
         is DescriptorSessionState.Contributed -> "Share ${state.shareIndex} contributed" to MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> "Failed: ${state.error}" to MaterialTheme.colorScheme.error
+        is DescriptorSessionState.Failed -> "Failed: ${truncateText(state.error, 80)}" to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
     }
 
@@ -292,7 +303,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
             if (state is DescriptorSessionState.Complete) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "External: ${state.externalDescriptor.take(40)}...",
+                    "External: ${truncateText(state.externalDescriptor, 40)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -304,6 +315,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
 @Composable
 private fun PendingContributionsCard(
     proposals: List<DescriptorProposal>,
+    inFlightSessions: Set<String>,
     onApprove: (DescriptorProposal) -> Unit,
     onReject: (DescriptorProposal) -> Unit
 ) {
@@ -329,10 +341,11 @@ private fun PendingContributionsCard(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { onReject(proposal) }) {
+                        val busy = proposal.sessionId in inFlightSessions
+                        OutlinedButton(onClick = { onReject(proposal) }, enabled = !busy) {
                             Text("Reject")
                         }
-                        Button(onClick = { onApprove(proposal) }) {
+                        Button(onClick = { onApprove(proposal) }, enabled = !busy) {
                             Text("Approve")
                         }
                     }
@@ -453,7 +466,7 @@ private fun ProposeDescriptorDialog(
                 OutlinedTextField(
                     value = threshold,
                     onValueChange = { threshold = it.filter { c -> c.isDigit() } },
-                    label = { Text("Threshold") },
+                    label = { Text("Threshold (1–15)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -461,20 +474,23 @@ private fun ProposeDescriptorDialog(
                 OutlinedTextField(
                     value = timelockMonths,
                     onValueChange = { timelockMonths = it.filter { c -> c.isDigit() } },
-                    label = { Text("Timelock (months)") },
+                    label = { Text("Timelock months (1–120)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
         },
         confirmButton = {
+            val t = threshold.toUIntOrNull()
+            val tl = timelockMonths.toUIntOrNull()
+            val valid = t != null && tl != null && t in 1u..15u && tl in 1u..120u
             TextButton(
                 onClick = {
-                    val t = threshold.toUIntOrNull() ?: return@TextButton
-                    val tl = timelockMonths.toUIntOrNull() ?: return@TextButton
-                    if (t < 1u || tl < 1u) return@TextButton
-                    onPropose(network, listOf(RecoveryTierConfig(t, tl)))
-                }
+                    val tv = threshold.toUIntOrNull() ?: return@TextButton
+                    val tlv = timelockMonths.toUIntOrNull() ?: return@TextButton
+                    if (tv in 1u..15u && tlv in 1u..120u) onPropose(network, listOf(RecoveryTierConfig(tv, tlv)))
+                },
+                enabled = valid
             ) {
                 Text("Propose")
             }
