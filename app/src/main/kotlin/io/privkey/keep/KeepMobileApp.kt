@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.app.Application
 import android.util.Log
+import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
@@ -321,6 +322,7 @@ class KeepMobileApp : Application() {
         _connectionState.value = ConnectionState()
         BunkerService.stop(this)
         bunkerConfigStore?.setEnabled(false)
+        DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
             runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings() }

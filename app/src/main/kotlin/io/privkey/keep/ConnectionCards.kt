@@ -347,6 +347,32 @@ fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WalletDescriptorCard(descriptorCount: Int, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Wallet Descriptors", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Manage multisig wallet descriptors",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                if (descriptorCount > 0) "$descriptorCount" else "Manage",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
 @Composable
 fun Nip55SettingsCard(
     onSignPolicyClick: () -> Unit,
