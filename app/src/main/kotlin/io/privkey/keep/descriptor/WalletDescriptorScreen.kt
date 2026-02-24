@@ -115,7 +115,13 @@ fun WalletDescriptorScreen(
 
     fun refreshDescriptors() {
         scope.launch {
-            descriptors = withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
+            runCatching {
+                withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
+            }.onSuccess {
+                descriptors = it
+            }.onFailure {
+                Toast.makeText(context, "Failed to load descriptors", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
