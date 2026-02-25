@@ -400,7 +400,10 @@ fun MainScreen(
             withContext(Dispatchers.IO) {
                 keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
             }
-        }.onFailure { if (it is CancellationException) throw it }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            Log.e("MainActivity", "Failed to set descriptor callbacks", it)
+        }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
                 val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount, newDescriptorCount) = withContext(Dispatchers.IO) {
