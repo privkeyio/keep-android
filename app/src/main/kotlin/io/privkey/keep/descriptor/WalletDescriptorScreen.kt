@@ -17,6 +17,7 @@ import io.privkey.keep.uniffi.DescriptorCallbacks
 import io.privkey.keep.uniffi.DescriptorProposal
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RecoveryTierConfig
+import io.privkey.keep.uniffi.AnnouncedXpubInfo
 import io.privkey.keep.uniffi.WalletDescriptorInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +86,10 @@ object DescriptorSessionManager {
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
             _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+        }
+
+        override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
+            Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
         }
 
         override fun onComplete(
