@@ -17,6 +17,7 @@ import io.privkey.keep.uniffi.DescriptorProposal
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RecoveryTierConfig
 import io.privkey.keep.uniffi.WalletDescriptorInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -124,6 +125,7 @@ fun WalletDescriptorScreen(
             }.onSuccess {
                 descriptors = it
             }.onFailure {
+                if (it is CancellationException) throw it
                 Toast.makeText(context, "Failed to load descriptors", Toast.LENGTH_SHORT).show()
             }
         }
@@ -175,6 +177,7 @@ fun WalletDescriptorScreen(
                             }
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
+                            if (e is CancellationException) throw e
                             Toast.makeText(context, e.message ?: "Failed to approve", Toast.LENGTH_LONG).show()
                         }
                         inFlightSessions = inFlightSessions - proposal.sessionId
@@ -190,6 +193,7 @@ fun WalletDescriptorScreen(
                             }
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
+                            if (e is CancellationException) throw e
                             Toast.makeText(context, e.message ?: "Failed to reject", Toast.LENGTH_LONG).show()
                         }
                         inFlightSessions = inFlightSessions - proposal.sessionId
@@ -233,6 +237,7 @@ fun WalletDescriptorScreen(
                     }.onSuccess {
                         showProposeDialog = false
                     }.onFailure { e ->
+                        if (e is CancellationException) throw e
                         Toast.makeText(context, e.message ?: "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
                 }
@@ -253,6 +258,7 @@ fun WalletDescriptorScreen(
                         copySensitiveText(context, exported)
                         Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                     }.onFailure { e ->
+                        if (e is CancellationException) throw e
                         Toast.makeText(context, e.message ?: "Export failed", Toast.LENGTH_LONG).show()
                     }
                     showExportDialog = null
@@ -275,6 +281,7 @@ fun WalletDescriptorScreen(
                     }.onSuccess {
                         showDeleteConfirm = null
                     }.onFailure { e ->
+                        if (e is CancellationException) throw e
                         Toast.makeText(context, e.message ?: "Delete failed", Toast.LENGTH_LONG).show()
                     }
                 }
