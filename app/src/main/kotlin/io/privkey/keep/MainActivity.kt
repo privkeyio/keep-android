@@ -410,7 +410,7 @@ fun MainScreen(
                     val k = storage.getActiveShareKey()
                     val p = if (h) keepMobile.getPeers() else emptyList()
                     val pc = if (h) keepMobile.getPendingRequests().size else 0
-                    val dc = if (h) keepMobile.walletDescriptorList().size else 0
+                    val dc = if (h) runCatching { keepMobile.walletDescriptorList().size }.getOrDefault(0) else 0
                     PollResult(h, s, a, k, p, pc, dc)
                 }
                 hasShare = newHasShare

@@ -66,7 +66,9 @@ object DescriptorSessionManager {
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
-            _pendingProposals.update { it + proposal }
+            _pendingProposals.update { current ->
+                if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
+            }
             _state.value = DescriptorSessionState.ContributionNeeded(proposal)
         }
 
