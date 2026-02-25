@@ -95,6 +95,7 @@ object DescriptorSessionManager {
         }
 
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
+            if (!active) return
             Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
         }
 
@@ -145,8 +146,7 @@ fun WalletDescriptorScreen(
     var showProposeDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
-    val inFlightSessions = remember { MutableStateFlow(emptySet<String>()) }
-    val inFlightSessionsState by inFlightSessions.collectAsState()
+    var inFlightSessions by remember { mutableStateOf(emptySet<String>()) }
     var isProposing by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
@@ -215,33 +215,33 @@ fun WalletDescriptorScreen(
 
         SessionStatusCard(sessionState)
 
+        fun handleProposalAction(
+            proposal: DescriptorProposal,
+            action: String,
+            block: suspend (String) -> Unit
+        ) {
+            if (proposal.sessionId in inFlightSessions) return
+            inFlightSessions = inFlightSessions + proposal.sessionId
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { block(proposal.sessionId) }
+                }.onSuccess {
+                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+                }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                    Log.w(TAG, "Failed to $action contribution", e)
+                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+                }
+                inFlightSessions = inFlightSessions - proposal.sessionId
+            }
+        }
+
         if (pendingProposals.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            fun handleProposalAction(
-                proposal: DescriptorProposal,
-                action: String,
-                block: suspend (String) -> Unit
-            ) {
-                if (proposal.sessionId in inFlightSessions.value) return
-                inFlightSessions.update { it + proposal.sessionId }
-                scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) { block(proposal.sessionId) }
-                    }.onSuccess {
-                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to $action contribution", e)
-                        Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
-                    }
-                    inFlightSessions.update { it - proposal.sessionId }
-                }
-            }
-
             PendingContributionsCard(
                 proposals = pendingProposals,
-                inFlightSessions = inFlightSessionsState,
+                inFlightSessions = inFlightSessions,
                 onApprove = { handleProposalAction(it, "approve") { id ->
                     keepMobile.walletDescriptorApproveContribution(id)
                 }},
@@ -482,7 +482,7 @@ private fun DescriptorRow(
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())),
+                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.toLong())),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
