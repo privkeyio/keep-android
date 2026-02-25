@@ -179,6 +179,7 @@ fun WalletDescriptorScreen(
 
     DisposableEffect(Unit) {
         setSecureScreen(context, true)
+        DescriptorSessionManager.activate()
         onDispose {
             setSecureScreen(context, false)
             DescriptorSessionManager.clearAll()
@@ -546,11 +547,11 @@ private fun ProposeDescriptorDialog(
                     onValueChange = { threshold = it.filter { c -> c.isDigit() } },
                     label = { Text("Threshold (1–15)") },
                     isError = thresholdError || (threshold.isEmpty()),
-                    supportingText = when {
-                        threshold.isEmpty() -> {{ Text("Required") }}
-                        thresholdError -> {{ Text("Must be between 1 and 15") }}
-                        else -> null
-                    },
+                    supportingText = if (threshold.isEmpty()) {
+                        { Text("Required") }
+                    } else if (thresholdError) {
+                        { Text("Must be between 1 and 15") }
+                    } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -561,11 +562,11 @@ private fun ProposeDescriptorDialog(
                     onValueChange = { timelockMonths = it.filter { c -> c.isDigit() } },
                     label = { Text("Timelock months (1–120)") },
                     isError = timelockError || (timelockMonths.isEmpty()),
-                    supportingText = when {
-                        timelockMonths.isEmpty() -> {{ Text("Required") }}
-                        timelockError -> {{ Text("Must be between 1 and 120") }}
-                        else -> null
-                    },
+                    supportingText = if (timelockMonths.isEmpty()) {
+                        { Text("Required") }
+                    } else if (timelockError) {
+                        { Text("Must be between 1 and 120") }
+                    } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
