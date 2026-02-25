@@ -1,5 +1,6 @@
 package io.privkey.keep.descriptor
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,9 +26,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+private const val TAG = "WalletDescriptor"
 
 private object ExportFormat {
     const val SPARROW = "sparrow"
@@ -62,18 +66,18 @@ object DescriptorSessionManager {
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
-            _state.value = DescriptorSessionState.Proposed(sessionId)
+            _state.update { DescriptorSessionState.Proposed(sessionId) }
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
             _pendingProposals.update { current ->
                 if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
             }
-            _state.value = DescriptorSessionState.ContributionNeeded(proposal)
+            _state.update { DescriptorSessionState.ContributionNeeded(proposal) }
         }
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
-            _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+            _state.update { DescriptorSessionState.Contributed(sessionId, shareIndex) }
         }
 
         override fun onComplete(
@@ -82,22 +86,23 @@ object DescriptorSessionManager {
             internalDescriptor: String
         ) {
             removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
+            _state.update { DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor) }
         }
 
         override fun onFailed(sessionId: String, error: String) {
             removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Failed(sessionId, error)
+            _state.update { DescriptorSessionState.Failed(sessionId, error) }
         }
     }
 
     fun clearSessionState() {
-        _state.value = DescriptorSessionState.Idle
+        _state.update { DescriptorSessionState.Idle }
+        _pendingProposals.update { emptyList() }
     }
 
     fun clearAll() {
-        _state.value = DescriptorSessionState.Idle
-        _pendingProposals.value = emptyList()
+        _state.update { DescriptorSessionState.Idle }
+        _pendingProposals.update { emptyList() }
     }
 
     fun removePendingProposal(sessionId: String) {
@@ -180,7 +185,8 @@ fun WalletDescriptorScreen(
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Toast.makeText(context, e.message ?: "Failed to approve", Toast.LENGTH_LONG).show()
+                            Log.w(TAG, "Failed to approve contribution", e)
+                            Toast.makeText(context, "Failed to approve contribution", Toast.LENGTH_LONG).show()
                         }
                         inFlightSessions = inFlightSessions - proposal.sessionId
                     }
@@ -196,7 +202,8 @@ fun WalletDescriptorScreen(
                             DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Toast.makeText(context, e.message ?: "Failed to reject", Toast.LENGTH_LONG).show()
+                            Log.w(TAG, "Failed to reject contribution", e)
+                            Toast.makeText(context, "Failed to reject contribution", Toast.LENGTH_LONG).show()
                         }
                         inFlightSessions = inFlightSessions - proposal.sessionId
                     }
@@ -240,7 +247,8 @@ fun WalletDescriptorScreen(
                         showProposeDialog = false
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
-                        Toast.makeText(context, e.message ?: "Failed to propose descriptor", Toast.LENGTH_LONG).show()
+                        Log.w(TAG, "Failed to propose descriptor", e)
+                        Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
                 }
             },
@@ -261,7 +269,8 @@ fun WalletDescriptorScreen(
                         Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
-                        Toast.makeText(context, e.message ?: "Export failed", Toast.LENGTH_LONG).show()
+                        Log.w(TAG, "Failed to export descriptor", e)
+                        Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                     }
                     showExportDialog = null
                 }
@@ -284,7 +293,8 @@ fun WalletDescriptorScreen(
                         showDeleteConfirm = null
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
-                        Toast.makeText(context, e.message ?: "Delete failed", Toast.LENGTH_LONG).show()
+                        Log.w(TAG, "Failed to delete descriptor", e)
+                        Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                     }
                 }
             },
@@ -402,7 +412,10 @@ private fun DescriptorRow(
     onExport: (WalletDescriptorInfo) -> Unit,
     onDelete: (WalletDescriptorInfo) -> Unit
 ) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+    val dateFormat = remember {
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
+            .withZone(ZoneId.systemDefault())
+    }
 
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
@@ -417,7 +430,7 @@ private fun DescriptorRow(
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                dateFormat.format(Date(descriptor.createdAt.toLong() * 1000)),
+                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.toLong())),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

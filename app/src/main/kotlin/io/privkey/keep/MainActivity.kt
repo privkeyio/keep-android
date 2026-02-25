@@ -59,6 +59,7 @@ import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -381,12 +382,6 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
-        }
-    }
-
-    LaunchedEffect(Unit) {
         val initial = withContext(Dispatchers.IO) {
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val k = storage.getActiveShareKey()
@@ -401,6 +396,9 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
+        }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
                 val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount, newDescriptorCount) = withContext(Dispatchers.IO) {
@@ -410,7 +408,7 @@ fun MainScreen(
                     val k = storage.getActiveShareKey()
                     val p = if (h) keepMobile.getPeers() else emptyList()
                     val pc = if (h) keepMobile.getPendingRequests().size else 0
-                    val dc = if (h) runCatching { keepMobile.walletDescriptorList().size }.getOrDefault(0) else 0
+                    val dc = if (h) runCatching { keepMobile.walletDescriptorList().size }.onFailure { if (it is CancellationException) throw it }.getOrDefault(0) else 0
                     PollResult(h, s, a, k, p, pc, dc)
                 }
                 hasShare = newHasShare

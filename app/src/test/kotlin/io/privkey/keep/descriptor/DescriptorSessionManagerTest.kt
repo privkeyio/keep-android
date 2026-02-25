@@ -123,14 +123,14 @@ class DescriptorSessionManagerTest {
     }
 
     @Test
-    fun `clearSessionState resets state but keeps proposals`() = runTest {
+    fun `clearSessionState resets state and proposals`() = runTest {
         val callbacks = DescriptorSessionManager.createCallbacks()
         callbacks.onContributionNeeded(makeProposal())
 
         DescriptorSessionManager.clearSessionState()
 
         assertEquals(DescriptorSessionState.Idle, DescriptorSessionManager.state.first())
-        assertEquals(1, DescriptorSessionManager.pendingProposals.first().size)
+        assertTrue(DescriptorSessionManager.pendingProposals.first().isEmpty())
     }
 
     @Test
