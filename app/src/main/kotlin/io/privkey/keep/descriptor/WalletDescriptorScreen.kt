@@ -283,18 +283,21 @@ fun WalletDescriptorScreen(
                 if (isProposing) return@ProposeDescriptorDialog
                 isProposing = true
                 scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorPropose(network, tiers)
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorPropose(network, tiers)
+                            }
+                        }.onSuccess {
+                            showProposeDialog = false
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Failed to propose descriptor", e)
+                            Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                         }
-                    }.onSuccess {
-                        showProposeDialog = false
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to propose descriptor", e)
-                        Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isProposing = false
                     }
-                    isProposing = false
                 }
             },
             onDismiss = { showProposeDialog = false }
@@ -309,19 +312,22 @@ fun WalletDescriptorScreen(
                 if (isExporting) return@ExportDescriptorDialog
                 isExporting = true
                 scope.launch {
-                    runCatching {
-                        val exported = withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
+                    try {
+                        runCatching {
+                            val exported = withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
+                            }
+                            copySensitiveText(context, exported)
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Failed to export descriptor", e)
+                            Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                         }
-                        copySensitiveText(context, exported)
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to export descriptor", e)
-                        Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isExporting = false
+                        showExportDialog = null
                     }
-                    isExporting = false
-                    showExportDialog = null
                 }
             },
             onDismiss = { showExportDialog = null }
@@ -336,19 +342,22 @@ fun WalletDescriptorScreen(
                 if (isDeleting) return@DeleteDescriptorDialog
                 isDeleting = true
                 scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
+                            }
+                        }.onSuccess {
+                            showDeleteConfirm = null
+                            refreshDescriptors()
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Failed to delete descriptor", e)
+                            Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                         }
-                    }.onSuccess {
-                        showDeleteConfirm = null
-                        refreshDescriptors()
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to delete descriptor", e)
-                        Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isDeleting = false
                     }
-                    isDeleting = false
                 }
             },
             onDismiss = { showDeleteConfirm = null }
@@ -358,8 +367,6 @@ fun WalletDescriptorScreen(
 
 @Composable
 private fun SessionStatusCard(state: DescriptorSessionState) {
-    if (state is DescriptorSessionState.Idle) return
-
     val (statusText, statusColor) = when (state) {
         is DescriptorSessionState.Proposed -> "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
