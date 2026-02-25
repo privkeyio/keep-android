@@ -396,9 +396,11 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
-        }
+        runCatching {
+            withContext(Dispatchers.IO) {
+                keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
+            }
+        }.onFailure { if (it is CancellationException) throw it }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
                 val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount, newDescriptorCount) = withContext(Dispatchers.IO) {
@@ -408,7 +410,11 @@ fun MainScreen(
                     val k = storage.getActiveShareKey()
                     val p = if (h) keepMobile.getPeers() else emptyList()
                     val pc = if (h) keepMobile.getPendingRequests().size else 0
-                    val dc = if (h) runCatching { keepMobile.walletDescriptorList().size }.onFailure { if (it is CancellationException) throw it }.getOrDefault(0) else 0
+                    val dc = if (h) {
+                        runCatching { keepMobile.walletDescriptorList().size }
+                            .onFailure { if (it is CancellationException) throw it }
+                            .getOrDefault(0)
+                    } else 0
                     PollResult(h, s, a, k, p, pc, dc)
                 }
                 hasShare = newHasShare

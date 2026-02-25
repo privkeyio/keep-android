@@ -97,7 +97,6 @@ object DescriptorSessionManager {
 
     fun clearSessionState() {
         _state.update { DescriptorSessionState.Idle }
-        _pendingProposals.update { emptyList() }
     }
 
     fun clearAll() {
@@ -505,14 +504,14 @@ private fun ProposeDescriptorDialog(
             }
         },
         confirmButton = {
-            val t = threshold.toUIntOrNull()
-            val tl = timelockMonths.toUIntOrNull()
-            val valid = t != null && tl != null && t in 1u..15u && tl in 1u..120u
+            val parsedThreshold = threshold.toUIntOrNull()
+            val parsedTimelock = timelockMonths.toUIntOrNull()
+            val valid = parsedThreshold in 1u..15u && parsedTimelock in 1u..120u
             TextButton(
                 onClick = {
-                    val tv = threshold.toUIntOrNull() ?: return@TextButton
-                    val tlv = timelockMonths.toUIntOrNull() ?: return@TextButton
-                    if (tv in 1u..15u && tlv in 1u..120u) onPropose(network, listOf(RecoveryTierConfig(tv, tlv)))
+                    if (parsedThreshold != null && parsedTimelock != null) {
+                        onPropose(network, listOf(RecoveryTierConfig(parsedThreshold, parsedTimelock)))
+                    }
                 },
                 enabled = valid
             ) {
