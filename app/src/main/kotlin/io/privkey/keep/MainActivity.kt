@@ -32,6 +32,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.privkey.keep.descriptor.DescriptorSessionManager
+import io.privkey.keep.descriptor.WalletDescriptorScreen
 import io.privkey.keep.navigation.Route
 import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
@@ -57,6 +59,7 @@ import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.ShareInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -315,6 +318,8 @@ fun MainScreen(
     var biometricTimeout by remember { mutableStateOf(biometricTimeoutStore.getTimeout()) }
     var biometricLockOnLaunch by remember { mutableStateOf(biometricTimeoutStore.isLockOnLaunchEnabled()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
+    var showWalletDescriptorScreen by remember { mutableStateOf(false) }
+    var descriptorCount by remember { mutableIntStateOf(0) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
     var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
@@ -391,16 +396,34 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
+        DescriptorSessionManager.clearAll()
+        DescriptorSessionManager.activate()
+        runCatching {
+            withContext(Dispatchers.IO) {
+                keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
+            }
+        }.onSuccess {
+            DescriptorSessionManager.setCallbacksRegistered(true)
+        }.onFailure {
+            if (it is CancellationException) throw it
+            Log.e("MainActivity", "Failed to set descriptor callbacks", it)
+            DescriptorSessionManager.setCallbacksRegistered(false)
+        }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
-                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount) = withContext(Dispatchers.IO) {
+                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount, newDescriptorCount) = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
                     val a = storage.listAllShares().map { it.toAccountInfo() }
                     val k = storage.getActiveShareKey()
                     val p = if (h) keepMobile.getPeers() else emptyList()
                     val pc = if (h) keepMobile.getPendingRequests().size else 0
-                    PollResult(h, s, a, k, p, pc)
+                    val dc = if (h) {
+                        runCatching { keepMobile.walletDescriptorList().size }
+                            .onFailure { if (it is CancellationException) throw it }
+                            .getOrDefault(descriptorCount)
+                    } else 0
+                    PollResult(h, s, a, k, p, pc, dc)
                 }
                 hasShare = newHasShare
                 shareInfo = newShareInfo
@@ -408,6 +431,7 @@ fun MainScreen(
                 activeAccountKey = newActiveKey
                 peers = newPeers
                 pendingCount = newPendingCount
+                descriptorCount = newDescriptorCount
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(newActiveKey) }
                 delay(10_000)
@@ -548,6 +572,14 @@ fun MainScreen(
             bunkerStatus = bunkerStatus,
             onToggleBunker = onBunkerServiceChanged,
             onDismiss = { showBunkerScreen = false }
+        )
+        return
+    }
+
+    if (showWalletDescriptorScreen) {
+        WalletDescriptorScreen(
+            keepMobile = keepMobile,
+            onDismiss = { showWalletDescriptorScreen = false }
         )
         return
     }
@@ -696,11 +728,13 @@ fun MainScreen(
                 AppsTab(
                     hasShare = hasShare,
                     bunkerStatus = bunkerStatus,
+                    descriptorCount = descriptorCount,
                     onConnectedAppsClick = { showConnectedApps = true },
                     onSignPolicyClick = { showSignPolicyScreen = true },
                     onPermissionsClick = { showPermissionsScreen = true },
                     onHistoryClick = { showHistoryScreen = true },
-                    onBunkerClick = { showBunkerScreen = true }
+                    onBunkerClick = { showBunkerScreen = true },
+                    onWalletDescriptorClick = { showWalletDescriptorScreen = true }
                 )
             }
 
@@ -906,11 +940,13 @@ private fun HomeTab(
 private fun AppsTab(
     hasShare: Boolean,
     bunkerStatus: BunkerStatus,
+    descriptorCount: Int,
     onConnectedAppsClick: () -> Unit,
     onSignPolicyClick: () -> Unit,
     onPermissionsClick: () -> Unit,
     onHistoryClick: () -> Unit,
-    onBunkerClick: () -> Unit
+    onBunkerClick: () -> Unit,
+    onWalletDescriptorClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -937,6 +973,12 @@ private fun AppsTab(
             BunkerCard(
                 status = bunkerStatus,
                 onClick = onBunkerClick
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            WalletDescriptorCard(
+                descriptorCount = descriptorCount,
+                onClick = onWalletDescriptorClick
             )
         } else {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -1170,7 +1212,8 @@ private data class PollResult(
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
     val peers: List<PeerInfo>,
-    val pendingCount: Int
+    val pendingCount: Int,
+    val descriptorCount: Int
 )
 
 @Composable
