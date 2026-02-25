@@ -209,12 +209,13 @@ fun WalletDescriptorScreen(
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) { block(proposal.sessionId) }
+                    }.onSuccess {
+                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "Failed to $action contribution", e)
                         Toast.makeText(context, "Failed to $action: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
                     }
-                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                     inFlightSessions = inFlightSessions - proposal.sessionId
                 }
             }

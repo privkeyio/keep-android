@@ -419,7 +419,7 @@ fun MainScreen(
                     val dc = if (h) {
                         runCatching { keepMobile.walletDescriptorList().size }
                             .onFailure { if (it is CancellationException) throw it }
-                            .getOrDefault(0)
+                            .getOrDefault(descriptorCount)
                     } else 0
                     PollResult(h, s, a, k, p, pc, dc)
                 }
