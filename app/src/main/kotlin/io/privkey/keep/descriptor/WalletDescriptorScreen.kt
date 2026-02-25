@@ -68,16 +68,21 @@ object DescriptorSessionManager {
     private val _callbacksRegistered = MutableStateFlow(false)
     val callbacksRegistered: StateFlow<Boolean> = _callbacksRegistered.asStateFlow()
 
+    @Volatile
+    private var active = true
+
     fun setCallbacksRegistered(registered: Boolean) {
         _callbacksRegistered.value = registered
     }
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
+            if (!active) return
             _state.value = DescriptorSessionState.Proposed(sessionId)
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
+            if (!active) return
             _pendingProposals.update { current ->
                 if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
             }
@@ -85,6 +90,7 @@ object DescriptorSessionManager {
         }
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
+            if (!active) return
             _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
         }
 
@@ -97,11 +103,13 @@ object DescriptorSessionManager {
             externalDescriptor: String,
             internalDescriptor: String
         ) {
+            if (!active) return
             removePendingProposal(sessionId)
             _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
         }
 
         override fun onFailed(sessionId: String, error: String) {
+            if (!active) return
             removePendingProposal(sessionId)
             _state.value = DescriptorSessionState.Failed(sessionId, error)
         }
@@ -112,8 +120,13 @@ object DescriptorSessionManager {
     }
 
     fun clearAll() {
+        active = false
         _state.value = DescriptorSessionState.Idle
         _pendingProposals.value = emptyList()
+    }
+
+    fun activate() {
+        active = true
     }
 
     fun removePendingProposal(sessionId: String) {
@@ -132,7 +145,8 @@ fun WalletDescriptorScreen(
     var showProposeDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
-    var inFlightSessions by remember { mutableStateOf(emptySet<String>()) }
+    val inFlightSessions = remember { MutableStateFlow(emptySet<String>()) }
+    val inFlightSessionsState by inFlightSessions.collectAsState()
     var isProposing by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
@@ -209,8 +223,8 @@ fun WalletDescriptorScreen(
                 action: String,
                 block: suspend (String) -> Unit
             ) {
-                if (proposal.sessionId in inFlightSessions) return
-                inFlightSessions = inFlightSessions + proposal.sessionId
+                if (proposal.sessionId in inFlightSessions.value) return
+                inFlightSessions.update { it + proposal.sessionId }
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) { block(proposal.sessionId) }
@@ -219,15 +233,15 @@ fun WalletDescriptorScreen(
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "Failed to $action contribution", e)
-                        Toast.makeText(context, "Failed to $action: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
                     }
-                    inFlightSessions = inFlightSessions - proposal.sessionId
+                    inFlightSessions.update { it - proposal.sessionId }
                 }
             }
 
             PendingContributionsCard(
                 proposals = pendingProposals,
-                inFlightSessions = inFlightSessions,
+                inFlightSessions = inFlightSessionsState,
                 onApprove = { handleProposalAction(it, "approve") { id ->
                     keepMobile.walletDescriptorApproveContribution(id)
                 }},
@@ -468,7 +482,7 @@ private fun DescriptorRow(
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.toLong())),
+                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.coerceAtMost(Long.MAX_VALUE.toULong()).toLong())),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -15,6 +15,7 @@ class DescriptorSessionManagerTest {
     @Before
     fun setup() {
         DescriptorSessionManager.clearAll()
+        DescriptorSessionManager.activate()
         DescriptorSessionManager.setCallbacksRegistered(false)
     }
 
@@ -90,6 +91,7 @@ class DescriptorSessionManagerTest {
         val callbacks = DescriptorSessionManager.createCallbacks()
         listOf("bitcoin", "testnet", "signet").forEach { network ->
             DescriptorSessionManager.clearAll()
+            DescriptorSessionManager.activate()
             val proposal = makeProposal(sessionId = "session-$network", network = network)
             callbacks.onContributionNeeded(proposal)
 
@@ -184,5 +186,21 @@ class DescriptorSessionManagerTest {
             DescriptorSessionManager.state.first()
         )
         assertTrue(DescriptorSessionManager.pendingProposals.first().isEmpty())
+    }
+
+    @Test
+    fun `callbacks are ignored after clearAll deactivates`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        DescriptorSessionManager.clearAll()
+
+        callbacks.onProposed("s1")
+        assertEquals(DescriptorSessionState.Idle, DescriptorSessionManager.state.first())
+
+        callbacks.onContributionNeeded(makeProposal("s2"))
+        assertTrue(DescriptorSessionManager.pendingProposals.first().isEmpty())
+
+        DescriptorSessionManager.activate()
+        callbacks.onProposed("s3")
+        assertEquals(DescriptorSessionState.Proposed("s3"), DescriptorSessionManager.state.first())
     }
 }

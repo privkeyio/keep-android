@@ -396,6 +396,8 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
+        DescriptorSessionManager.clearAll()
+        DescriptorSessionManager.activate()
         runCatching {
             withContext(Dispatchers.IO) {
                 keepMobile.walletDescriptorSetCallbacks(DescriptorSessionManager.createCallbacks())
