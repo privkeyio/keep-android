@@ -5,6 +5,7 @@ import io.privkey.keep.uniffi.RecoveryTierConfig
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -14,6 +15,7 @@ class DescriptorSessionManagerTest {
     @Before
     fun setup() {
         DescriptorSessionManager.clearAll()
+        DescriptorSessionManager.setCallbacksRegistered(false)
     }
 
     private fun makeProposal(
@@ -160,6 +162,15 @@ class DescriptorSessionManagerTest {
         val completeState = DescriptorSessionManager.state.first() as DescriptorSessionState.Complete
         assertEquals("ext-desc", completeState.externalDescriptor)
         assertTrue(DescriptorSessionManager.pendingProposals.first().isEmpty())
+    }
+
+    @Test
+    fun `callbacksRegistered defaults to false and can be set`() = runTest {
+        assertFalse(DescriptorSessionManager.callbacksRegistered.first())
+        DescriptorSessionManager.setCallbacksRegistered(true)
+        assertTrue(DescriptorSessionManager.callbacksRegistered.first())
+        DescriptorSessionManager.setCallbacksRegistered(false)
+        assertFalse(DescriptorSessionManager.callbacksRegistered.first())
     }
 
     @Test

@@ -64,6 +64,13 @@ object DescriptorSessionManager {
     private val _pendingProposals = MutableStateFlow<List<DescriptorProposal>>(emptyList())
     val pendingProposals: StateFlow<List<DescriptorProposal>> = _pendingProposals.asStateFlow()
 
+    private val _callbacksRegistered = MutableStateFlow(false)
+    val callbacksRegistered: StateFlow<Boolean> = _callbacksRegistered.asStateFlow()
+
+    fun setCallbacksRegistered(registered: Boolean) {
+        _callbacksRegistered.update { registered }
+    }
+
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
             _state.update { DescriptorSessionState.Proposed(sessionId) }
@@ -121,8 +128,12 @@ fun WalletDescriptorScreen(
     var showExportDialog by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
     var showDeleteConfirm by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
     var inFlightSessions by remember { mutableStateOf(emptySet<String>()) }
+    var isProposing by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+    var isDeleting by remember { mutableStateOf(false) }
     val sessionState by DescriptorSessionManager.state.collectAsState()
     val pendingProposals by DescriptorSessionManager.pendingProposals.collectAsState()
+    val callbacksRegistered by DescriptorSessionManager.callbacksRegistered.collectAsState()
 
     fun refreshDescriptors() {
         scope.launch {
@@ -151,7 +162,7 @@ fun WalletDescriptorScreen(
         setSecureScreen(context, true)
         onDispose {
             setSecureScreen(context, false)
-            DescriptorSessionManager.clearSessionState()
+            DescriptorSessionManager.clearAll()
         }
     }
 
@@ -165,6 +176,23 @@ fun WalletDescriptorScreen(
     ) {
         Text("Wallet Descriptors", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (!callbacksRegistered) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    "Real-time updates unavailable. Propose and list operations still work.",
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         SessionStatusCard(sessionState)
 
@@ -181,12 +209,12 @@ fun WalletDescriptorScreen(
                             withContext(Dispatchers.IO) {
                                 keepMobile.walletDescriptorApproveContribution(proposal.sessionId)
                             }
-                            DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             Log.w(TAG, "Failed to approve contribution", e)
-                            Toast.makeText(context, "Failed to approve contribution", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Failed to approve: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
                         }
+                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         inFlightSessions = inFlightSessions - proposal.sessionId
                     }
                 },
@@ -198,12 +226,12 @@ fun WalletDescriptorScreen(
                             withContext(Dispatchers.IO) {
                                 keepMobile.walletDescriptorCancel(proposal.sessionId)
                             }
-                            DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             Log.w(TAG, "Failed to reject contribution", e)
-                            Toast.makeText(context, "Failed to reject contribution", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Failed to reject: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
                         }
+                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                         inFlightSessions = inFlightSessions - proposal.sessionId
                     }
                 }
@@ -236,7 +264,10 @@ fun WalletDescriptorScreen(
 
     if (showProposeDialog) {
         ProposeDescriptorDialog(
+            isProposing = isProposing,
             onPropose = { network, tiers ->
+                if (isProposing) return@ProposeDescriptorDialog
+                isProposing = true
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
@@ -249,6 +280,7 @@ fun WalletDescriptorScreen(
                         Log.w(TAG, "Failed to propose descriptor", e)
                         Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
+                    isProposing = false
                 }
             },
             onDismiss = { showProposeDialog = false }
@@ -258,7 +290,10 @@ fun WalletDescriptorScreen(
     showExportDialog?.let { descriptor ->
         ExportDescriptorDialog(
             descriptor = descriptor,
+            isExporting = isExporting,
             onExport = { format ->
+                if (isExporting) return@ExportDescriptorDialog
+                isExporting = true
                 scope.launch {
                     runCatching {
                         val exported = withContext(Dispatchers.IO) {
@@ -271,6 +306,7 @@ fun WalletDescriptorScreen(
                         Log.w(TAG, "Failed to export descriptor", e)
                         Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                     }
+                    isExporting = false
                     showExportDialog = null
                 }
             },
@@ -281,20 +317,24 @@ fun WalletDescriptorScreen(
     showDeleteConfirm?.let { descriptor ->
         DeleteDescriptorDialog(
             descriptor = descriptor,
+            isDeleting = isDeleting,
             onConfirm = {
+                if (isDeleting) return@DeleteDescriptorDialog
+                isDeleting = true
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
                             keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
                         }
-                        refreshDescriptors()
                     }.onSuccess {
                         showDeleteConfirm = null
+                        refreshDescriptors()
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "Failed to delete descriptor", e)
                         Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                     }
+                    isDeleting = false
                 }
             },
             onDismiss = { showDeleteConfirm = null }
@@ -460,6 +500,7 @@ private fun DescriptorRow(
 
 @Composable
 private fun ProposeDescriptorDialog(
+    isProposing: Boolean = false,
     onPropose: (String, List<RecoveryTierConfig>) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -486,18 +527,32 @@ private fun ProposeDescriptorDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Recovery Tier", style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(8.dp))
+                val thresholdError = threshold.isNotEmpty() && threshold.toUIntOrNull()?.let { it !in 1u..15u } == true
                 OutlinedTextField(
                     value = threshold,
                     onValueChange = { threshold = it.filter { c -> c.isDigit() } },
                     label = { Text("Threshold (1–15)") },
+                    isError = thresholdError || (threshold.isEmpty()),
+                    supportingText = when {
+                        threshold.isEmpty() -> {{ Text("Required") }}
+                        thresholdError -> {{ Text("Must be between 1 and 15") }}
+                        else -> null
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
+                val timelockError = timelockMonths.isNotEmpty() && timelockMonths.toUIntOrNull()?.let { it !in 1u..120u } == true
                 OutlinedTextField(
                     value = timelockMonths,
                     onValueChange = { timelockMonths = it.filter { c -> c.isDigit() } },
                     label = { Text("Timelock months (1–120)") },
+                    isError = timelockError || (timelockMonths.isEmpty()),
+                    supportingText = when {
+                        timelockMonths.isEmpty() -> {{ Text("Required") }}
+                        timelockError -> {{ Text("Must be between 1 and 120") }}
+                        else -> null
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -513,9 +568,9 @@ private fun ProposeDescriptorDialog(
                         onPropose(network, listOf(RecoveryTierConfig(parsedThreshold, parsedTimelock)))
                     }
                 },
-                enabled = valid
+                enabled = valid && !isProposing
             ) {
-                Text("Propose")
+                Text(if (isProposing) "Proposing..." else "Propose")
             }
         },
         dismissButton = {
@@ -527,6 +582,7 @@ private fun ProposeDescriptorDialog(
 @Composable
 private fun ExportDescriptorDialog(
     descriptor: WalletDescriptorInfo,
+    isExporting: Boolean = false,
     onExport: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -541,13 +597,13 @@ private fun ExportDescriptorDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Choose export format:")
+                Text(if (isExporting) "Exporting..." else "Choose export format:")
             }
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onExport(ExportFormat.SPARROW) }) { Text("Sparrow") }
-                TextButton(onClick = { onExport(ExportFormat.RAW) }) { Text("Raw") }
+                TextButton(onClick = { onExport(ExportFormat.SPARROW) }, enabled = !isExporting) { Text("Sparrow") }
+                TextButton(onClick = { onExport(ExportFormat.RAW) }, enabled = !isExporting) { Text("Raw") }
             }
         },
         dismissButton = {
@@ -559,6 +615,7 @@ private fun ExportDescriptorDialog(
 @Composable
 private fun DeleteDescriptorDialog(
     descriptor: WalletDescriptorInfo,
+    isDeleting: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -571,11 +628,12 @@ private fun DeleteDescriptorDialog(
         confirmButton = {
             TextButton(
                 onClick = onConfirm,
+                enabled = !isDeleting,
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = MaterialTheme.colorScheme.error
                 )
             ) {
-                Text("Delete")
+                Text(if (isDeleting) "Deleting..." else "Delete")
             }
         },
         dismissButton = {
