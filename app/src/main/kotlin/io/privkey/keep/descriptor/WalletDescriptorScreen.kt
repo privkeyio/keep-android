@@ -533,8 +533,8 @@ private fun ProposeDescriptorDialog(
                     label = { Text("Threshold (1–15)") },
                     isError = thresholdError || (threshold.isEmpty()),
                     supportingText = when {
-                        threshold.isEmpty() -> {{ Text("Required") }}
-                        thresholdError -> {{ Text("Must be between 1 and 15") }}
+                        threshold.isEmpty() -> { Text("Required") }
+                        thresholdError -> { Text("Must be between 1 and 15") }
                         else -> null
                     },
                     singleLine = true,
@@ -548,8 +548,8 @@ private fun ProposeDescriptorDialog(
                     label = { Text("Timelock months (1–120)") },
                     isError = timelockError || (timelockMonths.isEmpty()),
                     supportingText = when {
-                        timelockMonths.isEmpty() -> {{ Text("Required") }}
-                        timelockError -> {{ Text("Must be between 1 and 120") }}
+                        timelockMonths.isEmpty() -> { Text("Required") }
+                        timelockError -> { Text("Must be between 1 and 120") }
                         else -> null
                     },
                     singleLine = true,
