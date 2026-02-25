@@ -49,10 +49,10 @@ class DescriptorSessionManagerTest {
     fun `onContributed transitions to Contributed`() = runTest {
         val callbacks = DescriptorSessionManager.createCallbacks()
         callbacks.onContributed("session-1", 0u)
-        val state = DescriptorSessionManager.state.first()
-        assertTrue(state is DescriptorSessionState.Contributed)
-        assertEquals("session-1", (state as DescriptorSessionState.Contributed).sessionId)
-        assertEquals(0.toUShort(), state.shareIndex)
+        assertEquals(
+            DescriptorSessionState.Contributed("session-1", 0u),
+            DescriptorSessionManager.state.first()
+        )
     }
 
     @Test
@@ -179,9 +179,10 @@ class DescriptorSessionManagerTest {
         callbacks.onContributionNeeded(makeProposal("s1"))
         callbacks.onFailed("s1", "rejected by user")
 
-        val state = DescriptorSessionManager.state.first()
-        assertTrue(state is DescriptorSessionState.Failed)
-        assertEquals("rejected by user", (state as DescriptorSessionState.Failed).error)
+        assertEquals(
+            DescriptorSessionState.Failed("s1", "rejected by user"),
+            DescriptorSessionManager.state.first()
+        )
         assertTrue(DescriptorSessionManager.pendingProposals.first().isEmpty())
     }
 }

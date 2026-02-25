@@ -68,23 +68,23 @@ object DescriptorSessionManager {
     val callbacksRegistered: StateFlow<Boolean> = _callbacksRegistered.asStateFlow()
 
     fun setCallbacksRegistered(registered: Boolean) {
-        _callbacksRegistered.update { registered }
+        _callbacksRegistered.value = registered
     }
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
-            _state.update { DescriptorSessionState.Proposed(sessionId) }
+            _state.value = DescriptorSessionState.Proposed(sessionId)
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
             _pendingProposals.update { current ->
                 if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
             }
-            _state.update { DescriptorSessionState.ContributionNeeded(proposal) }
+            _state.value = DescriptorSessionState.ContributionNeeded(proposal)
         }
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
-            _state.update { DescriptorSessionState.Contributed(sessionId, shareIndex) }
+            _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
         }
 
         override fun onComplete(
@@ -93,22 +93,22 @@ object DescriptorSessionManager {
             internalDescriptor: String
         ) {
             removePendingProposal(sessionId)
-            _state.update { DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor) }
+            _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
         }
 
         override fun onFailed(sessionId: String, error: String) {
             removePendingProposal(sessionId)
-            _state.update { DescriptorSessionState.Failed(sessionId, error) }
+            _state.value = DescriptorSessionState.Failed(sessionId, error)
         }
     }
 
     fun clearSessionState() {
-        _state.update { DescriptorSessionState.Idle }
+        _state.value = DescriptorSessionState.Idle
     }
 
     fun clearAll() {
-        _state.update { DescriptorSessionState.Idle }
-        _pendingProposals.update { emptyList() }
+        _state.value = DescriptorSessionState.Idle
+        _pendingProposals.value = emptyList()
     }
 
     fun removePendingProposal(sessionId: String) {
@@ -198,43 +198,36 @@ fun WalletDescriptorScreen(
 
         if (pendingProposals.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
+
+            fun handleProposalAction(
+                proposal: DescriptorProposal,
+                action: String,
+                block: suspend (String) -> Unit
+            ) {
+                if (proposal.sessionId in inFlightSessions) return
+                inFlightSessions = inFlightSessions + proposal.sessionId
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) { block(proposal.sessionId) }
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Failed to $action contribution", e)
+                        Toast.makeText(context, "Failed to $action: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
+                    }
+                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+                    inFlightSessions = inFlightSessions - proposal.sessionId
+                }
+            }
+
             PendingContributionsCard(
                 proposals = pendingProposals,
                 inFlightSessions = inFlightSessions,
-                onApprove = { proposal ->
-                    if (proposal.sessionId in inFlightSessions) return@PendingContributionsCard
-                    inFlightSessions = inFlightSessions + proposal.sessionId
-                    scope.launch {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                keepMobile.walletDescriptorApproveContribution(proposal.sessionId)
-                            }
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to approve contribution", e)
-                            Toast.makeText(context, "Failed to approve: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
-                        }
-                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                        inFlightSessions = inFlightSessions - proposal.sessionId
-                    }
-                },
-                onReject = { proposal ->
-                    if (proposal.sessionId in inFlightSessions) return@PendingContributionsCard
-                    inFlightSessions = inFlightSessions + proposal.sessionId
-                    scope.launch {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                keepMobile.walletDescriptorCancel(proposal.sessionId)
-                            }
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to reject contribution", e)
-                            Toast.makeText(context, "Failed to reject: ${truncateText(e.message ?: "unknown error", 80)}", Toast.LENGTH_LONG).show()
-                        }
-                        DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                        inFlightSessions = inFlightSessions - proposal.sessionId
-                    }
-                }
+                onApprove = { handleProposalAction(it, "approve") { id ->
+                    keepMobile.walletDescriptorApproveContribution(id)
+                }},
+                onReject = { handleProposalAction(it, "reject") { id ->
+                    keepMobile.walletDescriptorCancel(id)
+                }}
             )
         }
 
