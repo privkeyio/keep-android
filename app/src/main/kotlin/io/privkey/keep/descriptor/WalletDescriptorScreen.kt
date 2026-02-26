@@ -238,7 +238,7 @@ fun WalletDescriptorScreen(
                     DescriptorSessionManager.removePendingProposal(proposal.sessionId)
                 }.onFailure { e ->
                     if (e is CancellationException) throw e
-                    Log.w(TAG, "Failed to $action contribution", e)
+                    Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
                     Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
                 }
                 inFlightSessions = inFlightSessions - proposal.sessionId
@@ -317,7 +317,7 @@ fun WalletDescriptorScreen(
                             showProposeDialog = false
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to propose descriptor", e)
+                            Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -346,7 +346,7 @@ fun WalletDescriptorScreen(
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to export descriptor", e)
+                            Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -377,7 +377,7 @@ fun WalletDescriptorScreen(
                             refreshDescriptors()
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to delete descriptor", e)
+                            Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -407,7 +407,7 @@ fun WalletDescriptorScreen(
                             showAnnounceDialog = false
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to announce xpubs", e)
+                            Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -780,6 +780,9 @@ private fun AnnounceXpubsDialog(
     var fingerprint by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
 
+    val xpubPrefixes = listOf("xpub", "tpub", "Vpub", "Upub", "ypub", "zpub")
+    val xpubFormatError = xpub.isNotEmpty() && xpubPrefixes.none { xpub.startsWith(it) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Announce Recovery Key") },
@@ -787,10 +790,14 @@ private fun AnnounceXpubsDialog(
             Column {
                 OutlinedTextField(
                     value = xpub,
-                    onValueChange = { xpub = it.trim() },
+                    onValueChange = { xpub = it.trim().take(200) },
                     label = { Text("Recovery xpub") },
-                    isError = xpub.isEmpty(),
-                    supportingText = if (xpub.isEmpty()) {{ Text("Required") }} else null,
+                    isError = xpub.isEmpty() || xpubFormatError,
+                    supportingText = when {
+                        xpub.isEmpty() -> {{ Text("Required") }}
+                        xpubFormatError -> {{ Text("Must start with xpub, tpub, Vpub, Upub, ypub, or zpub") }}
+                        else -> null
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -798,7 +805,7 @@ private fun AnnounceXpubsDialog(
                 val fpError = fingerprint.isNotEmpty() && !fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
                 OutlinedTextField(
                     value = fingerprint,
-                    onValueChange = { fingerprint = it.filter { c -> c.isLetterOrDigit() }.take(8) },
+                    onValueChange = { fingerprint = it.filter { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' }.take(8) },
                     label = { Text("Fingerprint (8 hex chars)") },
                     isError = fingerprint.isEmpty() || fpError,
                     supportingText = when {
@@ -812,7 +819,7 @@ private fun AnnounceXpubsDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = label,
-                    onValueChange = { label = it },
+                    onValueChange = { label = it.take(64).filter { c -> !c.isISOControl() } },
                     label = { Text("Label (optional)") },
                     placeholder = { Text("e.g. coldcard-backup") },
                     singleLine = true,
@@ -821,7 +828,7 @@ private fun AnnounceXpubsDialog(
             }
         },
         confirmButton = {
-            val valid = xpub.isNotBlank() && fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
+            val valid = xpub.isNotBlank() && !xpubFormatError && fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
             TextButton(
                 onClick = { onAnnounce(xpub, fingerprint, label) },
                 enabled = valid && !isAnnouncing
