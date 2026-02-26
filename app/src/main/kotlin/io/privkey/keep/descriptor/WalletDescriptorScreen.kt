@@ -68,6 +68,9 @@ object DescriptorSessionManager {
     private val _callbacksRegistered = MutableStateFlow(false)
     val callbacksRegistered: StateFlow<Boolean> = _callbacksRegistered.asStateFlow()
 
+    private val _announcedXpubs = MutableStateFlow<Map<UShort, List<AnnouncedXpubInfo>>>(emptyMap())
+    val announcedXpubs: StateFlow<Map<UShort, List<AnnouncedXpubInfo>>> = _announcedXpubs.asStateFlow()
+
     @Volatile
     private var active = true
 
@@ -97,6 +100,7 @@ object DescriptorSessionManager {
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
             if (!active) return
             Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+            _announcedXpubs.update { current -> current + (shareIndex to xpubs) }
         }
 
         override fun onComplete(
@@ -124,6 +128,7 @@ object DescriptorSessionManager {
         active = false
         _state.value = DescriptorSessionState.Idle
         _pendingProposals.value = emptyList()
+        _announcedXpubs.value = emptyMap()
     }
 
     fun activate() {
@@ -150,9 +155,12 @@ fun WalletDescriptorScreen(
     var isProposing by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
+    var showAnnounceDialog by remember { mutableStateOf(false) }
+    var isAnnouncing by remember { mutableStateOf(false) }
     val sessionState by DescriptorSessionManager.state.collectAsState()
     val pendingProposals by DescriptorSessionManager.pendingProposals.collectAsState()
     val callbacksRegistered by DescriptorSessionManager.callbacksRegistered.collectAsState()
+    val announcedXpubs by DescriptorSessionManager.announcedXpubs.collectAsState()
 
     fun refreshDescriptors() {
         scope.launch {
@@ -261,6 +269,23 @@ fun WalletDescriptorScreen(
             Text("New Descriptor")
         }
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = { showAnnounceDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Text("Announce Recovery Keys")
+        }
+
+        if (announcedXpubs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            AnnouncedXpubsCard(announcedXpubs)
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         DescriptorListCard(
@@ -363,6 +388,36 @@ fun WalletDescriptorScreen(
             onDismiss = { showDeleteConfirm = null }
         )
     }
+
+    if (showAnnounceDialog) {
+        AnnounceXpubsDialog(
+            isAnnouncing = isAnnouncing,
+            onAnnounce = { xpub, fingerprint, label ->
+                if (isAnnouncing) return@AnnounceXpubsDialog
+                isAnnouncing = true
+                scope.launch {
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletAnnounceXpubs(
+                                    listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
+                                )
+                            }
+                        }.onSuccess {
+                            showAnnounceDialog = false
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Failed to announce xpubs", e)
+                            Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
+                        }
+                    } finally {
+                        isAnnouncing = false
+                    }
+                }
+            },
+            onDismiss = { showAnnounceDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -419,6 +474,11 @@ private fun PendingContributionsCard(
                             "${proposal.tiers.size} tier(s)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Approval includes key control proof",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -655,6 +715,118 @@ private fun DeleteDescriptorDialog(
                 )
             ) {
                 Text(if (isDeleting) "Deleting..." else "Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInfo>>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Announced Recovery Keys", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            announcedXpubs.entries.sortedBy { it.key }.forEachIndexed { index, (shareIndex, xpubs) ->
+                Text(
+                    "Share $shareIndex",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                xpubs.forEach { xpub ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                truncateText(xpub.xpub, 32),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "fp: ${xpub.fingerprint}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                xpub.label?.let { label ->
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (index < announcedXpubs.size - 1) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnnounceXpubsDialog(
+    isAnnouncing: Boolean = false,
+    onAnnounce: (String, String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var xpub by remember { mutableStateOf("") }
+    var fingerprint by remember { mutableStateOf("") }
+    var label by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Announce Recovery Key") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = xpub,
+                    onValueChange = { xpub = it.trim() },
+                    label = { Text("Recovery xpub") },
+                    isError = xpub.isEmpty(),
+                    supportingText = if (xpub.isEmpty()) {{ Text("Required") }} else null,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                val fpError = fingerprint.isNotEmpty() && !fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
+                OutlinedTextField(
+                    value = fingerprint,
+                    onValueChange = { fingerprint = it.filter { c -> c.isLetterOrDigit() }.take(8) },
+                    label = { Text("Fingerprint (8 hex chars)") },
+                    isError = fingerprint.isEmpty() || fpError,
+                    supportingText = when {
+                        fingerprint.isEmpty() -> {{ Text("Required") }}
+                        fpError -> {{ Text("Must be 8 hex characters") }}
+                        else -> null
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Label (optional)") },
+                    placeholder = { Text("e.g. coldcard-backup") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            val valid = xpub.isNotBlank() && fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
+            TextButton(
+                onClick = { onAnnounce(xpub, fingerprint, label) },
+                enabled = valid && !isAnnouncing
+            ) {
+                Text(if (isAnnouncing) "Announcing..." else "Announce")
             }
         },
         dismissButton = {

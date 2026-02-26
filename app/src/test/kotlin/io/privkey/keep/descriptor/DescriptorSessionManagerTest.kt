@@ -1,5 +1,6 @@
 package io.privkey.keep.descriptor
 
+import io.privkey.keep.uniffi.AnnouncedXpubInfo
 import io.privkey.keep.uniffi.DescriptorProposal
 import io.privkey.keep.uniffi.RecoveryTierConfig
 import kotlinx.coroutines.flow.first
@@ -23,6 +24,12 @@ class DescriptorSessionManagerTest {
         sessionId: String = "session-1",
         network: String = "bitcoin"
     ) = DescriptorProposal(sessionId, network, listOf(RecoveryTierConfig(2u, 6u)))
+
+    private fun makeXpub(
+        xpub: String = "xpub6ABC123",
+        fingerprint: String = "abcd1234",
+        label: String? = "coldcard-backup"
+    ) = AnnouncedXpubInfo(xpub, fingerprint, label)
 
     @Test
     fun `initial state is Idle`() = runTest {
@@ -202,5 +209,66 @@ class DescriptorSessionManagerTest {
         DescriptorSessionManager.activate()
         callbacks.onProposed("s3")
         assertEquals(DescriptorSessionState.Proposed("s3"), DescriptorSessionManager.state.first())
+    }
+
+    @Test
+    fun `onXpubAnnounced stores announced xpubs`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        val xpubs = listOf(makeXpub())
+        callbacks.onXpubAnnounced(1u, xpubs)
+
+        val announced = DescriptorSessionManager.announcedXpubs.first()
+        assertEquals(1, announced.size)
+        assertEquals(xpubs, announced[1.toUShort()])
+    }
+
+    @Test
+    fun `multiple shares announce xpubs independently`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        val xpubs1 = listOf(makeXpub("xpub1", "aaaa1111"))
+        val xpubs2 = listOf(makeXpub("xpub2", "bbbb2222"), makeXpub("xpub3", "cccc3333"))
+        callbacks.onXpubAnnounced(1u, xpubs1)
+        callbacks.onXpubAnnounced(2u, xpubs2)
+
+        val announced = DescriptorSessionManager.announcedXpubs.first()
+        assertEquals(2, announced.size)
+        assertEquals(1, announced[1.toUShort()]?.size)
+        assertEquals(2, announced[2.toUShort()]?.size)
+    }
+
+    @Test
+    fun `clearAll clears announced xpubs`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        callbacks.onXpubAnnounced(1u, listOf(makeXpub()))
+
+        DescriptorSessionManager.clearAll()
+
+        assertTrue(DescriptorSessionManager.announcedXpubs.first().isEmpty())
+    }
+
+    @Test
+    fun `onXpubAnnounced ignored after clearAll`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        DescriptorSessionManager.clearAll()
+
+        callbacks.onXpubAnnounced(1u, listOf(makeXpub()))
+
+        assertTrue(DescriptorSessionManager.announcedXpubs.first().isEmpty())
+    }
+
+    @Test
+    fun `announced xpubs initial state is empty`() = runTest {
+        assertTrue(DescriptorSessionManager.announcedXpubs.first().isEmpty())
+    }
+
+    @Test
+    fun `re-announce overwrites previous xpubs for same share`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        callbacks.onXpubAnnounced(1u, listOf(makeXpub("xpub-old", "11111111")))
+        callbacks.onXpubAnnounced(1u, listOf(makeXpub("xpub-new", "22222222")))
+
+        val announced = DescriptorSessionManager.announcedXpubs.first()
+        assertEquals(1, announced.size)
+        assertEquals("xpub-new", announced[1.toUShort()]?.first()?.xpub)
     }
 }
