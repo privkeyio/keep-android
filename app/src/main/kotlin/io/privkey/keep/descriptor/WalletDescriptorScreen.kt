@@ -33,7 +33,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
-private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "Ypub", "Zpub", "Upub", "Vpub")
+private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "upub", "vpub", "Ypub", "Zpub", "Upub", "Vpub")
 private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
 private object ExportFormat {
