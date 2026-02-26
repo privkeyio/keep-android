@@ -33,6 +33,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
+private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "Ypub", "Zpub", "Upub", "Vpub")
+private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
 private object ExportFormat {
     const val SPARROW = "sparrow"
@@ -736,28 +738,23 @@ private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInf
                     color = MaterialTheme.colorScheme.primary
                 )
                 xpubs.forEach { xpub ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.padding(start = 8.dp, top = 4.dp)) {
+                        Text(
+                            truncateText(xpub.xpub, 32),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                truncateText(xpub.xpub, 32),
-                                style = MaterialTheme.typography.bodySmall
+                                "fp: ${xpub.fingerprint}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            xpub.label?.let { label ->
                                 Text(
-                                    "fp: ${xpub.fingerprint}",
+                                    label,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.secondary
                                 )
-                                xpub.label?.let { label ->
-                                    Text(
-                                        label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
                             }
                         }
                     }
@@ -780,8 +777,7 @@ private fun AnnounceXpubsDialog(
     var fingerprint by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
 
-    val xpubPrefixes = listOf("xpub", "tpub", "Vpub", "Upub", "ypub", "zpub")
-    val xpubFormatError = xpub.isNotEmpty() && xpubPrefixes.none { xpub.startsWith(it) }
+    val xpubFormatError = xpub.isNotEmpty() && XPUB_PREFIXES.none { xpub.startsWith(it) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -795,14 +791,14 @@ private fun AnnounceXpubsDialog(
                     isError = xpub.isEmpty() || xpubFormatError,
                     supportingText = when {
                         xpub.isEmpty() -> {{ Text("Required") }}
-                        xpubFormatError -> {{ Text("Must start with xpub, tpub, Vpub, Upub, ypub, or zpub") }}
+                        xpubFormatError -> {{ Text("Must start with a valid xpub prefix") }}
                         else -> null
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                val fpError = fingerprint.isNotEmpty() && !fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
+                val fpError = fingerprint.isNotEmpty() && !fingerprint.matches(FP_REGEX)
                 OutlinedTextField(
                     value = fingerprint,
                     onValueChange = { fingerprint = it.filter { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' }.take(8) },
@@ -819,7 +815,7 @@ private fun AnnounceXpubsDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = label,
-                    onValueChange = { label = it.take(64).filter { c -> !c.isISOControl() } },
+                    onValueChange = { label = it.filter { c -> !c.isISOControl() }.take(64) },
                     label = { Text("Label (optional)") },
                     placeholder = { Text("e.g. coldcard-backup") },
                     singleLine = true,
@@ -828,7 +824,7 @@ private fun AnnounceXpubsDialog(
             }
         },
         confirmButton = {
-            val valid = xpub.isNotBlank() && !xpubFormatError && fingerprint.matches(Regex("^[0-9a-fA-F]{8}$"))
+            val valid = xpub.isNotBlank() && !xpubFormatError && fingerprint.matches(FP_REGEX)
             TextButton(
                 onClick = { onAnnounce(xpub, fingerprint, label) },
                 enabled = valid && !isAnnouncing
