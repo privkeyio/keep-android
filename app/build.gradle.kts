@@ -66,6 +66,10 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
 }
 
 kotlin {

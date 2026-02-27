@@ -2,6 +2,7 @@ package io.privkey.keep.descriptor
 
 import android.util.Log
 import android.widget.Toast
+import io.privkey.keep.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,12 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.setSecureScreen
-import io.privkey.keep.uniffi.DescriptorCallbacks
-import io.privkey.keep.uniffi.DescriptorProposal
-import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.RecoveryTierConfig
-import io.privkey.keep.uniffi.AnnouncedXpubInfo
-import io.privkey.keep.uniffi.WalletDescriptorInfo
+import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +29,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
+private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "upub", "vpub", "Ypub", "Zpub", "Upub", "Vpub")
+private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
 private object ExportFormat {
     const val SPARROW = "sparrow"
@@ -68,6 +66,9 @@ object DescriptorSessionManager {
     private val _callbacksRegistered = MutableStateFlow(false)
     val callbacksRegistered: StateFlow<Boolean> = _callbacksRegistered.asStateFlow()
 
+    private val _announcedXpubs = MutableStateFlow<Map<UShort, List<AnnouncedXpubInfo>>>(emptyMap())
+    val announcedXpubs: StateFlow<Map<UShort, List<AnnouncedXpubInfo>>> = _announcedXpubs.asStateFlow()
+
     @Volatile
     private var active = true
 
@@ -96,7 +97,10 @@ object DescriptorSessionManager {
 
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
             if (!active) return
-            Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+            _announcedXpubs.update { current ->
+                current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+            }
         }
 
         override fun onComplete(
@@ -124,6 +128,7 @@ object DescriptorSessionManager {
         active = false
         _state.value = DescriptorSessionState.Idle
         _pendingProposals.value = emptyList()
+        _announcedXpubs.value = emptyMap()
     }
 
     fun activate() {
@@ -150,9 +155,13 @@ fun WalletDescriptorScreen(
     var isProposing by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var isDeleting by remember { mutableStateOf(false) }
+    var showAnnounceDialog by remember { mutableStateOf(false) }
+    var isAnnouncing by remember { mutableStateOf(false) }
+    var showKeyProofDialog by remember { mutableStateOf<DescriptorProposal?>(null) }
     val sessionState by DescriptorSessionManager.state.collectAsState()
     val pendingProposals by DescriptorSessionManager.pendingProposals.collectAsState()
     val callbacksRegistered by DescriptorSessionManager.callbacksRegistered.collectAsState()
+    val announcedXpubs by DescriptorSessionManager.announcedXpubs.collectAsState()
 
     fun refreshDescriptors() {
         scope.launch {
@@ -186,6 +195,27 @@ fun WalletDescriptorScreen(
         }
     }
 
+    fun handleProposalAction(
+        proposal: DescriptorProposal,
+        action: String,
+        block: suspend (String) -> Unit
+    ) {
+        if (proposal.sessionId in inFlightSessions) return
+        inFlightSessions = inFlightSessions + proposal.sessionId
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { block(proposal.sessionId) }
+            }.onSuccess {
+                DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
+                Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+            }
+            inFlightSessions = inFlightSessions - proposal.sessionId
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -216,36 +246,13 @@ fun WalletDescriptorScreen(
 
         SessionStatusCard(sessionState)
 
-        fun handleProposalAction(
-            proposal: DescriptorProposal,
-            action: String,
-            block: suspend (String) -> Unit
-        ) {
-            if (proposal.sessionId in inFlightSessions) return
-            inFlightSessions = inFlightSessions + proposal.sessionId
-            scope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) { block(proposal.sessionId) }
-                }.onSuccess {
-                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                }.onFailure { e ->
-                    if (e is CancellationException) throw e
-                    Log.w(TAG, "Failed to $action contribution", e)
-                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
-                }
-                inFlightSessions = inFlightSessions - proposal.sessionId
-            }
-        }
-
         if (pendingProposals.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
 
             PendingContributionsCard(
                 proposals = pendingProposals,
                 inFlightSessions = inFlightSessions,
-                onApprove = { handleProposalAction(it, "approve") { id ->
-                    keepMobile.walletDescriptorApproveContribution(id)
-                }},
+                onApprove = { showKeyProofDialog = it },
                 onReject = { handleProposalAction(it, "reject") { id ->
                     keepMobile.walletDescriptorCancel(id)
                 }}
@@ -259,6 +266,23 @@ fun WalletDescriptorScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("New Descriptor")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = { showAnnounceDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Text("Announce Recovery Keys")
+        }
+
+        if (announcedXpubs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            AnnouncedXpubsCard(announcedXpubs)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -292,7 +316,7 @@ fun WalletDescriptorScreen(
                             showProposeDialog = false
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to propose descriptor", e)
+                            Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -321,7 +345,7 @@ fun WalletDescriptorScreen(
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to export descriptor", e)
+                            Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -352,7 +376,7 @@ fun WalletDescriptorScreen(
                             refreshDescriptors()
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to delete descriptor", e)
+                            Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -363,6 +387,99 @@ fun WalletDescriptorScreen(
             onDismiss = { showDeleteConfirm = null }
         )
     }
+
+    if (showAnnounceDialog) {
+        AnnounceXpubsDialog(
+            isAnnouncing = isAnnouncing,
+            onAnnounce = { xpub, fingerprint, label ->
+                if (isAnnouncing) return@AnnounceXpubsDialog
+                isAnnouncing = true
+                scope.launch {
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletAnnounceXpubs(
+                                    listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
+                                )
+                            }
+                        }.onSuccess {
+                            showAnnounceDialog = false
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
+                            Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
+                        }
+                    } finally {
+                        isAnnouncing = false
+                    }
+                }
+            },
+            onDismiss = { showAnnounceDialog = false }
+        )
+    }
+
+    showKeyProofDialog?.let { proposal ->
+        KeyProofConfirmDialog(
+            proposal = proposal,
+            isBusy = proposal.sessionId in inFlightSessions,
+            onConfirm = {
+                handleProposalAction(proposal, "approve") { id ->
+                    // TODO (#270): pass key_proof_psbt once keep #270 lands
+                    keepMobile.walletDescriptorApproveContribution(id)
+                }
+                showKeyProofDialog = null
+            },
+            onDismiss = { showKeyProofDialog = null }
+        )
+    }
+}
+
+@Composable
+private fun KeyProofConfirmDialog(
+    proposal: DescriptorProposal,
+    isBusy: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Verify Key Control") },
+        text = {
+            Column {
+                Text(
+                    "Approving this contribution will sign a verification message " +
+                        "proving you control your key for this wallet descriptor."
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Network: ${proposal.network}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Recovery tiers: ${proposal.tiers.size}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "This is required to complete the wallet setup.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !isBusy) {
+                Text(if (isBusy) "Approving..." else "Approve & Prove Key")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isBusy) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -372,7 +489,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
         is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
         is DescriptorSessionState.Contributed -> "Share ${state.shareIndex} contributed" to MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> "Failed: ${truncateText(state.error, 80)}" to MaterialTheme.colorScheme.error
+        is DescriptorSessionState.Failed -> (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
     }
 
@@ -419,6 +536,11 @@ private fun PendingContributionsCard(
                             "${proposal.tiers.size} tier(s)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Approval includes key control proof",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -655,6 +777,122 @@ private fun DeleteDescriptorDialog(
                 )
             ) {
                 Text(if (isDeleting) "Deleting..." else "Delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInfo>>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Announced Recovery Keys", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            val sorted = announcedXpubs.entries.sortedBy { it.key }
+            sorted.forEachIndexed { index, (shareIndex, xpubs) ->
+                Text(
+                    "Share $shareIndex",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                xpubs.forEach { xpub ->
+                    Column(modifier = Modifier.padding(start = 8.dp, top = 4.dp)) {
+                        Text(
+                            truncateText(xpub.xpub, 32),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "fp: ${xpub.fingerprint}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            xpub.label?.let { label ->
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
+                }
+                if (index < sorted.lastIndex) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnnounceXpubsDialog(
+    isAnnouncing: Boolean = false,
+    onAnnounce: (String, String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var xpub by remember { mutableStateOf("") }
+    var fingerprint by remember { mutableStateOf("") }
+    var label by remember { mutableStateOf("") }
+
+    val trimmedXpub = xpub.trim()
+    val xpubFormatError = trimmedXpub.isNotEmpty() && XPUB_PREFIXES.none { trimmedXpub.startsWith(it) }
+    val fpValid = fingerprint.matches(FP_REGEX)
+    val fpError = fingerprint.isNotEmpty() && !fpValid
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Announce Recovery Key") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = xpub,
+                    onValueChange = { xpub = it.take(200) },
+                    label = { Text("Recovery xpub") },
+                    isError = trimmedXpub.isEmpty() || xpubFormatError,
+                    supportingText = when {
+                        trimmedXpub.isEmpty() -> {{ Text("Required") }}
+                        xpubFormatError -> {{ Text("Must start with a valid xpub prefix") }}
+                        else -> null
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = fingerprint,
+                    onValueChange = { fingerprint = it.filter { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' }.take(8) },
+                    label = { Text("Fingerprint (8 hex chars)") },
+                    isError = fingerprint.isEmpty() || fpError,
+                    supportingText = when {
+                        fingerprint.isEmpty() -> {{ Text("Required") }}
+                        fpError -> {{ Text("Must be 8 hex characters") }}
+                        else -> null
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it.filter { c -> !c.isISOControl() }.take(64) },
+                    label = { Text("Label (optional)") },
+                    placeholder = { Text("e.g. coldcard-backup") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            val valid = trimmedXpub.isNotEmpty() && !xpubFormatError && fpValid
+            TextButton(
+                onClick = { onAnnounce(xpub.trim(), fingerprint, label) },
+                enabled = valid && !isAnnouncing
+            ) {
+                Text(if (isAnnouncing) "Announcing..." else "Announce")
             }
         },
         dismissButton = {
