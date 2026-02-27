@@ -1,6 +1,7 @@
 package io.privkey.keep.descriptor
 
 import android.util.Log
+import io.privkey.keep.BuildConfig
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -101,8 +102,8 @@ object DescriptorSessionManager {
 
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
             if (!active) return
-            Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
-            _announcedXpubs.update { current -> current + (shareIndex to xpubs) }
+            if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+            _announcedXpubs.update { current -> current + (shareIndex to (current[shareIndex].orEmpty() + xpubs)) }
         }
 
         override fun onComplete(
@@ -429,7 +430,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
         is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
         is DescriptorSessionState.Contributed -> "Share ${state.shareIndex} contributed" to MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> "Failed: ${truncateText(state.error, 80)}" to MaterialTheme.colorScheme.error
+        is DescriptorSessionState.Failed -> (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
     }
 
@@ -777,7 +778,8 @@ private fun AnnounceXpubsDialog(
     var fingerprint by remember { mutableStateOf("") }
     var label by remember { mutableStateOf("") }
 
-    val xpubFormatError = xpub.isNotEmpty() && XPUB_PREFIXES.none { xpub.startsWith(it) }
+    val trimmedXpub = xpub.trim()
+    val xpubFormatError = trimmedXpub.isNotEmpty() && XPUB_PREFIXES.none { trimmedXpub.startsWith(it) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -786,11 +788,11 @@ private fun AnnounceXpubsDialog(
             Column {
                 OutlinedTextField(
                     value = xpub,
-                    onValueChange = { xpub = it.trim().take(200) },
+                    onValueChange = { xpub = it.take(200) },
                     label = { Text("Recovery xpub") },
-                    isError = xpub.isEmpty() || xpubFormatError,
+                    isError = trimmedXpub.isEmpty() || xpubFormatError,
                     supportingText = when {
-                        xpub.isEmpty() -> {{ Text("Required") }}
+                        trimmedXpub.isEmpty() -> {{ Text("Required") }}
                         xpubFormatError -> {{ Text("Must start with a valid xpub prefix") }}
                         else -> null
                     },
@@ -824,9 +826,9 @@ private fun AnnounceXpubsDialog(
             }
         },
         confirmButton = {
-            val valid = xpub.isNotBlank() && !xpubFormatError && fingerprint.matches(FP_REGEX)
+            val valid = trimmedXpub.isNotEmpty() && !xpubFormatError && fingerprint.matches(FP_REGEX)
             TextButton(
-                onClick = { onAnnounce(xpub, fingerprint, label) },
+                onClick = { onAnnounce(xpub.trim(), fingerprint, label) },
                 enabled = valid && !isAnnouncing
             ) {
                 Text(if (isAnnouncing) "Announcing..." else "Announce")
