@@ -103,7 +103,9 @@ object DescriptorSessionManager {
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
             if (!active) return
             if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
-            _announcedXpubs.update { current -> current + (shareIndex to (current[shareIndex].orEmpty() + xpubs)) }
+            _announcedXpubs.update { current ->
+                current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+            }
         }
 
         override fun onComplete(
