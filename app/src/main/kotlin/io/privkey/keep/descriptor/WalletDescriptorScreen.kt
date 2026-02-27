@@ -1,8 +1,8 @@
 package io.privkey.keep.descriptor
 
 import android.util.Log
-import io.privkey.keep.BuildConfig
 import android.widget.Toast
+import io.privkey.keep.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,11 +14,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.setSecureScreen
+import io.privkey.keep.uniffi.AnnouncedXpubInfo
 import io.privkey.keep.uniffi.DescriptorCallbacks
 import io.privkey.keep.uniffi.DescriptorProposal
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RecoveryTierConfig
-import io.privkey.keep.uniffi.AnnouncedXpubInfo
 import io.privkey.keep.uniffi.WalletDescriptorInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -734,7 +734,8 @@ private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInf
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Announced Recovery Keys", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
-            announcedXpubs.entries.sortedBy { it.key }.forEachIndexed { index, (shareIndex, xpubs) ->
+            val sorted = announcedXpubs.entries.sortedBy { it.key }
+            sorted.forEachIndexed { index, (shareIndex, xpubs) ->
                 Text(
                     "Share $shareIndex",
                     style = MaterialTheme.typography.labelMedium,
@@ -762,7 +763,7 @@ private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInf
                         }
                     }
                 }
-                if (index < announcedXpubs.size - 1) {
+                if (index < sorted.lastIndex) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 }
             }
@@ -782,6 +783,8 @@ private fun AnnounceXpubsDialog(
 
     val trimmedXpub = xpub.trim()
     val xpubFormatError = trimmedXpub.isNotEmpty() && XPUB_PREFIXES.none { trimmedXpub.startsWith(it) }
+    val fpValid = fingerprint.matches(FP_REGEX)
+    val fpError = fingerprint.isNotEmpty() && !fpValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -802,7 +805,6 @@ private fun AnnounceXpubsDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                val fpError = fingerprint.isNotEmpty() && !fingerprint.matches(FP_REGEX)
                 OutlinedTextField(
                     value = fingerprint,
                     onValueChange = { fingerprint = it.filter { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' }.take(8) },
@@ -828,7 +830,7 @@ private fun AnnounceXpubsDialog(
             }
         },
         confirmButton = {
-            val valid = trimmedXpub.isNotEmpty() && !xpubFormatError && fingerprint.matches(FP_REGEX)
+            val valid = trimmedXpub.isNotEmpty() && !xpubFormatError && fpValid
             TextButton(
                 onClick = { onAnnounce(xpub.trim(), fingerprint, label) },
                 enabled = valid && !isAnnouncing
