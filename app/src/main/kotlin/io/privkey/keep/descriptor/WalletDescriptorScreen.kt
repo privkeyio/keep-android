@@ -14,12 +14,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.setSecureScreen
-import io.privkey.keep.uniffi.AnnouncedXpubInfo
-import io.privkey.keep.uniffi.DescriptorCallbacks
-import io.privkey.keep.uniffi.DescriptorProposal
-import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.RecoveryTierConfig
-import io.privkey.keep.uniffi.WalletDescriptorInfo
+import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -162,6 +157,7 @@ fun WalletDescriptorScreen(
     var isDeleting by remember { mutableStateOf(false) }
     var showAnnounceDialog by remember { mutableStateOf(false) }
     var isAnnouncing by remember { mutableStateOf(false) }
+    var showKeyProofDialog by remember { mutableStateOf<DescriptorProposal?>(null) }
     val sessionState by DescriptorSessionManager.state.collectAsState()
     val pendingProposals by DescriptorSessionManager.pendingProposals.collectAsState()
     val callbacksRegistered by DescriptorSessionManager.callbacksRegistered.collectAsState()
@@ -199,6 +195,27 @@ fun WalletDescriptorScreen(
         }
     }
 
+    fun handleProposalAction(
+        proposal: DescriptorProposal,
+        action: String,
+        block: suspend (String) -> Unit
+    ) {
+        if (proposal.sessionId in inFlightSessions) return
+        inFlightSessions = inFlightSessions + proposal.sessionId
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { block(proposal.sessionId) }
+            }.onSuccess {
+                DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
+                Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+            }
+            inFlightSessions = inFlightSessions - proposal.sessionId
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -229,36 +246,13 @@ fun WalletDescriptorScreen(
 
         SessionStatusCard(sessionState)
 
-        fun handleProposalAction(
-            proposal: DescriptorProposal,
-            action: String,
-            block: suspend (String) -> Unit
-        ) {
-            if (proposal.sessionId in inFlightSessions) return
-            inFlightSessions = inFlightSessions + proposal.sessionId
-            scope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) { block(proposal.sessionId) }
-                }.onSuccess {
-                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                }.onFailure { e ->
-                    if (e is CancellationException) throw e
-                    Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
-                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
-                }
-                inFlightSessions = inFlightSessions - proposal.sessionId
-            }
-        }
-
         if (pendingProposals.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
 
             PendingContributionsCard(
                 proposals = pendingProposals,
                 inFlightSessions = inFlightSessions,
-                onApprove = { handleProposalAction(it, "approve") { id ->
-                    keepMobile.walletDescriptorApproveContribution(id)
-                }},
+                onApprove = { showKeyProofDialog = it },
                 onReject = { handleProposalAction(it, "reject") { id ->
                     keepMobile.walletDescriptorCancel(id)
                 }}
@@ -423,6 +417,69 @@ fun WalletDescriptorScreen(
             onDismiss = { showAnnounceDialog = false }
         )
     }
+
+    showKeyProofDialog?.let { proposal ->
+        KeyProofConfirmDialog(
+            proposal = proposal,
+            isBusy = proposal.sessionId in inFlightSessions,
+            onConfirm = {
+                handleProposalAction(proposal, "approve") { id ->
+                    // TODO (#270): pass key_proof_psbt once keep #270 lands
+                    keepMobile.walletDescriptorApproveContribution(id)
+                }
+                showKeyProofDialog = null
+            },
+            onDismiss = { showKeyProofDialog = null }
+        )
+    }
+}
+
+@Composable
+private fun KeyProofConfirmDialog(
+    proposal: DescriptorProposal,
+    isBusy: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Verify Key Control") },
+        text = {
+            Column {
+                Text(
+                    "Approving this contribution will sign a verification message " +
+                        "proving you control your key for this wallet descriptor."
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Network: ${proposal.network}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Recovery tiers: ${proposal.tiers.size}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "This is required to complete the wallet setup.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !isBusy) {
+                Text(if (isBusy) "Approving..." else "Approve & Prove Key")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isBusy) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

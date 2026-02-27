@@ -262,13 +262,27 @@ class DescriptorSessionManagerTest {
     }
 
     @Test
-    fun `re-announce overwrites previous xpubs for same share`() = runTest {
+    fun `re-announce accumulates xpubs for same share`() = runTest {
         val callbacks = DescriptorSessionManager.createCallbacks()
         callbacks.onXpubAnnounced(1u, listOf(makeXpub("xpub-old", "11111111")))
         callbacks.onXpubAnnounced(1u, listOf(makeXpub("xpub-new", "22222222")))
 
         val announced = DescriptorSessionManager.announcedXpubs.first()
         assertEquals(1, announced.size)
-        assertEquals("xpub-new", announced[1.toUShort()]?.first()?.xpub)
+        val xpubs = announced[1.toUShort()]!!
+        assertEquals(2, xpubs.size)
+        assertEquals("xpub-old", xpubs[0].xpub)
+        assertEquals("xpub-new", xpubs[1].xpub)
+    }
+
+    @Test
+    fun `re-announcing same xpub does not duplicate`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        val xpub = makeXpub("xpub-same", "11111111")
+        callbacks.onXpubAnnounced(1u, listOf(xpub))
+        callbacks.onXpubAnnounced(1u, listOf(xpub))
+
+        val announced = DescriptorSessionManager.announcedXpubs.first()
+        assertEquals(1, announced[1.toUShort()]?.size)
     }
 }
