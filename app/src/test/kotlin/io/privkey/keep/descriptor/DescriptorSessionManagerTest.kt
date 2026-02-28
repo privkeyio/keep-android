@@ -17,7 +17,6 @@ class DescriptorSessionManagerTest {
     fun setup() {
         DescriptorSessionManager.clearAll()
         DescriptorSessionManager.activate()
-        DescriptorSessionManager.setCallbacksRegistered(false)
     }
 
     private fun makeProposal(

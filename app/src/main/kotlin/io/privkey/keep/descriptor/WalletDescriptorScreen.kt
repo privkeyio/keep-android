@@ -17,11 +17,11 @@ import io.privkey.keep.setSecureScreen
 import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -74,7 +74,10 @@ object DescriptorSessionManager {
     private var active = true
 
     fun setCallbacksRegistered(registered: Boolean) {
-        _callbacksRegistered.value = registered
+        synchronized(lock) {
+            if (!active) return
+            _callbacksRegistered.value = registered
+        }
     }
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
@@ -119,7 +122,7 @@ object DescriptorSessionManager {
         ) {
             synchronized(lock) {
                 if (!active) return
-                removePendingProposal(sessionId)
+                doRemovePendingProposal(sessionId)
                 _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
             }
         }
@@ -127,18 +130,23 @@ object DescriptorSessionManager {
         override fun onFailed(sessionId: String, error: String) {
             synchronized(lock) {
                 if (!active) return
-                removePendingProposal(sessionId)
+                doRemovePendingProposal(sessionId)
                 _state.value = DescriptorSessionState.Failed(sessionId, error)
             }
         }
     }
 
     fun setContributed(sessionId: String) {
-        _state.value = DescriptorSessionState.Contributed(sessionId, 0.toUShort())
+        synchronized(lock) {
+            if (!active) return
+            _state.value = DescriptorSessionState.Contributed(sessionId, 0.toUShort())
+        }
     }
 
     fun clearSessionState() {
-        _state.value = DescriptorSessionState.Idle
+        synchronized(lock) {
+            _state.value = DescriptorSessionState.Idle
+        }
     }
 
     fun clearAll() {
@@ -157,8 +165,14 @@ object DescriptorSessionManager {
         }
     }
 
-    fun removePendingProposal(sessionId: String) {
+    private fun doRemovePendingProposal(sessionId: String) {
         _pendingProposals.update { it.filter { p -> p.sessionId != sessionId } }
+    }
+
+    fun removePendingProposal(sessionId: String) {
+        synchronized(lock) {
+            doRemovePendingProposal(sessionId)
+        }
     }
 }
 
@@ -351,21 +365,18 @@ fun WalletDescriptorScreen(
                 if (isProposing) return@ProposeDescriptorDialog
                 isProposing = true
                 scope.launch {
-                    try {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                keepMobile.walletDescriptorPropose(network, tiers)
-                            }
-                        }.onSuccess {
-                            showProposeDialog = false
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            keepMobile.walletDescriptorPropose(network, tiers)
                         }
-                    } finally {
-                        isProposing = false
+                    }.onSuccess {
+                        showProposeDialog = false
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
+                        Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                     }
+                    isProposing = false
                 }
             },
             onDismiss = { showProposeDialog = false }
@@ -380,22 +391,19 @@ fun WalletDescriptorScreen(
                 if (isExporting) return@ExportDescriptorDialog
                 isExporting = true
                 scope.launch {
-                    try {
-                        runCatching {
-                            val exported = withContext(Dispatchers.IO) {
-                                keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
-                            }
-                            copySensitiveText(context, exported)
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
+                    runCatching {
+                        val exported = withContext(Dispatchers.IO) {
+                            keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
                         }
-                    } finally {
-                        isExporting = false
-                        showExportDialog = null
+                        copySensitiveText(context, exported)
+                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
+                        Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                     }
+                    isExporting = false
+                    showExportDialog = null
                 }
             },
             onDismiss = { showExportDialog = null }
@@ -410,22 +418,19 @@ fun WalletDescriptorScreen(
                 if (isDeleting) return@DeleteDescriptorDialog
                 isDeleting = true
                 scope.launch {
-                    try {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
-                            }
-                        }.onSuccess {
-                            showDeleteConfirm = null
-                            refreshDescriptors()
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
                         }
-                    } finally {
-                        isDeleting = false
+                    }.onSuccess {
+                        showDeleteConfirm = null
+                        refreshDescriptors()
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
+                        Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                     }
+                    isDeleting = false
                 }
             },
             onDismiss = { showDeleteConfirm = null }
@@ -439,23 +444,20 @@ fun WalletDescriptorScreen(
                 if (isAnnouncing) return@AnnounceXpubsDialog
                 isAnnouncing = true
                 scope.launch {
-                    try {
-                        runCatching {
-                            withContext(Dispatchers.IO) {
-                                keepMobile.walletAnnounceXpubs(
-                                    listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
-                                )
-                            }
-                        }.onSuccess {
-                            showAnnounceDialog = false
-                        }.onFailure { e ->
-                            if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            keepMobile.walletAnnounceXpubs(
+                                listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
+                            )
                         }
-                    } finally {
-                        isAnnouncing = false
+                    }.onSuccess {
+                        showAnnounceDialog = false
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
+                        Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
                     }
+                    isAnnouncing = false
                 }
             },
             onDismiss = { showAnnounceDialog = false }
@@ -534,12 +536,21 @@ private fun KeyProofConfirmDialog(
 @Composable
 private fun SessionStatusCard(state: DescriptorSessionState) {
     val (statusText, statusColor) = when (state) {
-        is DescriptorSessionState.Proposed -> "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
-        is DescriptorSessionState.Contributed -> (if (state.shareIndex > 0.toUShort()) "Share ${state.shareIndex} contributed" else "Contribution sent") to MaterialTheme.colorScheme.secondary
-        is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
+        is DescriptorSessionState.Proposed ->
+            "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
+        is DescriptorSessionState.ContributionNeeded ->
+            "Contribution needed" to MaterialTheme.colorScheme.tertiary
+        is DescriptorSessionState.Contributed -> {
+            val text = if (state.shareIndex > 0u) "Share ${state.shareIndex} contributed" else "Contribution sent"
+            text to MaterialTheme.colorScheme.secondary
+        }
+        is DescriptorSessionState.Complete ->
+            "Descriptor complete" to MaterialTheme.colorScheme.primary
+        is DescriptorSessionState.Failed -> {
+            val text = if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed"
+            text to MaterialTheme.colorScheme.error
+        }
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
