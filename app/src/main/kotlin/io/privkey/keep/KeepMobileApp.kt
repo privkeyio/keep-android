@@ -1,7 +1,12 @@
 package io.privkey.keep
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
@@ -59,9 +64,9 @@ class KeepMobileApp : Application() {
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    @Volatile
-    var liveState: KeepLiveState? = null
+    var liveState: KeepLiveState? by mutableStateOf(null)
         private set
 
     @Volatile
@@ -94,7 +99,7 @@ class KeepMobileApp : Application() {
             nip55Handler = Nip55Handler(newKeepMobile)
             newKeepMobile.setStateCallback(object : KeepStateCallback {
                 override fun onStateChanged(state: KeepLiveState) {
-                    liveState = state
+                    mainHandler.post { liveState = state }
                 }
             })
         }.onFailure { e ->
@@ -189,7 +194,10 @@ class KeepMobileApp : Application() {
         runCatching {
             val current = mobile.getBunkerConfig()
             mobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
-        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}") }
+        }.onFailure {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
+            return
+        }
         val action = if (enabled) BunkerService::start else BunkerService::stop
         action(this)
     }

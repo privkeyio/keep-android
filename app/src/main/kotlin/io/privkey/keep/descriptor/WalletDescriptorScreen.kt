@@ -47,7 +47,7 @@ private fun truncateText(text: String, maxLength: Int): String =
     if (text.length <= maxLength) text else "${text.take(maxLength)}..."
 
 private fun truncateGroupPubkey(key: String): String =
-    io.privkey.keep.uniffi.truncateStr(key, 8u, 6u)
+    truncateStr(key, 8u, 6u)
 
 sealed class DescriptorSessionState {
     data object Idle : DescriptorSessionState()

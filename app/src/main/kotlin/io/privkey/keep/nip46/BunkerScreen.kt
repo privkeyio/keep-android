@@ -96,15 +96,22 @@ fun BunkerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val bunkerConfig = remember { keepMobile.getBunkerConfig() }
-    var relays by remember {
-        val config = keepMobile.getRelayConfig(null)
-        mutableStateOf(config.bunkerRelays)
-    }
-    var authorizedClients by remember { mutableStateOf(bunkerConfig.authorizedClients.toSet()) }
+    var relays by remember { mutableStateOf<List<String>>(emptyList()) }
+    var authorizedClients by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
+                withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
+            }
+            runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
+                withContext(Dispatchers.Main) { relays = config.bunkerRelays }
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         setSecureScreen(context, true)
@@ -115,9 +122,13 @@ fun BunkerScreen(
 
     fun saveBunkerRelays(updated: List<String>) {
         scope.launch {
-            withContext(Dispatchers.IO) {
-                val config = keepMobile.getRelayConfig(null)
-                keepMobile.saveRelayConfig(null, RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val config = keepMobile.getRelayConfig(null)
+                    keepMobile.saveRelayConfig(null, RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
+                }
+            }.onFailure {
+                Toast.makeText(context, "Failed to save relay config", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -174,11 +185,16 @@ fun BunkerScreen(
                     return@BunkerToggleCard
                 }
                 scope.launch {
-                    withContext(Dispatchers.IO) {
-                        val current = keepMobile.getBunkerConfig()
-                        keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val current = keepMobile.getBunkerConfig()
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                        }
+                    }.onSuccess {
+                        onToggleBunker(enabled)
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to save bunker config", Toast.LENGTH_SHORT).show()
                     }
-                    onToggleBunker(enabled)
                 }
             }
         )
@@ -202,14 +218,19 @@ fun BunkerScreen(
             clients = authorizedClients,
             onRevoke = { pubkey ->
                 scope.launch {
-                    val updated = withContext(Dispatchers.IO) {
-                        val config = keepMobile.getBunkerConfig()
-                        val filtered = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
-                        keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, filtered))
-                        filtered
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val config = keepMobile.getBunkerConfig()
+                            val filtered = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, filtered))
+                            filtered
+                        }
+                    }.onSuccess { updated ->
+                        authorizedClients = updated.toSet()
+                        Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to revoke client", Toast.LENGTH_SHORT).show()
                     }
-                    authorizedClients = updated.toSet()
-                    Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
                 }
             },
             onRevokeAll = { showRevokeAllDialog = true }
@@ -240,11 +261,16 @@ fun BunkerScreen(
         RevokeAllClientsDialog(
             onConfirm = {
                 scope.launch {
-                    withContext(Dispatchers.IO) {
-                        keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
+                        }
+                    }.onSuccess {
+                        authorizedClients = emptySet()
+                        Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to revoke clients", Toast.LENGTH_SHORT).show()
                     }
-                    authorizedClients = emptySet()
-                    Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
                 }
             },
             onDismiss = { showRevokeAllDialog = false }

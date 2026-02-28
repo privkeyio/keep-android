@@ -58,24 +58,35 @@ class NostrConnectActivity : FragmentActivity() {
             return
         }
 
-        connectRequest = parsed
-
         if (killSwitchStore?.isEnabled() == true) {
             finish()
             return
         }
 
-        setContent {
-            KeepAndroidTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    NostrConnectApprovalScreen(
-                        request = parsed,
-                        onApprove = ::handleApprove,
-                        onReject = ::handleReject
-                    )
+        lifecycleScope.launch {
+            val safeRelays = withContext(Dispatchers.IO) {
+                parsed.relays.filter { !isInternalHost(it) }
+            }
+            if (safeRelays.isEmpty()) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "No safe relays after host filtering")
+                finish()
+                return@launch
+            }
+            val request = parsed.copy(relays = safeRelays)
+            connectRequest = request
+
+            setContent {
+                KeepAndroidTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        NostrConnectApprovalScreen(
+                            request = request,
+                            onApprove = ::handleApprove,
+                            onReject = ::handleReject
+                        )
+                    }
                 }
             }
         }
@@ -216,8 +227,7 @@ class NostrConnectActivity : FragmentActivity() {
             val relays = uri.getQueryParameters("relay")
                 .filter { url ->
                     url.startsWith("wss://") &&
-                    RELAY_URL_REGEX.matches(url) &&
-                    !isInternalHost(url)
+                    RELAY_URL_REGEX.matches(url)
                 }
             if (relays.isEmpty()) return null
 

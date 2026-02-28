@@ -366,6 +366,7 @@ private fun AppPermissionsListContent(
 
 private fun revokeNip46Client(context: android.content.Context, pubkey: String) {
     runCatching { Nip46ClientStore.removeClient(context, pubkey) }
+        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
     runCatching {
         val mobile = (context.applicationContext as? KeepMobileApp)?.getKeepMobile()
         if (mobile != null) {
@@ -373,7 +374,7 @@ private fun revokeNip46Client(context: android.content.Context, pubkey: String) 
             val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
             mobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
         }
-    }
+    }.onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke bunker client: ${it::class.simpleName}") }
 }
 
 @Composable
