@@ -205,6 +205,14 @@ class DescriptorSessionManagerTest {
     }
 
     @Test
+    fun `clearAll resets callbacksRegistered`() = runTest {
+        DescriptorSessionManager.setCallbacksRegistered(true)
+        assertTrue(DescriptorSessionManager.callbacksRegistered.first())
+        DescriptorSessionManager.clearAll()
+        assertFalse(DescriptorSessionManager.callbacksRegistered.first())
+    }
+
+    @Test
     fun `reject flow transitions through Failed`() = runTest {
         val callbacks = DescriptorSessionManager.createCallbacks()
         callbacks.onContributionNeeded(makeProposal("s1"))

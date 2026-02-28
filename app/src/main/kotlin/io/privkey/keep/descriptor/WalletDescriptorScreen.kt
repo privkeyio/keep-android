@@ -70,7 +70,7 @@ object DescriptorSessionManager {
     private val _announcedXpubs = MutableStateFlow<Map<UShort, List<AnnouncedXpubInfo>>>(emptyMap())
     val announcedXpubs: StateFlow<Map<UShort, List<AnnouncedXpubInfo>>> = _announcedXpubs.asStateFlow()
 
-    @Volatile
+    private val lock = Any()
     private var active = true
 
     fun setCallbacksRegistered(registered: Boolean) {
@@ -79,28 +79,36 @@ object DescriptorSessionManager {
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
-            if (!active) return
-            _state.value = DescriptorSessionState.Proposed(sessionId)
+            synchronized(lock) {
+                if (!active) return
+                _state.value = DescriptorSessionState.Proposed(sessionId)
+            }
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
-            if (!active) return
-            _pendingProposals.update { current ->
-                if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
+            synchronized(lock) {
+                if (!active) return
+                _pendingProposals.update { current ->
+                    if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
+                }
+                _state.value = DescriptorSessionState.ContributionNeeded(proposal)
             }
-            _state.value = DescriptorSessionState.ContributionNeeded(proposal)
         }
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
-            if (!active) return
-            _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+            synchronized(lock) {
+                if (!active) return
+                _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+            }
         }
 
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
-            if (!active) return
-            if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
-            _announcedXpubs.update { current ->
-                current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+            synchronized(lock) {
+                if (!active) return
+                if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+                _announcedXpubs.update { current ->
+                    current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+                }
             }
         }
 
@@ -109,15 +117,19 @@ object DescriptorSessionManager {
             externalDescriptor: String,
             internalDescriptor: String
         ) {
-            if (!active) return
-            removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
+            synchronized(lock) {
+                if (!active) return
+                removePendingProposal(sessionId)
+                _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
+            }
         }
 
         override fun onFailed(sessionId: String, error: String) {
-            if (!active) return
-            removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Failed(sessionId, error)
+            synchronized(lock) {
+                if (!active) return
+                removePendingProposal(sessionId)
+                _state.value = DescriptorSessionState.Failed(sessionId, error)
+            }
         }
     }
 
@@ -130,14 +142,19 @@ object DescriptorSessionManager {
     }
 
     fun clearAll() {
-        active = false
-        _state.value = DescriptorSessionState.Idle
-        _pendingProposals.value = emptyList()
-        _announcedXpubs.value = emptyMap()
+        synchronized(lock) {
+            active = false
+            _state.value = DescriptorSessionState.Idle
+            _pendingProposals.value = emptyList()
+            _announcedXpubs.value = emptyMap()
+            _callbacksRegistered.value = false
+        }
     }
 
     fun activate() {
-        active = true
+        synchronized(lock) {
+            active = true
+        }
     }
 
     fun removePendingProposal(sessionId: String) {
@@ -197,10 +214,13 @@ fun WalletDescriptorScreen(
                     delay(5_000)
                     runCatching {
                         withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
-                    }.onSuccess {
-                        if (it.size > descriptors.size) {
-                            descriptors = it
+                    }.onSuccess { fresh ->
+                        if (fresh.toSet() != descriptors.toSet()) {
+                            descriptors = fresh
                         }
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Polling descriptors failed: ${e.javaClass.simpleName}")
                     }
                 }
             }
@@ -452,11 +472,11 @@ fun WalletDescriptorScreen(
                     "approve",
                     onSuccess = {
                         DescriptorSessionManager.setContributed(proposal.sessionId)
+                        showKeyProofDialog = null
                     }
                 ) { id ->
                     keepMobile.walletDescriptorApproveContribution(id)
                 }
-                showKeyProofDialog = null
             },
             onDismiss = { showKeyProofDialog = null }
         )
