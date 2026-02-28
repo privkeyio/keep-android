@@ -200,15 +200,14 @@ fun BunkerScreen(
             clients = authorizedClients,
             onRevoke = { pubkey ->
                 scope.launch {
-                    withContext(Dispatchers.IO) {
+                    val updated = withContext(Dispatchers.IO) {
                         val config = keepMobile.getBunkerConfig()
-                        val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
-                        keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
-                        withContext(Dispatchers.Main) {
-                            authorizedClients = updated.toSet()
-                            Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
-                        }
+                        val filtered = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
+                        keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, filtered))
+                        filtered
                     }
+                    authorizedClients = updated.toSet()
+                    Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
                 }
             },
             onRevokeAll = { showRevokeAllDialog = true }

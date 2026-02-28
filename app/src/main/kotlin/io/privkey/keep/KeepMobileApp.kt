@@ -64,6 +64,7 @@ class KeepMobileApp : Application() {
     var liveState: KeepLiveState? = null
         private set
 
+    @Volatile
     private var pinMismatch: PinMismatchInfo? = null
 
     override fun onCreate() {
@@ -295,7 +296,8 @@ class KeepMobileApp : Application() {
         pinMismatch = null
         BunkerService.stop(this)
         runCatching {
-            keepMobile?.saveBunkerConfig(BunkerConfigInfo(false, emptyList()))
+            val current = keepMobile?.getBunkerConfig()
+            keepMobile?.saveBunkerConfig(BunkerConfigInfo(false, current?.authorizedClients ?: emptyList()))
         }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
