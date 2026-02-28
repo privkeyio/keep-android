@@ -257,7 +257,7 @@ fun CertificatePinsCard(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
-                                pin.spkiHash.take(16) + "...",
+                                io.privkey.keep.uniffi.truncateStr(pin.spkiHash, 8u, 6u),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

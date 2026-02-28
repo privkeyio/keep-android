@@ -21,8 +21,6 @@ import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.NetworkConnectivityManager
-import io.privkey.keep.storage.BunkerConfigStore
-import io.privkey.keep.storage.ProxyConfigStore
 import io.privkey.keep.uniffi.BunkerApprovalRequest
 import io.privkey.keep.uniffi.BunkerCallbacks
 import io.privkey.keep.uniffi.BunkerHandler
@@ -194,7 +192,7 @@ class BunkerService : Service() {
         }
 
         private fun truncatePubkey(pubkey: String): String =
-            if (pubkey.length > 16) "${pubkey.take(8)}..." else pubkey
+            io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)
 
         internal fun clearRateLimitState() {
             globalPendingCount.set(0)
@@ -211,7 +209,7 @@ class BunkerService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
-    private var configStore: BunkerConfigStore? = null
+    private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
     private var permissionStore: PermissionStore? = null
 
     override fun onCreate() {
@@ -223,14 +221,6 @@ class BunkerService : Service() {
         clearRateLimitState()
         serviceInstanceRef.set(this)
 
-        configStore = BunkerConfigStore(this)
-        if (configStore?.isEnabled() != true) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
-
-        startForeground(NOTIFICATION_ID, createNotification(isActive = false))
-
         val app = applicationContext as? KeepMobileApp
         val keepMobile = app?.getKeepMobile()
         if (keepMobile == null) {
@@ -240,9 +230,19 @@ class BunkerService : Service() {
             return START_NOT_STICKY
         }
 
+        keepMobileRef = keepMobile
+
+        val bunkerConfig = runCatching { keepMobile.getBunkerConfig() }.getOrNull()
+        if (bunkerConfig?.enabled != true) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        startForeground(NOTIFICATION_ID, createNotification(isActive = false))
+
         permissionStore = PermissionStore(Nip55Database.getInstance(this))
 
-        val relays = configStore?.getRelays() ?: emptyList()
+        val relays = runCatching { keepMobile.getRelayConfig(null).bunkerRelays }.getOrDefault(emptyList())
         if (relays.isEmpty()) {
             if (BuildConfig.DEBUG) Log.e(TAG, "No bunker relays configured")
             _status.value = BunkerStatus.ERROR
@@ -288,9 +288,9 @@ class BunkerService : Service() {
                 }
             }
 
-            val proxy = ProxyConfigStore(this@BunkerService).getProxyConfig()
-            val proxyStarted = proxy != null && proxy.port in 1..65535 &&
-                invokeStartBunkerWithProxy(handler, relays, callbacks, proxy.host, proxy.port.toUShort())
+            val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
+            val proxyStarted = proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535 &&
+                invokeStartBunkerWithProxy(handler, relays, callbacks, "127.0.0.1", proxy.port)
             if (!proxyStarted) {
                 handler.startBunker(relays, callbacks)
             }
@@ -402,8 +402,10 @@ class BunkerService : Service() {
             return false
         }
 
-        val store = configStore
-        val isAuthorized = store?.isClientAuthorized(clientPubkey) == true
+        val mobile = keepMobileRef
+        val isAuthorized = mobile != null && runCatching {
+            mobile.getBunkerConfig().authorizedClients.any { it.lowercase() == clientPubkey.lowercase() }
+        }.getOrDefault(false)
         val isConnectRequest = request.method == "connect"
 
         if (!isAuthorized && !isConnectRequest) {
@@ -455,8 +457,14 @@ class BunkerService : Service() {
         }
 
         val result = approvedRef.get() ?: false
-        if (result && isConnectRequest && store != null) {
-            store.authorizeClient(clientPubkey)
+        if (result && isConnectRequest && mobile != null) {
+            runCatching {
+                val config = mobile.getBunkerConfig()
+                if (!config.authorizedClients.any { it.lowercase() == clientPubkey.lowercase() }) {
+                    val updated = config.authorizedClients + clientPubkey.lowercase()
+                    mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
+                }
+            }
             if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
         }
 
@@ -525,7 +533,7 @@ class BunkerService : Service() {
         networkManager = null
         bunkerHandler?.stopBunker()
         bunkerHandler = null
-        configStore = null
+        keepMobileRef = null
         permissionStore = null
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED

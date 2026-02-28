@@ -40,7 +40,7 @@ private fun bech32Decode(bech32: String): Pair<String, List<Int>>? {
 }
 
 private fun truncate(value: String): String =
-    if (value.length > 20) "${value.take(12)}...${value.takeLast(8)}" else value
+    io.privkey.keep.uniffi.truncateStr(value, 12u, 8u)
 
 fun formatPubkeyDisplay(pubkey: String): String =
     hexToBech32(pubkey, "npub")?.let { truncate(it) } ?: truncate(pubkey)

@@ -94,7 +94,7 @@ fun ShareDetailsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isNpubValid) "${npub.take(24)}...${npub.takeLast(8)}" else "---",
+                    text = if (isNpubValid) io.privkey.keep.uniffi.truncateStr(npub, 12u, 8u) else "---",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }

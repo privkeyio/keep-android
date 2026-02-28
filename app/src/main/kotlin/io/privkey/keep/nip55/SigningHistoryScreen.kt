@@ -17,8 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
 
 private const val PAGE_SIZE = 50
 
@@ -258,7 +256,6 @@ private fun SigningHistoryLogsList(
 
 @Composable
 private fun AuditLogCard(log: Nip55AuditLog) {
-    val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm:ss", Locale.getDefault()) }
     val isAllowed = log.decision == "allow"
 
     val containerColor = if (isAllowed) {
@@ -309,7 +306,7 @@ private fun AuditLogCard(log: Nip55AuditLog) {
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = dateFormat.format(Date(log.timestamp)),
+                text = io.privkey.keep.uniffi.formatTimestampDetailed(log.timestamp / 1000),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

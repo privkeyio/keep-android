@@ -4,9 +4,8 @@ import android.content.Context
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
-import io.privkey.keep.storage.ProfileRelayConfigStore
-import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,8 +18,6 @@ import javax.crypto.Cipher
 internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
-    private val relayConfigStore: RelayConfigStore,
-    private val profileRelayConfigStore: ProfileRelayConfigStore?,
     private val coroutineScope: CoroutineScope,
     private val appContext: Context,
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
@@ -65,8 +62,10 @@ internal class AccountActions(
             val s = keepMobile.getShareInfo()
             val k = storage.getActiveShareKey()
             val a = storage.listAllShares().map { it.toAccountInfo() }
-            val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            val pr = k?.let { profileRelayConfigStore?.getRelaysForAccount(it) } ?: emptyList()
+            val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
+                ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+            val r = config.frostRelays
+            val pr = config.profileRelays
             AccountState(h, s, k, a, r, pr)
         }
         onStateChanged(result)
@@ -88,7 +87,9 @@ internal class AccountActions(
                             withContext(Dispatchers.IO) {
                                 val currentKey = storage.getActiveShareKey()
                                 if (currentKey != null) {
-                                    relayConfigStore.setRelaysForAccount(currentKey, currentRelays)
+                                    val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
+                                        ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+                                    keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
                                 }
                             }
                             activateShare(authedCipher, account.groupPubkeyHex)
@@ -138,8 +139,7 @@ internal class AccountActions(
         val wasActive = account.groupPubkeyHex == activeAccountKey
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)
-            relayConfigStore.deleteRelaysForAccount(account.groupPubkeyHex)
-            profileRelayConfigStore?.deleteRelaysForAccount(account.groupPubkeyHex)
+            keepMobile.deleteRelayConfig(account.groupPubkeyHex)
         }
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }

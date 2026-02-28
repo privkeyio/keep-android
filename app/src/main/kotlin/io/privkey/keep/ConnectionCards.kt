@@ -9,7 +9,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.PeerStatus
@@ -191,9 +190,9 @@ private fun EditRelaysDialog(
                         val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
                         when {
                             url.length > 256 -> error = "URL too long"
-                            !url.matches(RelayConfigStore.RELAY_URL_REGEX) -> error = "Invalid relay URL"
+                            !url.matches(RELAY_URL_REGEX) -> error = "Invalid relay URL"
                             else -> {
-                                if (!RelayConfigStore.isValidPort(url)) {
+                                if (!isValidRelayPort(url)) {
                                     error = "Port must be between 1 and 65535"
                                     return@IconButton
                                 }

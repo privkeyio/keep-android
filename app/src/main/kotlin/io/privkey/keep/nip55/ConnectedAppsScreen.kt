@@ -262,7 +262,7 @@ private fun ConnectedAppItem(
                 if (isNip46Client) {
                     val pubkey = app.packageName.removePrefix("nip46:")
                     Text(
-                        text = "NIP-46 (${pubkey.take(8)}...${pubkey.takeLast(6)})",
+                        text = "NIP-46 (${io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)})",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
