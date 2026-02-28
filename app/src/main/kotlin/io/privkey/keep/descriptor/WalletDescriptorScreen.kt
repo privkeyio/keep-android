@@ -32,6 +32,9 @@ import java.util.Locale
 private const val TAG = "WalletDescriptor"
 private const val MAX_PENDING_PROPOSALS = 50
 private const val MAX_POLL_RETRIES = 60
+private const val POLL_INTERVAL_MS = 5_000L
+private const val MAX_POLL_INTERVAL_MS = 60_000L
+private const val POLL_DEADLINE_MS = 30 * 60 * 1000L
 private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "upub", "vpub", "Ypub", "Zpub", "Upub", "Vpub")
 private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
@@ -95,9 +98,7 @@ object DescriptorSessionManager {
                 if (!active) return
                 _pendingProposals.update { current ->
                     if (current.any { it.sessionId == proposal.sessionId }) current
-                    else (current + proposal).let { updated ->
-                        if (updated.size > MAX_PENDING_PROPOSALS) updated.drop(updated.size - MAX_PENDING_PROPOSALS) else updated
-                    }
+                    else (current + proposal).takeLast(MAX_PENDING_PROPOSALS)
                 }
                 _state.value = DescriptorSessionState.ContributionNeeded(proposal)
             }
@@ -230,22 +231,22 @@ fun WalletDescriptorScreen(
             is DescriptorSessionState.Contributed,
             is DescriptorSessionState.Proposed -> {
                 var failures = 0
-                var delayMs = 5_000L
-                val deadline = System.currentTimeMillis() + 30 * 60 * 1000L // 30 min
+                var delayMs = POLL_INTERVAL_MS
+                val deadline = System.currentTimeMillis() + POLL_DEADLINE_MS
                 while (failures < MAX_POLL_RETRIES && System.currentTimeMillis() < deadline) {
                     delay(delayMs)
                     runCatching {
                         withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
                     }.onSuccess { fresh ->
                         failures = 0
-                        delayMs = 5_000L
+                        delayMs = POLL_INTERVAL_MS
                         if (fresh.toSet() != descriptors.toSet()) {
                             descriptors = fresh
                         }
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
                         failures++
-                        delayMs = (delayMs * 2).coerceAtMost(60_000L)
+                        delayMs = (delayMs * 2).coerceAtMost(MAX_POLL_INTERVAL_MS)
                         if (BuildConfig.DEBUG) Log.w(TAG, "Polling descriptors failed: ${e.javaClass.simpleName}")
                     }
                 }
@@ -569,16 +570,14 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
             "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.ContributionNeeded ->
             "Contribution needed" to MaterialTheme.colorScheme.tertiary
-        is DescriptorSessionState.Contributed -> {
-            val text = if (state.shareIndex > 0u) "Share ${state.shareIndex} contributed" else "Contribution sent"
-            text to MaterialTheme.colorScheme.secondary
-        }
+        is DescriptorSessionState.Contributed ->
+            (if (state.shareIndex > 0u) "Share ${state.shareIndex} contributed" else "Contribution sent") to
+                MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete ->
             "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> {
-            val text = if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed"
-            text to MaterialTheme.colorScheme.error
-        }
+        is DescriptorSessionState.Failed ->
+            (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to
+                MaterialTheme.colorScheme.error
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
