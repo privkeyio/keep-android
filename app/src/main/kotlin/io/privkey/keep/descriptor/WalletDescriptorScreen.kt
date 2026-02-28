@@ -30,6 +30,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
+private const val MAX_PENDING_PROPOSALS = 50
+private const val MAX_POLL_RETRIES = 60
 private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "upub", "vpub", "Ypub", "Zpub", "Upub", "Vpub")
 private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
@@ -92,7 +94,10 @@ object DescriptorSessionManager {
             synchronized(lock) {
                 if (!active) return
                 _pendingProposals.update { current ->
-                    if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
+                    if (current.any { it.sessionId == proposal.sessionId }) current
+                    else (current + proposal).let { updated ->
+                        if (updated.size > MAX_PENDING_PROPOSALS) updated.drop(updated.size - MAX_PENDING_PROPOSALS) else updated
+                    }
                 }
                 _state.value = DescriptorSessionState.ContributionNeeded(proposal)
             }
@@ -224,17 +229,23 @@ fun WalletDescriptorScreen(
             is DescriptorSessionState.ContributionNeeded,
             is DescriptorSessionState.Contributed,
             is DescriptorSessionState.Proposed -> {
-                while (true) {
-                    delay(5_000)
+                var failures = 0
+                var delayMs = 5_000L
+                while (failures < MAX_POLL_RETRIES) {
+                    delay(delayMs)
                     runCatching {
                         withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
                     }.onSuccess { fresh ->
+                        failures = 0
+                        delayMs = 5_000L
                         if (fresh.toSet() != descriptors.toSet()) {
                             descriptors = fresh
                         }
                     }.onFailure { e ->
                         if (e is CancellationException) throw e
-                        Log.w(TAG, "Polling descriptors failed: ${e.javaClass.simpleName}")
+                        failures++
+                        delayMs = (delayMs * 2).coerceAtMost(60_000L)
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Polling descriptors failed: ${e.javaClass.simpleName}")
                     }
                 }
             }
@@ -267,7 +278,7 @@ fun WalletDescriptorScreen(
                 onSuccess?.invoke()
             }.onFailure { e ->
                 if (e is CancellationException) throw e
-                Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
+                if (BuildConfig.DEBUG) Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
                 Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
             }
             inFlightSessions = inFlightSessions - proposal.sessionId
@@ -365,18 +376,21 @@ fun WalletDescriptorScreen(
                 if (isProposing) return@ProposeDescriptorDialog
                 isProposing = true
                 scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorPropose(network, tiers)
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorPropose(network, tiers)
+                            }
+                        }.onSuccess {
+                            showProposeDialog = false
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
+                            Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                         }
-                    }.onSuccess {
-                        showProposeDialog = false
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
-                        Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isProposing = false
                     }
-                    isProposing = false
                 }
             },
             onDismiss = { showProposeDialog = false }
@@ -391,19 +405,23 @@ fun WalletDescriptorScreen(
                 if (isExporting) return@ExportDescriptorDialog
                 isExporting = true
                 scope.launch {
-                    runCatching {
-                        val exported = withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
+                    try {
+                        runCatching {
+                            val exported = withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
+                            }
+                            copySensitiveText(context, exported)
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }.onSuccess {
+                            showExportDialog = null
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
+                            Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                         }
-                        copySensitiveText(context, exported)
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
-                        Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isExporting = false
                     }
-                    isExporting = false
-                    showExportDialog = null
                 }
             },
             onDismiss = { showExportDialog = null }
@@ -418,19 +436,22 @@ fun WalletDescriptorScreen(
                 if (isDeleting) return@DeleteDescriptorDialog
                 isDeleting = true
                 scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletDescriptorDelete(descriptor.groupPubkey)
+                            }
+                        }.onSuccess {
+                            showDeleteConfirm = null
+                            refreshDescriptors()
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
+                            Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                         }
-                    }.onSuccess {
-                        showDeleteConfirm = null
-                        refreshDescriptors()
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
-                        Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isDeleting = false
                     }
-                    isDeleting = false
                 }
             },
             onDismiss = { showDeleteConfirm = null }
@@ -444,20 +465,23 @@ fun WalletDescriptorScreen(
                 if (isAnnouncing) return@AnnounceXpubsDialog
                 isAnnouncing = true
                 scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            keepMobile.walletAnnounceXpubs(
-                                listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
-                            )
+                    try {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                keepMobile.walletAnnounceXpubs(
+                                    listOf(AnnouncedXpubInfo(xpub, fingerprint, label.ifBlank { null }))
+                                )
+                            }
+                        }.onSuccess {
+                            showAnnounceDialog = false
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
+                            Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
                         }
-                    }.onSuccess {
-                        showAnnounceDialog = false
-                    }.onFailure { e ->
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
-                        Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
+                    } finally {
+                        isAnnouncing = false
                     }
-                    isAnnouncing = false
                 }
             },
             onDismiss = { showAnnounceDialog = false }
@@ -558,7 +582,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
             Text("Session Status", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(statusText, color = statusColor, style = MaterialTheme.typography.bodyMedium)
-            if (state is DescriptorSessionState.Complete) {
+            if (BuildConfig.DEBUG && state is DescriptorSessionState.Complete) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     "External: ${truncateText(state.externalDescriptor, 40)}",
