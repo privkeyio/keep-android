@@ -59,15 +59,13 @@ internal class AccountActions(
 
     private suspend fun refreshAccountState() {
         val result = withContext(Dispatchers.IO) {
-            val h = keepMobile.hasShare()
-            val s = keepMobile.getShareInfo()
-            val k = storage.getActiveShareKey()
-            val a = storage.listAllShares().map { it.toAccountInfo() }
-            val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
+            val hasShare = keepMobile.hasShare()
+            val shareInfo = keepMobile.getShareInfo()
+            val activeKey = storage.getActiveShareKey()
+            val accounts = storage.listAllShares().map { it.toAccountInfo() }
+            val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
-            val r = config.frostRelays
-            val pr = config.profileRelays
-            AccountState(h, s, k, a, r, pr)
+            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays)
         }
         onStateChanged(result)
     }

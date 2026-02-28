@@ -243,9 +243,8 @@ class KeepMobileApp : Application() {
                     announceJob?.cancel()
                     if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}")
-                    val pm = findPinMismatch(e)
-                    pinMismatch = pm
-                    val errorMsg = pm?.let { PIN_MISMATCH_ERROR } ?: "Connection failed"
+                    pinMismatch = findPinMismatch(e)
+                    val errorMsg = if (pinMismatch != null) PIN_MISMATCH_ERROR else "Connection failed"
                     withContext(Dispatchers.Main) { onError(errorMsg) }
                 }
         }
@@ -333,8 +332,7 @@ class KeepMobileApp : Application() {
                 .onFailure { e ->
                     if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
-                    val pm = findPinMismatch(e)
-                    pinMismatch = pm
+                    pinMismatch = findPinMismatch(e)
                 }
         }
     }

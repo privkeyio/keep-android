@@ -25,6 +25,8 @@ import io.privkey.keep.setSecureScreen
 import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.RelayConfigInfo
+import io.privkey.keep.uniffi.truncateStr
 
 private fun validateRelayUrl(url: String, existingRelays: List<String>): String? = when {
     url.length > 256 -> "URL too long"
@@ -115,7 +117,7 @@ fun BunkerScreen(
         scope.launch {
             withContext(Dispatchers.IO) {
                 val config = keepMobile.getRelayConfig(null)
-                keepMobile.saveRelayConfig(null, io.privkey.keep.uniffi.RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
+                keepMobile.saveRelayConfig(null, RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
             }
         }
     }
@@ -534,7 +536,7 @@ private fun AuthorizedClientsCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u),
+                            truncateStr(pubkey, 8u, 6u),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall
                         )
