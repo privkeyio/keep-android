@@ -17,7 +17,6 @@ class DescriptorSessionManagerTest {
     fun setup() {
         DescriptorSessionManager.clearAll()
         DescriptorSessionManager.activate()
-        DescriptorSessionManager.setCallbacksRegistered(false)
     }
 
     private fun makeProposal(
@@ -179,6 +178,36 @@ class DescriptorSessionManagerTest {
         DescriptorSessionManager.setCallbacksRegistered(true)
         assertTrue(DescriptorSessionManager.callbacksRegistered.first())
         DescriptorSessionManager.setCallbacksRegistered(false)
+        assertFalse(DescriptorSessionManager.callbacksRegistered.first())
+    }
+
+    @Test
+    fun `setContributed transitions to Contributed with zero index`() = runTest {
+        DescriptorSessionManager.setContributed("s1")
+        val state = DescriptorSessionManager.state.first() as DescriptorSessionState.Contributed
+        assertEquals("s1", state.sessionId)
+        assertEquals(0.toUShort(), state.shareIndex)
+    }
+
+    @Test
+    fun `local approve then complete flow`() = runTest {
+        val callbacks = DescriptorSessionManager.createCallbacks()
+        callbacks.onContributionNeeded(makeProposal("s1"))
+        assertTrue(DescriptorSessionManager.state.first() is DescriptorSessionState.ContributionNeeded)
+
+        DescriptorSessionManager.setContributed("s1")
+        assertTrue(DescriptorSessionManager.state.first() is DescriptorSessionState.Contributed)
+
+        callbacks.onComplete("s1", "ext-desc", "int-desc")
+        val completeState = DescriptorSessionManager.state.first() as DescriptorSessionState.Complete
+        assertEquals("ext-desc", completeState.externalDescriptor)
+    }
+
+    @Test
+    fun `clearAll resets callbacksRegistered`() = runTest {
+        DescriptorSessionManager.setCallbacksRegistered(true)
+        assertTrue(DescriptorSessionManager.callbacksRegistered.first())
+        DescriptorSessionManager.clearAll()
         assertFalse(DescriptorSessionManager.callbacksRegistered.first())
     }
 

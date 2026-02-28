@@ -17,6 +17,7 @@ import io.privkey.keep.setSecureScreen
 import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,11 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
+private const val MAX_PENDING_PROPOSALS = 50
+private const val MAX_POLL_RETRIES = 60
+private const val POLL_INTERVAL_MS = 5_000L
+private const val MAX_POLL_INTERVAL_MS = 60_000L
+private const val POLL_DEADLINE_MS = 30 * 60 * 1000L
 private val XPUB_PREFIXES = listOf("xpub", "tpub", "ypub", "zpub", "upub", "vpub", "Ypub", "Zpub", "Upub", "Vpub")
 private val FP_REGEX = Regex("^[0-9a-fA-F]{8}$")
 
@@ -69,37 +75,49 @@ object DescriptorSessionManager {
     private val _announcedXpubs = MutableStateFlow<Map<UShort, List<AnnouncedXpubInfo>>>(emptyMap())
     val announcedXpubs: StateFlow<Map<UShort, List<AnnouncedXpubInfo>>> = _announcedXpubs.asStateFlow()
 
-    @Volatile
+    private val lock = Any()
     private var active = true
 
     fun setCallbacksRegistered(registered: Boolean) {
-        _callbacksRegistered.value = registered
+        synchronized(lock) {
+            if (!active) return
+            _callbacksRegistered.value = registered
+        }
     }
 
     fun createCallbacks(): DescriptorCallbacks = object : DescriptorCallbacks {
         override fun onProposed(sessionId: String) {
-            if (!active) return
-            _state.value = DescriptorSessionState.Proposed(sessionId)
+            synchronized(lock) {
+                if (!active) return
+                _state.value = DescriptorSessionState.Proposed(sessionId)
+            }
         }
 
         override fun onContributionNeeded(proposal: DescriptorProposal) {
-            if (!active) return
-            _pendingProposals.update { current ->
-                if (current.any { it.sessionId == proposal.sessionId }) current else current + proposal
+            synchronized(lock) {
+                if (!active) return
+                _pendingProposals.update { current ->
+                    if (current.any { it.sessionId == proposal.sessionId }) current
+                    else (current + proposal).takeLast(MAX_PENDING_PROPOSALS)
+                }
+                _state.value = DescriptorSessionState.ContributionNeeded(proposal)
             }
-            _state.value = DescriptorSessionState.ContributionNeeded(proposal)
         }
 
         override fun onContributed(sessionId: String, shareIndex: UShort) {
-            if (!active) return
-            _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+            synchronized(lock) {
+                if (!active) return
+                _state.value = DescriptorSessionState.Contributed(sessionId, shareIndex)
+            }
         }
 
         override fun onXpubAnnounced(shareIndex: UShort, xpubs: List<AnnouncedXpubInfo>) {
-            if (!active) return
-            if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
-            _announcedXpubs.update { current ->
-                current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+            synchronized(lock) {
+                if (!active) return
+                if (BuildConfig.DEBUG) Log.d(TAG, "Xpub announced for share $shareIndex: ${xpubs.size} xpub(s)")
+                _announcedXpubs.update { current ->
+                    current + (shareIndex to (current[shareIndex].orEmpty() + xpubs).distinctBy { it.xpub })
+                }
             }
         }
 
@@ -108,35 +126,59 @@ object DescriptorSessionManager {
             externalDescriptor: String,
             internalDescriptor: String
         ) {
-            if (!active) return
-            removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
+            synchronized(lock) {
+                if (!active) return
+                doRemovePendingProposal(sessionId)
+                _state.value = DescriptorSessionState.Complete(sessionId, externalDescriptor, internalDescriptor)
+            }
         }
 
         override fun onFailed(sessionId: String, error: String) {
+            synchronized(lock) {
+                if (!active) return
+                doRemovePendingProposal(sessionId)
+                _state.value = DescriptorSessionState.Failed(sessionId, error)
+            }
+        }
+    }
+
+    fun setContributed(sessionId: String) {
+        synchronized(lock) {
             if (!active) return
-            removePendingProposal(sessionId)
-            _state.value = DescriptorSessionState.Failed(sessionId, error)
+            _state.value = DescriptorSessionState.Contributed(sessionId, 0.toUShort())
         }
     }
 
     fun clearSessionState() {
-        _state.value = DescriptorSessionState.Idle
+        synchronized(lock) {
+            _state.value = DescriptorSessionState.Idle
+        }
     }
 
     fun clearAll() {
-        active = false
-        _state.value = DescriptorSessionState.Idle
-        _pendingProposals.value = emptyList()
-        _announcedXpubs.value = emptyMap()
+        synchronized(lock) {
+            active = false
+            _state.value = DescriptorSessionState.Idle
+            _pendingProposals.value = emptyList()
+            _announcedXpubs.value = emptyMap()
+            _callbacksRegistered.value = false
+        }
     }
 
     fun activate() {
-        active = true
+        synchronized(lock) {
+            active = true
+        }
+    }
+
+    private fun doRemovePendingProposal(sessionId: String) {
+        _pendingProposals.update { it.filter { p -> p.sessionId != sessionId } }
     }
 
     fun removePendingProposal(sessionId: String) {
-        _pendingProposals.update { it.filter { p -> p.sessionId != sessionId } }
+        synchronized(lock) {
+            doRemovePendingProposal(sessionId)
+        }
     }
 }
 
@@ -181,8 +223,35 @@ fun WalletDescriptorScreen(
     }
 
     LaunchedEffect(sessionState) {
-        if (sessionState is DescriptorSessionState.Complete) {
-            refreshDescriptors()
+        when (sessionState) {
+            is DescriptorSessionState.Complete -> {
+                refreshDescriptors()
+            }
+            is DescriptorSessionState.ContributionNeeded,
+            is DescriptorSessionState.Contributed,
+            is DescriptorSessionState.Proposed -> {
+                var failures = 0
+                var delayMs = POLL_INTERVAL_MS
+                val deadline = System.currentTimeMillis() + POLL_DEADLINE_MS
+                while (failures < MAX_POLL_RETRIES && System.currentTimeMillis() < deadline) {
+                    delay(delayMs)
+                    runCatching {
+                        withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
+                    }.onSuccess { fresh ->
+                        failures = 0
+                        delayMs = POLL_INTERVAL_MS
+                        if (fresh.toSet() != descriptors.toSet()) {
+                            descriptors = fresh
+                        }
+                    }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                        failures++
+                        delayMs = (delayMs * 2).coerceAtMost(MAX_POLL_INTERVAL_MS)
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Polling descriptors failed: ${e.javaClass.simpleName}")
+                    }
+                }
+            }
+            else -> {}
         }
     }
 
@@ -198,21 +267,26 @@ fun WalletDescriptorScreen(
     fun handleProposalAction(
         proposal: DescriptorProposal,
         action: String,
+        onSuccess: (() -> Unit)? = null,
         block: suspend (String) -> Unit
     ) {
         if (proposal.sessionId in inFlightSessions) return
         inFlightSessions = inFlightSessions + proposal.sessionId
         scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) { block(proposal.sessionId) }
-            }.onSuccess {
-                DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-            }.onFailure { e ->
-                if (e is CancellationException) throw e
-                Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
-                Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+            try {
+                runCatching {
+                    withContext(Dispatchers.IO) { block(proposal.sessionId) }
+                }.onSuccess {
+                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+                    onSuccess?.invoke()
+                }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
+                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                inFlightSessions = inFlightSessions - proposal.sessionId
             }
-            inFlightSessions = inFlightSessions - proposal.sessionId
         }
     }
 
@@ -316,7 +390,7 @@ fun WalletDescriptorScreen(
                             showProposeDialog = false
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -343,14 +417,15 @@ fun WalletDescriptorScreen(
                             }
                             copySensitiveText(context, exported)
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }.onSuccess {
+                            showExportDialog = null
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
                         isExporting = false
-                        showExportDialog = null
                     }
                 }
             },
@@ -376,7 +451,7 @@ fun WalletDescriptorScreen(
                             refreshDescriptors()
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -406,7 +481,7 @@ fun WalletDescriptorScreen(
                             showAnnounceDialog = false
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
-                            Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
                             Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
                         }
                     } finally {
@@ -423,11 +498,16 @@ fun WalletDescriptorScreen(
             proposal = proposal,
             isBusy = proposal.sessionId in inFlightSessions,
             onConfirm = {
-                handleProposalAction(proposal, "approve") { id ->
-                    // TODO (#270): pass key_proof_psbt once keep #270 lands
+                handleProposalAction(
+                    proposal,
+                    "approve",
+                    onSuccess = {
+                        DescriptorSessionManager.setContributed(proposal.sessionId)
+                        showKeyProofDialog = null
+                    }
+                ) { id ->
                     keepMobile.walletDescriptorApproveContribution(id)
                 }
-                showKeyProofDialog = null
             },
             onDismiss = { showKeyProofDialog = null }
         )
@@ -485,12 +565,19 @@ private fun KeyProofConfirmDialog(
 @Composable
 private fun SessionStatusCard(state: DescriptorSessionState) {
     val (statusText, statusColor) = when (state) {
-        is DescriptorSessionState.Proposed -> "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
-        is DescriptorSessionState.Contributed -> "Share ${state.shareIndex} contributed" to MaterialTheme.colorScheme.secondary
-        is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
-        is DescriptorSessionState.Failed -> (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
+        is DescriptorSessionState.Proposed ->
+            "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
+        is DescriptorSessionState.ContributionNeeded ->
+            "Contribution needed" to MaterialTheme.colorScheme.tertiary
+        is DescriptorSessionState.Contributed ->
+            (if (state.shareIndex > 0u) "Share ${state.shareIndex} contributed" else "Contribution sent") to
+                MaterialTheme.colorScheme.secondary
+        is DescriptorSessionState.Complete ->
+            "Descriptor complete" to MaterialTheme.colorScheme.primary
+        is DescriptorSessionState.Failed ->
+            (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to
+                MaterialTheme.colorScheme.error
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -498,7 +585,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
             Text("Session Status", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(statusText, color = statusColor, style = MaterialTheme.typography.bodyMedium)
-            if (state is DescriptorSessionState.Complete) {
+            if (BuildConfig.DEBUG && state is DescriptorSessionState.Complete) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     "External: ${truncateText(state.externalDescriptor, 40)}",
