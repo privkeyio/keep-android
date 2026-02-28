@@ -231,7 +231,8 @@ fun WalletDescriptorScreen(
             is DescriptorSessionState.Proposed -> {
                 var failures = 0
                 var delayMs = 5_000L
-                while (failures < MAX_POLL_RETRIES) {
+                val deadline = System.currentTimeMillis() + 30 * 60 * 1000L // 30 min
+                while (failures < MAX_POLL_RETRIES && System.currentTimeMillis() < deadline) {
                     delay(delayMs)
                     runCatching {
                         withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
@@ -271,17 +272,20 @@ fun WalletDescriptorScreen(
         if (proposal.sessionId in inFlightSessions) return
         inFlightSessions = inFlightSessions + proposal.sessionId
         scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) { block(proposal.sessionId) }
-            }.onSuccess {
-                DescriptorSessionManager.removePendingProposal(proposal.sessionId)
-                onSuccess?.invoke()
-            }.onFailure { e ->
-                if (e is CancellationException) throw e
-                if (BuildConfig.DEBUG) Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
-                Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+            try {
+                runCatching {
+                    withContext(Dispatchers.IO) { block(proposal.sessionId) }
+                }.onSuccess {
+                    DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+                    onSuccess?.invoke()
+                }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
+                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                inFlightSessions = inFlightSessions - proposal.sessionId
             }
-            inFlightSessions = inFlightSessions - proposal.sessionId
         }
     }
 
