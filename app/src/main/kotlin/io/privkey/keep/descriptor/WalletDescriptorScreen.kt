@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -120,6 +121,10 @@ object DescriptorSessionManager {
         }
     }
 
+    fun setContributed(sessionId: String) {
+        _state.value = DescriptorSessionState.Contributed(sessionId, 0.toUShort())
+    }
+
     fun clearSessionState() {
         _state.value = DescriptorSessionState.Idle
     }
@@ -181,8 +186,25 @@ fun WalletDescriptorScreen(
     }
 
     LaunchedEffect(sessionState) {
-        if (sessionState is DescriptorSessionState.Complete) {
-            refreshDescriptors()
+        when (sessionState) {
+            is DescriptorSessionState.Complete -> {
+                refreshDescriptors()
+            }
+            is DescriptorSessionState.ContributionNeeded,
+            is DescriptorSessionState.Contributed,
+            is DescriptorSessionState.Proposed -> {
+                while (true) {
+                    delay(5_000)
+                    runCatching {
+                        withContext(Dispatchers.IO) { keepMobile.walletDescriptorList() }
+                    }.onSuccess {
+                        if (it.size > descriptors.size) {
+                            descriptors = it
+                        }
+                    }
+                }
+            }
+            else -> {}
         }
     }
 
@@ -198,6 +220,7 @@ fun WalletDescriptorScreen(
     fun handleProposalAction(
         proposal: DescriptorProposal,
         action: String,
+        onSuccess: (() -> Unit)? = null,
         block: suspend (String) -> Unit
     ) {
         if (proposal.sessionId in inFlightSessions) return
@@ -207,6 +230,7 @@ fun WalletDescriptorScreen(
                 withContext(Dispatchers.IO) { block(proposal.sessionId) }
             }.onSuccess {
                 DescriptorSessionManager.removePendingProposal(proposal.sessionId)
+                onSuccess?.invoke()
             }.onFailure { e ->
                 if (e is CancellationException) throw e
                 Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
@@ -423,8 +447,13 @@ fun WalletDescriptorScreen(
             proposal = proposal,
             isBusy = proposal.sessionId in inFlightSessions,
             onConfirm = {
-                handleProposalAction(proposal, "approve") { id ->
-                    // TODO (#270): pass key_proof_psbt once keep #270 lands
+                handleProposalAction(
+                    proposal,
+                    "approve",
+                    onSuccess = {
+                        DescriptorSessionManager.setContributed(proposal.sessionId)
+                    }
+                ) { id ->
                     keepMobile.walletDescriptorApproveContribution(id)
                 }
                 showKeyProofDialog = null
@@ -487,7 +516,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
     val (statusText, statusColor) = when (state) {
         is DescriptorSessionState.Proposed -> "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.ContributionNeeded -> "Contribution needed" to MaterialTheme.colorScheme.tertiary
-        is DescriptorSessionState.Contributed -> "Share ${state.shareIndex} contributed" to MaterialTheme.colorScheme.secondary
+        is DescriptorSessionState.Contributed -> (if (state.shareIndex > 0.toUShort()) "Share ${state.shareIndex} contributed" else "Contribution sent") to MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete -> "Descriptor complete" to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.Failed -> (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to MaterialTheme.colorScheme.error
         is DescriptorSessionState.Idle -> return
