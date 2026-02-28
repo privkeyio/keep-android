@@ -33,6 +33,7 @@ internal class AccountActions(
         val profileRelays: List<String>
     )
 
+    @Volatile
     private var currentRelays: List<String> = emptyList()
 
     fun setCurrentRelays(relays: List<String>) {
@@ -101,6 +102,7 @@ internal class AccountActions(
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(appContext, "Failed to switch account", Toast.LENGTH_SHORT).show()
                             }
+                            onDismiss()
                         }
                     }
                 }
@@ -156,6 +158,7 @@ internal class AccountActions(
             }
         } else {
             refreshAccountState()
+            onDismiss()
         }
     }
 

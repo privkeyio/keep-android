@@ -241,7 +241,7 @@ class KeepMobileApp : Application() {
                 .onFailure { e ->
                     announceJob?.cancel()
                     if (isCancellationException(e)) return@onFailure
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}")
                     val pm = findPinMismatch(e)
                     pinMismatch = pm
                     val errorMsg = pm?.let { PIN_MISMATCH_ERROR } ?: "Connection failed"

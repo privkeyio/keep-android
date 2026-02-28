@@ -171,9 +171,13 @@ fun BunkerScreen(
                     Toast.makeText(context, "Add at least one relay first", Toast.LENGTH_SHORT).show()
                     return@BunkerToggleCard
                 }
-                val current = keepMobile.getBunkerConfig()
-                keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
-                onToggleBunker(enabled)
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        val current = keepMobile.getBunkerConfig()
+                        keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                    }
+                    onToggleBunker(enabled)
+                }
             }
         )
 
@@ -195,11 +199,17 @@ fun BunkerScreen(
         AuthorizedClientsCard(
             clients = authorizedClients,
             onRevoke = { pubkey ->
-                val config = keepMobile.getBunkerConfig()
-                val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
-                keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
-                authorizedClients = updated.toSet()
-                Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        val config = keepMobile.getBunkerConfig()
+                        val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
+                        keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
+                        withContext(Dispatchers.Main) {
+                            authorizedClients = updated.toSet()
+                            Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             },
             onRevokeAll = { showRevokeAllDialog = true }
         )
@@ -228,9 +238,13 @@ fun BunkerScreen(
     if (showRevokeAllDialog) {
         RevokeAllClientsDialog(
             onConfirm = {
-                keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
-                authorizedClients = emptySet()
-                Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
+                    }
+                    authorizedClients = emptySet()
+                    Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                }
             },
             onDismiss = { showRevokeAllDialog = false }
         )
