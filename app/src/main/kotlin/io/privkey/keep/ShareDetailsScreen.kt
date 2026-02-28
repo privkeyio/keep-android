@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.uniffi.hexToNpub
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,7 +21,7 @@ fun ShareDetailsScreen(
 ) {
     val context = LocalContext.current
     val npub = remember(shareInfo.groupPubkey) {
-        hexToNpub(shareInfo.groupPubkey)
+        hexToNpub(shareInfo.groupPubkey) ?: ""
     }
     val isNpubValid = npub.isNotBlank()
 

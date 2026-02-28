@@ -5,13 +5,13 @@ import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.nsecToHex
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Arrays
 import java.util.UUID
 import javax.crypto.Cipher
 
@@ -210,17 +210,12 @@ internal class AccountActions(
         onImportStateChanged: (ImportState) -> Unit
     ) {
         onImportStateChanged(ImportState.Importing)
-        val keyBytes = nsecToBytes(nsec) ?: run {
+        val hexKey = nsecToHex(nsec) ?: run {
             onImportStateChanged(ImportState.Error("Invalid nsec format"))
             return
         }
         executeImport(cipher, onImportStateChanged) {
-            try {
-                val hexKey = keyBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-                keepMobile.importNsec(hexKey, name)
-            } finally {
-                Arrays.fill(keyBytes, 0.toByte())
-            }
+            keepMobile.importNsec(hexKey, name)
         }
     }
 

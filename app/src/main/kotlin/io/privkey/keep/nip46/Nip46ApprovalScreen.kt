@@ -9,7 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.privkey.keep.formatPubkeyDisplay
+import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.nip55.EventKind
 import io.privkey.keep.nip55.PermissionDuration
 

@@ -13,9 +13,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
-import io.privkey.keep.formatEventIdDisplay
-import io.privkey.keep.formatPubkeyDisplay
-import io.privkey.keep.isHex64
+import io.privkey.keep.uniffi.formatEventIdDisplay
+import io.privkey.keep.uniffi.formatPubkeyDisplay
+import io.privkey.keep.uniffi.isHex64
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
