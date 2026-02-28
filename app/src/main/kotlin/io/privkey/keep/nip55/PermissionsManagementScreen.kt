@@ -12,8 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
 
 @Composable
 fun PermissionsManagementScreen(
@@ -316,7 +314,6 @@ private fun PermissionCard(
     onDecisionChange: (PermissionDecision) -> Unit,
     onDelete: () -> Unit
 ) {
-    val dateFormat = remember { SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()) }
     val isExpired = permission.isExpired()
     val currentDecision = permission.permissionDecision
     val containerColor = if (isExpired) {
@@ -367,7 +364,7 @@ private fun PermissionCard(
                         )
                     }
 
-                    val expiryText = permission.expiresAt?.let { "Expires ${dateFormat.format(Date(it))}" } ?: "Permanent"
+                    val expiryText = permission.expiresAt?.let { "Expires ${io.privkey.keep.uniffi.formatTimestampDetailed(it / 1000)}" } ?: "Permanent"
                     Text(
                         text = expiryText,
                         style = MaterialTheme.typography.bodySmall,

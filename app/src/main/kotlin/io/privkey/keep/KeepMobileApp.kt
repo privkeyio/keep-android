@@ -35,7 +35,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -60,7 +59,6 @@ class KeepMobileApp : Application() {
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var initError: String? = null
-    private var announceJob: Job? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -241,14 +239,12 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicPeerCheck(mobile)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
                     withContext(Dispatchers.Main) { onSuccess() }
                 }
                 .onFailure { e ->
-                    announceJob?.cancel()
                     if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}")
                     pinMismatch = findPinMismatch(e)
@@ -273,33 +269,9 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    private fun startPeriodicPeerCheck(mobile: KeepMobile) {
-        announceJob?.cancel()
-        announceJob = applicationScope.launch {
-            repeat(10) { iteration ->
-                delay(5000)
-                runCatching {
-                    val currentRelays = getActiveRelays()
-                    if (currentRelays.isEmpty()) {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
-                        return@runCatching
-                    }
-                    val peers = mobile.getPeers()
-                    if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "Peer check #${iteration + 1}, peers: ${peers.size}")
-                    }
-                }.onFailure {
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
-                    if (it is CancellationException) throw it
-                }
-            }
-        }
-    }
-
     suspend fun onAccountSwitched() {
         connectionJob?.cancel()
         reconnectJob?.cancel()
-        announceJob?.cancel()
         pinMismatch = null
         BunkerService.stop(this)
         runCatching {
@@ -335,7 +307,6 @@ class KeepMobileApp : Application() {
             runCatching { initializeConnection(mobile, relays) }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
-                    startPeriodicPeerCheck(mobile)
                 }
                 .onFailure { e ->
                     if (isCancellationException(e)) return@onFailure
