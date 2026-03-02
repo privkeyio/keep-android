@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -23,28 +23,35 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import javax.crypto.Cipher
+
+private const val MAX_BACKUP_FILE_SIZE = 10L * 1024 * 1024 // 10 MB
 
 private sealed class BackupState {
     data object Idle : BackupState()
     data object Creating : BackupState()
-    data class Created(val data: ByteArray) : BackupState()
+    class Created(val data: ByteArray) : BackupState()
     data class Error(val message: String) : BackupState()
 }
 
 private sealed class RestoreState {
     data object Idle : RestoreState()
-    data class FileSelected(val data: ByteArray, val fileName: String) : RestoreState()
+    class FileSelected(val data: ByteArray, val fileName: String) : RestoreState()
     data object Verifying : RestoreState()
-    data class Verified(val data: ByteArray, val info: BackupInfo) : RestoreState()
+    class Verified(val data: ByteArray, val info: BackupInfo) : RestoreState()
     data object Restoring : RestoreState()
     data class Restored(val info: BackupInfo) : RestoreState()
     data class Error(val message: String) : RestoreState()
 }
 
+private fun clearByteArray(bytes: ByteArray) = bytes.fill(0)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRestoreScreen(
     keepMobile: KeepMobile,
+    onGetCipher: () -> Cipher?,
+    onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -57,22 +64,59 @@ fun BackupRestoreScreen(
 
     var restorePassphrase by remember { mutableStateOf("") }
     var restoreState by remember { mutableStateOf<RestoreState>(RestoreState.Idle) }
-    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+    var confirmingRestore by remember { mutableStateOf<RestoreState.Verified?>(null) }
+
+    DisposableEffect(context) {
+        setSecureScreen(context, true)
+        onDispose {
+            setSecureScreen(context, false)
+            backupPassphrase = ""
+            backupPassphraseConfirm = ""
+            restorePassphrase = ""
+            (backupState as? BackupState.Created)?.let { clearByteArray(it.data) }
+            when (val rs = restoreState) {
+                is RestoreState.FileSelected -> clearByteArray(rs.data)
+                is RestoreState.Verified -> clearByteArray(rs.data)
+                else -> {}
+            }
+        }
+    }
+
+    fun requireBiometricAuth(onAuthed: () -> Unit) {
+        val cipher = onGetCipher()
+        if (cipher == null) {
+            Toast.makeText(context, "Authentication unavailable", Toast.LENGTH_SHORT).show()
+            return
+        }
+        onBiometricAuth(cipher) { authedCipher ->
+            if (authedCipher != null) onAuthed()
+        }
+    }
 
     val saveFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri != null) {
-            val data = (backupState as? BackupState.Created)?.data ?: return@rememberLauncherForActivityResult
+            val created = backupState as? BackupState.Created ?: return@rememberLauncherForActivityResult
             try {
-                context.contentResolver.openOutputStream(uri)?.use { it.write(data) }
+                val outputStream = context.contentResolver.openOutputStream(uri)
+                if (outputStream == null) {
+                    backupState = BackupState.Error("Failed to save backup")
+                    return@rememberLauncherForActivityResult
+                }
+                outputStream.use { it.write(created.data) }
+                clearByteArray(created.data)
                 Toast.makeText(context, "Backup saved", Toast.LENGTH_SHORT).show()
                 backupState = BackupState.Idle
                 backupPassphrase = ""
                 backupPassphraseConfirm = ""
             } catch (e: Exception) {
-                backupState = BackupState.Error("Failed to save: ${e.message}")
+                if (BuildConfig.DEBUG) Log.e("BackupRestore", "Failed to save backup", e)
+                backupState = BackupState.Error("Failed to save backup")
             }
+        } else {
+            (backupState as? BackupState.Created)?.let { clearByteArray(it.data) }
+            backupState = BackupState.Idle
         }
     }
 
@@ -81,13 +125,26 @@ fun BackupRestoreScreen(
     ) { uri ->
         if (uri != null) {
             try {
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                if (bytes != null) {
-                    restoreState = RestoreState.FileSelected(bytes, uri.lastPathSegment ?: "backup")
-                    restorePassphrase = ""
+                val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1
+                if (size > MAX_BACKUP_FILE_SIZE) {
+                    restoreState = RestoreState.Error("File too large (max ${MAX_BACKUP_FILE_SIZE / 1024 / 1024} MB)")
+                    return@rememberLauncherForActivityResult
                 }
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes == null) {
+                    restoreState = RestoreState.Error("Failed to read file")
+                    return@rememberLauncherForActivityResult
+                }
+                if (bytes.size > MAX_BACKUP_FILE_SIZE) {
+                    clearByteArray(bytes)
+                    restoreState = RestoreState.Error("File too large (max ${MAX_BACKUP_FILE_SIZE / 1024 / 1024} MB)")
+                    return@rememberLauncherForActivityResult
+                }
+                restoreState = RestoreState.FileSelected(bytes, uri.lastPathSegment ?: "backup")
+                restorePassphrase = ""
             } catch (e: Exception) {
-                restoreState = RestoreState.Error("Failed to read file: ${e.message}")
+                if (BuildConfig.DEBUG) Log.e("BackupRestore", "Failed to read file", e)
+                restoreState = RestoreState.Error("Failed to read file")
             }
         }
     }
@@ -154,17 +211,20 @@ fun BackupRestoreScreen(
 
                     Button(
                         onClick = {
-                            backupState = BackupState.Creating
-                            scope.launch {
-                                try {
-                                    val data = withContext(Dispatchers.IO) {
-                                        keepMobile.createBackup(backupPassphrase)
+                            requireBiometricAuth {
+                                backupState = BackupState.Creating
+                                scope.launch {
+                                    try {
+                                        val data = withContext(Dispatchers.IO) {
+                                            keepMobile.createBackup(backupPassphrase)
+                                        }
+                                        backupState = BackupState.Created(data)
+                                        val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                                        saveFileLauncher.launch("keep-backup-$date.kbak")
+                                    } catch (e: Exception) {
+                                        if (BuildConfig.DEBUG) Log.e("BackupRestore", "Backup failed", e)
+                                        backupState = BackupState.Error("Backup failed")
                                     }
-                                    backupState = BackupState.Created(data)
-                                    val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
-                                    saveFileLauncher.launch("keep-backup-$date.kbak")
-                                } catch (e: Exception) {
-                                    backupState = BackupState.Error(e.message ?: "Backup failed")
                                 }
                             }
                         },
@@ -182,10 +242,11 @@ fun BackupRestoreScreen(
                         Text("Create Backup")
                     }
 
-                    if (backupState is BackupState.Error) {
+                    val backupError = backupState as? BackupState.Error
+                    if (backupError != null) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            (backupState as BackupState.Error).message,
+                            backupError.message,
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -200,7 +261,7 @@ fun BackupRestoreScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Button(
-                        onClick = { openFileLauncher.launch(arrayOf("*/*")) },
+                        onClick = { openFileLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Select Backup File")
@@ -209,11 +270,8 @@ fun BackupRestoreScreen(
                     val currentRestoreState = restoreState
                     when (currentRestoreState) {
                         is RestoreState.FileSelected, is RestoreState.Verified -> {
-                            val fileName = when (currentRestoreState) {
-                                is RestoreState.FileSelected -> currentRestoreState.fileName
-                                is RestoreState.Verified -> "Verified"
-                                else -> ""
-                            }
+                            val fileName = if (currentRestoreState is RestoreState.FileSelected)
+                                currentRestoreState.fileName else "Verified"
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 "File: $fileName",
@@ -250,9 +308,9 @@ fun BackupRestoreScreen(
                                                     info
                                                 )
                                             } catch (e: Exception) {
-                                                restoreState = RestoreState.Error(
-                                                    e.message ?: "Verification failed"
-                                                )
+                                                if (BuildConfig.DEBUG) Log.e("BackupRestore", "Verification failed", e)
+                                                clearByteArray(currentRestoreState.data)
+                                                restoreState = RestoreState.Error("Verification failed")
                                             }
                                         }
                                     },
@@ -267,7 +325,7 @@ fun BackupRestoreScreen(
                                 BackupSummaryCard(currentRestoreState.info)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Button(
-                                    onClick = { showRestoreConfirmDialog = true },
+                                    onClick = { confirmingRestore = currentRestoreState },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.error
@@ -278,7 +336,9 @@ fun BackupRestoreScreen(
                             }
                         }
 
-                        is RestoreState.Verifying -> {
+                        is RestoreState.Verifying, is RestoreState.Restoring -> {
+                            val label = if (currentRestoreState is RestoreState.Verifying)
+                                "Verifying..." else "Restoring..."
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -286,19 +346,7 @@ fun BackupRestoreScreen(
                             ) {
                                 CircularProgressIndicator(modifier = Modifier.size(24.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Verifying...")
-                            }
-                        }
-
-                        is RestoreState.Restoring -> {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Restoring...")
+                                Text(label)
                             }
                         }
 
@@ -331,17 +379,17 @@ fun BackupRestoreScreen(
         }
     }
 
-    if (showRestoreConfirmDialog) {
-        val verifiedState = restoreState as? RestoreState.Verified
+    val verifiedState = confirmingRestore
+    if (verifiedState != null) {
         AlertDialog(
-            onDismissRequest = { showRestoreConfirmDialog = false },
+            onDismissRequest = { confirmingRestore = null },
             title = { Text("Restore Backup?") },
             text = { Text("This will import all keys, shares, and settings from the backup. Existing data with the same keys will be overwritten.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showRestoreConfirmDialog = false
-                        if (verifiedState != null) {
+                        confirmingRestore = null
+                        requireBiometricAuth {
                             restoreState = RestoreState.Restoring
                             scope.launch {
                                 try {
@@ -351,12 +399,14 @@ fun BackupRestoreScreen(
                                             restorePassphrase
                                         )
                                     }
+                                    clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Restored(info)
+                                    restorePassphrase = ""
                                     Toast.makeText(context, "Backup restored", Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
-                                    restoreState = RestoreState.Error(
-                                        e.message ?: "Restore failed"
-                                    )
+                                    if (BuildConfig.DEBUG) Log.e("BackupRestore", "Restore failed", e)
+                                    clearByteArray(verifiedState.data)
+                                    restoreState = RestoreState.Error("Restore failed")
                                 }
                             }
                         }
@@ -366,7 +416,7 @@ fun BackupRestoreScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRestoreConfirmDialog = false }) {
+                TextButton(onClick = { confirmingRestore = null }) {
                     Text("Cancel")
                 }
             }
