@@ -481,7 +481,6 @@ fun MainScreen(
     if (showBackupRestore) {
         BackupRestoreScreen(
             keepMobile = keepMobile,
-            killSwitchStore = killSwitchStore,
             onDismiss = { showBackupRestore = false }
         )
         return

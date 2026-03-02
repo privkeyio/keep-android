@@ -15,9 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.uniffi.BackupInfo
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.backupMinPassphraseLength
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,11 +45,11 @@ private sealed class RestoreState {
 @Composable
 fun BackupRestoreScreen(
     keepMobile: KeepMobile,
-    killSwitchStore: KillSwitchStore,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val minPassphraseLength = remember { backupMinPassphraseLength().toInt() }
 
     var backupPassphrase by remember { mutableStateOf("") }
     var backupPassphraseConfirm by remember { mutableStateOf("") }
@@ -135,8 +135,8 @@ fun BackupRestoreScreen(
                     )
 
                     val passphraseError = when {
-                        backupPassphrase.isNotEmpty() && backupPassphrase.length < 8 ->
-                            "Passphrase must be at least 8 characters"
+                        backupPassphrase.isNotEmpty() && backupPassphrase.length < minPassphraseLength ->
+                            "Passphrase must be at least $minPassphraseLength characters"
                         backupPassphraseConfirm.isNotEmpty() && backupPassphrase != backupPassphraseConfirm ->
                             "Passphrases do not match"
                         else -> null
@@ -148,7 +148,7 @@ fun BackupRestoreScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    val canCreate = backupPassphrase.length >= 8 &&
+                    val canCreate = backupPassphrase.length >= minPassphraseLength &&
                         backupPassphrase == backupPassphraseConfirm &&
                         backupState !is BackupState.Creating
 
@@ -157,9 +157,8 @@ fun BackupRestoreScreen(
                             backupState = BackupState.Creating
                             scope.launch {
                                 try {
-                                    val killSwitch = withContext(Dispatchers.IO) { killSwitchStore.isEnabled() }
                                     val data = withContext(Dispatchers.IO) {
-                                        keepMobile.createBackup(backupPassphrase, killSwitch)
+                                        keepMobile.createBackup(backupPassphrase)
                                     }
                                     backupState = BackupState.Created(data)
                                     val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
@@ -257,7 +256,7 @@ fun BackupRestoreScreen(
                                             }
                                         }
                                     },
-                                    enabled = restorePassphrase.length >= 8,
+                                    enabled = restorePassphrase.length >= minPassphraseLength,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text("Verify")
