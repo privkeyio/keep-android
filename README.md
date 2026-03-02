@@ -28,6 +28,8 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 - NIP-44 encryption and decryption
 - Background signing with configurable rate limits
 - Certificate pinning for relay connections
+- Encrypted backup and restore
+- Bitcoin wallet descriptor coordination (multisig)
 
 # Download
 
