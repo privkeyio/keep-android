@@ -305,6 +305,7 @@ fun MainScreen(
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
+    var showBackupRestore by remember { mutableStateOf(false) }
 
     val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
     var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
@@ -473,6 +474,18 @@ fun MainScreen(
             killSwitchEnabled = killSwitchEnabled,
             onKillSwitchToggle = handleKillSwitchToggle,
             onDismiss = { showSecuritySettings = false }
+        )
+        return
+    }
+
+    if (showBackupRestore) {
+        BackupRestoreScreen(
+            keepMobile = keepMobile,
+            onGetCipher = { getShareAwareCipher(storage) },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)
+            },
+            onDismiss = { showBackupRestore = false }
         )
         return
     }
@@ -810,6 +823,7 @@ fun MainScreen(
                         }
                     },
                     onSecurityClick = { showSecuritySettings = true },
+                    onBackupClick = { showBackupRestore = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
                             permissionStore.cleanupExpired()
@@ -1003,6 +1017,7 @@ private fun SettingsTab(
     onAutoStartToggle: (Boolean) -> Unit,
     onForegroundServiceToggle: (Boolean) -> Unit,
     onSecurityClick: () -> Unit,
+    onBackupClick: () -> Unit,
     onClearLogsAndActivity: suspend () -> Unit
 ) {
     val context = LocalContext.current
@@ -1061,6 +1076,9 @@ private fun SettingsTab(
         Spacer(modifier = Modifier.height(16.dp))
 
         SecuritySettingsCard(onClick = onSecurityClick)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        BackupSettingsCard(onClick = onBackupClick)
 
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider()
