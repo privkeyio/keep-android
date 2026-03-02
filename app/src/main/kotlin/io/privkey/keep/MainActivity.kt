@@ -46,20 +46,15 @@ import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.ProfileRelayConfigStore
-import io.privkey.keep.storage.ProxyConfigStore
-import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
@@ -74,7 +69,6 @@ class MainActivity : FragmentActivity() {
         biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
-        val relayConfigStore = app.getRelayConfigStore()
         val killSwitchStore = app.getKillSwitchStore()
         val signPolicyStore = app.getSignPolicyStore()
         val autoStartStore = app.getAutoStartStore()
@@ -82,14 +76,11 @@ class MainActivity : FragmentActivity() {
         val pinStore = app.getPinStore()
         val biometricTimeoutStore = app.getBiometricTimeoutStore()
         val permissionStore = app.getPermissionStore()
-        val bunkerConfigStore = app.getBunkerConfigStore()
-        val proxyConfigStore = app.getProxyConfigStore()
-        val profileRelayConfigStore = app.getProfileRelayConfigStore()
 
         val allDependenciesAvailable = listOf(
-            keepMobile, storage, relayConfigStore, killSwitchStore, signPolicyStore,
+            keepMobile, storage, killSwitchStore, signPolicyStore,
             autoStartStore, foregroundServiceStore, pinStore, biometricTimeoutStore,
-            permissionStore, bunkerConfigStore, proxyConfigStore
+            permissionStore
         ).all { it != null }
 
         setContent {
@@ -164,7 +155,6 @@ class MainActivity : FragmentActivity() {
                     } else if (allDependenciesAvailable) {
                         val safeKeepMobile = keepMobile ?: return@Surface
                         val safeStorage = storage ?: return@Surface
-                        val safeRelayConfigStore = relayConfigStore ?: return@Surface
                         val safeKillSwitchStore = killSwitchStore ?: return@Surface
                         val safeSignPolicyStore = signPolicyStore ?: return@Surface
                         val safeAutoStartStore = autoStartStore ?: return@Surface
@@ -172,12 +162,9 @@ class MainActivity : FragmentActivity() {
                         val safePinStore = pinStore ?: return@Surface
                         val safeBiometricTimeoutStore = biometricTimeoutStore ?: return@Surface
                         val safePermissionStore = permissionStore ?: return@Surface
-                        val safeBunkerConfigStore = bunkerConfigStore ?: return@Surface
-                        val safeProxyConfigStore = proxyConfigStore ?: return@Surface
                         MainScreen(
                             keepMobile = safeKeepMobile,
                             storage = safeStorage,
-                            relayConfigStore = safeRelayConfigStore,
                             killSwitchStore = safeKillSwitchStore,
                             signPolicyStore = safeSignPolicyStore,
                             autoStartStore = safeAutoStartStore,
@@ -185,10 +172,6 @@ class MainActivity : FragmentActivity() {
                             pinStore = safePinStore,
                             biometricTimeoutStore = safeBiometricTimeoutStore,
                             permissionStore = safePermissionStore,
-                            bunkerConfigStore = safeBunkerConfigStore,
-                            proxyConfigStore = safeProxyConfigStore,
-                            profileRelayConfigStore = profileRelayConfigStore,
-                            connectionStateFlow = app.connectionState,
                             securityLevel = safeStorage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
                             biometricAvailable = biometricAvailable,
@@ -254,7 +237,6 @@ class MainActivity : FragmentActivity() {
 fun MainScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
-    relayConfigStore: RelayConfigStore,
     killSwitchStore: KillSwitchStore,
     signPolicyStore: SignPolicyStore,
     autoStartStore: AutoStartStore,
@@ -262,10 +244,6 @@ fun MainScreen(
     pinStore: PinStore,
     biometricTimeoutStore: BiometricTimeoutStore,
     permissionStore: PermissionStore,
-    bunkerConfigStore: BunkerConfigStore,
-    proxyConfigStore: ProxyConfigStore,
-    profileRelayConfigStore: ProfileRelayConfigStore?,
-    connectionStateFlow: StateFlow<ConnectionState>,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
     onRelaysChanged: (List<String>) -> Unit,
@@ -285,8 +263,6 @@ fun MainScreen(
     val appContext = LocalContext.current.applicationContext
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
-    var peers by remember { mutableStateOf<List<PeerInfo>>(emptyList()) }
-    var pendingCount by remember { mutableIntStateOf(0) }
     var allAccounts by remember { mutableStateOf<List<AccountInfo>>(emptyList()) }
     var activeAccountKey by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
@@ -302,10 +278,17 @@ fun MainScreen(
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
     var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
-    val connectionState by connectionStateFlow.collectAsState()
-    val isConnected = connectionState.isConnected
-    val isConnecting = connectionState.isConnecting
-    val connectionError = connectionState.error
+
+    val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
+    val peers = appLiveState?.peers ?: emptyList()
+    val pendingCount = appLiveState?.pendingRequests?.size ?: 0
+    val connectionStatus = appLiveState?.connectionStatus
+    val isConnected = connectionStatus is ConnectionStatus.Connected
+    val isConnecting = connectionStatus is ConnectionStatus.Connecting
+    val connectionError = (connectionStatus as? ConnectionStatus.Error)?.message
+
+    val pinMismatchInfo = (appContext as? KeepMobileApp)?.getPinMismatch()
+
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
@@ -319,11 +302,13 @@ fun MainScreen(
     var descriptorCount by remember { mutableIntStateOf(0) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
-    var proxyEnabled by remember { mutableStateOf(proxyConfigStore.isEnabled()) }
-    var proxyPort by remember { mutableStateOf(proxyConfigStore.getPort()) }
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
+
+    val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
+    var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
+    var proxyPort by remember { mutableStateOf(proxyConfig?.port?.toInt() ?: 9050) }
 
     val handleKillSwitchToggle: (Boolean) -> Unit = { newValue ->
         if (newValue) {
@@ -343,8 +328,6 @@ fun MainScreen(
         AccountActions(
             keepMobile = keepMobile,
             storage = storage,
-            relayConfigStore = relayConfigStore,
-            profileRelayConfigStore = profileRelayConfigStore,
             coroutineScope = coroutineScope,
             appContext = appContext,
             onBiometricRequest = onBiometricRequest,
@@ -370,20 +353,26 @@ fun MainScreen(
 
     fun loadProfileRelays(accountKey: String?): List<String> {
         if (accountKey == null) return emptyList()
-        return profileRelayConfigStore?.getRelaysForAccount(accountKey) ?: emptyList()
+        return runCatching { keepMobile.getRelayConfig(accountKey).profileRelays }.getOrDefault(emptyList())
     }
 
     suspend fun saveProfileRelays(updated: List<String>) {
         val key = withContext(Dispatchers.IO) { storage.getActiveShareKey() } ?: return
-        withContext(Dispatchers.IO) { profileRelayConfigStore?.setRelaysForAccount(key, updated) }
+        withContext(Dispatchers.IO) {
+            val existing = runCatching { keepMobile.getRelayConfig(key) }.getOrNull()
+                ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+            keepMobile.saveRelayConfig(key, RelayConfigInfo(existing.frostRelays, updated, existing.bunkerRelays))
+        }
     }
 
     LaunchedEffect(Unit) {
         val initial = withContext(Dispatchers.IO) {
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val k = storage.getActiveShareKey()
-            val r = if (k != null) relayConfigStore.getRelaysForAccount(k) else relayConfigStore.getRelays()
-            val pr = loadProfileRelays(k)
+            val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
+                ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+            val r = config.frostRelays
+            val pr = config.profileRelays
             AccountInitial(a, k, r, pr)
         }
         allAccounts = initial.accounts
@@ -408,26 +397,22 @@ fun MainScreen(
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
-                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newPeers, newPendingCount, newDescriptorCount) = withContext(Dispatchers.IO) {
+                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newDescriptorCount) = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
                     val a = storage.listAllShares().map { it.toAccountInfo() }
                     val k = storage.getActiveShareKey()
-                    val p = if (h) keepMobile.getPeers() else emptyList()
-                    val pc = if (h) keepMobile.getPendingRequests().size else 0
                     val dc = if (h) {
                         runCatching { keepMobile.walletDescriptorList().size }
                             .onFailure { if (it is CancellationException) throw it }
                             .getOrDefault(descriptorCount)
                     } else 0
-                    PollResult(h, s, a, k, p, pc, dc)
+                    PollResult(h, s, a, k, dc)
                 }
                 hasShare = newHasShare
                 shareInfo = newShareInfo
                 allAccounts = newAccounts
                 activeAccountKey = newActiveKey
-                peers = newPeers
-                pendingCount = newPendingCount
                 descriptorCount = newDescriptorCount
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(newActiveKey) }
@@ -564,7 +549,7 @@ fun MainScreen(
 
     if (showBunkerScreen) {
         BunkerScreen(
-            bunkerConfigStore = bunkerConfigStore,
+            keepMobile = keepMobile,
             bunkerUrl = bunkerUrl,
             bunkerStatus = bunkerStatus,
             onToggleBunker = onBunkerServiceChanged,
@@ -639,13 +624,12 @@ fun MainScreen(
         return
     }
 
-    val pinMismatch = connectionState.pinMismatch
-    if (pinMismatch != null) {
+    if (pinMismatchInfo != null) {
         PinMismatchDialog(
-            hostname = pinMismatch.hostname,
+            hostname = pinMismatchInfo.hostname,
             onClearAndRetry = {
                 coroutineScope.launch {
-                    withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatch.hostname) }
+                    withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatchInfo.hostname) }
                     refreshCertificatePins()
                     onReconnectRelays()
                 }
@@ -747,9 +731,9 @@ fun MainScreen(
                     foregroundServiceEnabled = foregroundServiceEnabled,
                     isConnected = isConnected,
                     onAddRelay = { relay ->
-                        if (!relays.contains(relay) && relays.size < RelayConfigStore.MAX_RELAYS) {
+                        if (!relays.contains(relay) && relays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
                                 if (!isInternal) {
                                     val updated = relays + relay
                                     relays = updated
@@ -764,9 +748,9 @@ fun MainScreen(
                         onRelaysChanged(updated)
                     },
                     onAddProfileRelay = { relay ->
-                        if (!profileRelays.contains(relay) && profileRelays.size < RelayConfigStore.MAX_RELAYS) {
+                        if (!profileRelays.contains(relay) && profileRelays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { BunkerConfigStore.isInternalHost(relay) }
+                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
                                 if (!isInternal) {
                                     val updated = profileRelays + relay
                                     profileRelays = updated
@@ -795,8 +779,7 @@ fun MainScreen(
                     onProxyActivate = { port ->
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
-                                proxyConfigStore.setProxyConfig("127.0.0.1", port)
-                                proxyConfigStore.setEnabled(true)
+                                keepMobile.saveProxyConfig(ProxyConfigInfo(true, port.toUShort()))
                             }
                             proxyEnabled = true
                             proxyPort = port
@@ -805,7 +788,9 @@ fun MainScreen(
                     },
                     onProxyDeactivate = {
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) { proxyConfigStore.setEnabled(false) }
+                            withContext(Dispatchers.IO) {
+                                keepMobile.saveProxyConfig(ProxyConfigInfo(false, proxyPort.toUShort()))
+                            }
                             proxyEnabled = false
                             if (isConnected) onReconnectRelays()
                         }
@@ -1208,8 +1193,6 @@ private data class PollResult(
     val shareInfo: ShareInfo?,
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
-    val peers: List<PeerInfo>,
-    val pendingCount: Int,
     val descriptorCount: Int
 )
 

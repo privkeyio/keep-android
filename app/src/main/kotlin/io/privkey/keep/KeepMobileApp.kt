@@ -1,7 +1,12 @@
 package io.privkey.keep
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
@@ -14,27 +19,22 @@ import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.ProfileRelayConfigStore
-import io.privkey.keep.storage.ProxyConfig
-import io.privkey.keep.storage.ProxyConfigStore
-import io.privkey.keep.storage.RelayConfigStore
 import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.uniffi.BunkerConfigInfo
+import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.KeepStateCallback
 import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.uniffi.ProxyConfigInfo
+import io.privkey.keep.uniffi.RelayConfigInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -46,7 +46,6 @@ private const val PIN_MISMATCH_ERROR = "Certificate pin mismatch"
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
     private var storage: AndroidKeystoreStorage? = null
-    private var relayConfigStore: RelayConfigStore? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var signPolicyStore: SignPolicyStore? = null
     private var autoStartStore: AutoStartStore? = null
@@ -59,17 +58,17 @@ class KeepMobileApp : Application() {
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
-    private var bunkerConfigStore: BunkerConfigStore? = null
-    private var proxyConfigStore: ProxyConfigStore? = null
-    private var profileRelayConfigStore: ProfileRelayConfigStore? = null
     private var initError: String? = null
-    private var announceJob: Job? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val _connectionState = MutableStateFlow(ConnectionState())
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    var liveState: KeepLiveState? by mutableStateOf(null)
+        private set
+
+    @Volatile
+    private var pinMismatch: PinMismatchInfo? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -88,19 +87,19 @@ class KeepMobileApp : Application() {
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
-            relayConfigStore = RelayConfigStore(this)
             killSwitchStore = KillSwitchStore(this)
             signPolicyStore = SignPolicyStore(this)
             autoStartStore = AutoStartStore(this)
             foregroundServiceStore = ForegroundServiceStore(this)
             pinStore = PinStore(this)
             biometricTimeoutStore = BiometricTimeoutStore(this)
-            runCatching { proxyConfigStore = ProxyConfigStore(this) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize ProxyConfigStore: ${it::class.simpleName}") }
-            runCatching { profileRelayConfigStore = ProfileRelayConfigStore(this) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize ProfileRelayConfigStore: ${it::class.simpleName}") }
             keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
+            newKeepMobile.setStateCallback(object : KeepStateCallback {
+                override fun onStateChanged(state: KeepLiveState) {
+                    mainHandler.post { liveState = state }
+                }
+            })
         }.onFailure { e ->
             initError = "Failed to initialize application"
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
@@ -148,9 +147,9 @@ class KeepMobileApp : Application() {
 
     private fun initializeBunkerService() {
         runCatching {
-            val store = BunkerConfigStore(this)
-            bunkerConfigStore = store
-            if (store.isEnabled()) {
+            val mobile = keepMobile ?: return
+            val config = mobile.getBunkerConfig()
+            if (config.enabled) {
                 BunkerService.start(this)
             }
         }.onFailure { e ->
@@ -161,8 +160,6 @@ class KeepMobileApp : Application() {
     fun getKeepMobile(): KeepMobile? = keepMobile
 
     fun getStorage(): AndroidKeystoreStorage? = storage
-
-    fun getRelayConfigStore(): RelayConfigStore? = relayConfigStore
 
     fun getKillSwitchStore(): KillSwitchStore? = killSwitchStore
 
@@ -186,32 +183,37 @@ class KeepMobileApp : Application() {
 
     fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
 
-    fun getBunkerConfigStore(): BunkerConfigStore? = bunkerConfigStore
-
-    fun getProxyConfigStore(): ProxyConfigStore? = proxyConfigStore
-
-    fun getProfileRelayConfigStore(): ProfileRelayConfigStore? = profileRelayConfigStore
-
     fun getInitError(): String? = initError
 
+    fun getPinMismatch(): PinMismatchInfo? = pinMismatch
+
     fun updateBunkerService(enabled: Boolean) {
-        bunkerConfigStore?.setEnabled(enabled)
+        val mobile = keepMobile ?: return
+        runCatching {
+            val current = mobile.getBunkerConfig()
+            mobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+        }.onFailure {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
+            return
+        }
         val action = if (enabled) BunkerService::start else BunkerService::stop
         action(this)
     }
 
     private fun getActiveRelays(): List<String> {
-        val config = relayConfigStore ?: return emptyList()
+        val mobile = keepMobile ?: return emptyList()
         val activeKey = storage?.getActiveShareKey()
-        return if (activeKey != null) config.getRelaysForAccount(activeKey) else config.getRelays()
+        return runCatching { mobile.getRelayConfig(activeKey).frostRelays }
+            .getOrDefault(emptyList())
     }
 
     suspend fun initializeWithRelays(relays: List<String>) {
+        val mobile = keepMobile ?: return
         val activeKey = storage?.getActiveShareKey()
-        if (activeKey != null) {
-            relayConfigStore?.setRelaysForAccount(activeKey, relays)
-        } else {
-            relayConfigStore?.setRelays(relays)
+        val existing = runCatching { mobile.getRelayConfig(activeKey) }.getOrNull()
+            ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+        withContext(Dispatchers.IO) {
+            mobile.saveRelayConfig(activeKey, RelayConfigInfo(relays, existing.profileRelays, existing.bunkerRelays))
         }
     }
 
@@ -224,7 +226,7 @@ class KeepMobileApp : Application() {
 
         connectionJob?.cancel()
         reconnectJob?.cancel()
-        _connectionState.value = ConnectionState(isConnecting = true)
+        pinMismatch = null
 
         val connectId = UUID.randomUUID().toString()
         connectionJob = applicationScope.launch {
@@ -237,91 +239,45 @@ class KeepMobileApp : Application() {
                     store.clearRequestIdContext()
                     store.clearPendingCipher(connectId)
                 }
-                startPeriodicPeerCheck(mobile)
             }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Connection successful")
-                    _connectionState.value = ConnectionState(isConnected = true)
                     withContext(Dispatchers.Main) { onSuccess() }
                 }
                 .onFailure { e ->
-                    announceJob?.cancel()
-                    if (isCancellationException(e)) {
-                        _connectionState.value = ConnectionState()
-                        return@onFailure
-                    }
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}: ${e.message}", e)
-                    val pinMismatch = findPinMismatch(e)
-                    val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Connection failed"
-                    _connectionState.value = ConnectionState(error = errorMsg, pinMismatch = pinMismatch)
+                    if (isCancellationException(e)) return@onFailure
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}")
+                    pinMismatch = findPinMismatch(e)
+                    val errorMsg = if (pinMismatch != null) PIN_MISMATCH_ERROR else "Connection failed"
                     withContext(Dispatchers.Main) { onError(errorMsg) }
                 }
         }
     }
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
-        val proxy = proxyConfigStore?.getProxyConfig()
+        val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
             val shareInfo = mobile.getShareInfo()
             Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, hasGroup=${shareInfo?.groupPubkey != null}")
-            Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxy != null}")
+            Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
         }
-        initializeWithProxy(mobile, relays, proxy)
-        if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
-    }
-
-    private fun initializeWithProxy(mobile: KeepMobile, relays: List<String>, proxy: ProxyConfig?) {
-        if (proxy != null && proxy.port in 1..65535 && hasProxySupport(mobile)) {
-            invokeInitializeWithProxy(mobile, relays, proxy.host, proxy.port.toUShort())
+        if (proxyConfig != null && proxyConfig.enabled && proxyConfig.port.toInt() in 1..65535) {
+            mobile.initializeWithProxy(relays, "127.0.0.1", proxyConfig.port)
         } else {
             mobile.initialize(relays)
         }
-    }
-
-    private fun hasProxySupport(mobile: KeepMobile): Boolean = runCatching {
-        mobile.javaClass.methods.any { it.name == "initializeWithProxy" }
-    }.getOrDefault(false)
-
-    private fun invokeInitializeWithProxy(
-        mobile: KeepMobile,
-        relays: List<String>,
-        proxyHost: String,
-        proxyPort: UShort
-    ) {
-        val method = mobile.javaClass.methods.first { it.name == "initializeWithProxy" }
-        method.invoke(mobile, relays, proxyHost, proxyPort)
-    }
-
-    private fun startPeriodicPeerCheck(mobile: KeepMobile) {
-        announceJob?.cancel()
-        announceJob = applicationScope.launch {
-            repeat(10) { iteration ->
-                delay(5000)
-                runCatching {
-                    val currentRelays = getActiveRelays()
-                    if (currentRelays.isEmpty()) {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "No relays configured, skipping peer check")
-                        return@runCatching
-                    }
-                    val peers = mobile.getPeers()
-                    if (BuildConfig.DEBUG) {
-                        Log.d(TAG, "Peer check #${iteration + 1}, peers: ${peers.size}")
-                    }
-                }.onFailure {
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Peer check failed on iteration ${iteration + 1}", it)
-                    if (it is CancellationException) throw it
-                }
-            }
-        }
+        if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
     suspend fun onAccountSwitched() {
         connectionJob?.cancel()
         reconnectJob?.cancel()
-        announceJob?.cancel()
-        _connectionState.value = ConnectionState()
+        pinMismatch = null
         BunkerService.stop(this)
-        bunkerConfigStore?.setEnabled(false)
+        runCatching {
+            val current = keepMobile?.getBunkerConfig()
+            keepMobile?.saveBunkerConfig(BunkerConfigInfo(false, current?.authorizedClients ?: emptyList()))
+        }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
@@ -345,24 +301,17 @@ class KeepMobileApp : Application() {
 
         reconnectJob?.cancel()
         connectionJob?.cancel()
-        _connectionState.value = ConnectionState(isConnecting = true)
+        pinMismatch = null
 
         reconnectJob = applicationScope.launch {
-            runCatching { initializeWithProxy(mobile, relays, proxyConfigStore?.getProxyConfig()) }
+            runCatching { initializeConnection(mobile, relays) }
                 .onSuccess {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Reconnection successful")
-                    _connectionState.value = ConnectionState(isConnected = true)
-                    startPeriodicPeerCheck(mobile)
                 }
                 .onFailure { e ->
-                    if (isCancellationException(e)) {
-                        _connectionState.value = ConnectionState()
-                        return@onFailure
-                    }
+                    if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to reconnect relays: ${e::class.simpleName}")
-                    val pinMismatch = findPinMismatch(e)
-                    val errorMsg = pinMismatch?.let { PIN_MISMATCH_ERROR } ?: "Reconnection failed"
-                    _connectionState.value = ConnectionState(error = errorMsg, pinMismatch = pinMismatch)
+                    pinMismatch = findPinMismatch(e)
                 }
         }
     }
@@ -395,23 +344,17 @@ class KeepMobileApp : Application() {
     }
 
     fun clearCertificatePin(hostname: String) {
-        invokeKeepMobileMethod("clearCertificatePin", hostname)
+        runCatching { keepMobile?.clearCertificatePin(hostname) }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
-        invokeKeepMobileMethod("clearCertificatePins")
-    }
-
-    private fun invokeKeepMobileMethod(name: String, vararg args: Any) {
-        runCatching {
-            val mobile = keepMobile ?: return
-            val method = mobile.javaClass.methods.firstOrNull { it.name == name } ?: return
-            method.invoke(mobile, *args)
-        }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to invoke $name: ${it::class.simpleName}") }
+        runCatching { keepMobile?.clearCertificatePins() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
     fun dismissPinMismatch() {
-        _connectionState.update { it.copy(error = null, pinMismatch = null) }
+        pinMismatch = null
     }
 
     private fun findPinMismatch(e: Throwable): PinMismatchInfo? =

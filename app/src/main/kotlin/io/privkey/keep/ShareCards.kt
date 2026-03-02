@@ -51,7 +51,7 @@ fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
             Text("Threshold: ${info.threshold}")
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Group: ${info.groupPubkey.take(16)}...",
+                "Group: ${io.privkey.keep.uniffi.truncateStr(info.groupPubkey, 8u, 6u)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

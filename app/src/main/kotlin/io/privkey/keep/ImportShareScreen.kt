@@ -44,7 +44,7 @@ internal fun isValidKshareFormat(data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
     if (!data.startsWith("kshare1")) return false
     val payload = data.removePrefix("kshare1")
-    return payload.isNotEmpty() && payload.all { it in BECH32_CHARSET }
+    return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
 }
 
 sealed class ImportState {

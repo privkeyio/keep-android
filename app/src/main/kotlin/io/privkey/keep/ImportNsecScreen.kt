@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Log
+import io.privkey.keep.uniffi.isValidNsecFormat
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll

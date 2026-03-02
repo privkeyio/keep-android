@@ -15,8 +15,9 @@ import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.RELAY_URL_REGEX
+import io.privkey.keep.isInternalHost
 import io.privkey.keep.storage.AndroidKeystoreStorage
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -57,24 +58,35 @@ class NostrConnectActivity : FragmentActivity() {
             return
         }
 
-        connectRequest = parsed
-
         if (killSwitchStore?.isEnabled() == true) {
             finish()
             return
         }
 
-        setContent {
-            KeepAndroidTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    NostrConnectApprovalScreen(
-                        request = parsed,
-                        onApprove = ::handleApprove,
-                        onReject = ::handleReject
-                    )
+        lifecycleScope.launch {
+            val safeRelays = withContext(Dispatchers.IO) {
+                parsed.relays.filter { !isInternalHost(it) }
+            }
+            if (safeRelays.isEmpty()) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "No safe relays after host filtering")
+                finish()
+                return@launch
+            }
+            val request = parsed.copy(relays = safeRelays)
+            connectRequest = request
+
+            setContent {
+                KeepAndroidTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        NostrConnectApprovalScreen(
+                            request = request,
+                            onApprove = ::handleApprove,
+                            onReject = ::handleReject
+                        )
+                    }
                 }
             }
         }
@@ -120,7 +132,7 @@ class NostrConnectActivity : FragmentActivity() {
             }
 
             val app = application as? KeepMobileApp
-            val bunkerConfigStore = app?.getBunkerConfigStore()
+            val mobile = app?.getKeepMobile()
             val permissionStore = app?.getPermissionStore()
 
             var queued = false
@@ -134,7 +146,13 @@ class NostrConnectActivity : FragmentActivity() {
                 queued = true
 
                 withContext(Dispatchers.IO) {
-                    bunkerConfigStore?.authorizeClient(request.clientPubkey)
+                    if (mobile != null) {
+                        val config = mobile.getBunkerConfig()
+                        if (!config.authorizedClients.any { it.lowercase() == request.clientPubkey.lowercase() }) {
+                            val updated = config.authorizedClients + request.clientPubkey.lowercase()
+                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
+                        }
+                    }
 
                     Nip46ClientStore.saveClient(
                         this@NostrConnectActivity,
@@ -162,7 +180,13 @@ class NostrConnectActivity : FragmentActivity() {
                     BunkerService.dequeueNostrConnectRequest(request)
                 }
                 withContext(Dispatchers.IO) {
-                    runCatching { bunkerConfigStore?.revokeClient(request.clientPubkey) }
+                    runCatching {
+                        if (mobile != null) {
+                            val config = mobile.getBunkerConfig()
+                            val updated = config.authorizedClients.filter { it.lowercase() != request.clientPubkey.lowercase() }
+                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
+                        }
+                    }
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
                     if (permissionStore != null) {
                         val callerPackage = "nip46:${request.clientPubkey}"
@@ -203,8 +227,7 @@ class NostrConnectActivity : FragmentActivity() {
             val relays = uri.getQueryParameters("relay")
                 .filter { url ->
                     url.startsWith("wss://") &&
-                    BunkerConfigStore.RELAY_URL_REGEX.matches(url) &&
-                    !BunkerConfigStore.isInternalHost(url)
+                    RELAY_URL_REGEX.matches(url)
                 }
             if (relays.isEmpty()) return null
 

@@ -8,7 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.privkey.keep.formatPubkeyDisplay
+import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.nip55.PermissionDuration
 
 @Composable

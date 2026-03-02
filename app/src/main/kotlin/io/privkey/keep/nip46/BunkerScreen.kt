@@ -16,16 +16,22 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.privkey.keep.MAX_BUNKER_RELAYS
 import io.privkey.keep.QrCodeDisplay
+import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.copySensitiveText
+import io.privkey.keep.isInternalHost
 import io.privkey.keep.setSecureScreen
-import io.privkey.keep.storage.BunkerConfigStore
+import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.RelayConfigInfo
+import io.privkey.keep.uniffi.truncateStr
 
 private fun validateRelayUrl(url: String, existingRelays: List<String>): String? = when {
     url.length > 256 -> "URL too long"
-    !url.matches(BunkerConfigStore.RELAY_URL_REGEX) -> "Invalid relay URL"
-    existingRelays.size >= BunkerConfigStore.MAX_RELAYS -> "Maximum relays reached"
+    !url.matches(RELAY_URL_REGEX) -> "Invalid relay URL"
+    existingRelays.size >= MAX_BUNKER_RELAYS -> "Maximum relays reached"
     existingRelays.contains(url) -> "Relay already added"
     else -> null
 }
@@ -60,9 +66,9 @@ private suspend fun addBunkerRelays(
 ): Result<List<String>> {
     val validRelays = bunkerRelays.filter { validateRelayUrl(it, existingRelays) == null }
     val safeRelays = withContext(Dispatchers.IO) {
-        validRelays.filter { !BunkerConfigStore.isInternalHost(it) }
+        validRelays.filter { !isInternalHost(it) }
     }
-    val remaining = BunkerConfigStore.MAX_RELAYS - existingRelays.size
+    val remaining = MAX_BUNKER_RELAYS - existingRelays.size
 
     if (remaining <= 0) return Result.failure(Exception("Maximum relays reached"))
 
@@ -82,7 +88,7 @@ private suspend fun addBunkerRelays(
 
 @Composable
 fun BunkerScreen(
-    bunkerConfigStore: BunkerConfigStore,
+    keepMobile: KeepMobile,
     bunkerUrl: String?,
     bunkerStatus: BunkerStatus,
     onToggleBunker: (Boolean) -> Unit,
@@ -90,16 +96,40 @@ fun BunkerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var relays by remember { mutableStateOf(bunkerConfigStore.getRelays()) }
-    var authorizedClients by remember { mutableStateOf(bunkerConfigStore.getAuthorizedClients()) }
+    var relays by remember { mutableStateOf<List<String>>(emptyList()) }
+    var authorizedClients by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
+                withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
+            }
+            runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
+                withContext(Dispatchers.Main) { relays = config.bunkerRelays }
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         setSecureScreen(context, true)
         onDispose {
             setSecureScreen(context, false)
+        }
+    }
+
+    fun saveBunkerRelays(updated: List<String>) {
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val config = keepMobile.getRelayConfig(null)
+                    keepMobile.saveRelayConfig(null, RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
+                }
+            }.onFailure {
+                Toast.makeText(context, "Failed to save relay config", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -154,8 +184,18 @@ fun BunkerScreen(
                     Toast.makeText(context, "Add at least one relay first", Toast.LENGTH_SHORT).show()
                     return@BunkerToggleCard
                 }
-                bunkerConfigStore.setEnabled(enabled)
-                onToggleBunker(enabled)
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val current = keepMobile.getBunkerConfig()
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                        }
+                    }.onSuccess {
+                        onToggleBunker(enabled)
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to save bunker config", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         )
 
@@ -168,7 +208,7 @@ fun BunkerScreen(
             onRemove = { relay ->
                 val updated = relays - relay
                 relays = updated
-                scope.launch { bunkerConfigStore.setRelays(updated) }
+                saveBunkerRelays(updated)
             }
         )
 
@@ -177,9 +217,21 @@ fun BunkerScreen(
         AuthorizedClientsCard(
             clients = authorizedClients,
             onRevoke = { pubkey ->
-                bunkerConfigStore.revokeClient(pubkey)
-                authorizedClients = bunkerConfigStore.getAuthorizedClients()
-                Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val config = keepMobile.getBunkerConfig()
+                            val filtered = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, filtered))
+                            filtered
+                        }
+                    }.onSuccess { updated ->
+                        authorizedClients = updated.toSet()
+                        Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to revoke client", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onRevokeAll = { showRevokeAllDialog = true }
         )
@@ -199,7 +251,7 @@ fun BunkerScreen(
             relays = relays,
             onRelaysUpdated = { updated ->
                 relays = updated
-                scope.launch { bunkerConfigStore.setRelays(updated) }
+                saveBunkerRelays(updated)
             },
             onDismiss = { showAddDialog = false }
         )
@@ -208,9 +260,18 @@ fun BunkerScreen(
     if (showRevokeAllDialog) {
         RevokeAllClientsDialog(
             onConfirm = {
-                bunkerConfigStore.revokeAllClients()
-                authorizedClients = emptySet()
-                Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
+                        }
+                    }.onSuccess {
+                        authorizedClients = emptySet()
+                        Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(context, "Failed to revoke clients", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onDismiss = { showRevokeAllDialog = false }
         )
@@ -291,7 +352,7 @@ private fun AddBunkerRelayDialog(
                                 isAdding = true
                                 scope.launch {
                                     val isInternal = withContext(Dispatchers.IO) {
-                                        BunkerConfigStore.isInternalHost(url)
+                                        isInternalHost(url)
                                     }
                                     if (isInternal) {
                                         error = "Internal/private hosts are not allowed"
@@ -501,7 +562,7 @@ private fun AuthorizedClientsCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "${pubkey.take(8)}...${pubkey.takeLast(6)}",
+                            truncateStr(pubkey, 8u, 6u),
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall
                         )

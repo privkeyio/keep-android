@@ -24,9 +24,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
+import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip46.Nip46ClientStore
-import io.privkey.keep.storage.BunkerConfigStore
 import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.uniffi.BunkerConfigInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -365,7 +366,15 @@ private fun AppPermissionsListContent(
 
 private fun revokeNip46Client(context: android.content.Context, pubkey: String) {
     runCatching { Nip46ClientStore.removeClient(context, pubkey) }
-    runCatching { BunkerConfigStore(context).revokeClient(pubkey) }
+        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
+    runCatching {
+        val mobile = (context.applicationContext as? KeepMobileApp)?.getKeepMobile()
+        if (mobile != null) {
+            val config = mobile.getBunkerConfig()
+            val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
+            mobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
+        }
+    }.onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke bunker client: ${it::class.simpleName}") }
 }
 
 @Composable
@@ -420,7 +429,7 @@ private fun AppHeaderCard(
                 if (isNip46Client) {
                     val pubkey = packageName.removePrefix("nip46:")
                     Text(
-                        text = "NIP-46 Client (${pubkey.take(8)}...${pubkey.takeLast(6)})",
+                        text = "NIP-46 Client (${io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)})",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )

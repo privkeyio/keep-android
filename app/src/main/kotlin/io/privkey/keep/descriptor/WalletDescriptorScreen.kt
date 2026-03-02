@@ -24,10 +24,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 private const val TAG = "WalletDescriptor"
 private const val MAX_PENDING_PROPOSALS = 50
@@ -47,7 +43,7 @@ private fun truncateText(text: String, maxLength: Int): String =
     if (text.length <= maxLength) text else "${text.take(maxLength)}..."
 
 private fun truncateGroupPubkey(key: String): String =
-    if (key.length <= 14) key else "${key.take(8)}...${key.takeLast(6)}"
+    truncateStr(key, 8u, 6u)
 
 sealed class DescriptorSessionState {
     data object Idle : DescriptorSessionState()
@@ -681,11 +677,6 @@ private fun DescriptorRow(
     onExport: (WalletDescriptorInfo) -> Unit,
     onDelete: (WalletDescriptorInfo) -> Unit
 ) {
-    val dateFormat = remember {
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.getDefault())
-            .withZone(ZoneId.systemDefault())
-    }
-
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             truncateGroupPubkey(descriptor.groupPubkey),
@@ -699,7 +690,7 @@ private fun DescriptorRow(
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                dateFormat.format(Instant.ofEpochSecond(descriptor.createdAt.toLong())),
+                formatTimestampDetailed(descriptor.createdAt.toLong()),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

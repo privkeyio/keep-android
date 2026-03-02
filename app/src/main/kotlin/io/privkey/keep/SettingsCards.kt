@@ -11,7 +11,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.ProxyConfigStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -305,7 +304,7 @@ fun TorOrbotCard(
                 Button(
                     onClick = {
                         val p = portInput.toIntOrNull()
-                        if (p == null || !ProxyConfigStore.isValidPort(p)) {
+                        if (p == null || p !in 1..65535) {
                             error = "Port must be 1-65535"
                         } else {
                             onActivate(p)

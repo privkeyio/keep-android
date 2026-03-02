@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.uniffi.hexToNpub
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,7 +21,7 @@ fun ShareDetailsScreen(
 ) {
     val context = LocalContext.current
     val npub = remember(shareInfo.groupPubkey) {
-        hexToNpub(shareInfo.groupPubkey)
+        hexToNpub(shareInfo.groupPubkey) ?: ""
     }
     val isNpubValid = npub.isNotBlank()
 
@@ -94,7 +95,7 @@ fun ShareDetailsScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isNpubValid) "${npub.take(24)}...${npub.takeLast(8)}" else "---",
+                    text = if (isNpubValid) io.privkey.keep.uniffi.truncateStr(npub, 12u, 8u) else "---",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
