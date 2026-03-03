@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import javax.crypto.Cipher
 
 private const val MAX_BACKUP_FILE_SIZE = 10L * 1024 * 1024 // 10 MB
@@ -67,6 +68,7 @@ fun BackupRestoreScreen(
     var restorePassphrase by remember { mutableStateOf("") }
     var restoreState by remember { mutableStateOf<RestoreState>(RestoreState.Idle) }
     var confirmingRestore by remember { mutableStateOf<RestoreState.Verified?>(null) }
+    val activeRequestIds = remember { mutableStateListOf<String>() }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -76,11 +78,13 @@ fun BackupRestoreScreen(
             backupPassphraseConfirm = ""
             restorePassphrase = ""
             (backupState as? BackupState.Created)?.let { clearByteArray(it.data) }
-            when (val rs = restoreState) {
-                is RestoreState.FileSelected -> clearByteArray(rs.data)
-                is RestoreState.Verified -> clearByteArray(rs.data)
-                else -> {}
+            val rs = restoreState
+            if (rs is RestoreState.FileSelected) clearByteArray(rs.data)
+            if (rs is RestoreState.Verified) clearByteArray(rs.data)
+            for (id in activeRequestIds) {
+                storage.clearPendingCipher(id)
             }
+            activeRequestIds.clear()
         }
     }
 
@@ -214,14 +218,15 @@ fun BackupRestoreScreen(
                     Button(
                         onClick = {
                             requireBiometricAuth { authedCipher ->
-                                val requestId = java.util.UUID.randomUUID().toString()
+                                val requestId = UUID.randomUUID().toString()
                                 storage.setPendingCipher(requestId, authedCipher)
+                                activeRequestIds.add(requestId)
                                 backupState = BackupState.Creating
                                 scope.launch {
                                     try {
                                         val data = withContext(Dispatchers.IO) {
-                                            storage.setRequestIdContext(requestId)
                                             try {
+                                                storage.setRequestIdContext(requestId)
                                                 keepMobile.createBackup(backupPassphrase)
                                             } finally {
                                                 storage.clearRequestIdContext()
@@ -235,6 +240,7 @@ fun BackupRestoreScreen(
                                         backupState = BackupState.Error("Backup failed")
                                     } finally {
                                         storage.clearPendingCipher(requestId)
+                                        activeRequestIds.remove(requestId)
                                     }
                                 }
                             }
@@ -281,8 +287,10 @@ fun BackupRestoreScreen(
                     val currentRestoreState = restoreState
                     when (currentRestoreState) {
                         is RestoreState.FileSelected, is RestoreState.Verified -> {
-                            val fileName = if (currentRestoreState is RestoreState.FileSelected)
-                                currentRestoreState.fileName else "Verified"
+                            val fileName = when (currentRestoreState) {
+                                is RestoreState.FileSelected -> currentRestoreState.fileName
+                                else -> "Verified"
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 "File: $fileName",
@@ -348,8 +356,10 @@ fun BackupRestoreScreen(
                         }
 
                         is RestoreState.Verifying, is RestoreState.Restoring -> {
-                            val label = if (currentRestoreState is RestoreState.Verifying)
-                                "Verifying..." else "Restoring..."
+                            val label = when (currentRestoreState) {
+                                is RestoreState.Verifying -> "Verifying..."
+                                else -> "Restoring..."
+                            }
                             Spacer(modifier = Modifier.height(12.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -395,23 +405,30 @@ fun BackupRestoreScreen(
         AlertDialog(
             onDismissRequest = { confirmingRestore = null },
             title = { Text("Restore Backup?") },
-            text = { Text("This will import all keys, shares, and settings from the backup. Existing data with the same keys will be overwritten.") },
+            text = {
+                Text(
+                    "This will import all keys, shares, and settings from the backup." +
+                        " Existing data with the same keys will be overwritten."
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmingRestore = null
                         requireBiometricAuth { authedCipher ->
-                            val requestId = java.util.UUID.randomUUID().toString()
+                            val requestId = UUID.randomUUID().toString()
                             storage.setPendingCipher(requestId, authedCipher)
+                            activeRequestIds.add(requestId)
                             restoreState = RestoreState.Restoring
+                            val passphrase = restorePassphrase
                             scope.launch {
                                 try {
                                     val info = withContext(Dispatchers.IO) {
-                                        storage.setRequestIdContext(requestId)
                                         try {
+                                            storage.setRequestIdContext(requestId)
                                             keepMobile.restoreBackup(
                                                 verifiedState.data,
-                                                restorePassphrase
+                                                passphrase
                                             )
                                         } finally {
                                             storage.clearRequestIdContext()
@@ -427,6 +444,7 @@ fun BackupRestoreScreen(
                                     restoreState = RestoreState.Error("Restore failed")
                                 } finally {
                                     storage.clearPendingCipher(requestId)
+                                    activeRequestIds.remove(requestId)
                                 }
                             }
                         }
