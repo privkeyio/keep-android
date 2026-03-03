@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.BackupInfo
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.backupMinPassphraseLength
@@ -50,6 +51,7 @@ private fun clearByteArray(bytes: ByteArray) = bytes.fill(0)
 @Composable
 fun BackupRestoreScreen(
     keepMobile: KeepMobile,
+    storage: AndroidKeystoreStorage,
     onGetCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
@@ -82,14 +84,14 @@ fun BackupRestoreScreen(
         }
     }
 
-    fun requireBiometricAuth(onAuthed: () -> Unit) {
+    fun requireBiometricAuth(onAuthed: (authedCipher: Cipher) -> Unit) {
         val cipher = onGetCipher()
         if (cipher == null) {
             Toast.makeText(context, "Authentication unavailable", Toast.LENGTH_SHORT).show()
             return
         }
         onBiometricAuth(cipher) { authedCipher ->
-            if (authedCipher != null) onAuthed()
+            if (authedCipher != null) onAuthed(authedCipher)
         }
     }
 
@@ -211,12 +213,19 @@ fun BackupRestoreScreen(
 
                     Button(
                         onClick = {
-                            requireBiometricAuth {
+                            requireBiometricAuth { authedCipher ->
+                                val requestId = java.util.UUID.randomUUID().toString()
+                                storage.setPendingCipher(requestId, authedCipher)
                                 backupState = BackupState.Creating
                                 scope.launch {
                                     try {
                                         val data = withContext(Dispatchers.IO) {
-                                            keepMobile.createBackup(backupPassphrase)
+                                            storage.setRequestIdContext(requestId)
+                                            try {
+                                                keepMobile.createBackup(backupPassphrase)
+                                            } finally {
+                                                storage.clearRequestIdContext()
+                                            }
                                         }
                                         backupState = BackupState.Created(data)
                                         val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
@@ -224,6 +233,8 @@ fun BackupRestoreScreen(
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("BackupRestore", "Backup failed", e)
                                         backupState = BackupState.Error("Backup failed")
+                                    } finally {
+                                        storage.clearPendingCipher(requestId)
                                     }
                                 }
                             }
@@ -389,15 +400,22 @@ fun BackupRestoreScreen(
                 TextButton(
                     onClick = {
                         confirmingRestore = null
-                        requireBiometricAuth {
+                        requireBiometricAuth { authedCipher ->
+                            val requestId = java.util.UUID.randomUUID().toString()
+                            storage.setPendingCipher(requestId, authedCipher)
                             restoreState = RestoreState.Restoring
                             scope.launch {
                                 try {
                                     val info = withContext(Dispatchers.IO) {
-                                        keepMobile.restoreBackup(
-                                            verifiedState.data,
-                                            restorePassphrase
-                                        )
+                                        storage.setRequestIdContext(requestId)
+                                        try {
+                                            keepMobile.restoreBackup(
+                                                verifiedState.data,
+                                                restorePassphrase
+                                            )
+                                        } finally {
+                                            storage.clearRequestIdContext()
+                                        }
                                     }
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Restored(info)
@@ -407,6 +425,8 @@ fun BackupRestoreScreen(
                                     if (BuildConfig.DEBUG) Log.e("BackupRestore", "Restore failed", e)
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Error("Restore failed")
+                                } finally {
+                                    storage.clearPendingCipher(requestId)
                                 }
                             }
                         }

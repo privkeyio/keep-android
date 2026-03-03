@@ -481,6 +481,7 @@ fun MainScreen(
     if (showBackupRestore) {
         BackupRestoreScreen(
             keepMobile = keepMobile,
+            storage = storage,
             onGetCipher = { getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)
