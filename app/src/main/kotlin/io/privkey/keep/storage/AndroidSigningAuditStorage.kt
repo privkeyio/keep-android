@@ -45,14 +45,9 @@ class AndroidSigningAuditStorage(
     }
 
     override fun loadEntries(limit: UInt?): List<String> {
-        val entries = runBlocking(Dispatchers.IO) {
-            if (limit != null) {
-                val safeLimit = limit.toLong().coerceAtMost(MAX_QUERY_LIMIT.toLong()).toInt()
-                auditDao.getRecent(safeLimit)
-            } else {
-                auditDao.getRecent(MAX_QUERY_LIMIT)
-            }
-        }
+        val safeLimit = (limit?.toLong() ?: MAX_QUERY_LIMIT.toLong())
+            .coerceAtMost(MAX_QUERY_LIMIT.toLong()).toInt()
+        val entries = runBlocking(Dispatchers.IO) { auditDao.getRecent(safeLimit) }
         return entries.map { it.toRustJson() }
     }
 
@@ -98,16 +93,12 @@ class AndroidSigningAuditStorage(
             "ask" to "Pending"
         )
 
-        private val RUST_TO_DECISION = mapOf(
-            "Approved" to "allow",
-            "Denied" to "deny",
-            "Pending" to "ask"
-        )
+        private val RUST_TO_DECISION = DECISION_TO_RUST.entries.associate { (k, v) -> v to k }
 
-        fun toRustRequestType(roomType: String): String {
-            val mapped = REQUEST_TYPE_TO_RUST[roomType]
+        fun toRustRequestType(dbType: String): String {
+            val mapped = REQUEST_TYPE_TO_RUST[dbType]
             if (mapped == null) {
-                Log.w(TAG, "Unknown request type: $roomType, defaulting to SignEvent")
+                Log.w(TAG, "Unknown request type: $dbType, defaulting to SignEvent")
             }
             return mapped ?: "SignEvent"
         }
@@ -120,8 +111,8 @@ class AndroidSigningAuditStorage(
             return mapped ?: "SIGN_EVENT"
         }
 
-        fun toRustDecision(roomDecision: String): String =
-            DECISION_TO_RUST[roomDecision] ?: "Denied"
+        fun toRustDecision(dbDecision: String): String =
+            DECISION_TO_RUST[dbDecision] ?: "Denied"
 
         private fun fromRustDecision(rustDecision: String): String =
             RUST_TO_DECISION[rustDecision] ?: "deny"

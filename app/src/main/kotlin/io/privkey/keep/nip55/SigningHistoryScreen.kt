@@ -3,7 +3,7 @@ package io.privkey.keep.nip55
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -88,16 +88,13 @@ fun SigningHistoryScreen(
                 if (signingAuditLog != null) {
                     availableApps = signingAuditLog.getDistinctCallers()
                     logCount = signingAuditLog.getEntryCount().toInt().coerceAtLeast(0)
+                    val result = signingAuditLog.verifyChain()
+                    chainStatus = if (result.verified) ChainVerificationResult.Valid
+                        else ChainVerificationResult.Broken(-1L)
                 } else {
                     availableApps = permissionStore.getDistinctAuditCallers()
                     logCount = permissionStore.getAuditLogCount()
-                }
-                chainStatus = if (signingAuditLog != null) {
-                    val result = signingAuditLog.verifyChain()
-                    if (result.verified) ChainVerificationResult.Valid
-                    else ChainVerificationResult.Broken(-1L)
-                } else {
-                    permissionStore.verifyAuditChain()
+                    chainStatus = permissionStore.verifyAuditChain()
                 }
             } catch (e: Exception) {
                 loadError = "Failed to load apps"
@@ -262,10 +259,10 @@ private fun SigningHistoryLogsList(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            itemsIndexed(
+            items(
                 items = logs,
-                key = { _, log -> "${log.timestamp}_${log.caller}_${log.requestType}" }
-            ) { _, log ->
+                key = { log -> "${log.timestamp}_${log.caller}_${log.requestType}" }
+            ) { log ->
                 AuditLogCard(log)
             }
 
@@ -436,17 +433,17 @@ private fun formatSigningRequestType(type: SigningRequestType): String =
     }
 
 private fun Nip55AuditLog.toSigningAuditEntry(): SigningAuditEntry {
-    val rustRequestType = SigningRequestType.entries.find { it.name == requestType }
-        ?: SigningRequestType.SIGN_EVENT
+    val type = runCatching { SigningRequestType.valueOf(requestType) }
+        .getOrDefault(SigningRequestType.SIGN_EVENT)
     val rustDecision = if (decision == "allow") SigningDecision.APPROVED else SigningDecision.DENIED
     return SigningAuditEntry(
         timestamp = timestamp / 1000,
-        requestType = rustRequestType,
+        requestType = type,
         decision = rustDecision,
         wasAutomatic = wasAutomatic,
         caller = callerPackage,
         callerName = null,
-        eventKind = eventKind?.let { if (it == -1) null else it.toUInt() },
+        eventKind = eventKind?.takeIf { it != -1 }?.toUInt(),
         reason = null,
         prevHash = byteArrayOf(),
         hash = byteArrayOf()
