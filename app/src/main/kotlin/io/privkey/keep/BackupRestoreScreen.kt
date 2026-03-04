@@ -222,12 +222,13 @@ fun BackupRestoreScreen(
                                 storage.setPendingCipher(requestId, authedCipher)
                                 activeRequestIds.add(requestId)
                                 backupState = BackupState.Creating
+                                val passphrase = backupPassphrase
                                 scope.launch {
                                     try {
                                         val data = withContext(Dispatchers.IO) {
                                             try {
                                                 storage.setRequestIdContext(requestId)
-                                                keepMobile.createBackup(backupPassphrase)
+                                                keepMobile.createBackup(passphrase)
                                             } finally {
                                                 storage.clearRequestIdContext()
                                             }
