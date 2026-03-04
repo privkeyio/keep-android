@@ -40,7 +40,7 @@ private sealed class RestoreState {
     data object Idle : RestoreState()
     class FileSelected(val data: ByteArray, val fileName: String) : RestoreState()
     data object Verifying : RestoreState()
-    class Verified(val data: ByteArray, val info: BackupInfo) : RestoreState()
+    class Verified(val data: ByteArray, val info: BackupInfo, val fileName: String) : RestoreState()
     data object Restoring : RestoreState()
     data class Restored(val info: BackupInfo) : RestoreState()
     data class Error(val message: String) : RestoreState()
@@ -221,12 +221,12 @@ fun BackupRestoreScreen(
                         onClick = {
                             requireBiometricAuth { authedCipher ->
                                 val requestId = UUID.randomUUID().toString()
-                                storage.setPendingCipher(requestId, authedCipher)
-                                activeRequestIds.add(requestId)
                                 backupState = BackupState.Creating
                                 val passphrase = backupPassphrase
                                 scope.launch {
                                     try {
+                                        storage.setPendingCipher(requestId, authedCipher)
+                                        activeRequestIds.add(requestId)
                                         val data = withContext(Dispatchers.IO) {
                                             try {
                                                 storage.setRequestIdContext(requestId)
@@ -302,7 +302,7 @@ fun BackupRestoreScreen(
                                             val info = withContext(Dispatchers.IO) {
                                                 keepMobile.verifyBackup(currentRestoreState.data, passphrase)
                                             }
-                                            restoreState = RestoreState.Verified(currentRestoreState.data, info)
+                                            restoreState = RestoreState.Verified(currentRestoreState.data, info, currentRestoreState.fileName)
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("BackupRestore", "Verification failed", e)
                                             clearByteArray(currentRestoreState.data)
@@ -318,7 +318,7 @@ fun BackupRestoreScreen(
                         }
 
                         is RestoreState.Verified -> {
-                            RestoreFileInfo("Verified", restorePassphrase) {
+                            RestoreFileInfo(currentRestoreState.fileName, restorePassphrase) {
                                 restorePassphrase = it
                             }
                             Spacer(modifier = Modifier.height(12.dp))
@@ -389,12 +389,12 @@ fun BackupRestoreScreen(
                         confirmingRestore = null
                         requireBiometricAuth { authedCipher ->
                             val requestId = UUID.randomUUID().toString()
-                            storage.setPendingCipher(requestId, authedCipher)
-                            activeRequestIds.add(requestId)
                             restoreState = RestoreState.Restoring
                             val passphrase = restorePassphrase
                             scope.launch {
                                 try {
+                                    storage.setPendingCipher(requestId, authedCipher)
+                                    activeRequestIds.add(requestId)
                                     val info = withContext(Dispatchers.IO) {
                                         try {
                                             storage.setRequestIdContext(requestId)
