@@ -315,12 +315,13 @@ fun BackupRestoreScreen(
                                 OutlinedButton(
                                     onClick = {
                                         restoreState = RestoreState.Verifying
+                                        val passphrase = restorePassphrase
                                         scope.launch {
                                             try {
                                                 val info = withContext(Dispatchers.IO) {
                                                     keepMobile.verifyBackup(
                                                         currentRestoreState.data,
-                                                        restorePassphrase
+                                                        passphrase
                                                     )
                                                 }
                                                 restoreState = RestoreState.Verified(
