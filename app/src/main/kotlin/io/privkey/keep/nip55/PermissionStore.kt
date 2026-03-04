@@ -172,7 +172,7 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     suspend fun verifyAuditChain(): ChainVerificationResult {
-        val entries = auditDao.getRecent(10_000)
+        val entries = auditDao.getAllOrdered()
         val knownHashes = entries.mapNotNullTo(mutableSetOf()) { it.entryHash.takeIf { h -> h.isNotEmpty() } }
         var inLegacyPhase = true
         var legacyEntriesSkipped = 0
