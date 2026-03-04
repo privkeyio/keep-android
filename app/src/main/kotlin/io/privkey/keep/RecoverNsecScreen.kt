@@ -36,7 +36,6 @@ sealed class RecoveryState {
     object Recovering : RecoveryState()
     data class Error(val message: String) : RecoveryState()
     data class Success(val nsec: CharArray) : RecoveryState() {
-        @Synchronized
         fun clear() {
             Arrays.fill(nsec, '\u0000')
         }
@@ -103,7 +102,7 @@ fun RecoverNsecScreen(
         setSecureScreen(context, true)
 
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+            if (event == Lifecycle.Event.ON_PAUSE) {
                 clearAll()
             }
         }
@@ -395,8 +394,13 @@ fun RecoverNsecScreen(
                         val shareDataList = slots.map { it.data.valueUnsafe() }.toMutableList()
                         val passphraseList = slots.map { String(it.passphrase.toCharArray()) }.toMutableList()
 
-                        val groupPk = groupPubkey?.let { hex ->
-                            hex.chunked(2).map { it.toInt(16).toByte() }
+                        val groupPk = try {
+                            groupPubkey?.let { hex ->
+                                hex.chunked(2).map { it.toInt(16).toByte() }
+                            }
+                        } catch (_: NumberFormatException) {
+                            recoveryState = RecoveryState.Error("Invalid group public key")
+                            return@Button
                         }
 
                         recoveryState = RecoveryState.Recovering
@@ -501,5 +505,5 @@ private fun mapRecoveryError(message: String): String = when {
     message.contains("match", ignoreCase = true) -> "Recovered key does not match expected group"
     message.contains("format", ignoreCase = true) -> "Invalid share format"
     message.contains("threshold", ignoreCase = true) -> "Not enough shares to recover"
-    else -> "Recovery failed: $message"
+    else -> "Recovery failed"
 }

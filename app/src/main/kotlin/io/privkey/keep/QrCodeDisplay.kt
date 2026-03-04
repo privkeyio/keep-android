@@ -324,7 +324,7 @@ private object ClipboardClearManager {
 
 internal fun copySensitiveText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    val clip = ClipData.newPlainText("share", text)
+    val clip = ClipData.newPlainText("", text)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         clip.description.extras = PersistableBundle().apply {
             putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
