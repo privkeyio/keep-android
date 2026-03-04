@@ -114,7 +114,7 @@ internal class FrameCollector {
                 return try {
                     val reassembled = io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
                     if (reassembled.length > MAX_SHARE_LENGTH) { reset(); null }
-                    else reassembled
+                    else { reset(); reassembled }
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
                     reset()

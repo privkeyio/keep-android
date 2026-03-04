@@ -354,7 +354,9 @@ fun ExportShareScreen(
                                             }
                                             (exportState as? ExportState.Success)?.clear()
                                             val frames = try {
-                                                io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
+                                                withContext(Dispatchers.Default) {
+                                                    io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
+                                                }
                                             } catch (e: Exception) {
                                                 if (data.length > MAX_SINGLE_QR_BYTES) {
                                                     if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed for ${data.length}-byte payload: ${e::class.simpleName}")
