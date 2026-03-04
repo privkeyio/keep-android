@@ -131,6 +131,9 @@ interface Nip55AuditLogDao {
 
     @Query("SELECT COUNT(*) FROM nip55_audit_log")
     suspend fun getCount(): Int
+
+    @Query("DELETE FROM nip55_audit_log")
+    suspend fun deleteAll()
 }
 
 @Dao

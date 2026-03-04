@@ -3,7 +3,7 @@ package io.privkey.keep.nip55
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -16,17 +16,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.uniffi.SigningAuditEntry
+import io.privkey.keep.uniffi.SigningAuditLog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val PAGE_SIZE = 50
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SigningHistoryScreen(
+    signingAuditLog: SigningAuditLog?,
     permissionStore: PermissionStore,
     onDismiss: () -> Unit
 ) {
-    var logs by remember { mutableStateOf<List<Nip55AuditLog>>(emptyList()) }
+    var logs by remember { mutableStateOf<List<SigningAuditEntry>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var hasMore by remember { mutableStateOf(true) }
@@ -46,11 +51,21 @@ fun SigningHistoryScreen(
 
             runCatching {
                 val offset = if (reset) 0 else logs.size
-                permissionStore.getAuditLogPage(
-                    limit = PAGE_SIZE,
-                    offset = offset,
-                    callerPackage = selectedApp
-                )
+                withContext(Dispatchers.IO) {
+                    if (signingAuditLog != null) {
+                        signingAuditLog.getEntries(
+                            offset.toUInt(),
+                            PAGE_SIZE.toUInt(),
+                            selectedApp
+                        )
+                    } else {
+                        permissionStore.getAuditLogPage(
+                            limit = PAGE_SIZE,
+                            offset = offset,
+                            callerPackage = selectedApp
+                        ).map { it.toSigningAuditEntry() }
+                    }
+                }
             }.onSuccess { newLogs ->
                 logs = if (reset) newLogs else logs + newLogs
                 hasMore = newLogs.size == PAGE_SIZE
@@ -65,12 +80,25 @@ fun SigningHistoryScreen(
     }
 
     LaunchedEffect(Unit) {
-        try {
-            availableApps = permissionStore.getDistinctAuditCallers()
-            chainStatus = permissionStore.verifyAuditChain()
-            logCount = permissionStore.getAuditLogCount()
-        } catch (e: Exception) {
-            loadError = "Failed to load apps"
+        withContext(Dispatchers.IO) {
+            try {
+                if (signingAuditLog != null) {
+                    availableApps = signingAuditLog.getDistinctCallers()
+                    logCount = signingAuditLog.getEntryCount().toInt().coerceAtLeast(0)
+                } else {
+                    availableApps = permissionStore.getDistinctAuditCallers()
+                    logCount = permissionStore.getAuditLogCount()
+                }
+                chainStatus = if (signingAuditLog != null) {
+                    val result = signingAuditLog.verifyChain()
+                    if (result.verified) ChainVerificationResult.Valid
+                    else ChainVerificationResult.Broken(0)
+                } else {
+                    permissionStore.verifyAuditChain()
+                }
+            } catch (e: Exception) {
+                loadError = "Failed to load apps"
+            }
         }
     }
 
@@ -207,7 +235,7 @@ private fun AppFilterDropdown(
 
 @Composable
 private fun SigningHistoryLogsList(
-    logs: List<Nip55AuditLog>,
+    logs: List<SigningAuditEntry>,
     isLoading: Boolean,
     isLoadingMore: Boolean,
     listState: LazyListState,
@@ -231,10 +259,10 @@ private fun SigningHistoryLogsList(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(
+            itemsIndexed(
                 items = logs,
-                key = { it.id }
-            ) { log ->
+                key = { index, log -> "${index}_${log.timestamp}_${log.caller}_${log.requestType}" }
+            ) { _, log ->
                 AuditLogCard(log)
             }
 
@@ -255,8 +283,8 @@ private fun SigningHistoryLogsList(
 }
 
 @Composable
-private fun AuditLogCard(log: Nip55AuditLog) {
-    val isAllowed = log.decision == "allow"
+private fun AuditLogCard(log: SigningAuditEntry) {
+    val isAllowed = log.decision == io.privkey.keep.uniffi.SigningDecision.APPROVED
 
     val containerColor = if (isAllowed) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -279,16 +307,19 @@ private fun AuditLogCard(log: Nip55AuditLog) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = formatRequestType(log.requestType),
+                    text = formatSigningRequestType(log.requestType),
                     style = MaterialTheme.typography.titleSmall
                 )
-                DecisionBadge(decision = log.decision, wasAutomatic = log.wasAutomatic)
+                DecisionBadge(
+                    decision = log.decision,
+                    wasAutomatic = log.wasAutomatic
+                )
             }
 
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = log.callerPackage,
+                text = log.callerName ?: log.caller,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -297,7 +328,7 @@ private fun AuditLogCard(log: Nip55AuditLog) {
 
             log.eventKind?.let { kind ->
                 Text(
-                    text = EventKind.displayName(kind),
+                    text = EventKind.displayName(kind.toInt()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -306,7 +337,7 @@ private fun AuditLogCard(log: Nip55AuditLog) {
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = io.privkey.keep.uniffi.formatTimestampDetailed(log.timestamp / 1000),
+                text = io.privkey.keep.uniffi.formatTimestampDetailed(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -315,8 +346,11 @@ private fun AuditLogCard(log: Nip55AuditLog) {
 }
 
 @Composable
-private fun DecisionBadge(decision: String, wasAutomatic: Boolean) {
-    val isAllowed = decision == "allow"
+private fun DecisionBadge(
+    decision: io.privkey.keep.uniffi.SigningDecision,
+    wasAutomatic: Boolean
+) {
+    val isAllowed = decision == io.privkey.keep.uniffi.SigningDecision.APPROVED
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (wasAutomatic) {
@@ -383,4 +417,49 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
             color = statusColor
         )
     }
+}
+
+private fun formatSigningRequestType(type: io.privkey.keep.uniffi.SigningRequestType): String =
+    when (type) {
+        io.privkey.keep.uniffi.SigningRequestType.CONNECT -> "Connect"
+        io.privkey.keep.uniffi.SigningRequestType.GET_PUBLIC_KEY -> "Get public key"
+        io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT -> "Sign event"
+        io.privkey.keep.uniffi.SigningRequestType.NIP04_ENCRYPT -> "NIP-04 encrypt"
+        io.privkey.keep.uniffi.SigningRequestType.NIP04_DECRYPT -> "NIP-04 decrypt"
+        io.privkey.keep.uniffi.SigningRequestType.NIP44_ENCRYPT -> "NIP-44 encrypt"
+        io.privkey.keep.uniffi.SigningRequestType.NIP44_DECRYPT -> "NIP-44 decrypt"
+        io.privkey.keep.uniffi.SigningRequestType.DISCONNECT -> "Disconnect"
+        io.privkey.keep.uniffi.SigningRequestType.KILL_SWITCH -> "Kill switch"
+    }
+
+private fun Nip55AuditLog.toSigningAuditEntry(): SigningAuditEntry {
+    val rustRequestType = when (requestType) {
+        "SIGN_EVENT" -> io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT
+        "GET_PUBLIC_KEY" -> io.privkey.keep.uniffi.SigningRequestType.GET_PUBLIC_KEY
+        "CONNECT" -> io.privkey.keep.uniffi.SigningRequestType.CONNECT
+        "DISCONNECT" -> io.privkey.keep.uniffi.SigningRequestType.DISCONNECT
+        "NIP04_ENCRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP04_ENCRYPT
+        "NIP04_DECRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP04_DECRYPT
+        "NIP44_ENCRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP44_ENCRYPT
+        "NIP44_DECRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP44_DECRYPT
+        "KILL_SWITCH" -> io.privkey.keep.uniffi.SigningRequestType.KILL_SWITCH
+        else -> io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT
+    }
+    val rustDecision = if (decision == "allow") {
+        io.privkey.keep.uniffi.SigningDecision.APPROVED
+    } else {
+        io.privkey.keep.uniffi.SigningDecision.DENIED
+    }
+    return SigningAuditEntry(
+        timestamp = timestamp / 1000,
+        requestType = rustRequestType,
+        decision = rustDecision,
+        wasAutomatic = wasAutomatic,
+        caller = callerPackage,
+        callerName = null,
+        eventKind = eventKind?.let { if (it == -1) null else it.toUInt() },
+        reason = null,
+        prevHash = byteArrayOf(),
+        hash = byteArrayOf()
+    )
 }

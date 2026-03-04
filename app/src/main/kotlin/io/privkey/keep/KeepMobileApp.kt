@@ -22,12 +22,14 @@ import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.AndroidSigningAuditStorage
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepStateCallback
 import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.uniffi.SigningAuditLog
 import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import kotlinx.coroutines.CancellationException
@@ -56,6 +58,7 @@ class KeepMobileApp : Application() {
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
+    private var signingAuditLog: SigningAuditLog? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var initError: String? = null
@@ -122,16 +125,28 @@ class KeepMobileApp : Application() {
 
     private fun initializePermissionStore() {
         runCatching {
-            val store = PermissionStore(Nip55Database.getInstance(this))
+            val db = Nip55Database.getInstance(this)
+            val store = PermissionStore(db)
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
             autoSigningSafeguards = AutoSigningSafeguards(this)
+            initializeSigningAuditLog(db)
             applicationScope.launch {
                 store.cleanupExpired()
                 callerVerificationStore?.cleanupExpiredNonces()
             }
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
+        }
+    }
+
+    private fun initializeSigningAuditLog(db: Nip55Database) {
+        runCatching {
+            val storage = AndroidSigningAuditStorage(db.auditLogDao())
+            signingAuditLog = SigningAuditLog(storage)
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to initialize SigningAuditLog: ${e::class.simpleName}")
+            initError = "Signing audit log unavailable"
         }
     }
 
@@ -180,6 +195,8 @@ class KeepMobileApp : Application() {
     fun getCallerVerificationStore(): CallerVerificationStore? = callerVerificationStore
 
     fun getAutoSigningSafeguards(): AutoSigningSafeguards? = autoSigningSafeguards
+
+    fun getSigningAuditLog(): SigningAuditLog? = signingAuditLog
 
     fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
 
@@ -285,6 +302,7 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
+            runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
         }
     }
 
