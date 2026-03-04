@@ -56,16 +56,11 @@ sealed class ExportState {
 
 @Composable
 private fun ErrorCard(message: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-    ) {
-        Text(
-            text = message,
-            modifier = Modifier.padding(16.dp),
-            color = MaterialTheme.colorScheme.onErrorContainer
-        )
-    }
+    StatusCard(
+        text = message,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
+    )
 }
 
 private enum class PassphraseStrength(val label: String) {
@@ -358,12 +353,11 @@ fun ExportShareScreen(
                                                     io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
                                                 }
                                             } catch (e: Exception) {
+                                                if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                 if (data.length > MAX_SINGLE_QR_BYTES) {
-                                                    if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                     exportState = ExportState.Error("Export too large for a single QR code and frame generation failed")
                                                     return@launch
                                                 }
-                                                if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                 listOf(data)
                                             }
                                             exportState = ExportState.Success(data, frames)

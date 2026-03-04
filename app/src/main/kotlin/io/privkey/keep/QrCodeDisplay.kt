@@ -215,25 +215,20 @@ fun AnimatedQrCodeDisplay(
     onCopied: () -> Unit = {}
 ) {
     var bitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
-    var previousBitmaps by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
     var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
-        previousBitmaps = bitmaps
+        val oldBitmaps = bitmaps
         val generated = withContext(Dispatchers.Default) {
             frames.mapNotNull { generateQrCode(it) }
         }
         generationError = generated.size != frames.size
         bitmaps = generated
-        previousBitmaps.forEach { it.recycle() }
-        previousBitmaps = emptyList()
+        oldBitmaps.forEach { it.recycle() }
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            bitmaps.forEach { it.recycle() }
-            previousBitmaps.forEach { it.recycle() }
-        }
+        onDispose { bitmaps.forEach { it.recycle() } }
     }
 
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)

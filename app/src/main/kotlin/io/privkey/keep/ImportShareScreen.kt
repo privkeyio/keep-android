@@ -95,7 +95,6 @@ internal class FrameCollector {
         return null
     }
 
-    @Synchronized
     private fun processAnimatedFrame(parsed: JSONObject, raw: String): String? {
         val idx = parsed.optInt("f", -1)
         val frameTotal = parsed.optInt("t", -1)
@@ -118,8 +117,8 @@ internal class FrameCollector {
             if (orderedFrames.size == frameTotal) {
                 return try {
                     val reassembled = io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
-                    if (reassembled.length > MAX_SHARE_LENGTH) { reset(); null }
-                    else { reset(); reassembled }
+                    reset()
+                    if (reassembled.length > MAX_SHARE_LENGTH) null else reassembled
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
                     reset()
@@ -524,10 +523,10 @@ private fun CameraPreview(
 
                         val result = frameCollector.processQrContent(rawValue)
 
-                        if (frameCollector.isCollecting) {
-                            frameProgress = frameCollector.framesCollected to frameCollector.total
+                        frameProgress = if (frameCollector.isCollecting) {
+                            frameCollector.framesCollected to frameCollector.total
                         } else {
-                            frameProgress = null
+                            null
                         }
 
                         if (result != null && validator(result)) {
