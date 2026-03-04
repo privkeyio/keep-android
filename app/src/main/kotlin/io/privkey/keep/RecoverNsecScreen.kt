@@ -83,6 +83,7 @@ fun RecoverNsecScreen(
     var lastAttemptTime by remember { mutableLongStateOf(0L) }
     var showScanner by remember { mutableStateOf<Int?>(null) }
     var vaultSlotPopulated by remember { mutableStateOf(false) }
+    var isPreFilling by remember { mutableStateOf(false) }
 
     val slots = remember {
         mutableStateListOf<ShareSlot>().apply {
@@ -97,6 +98,7 @@ fun RecoverNsecScreen(
         nsecVisible = false
         autoClearRemaining = 0
         vaultSlotPopulated = false
+        isPreFilling = false
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -194,6 +196,7 @@ fun RecoverNsecScreen(
                     }
                     onBiometricAuth(cipher) { authedCipher ->
                         if (authedCipher != null) {
+                            isPreFilling = true
                             coroutineScope.launch {
                                 val exportId = java.util.UUID.randomUUID().toString()
                                 storage.setPendingCipher(exportId, authedCipher)
@@ -219,13 +222,14 @@ fun RecoverNsecScreen(
                                     recoveryState = RecoveryState.Error("Failed to export vault share")
                                 } finally {
                                     storage.clearPendingCipher(exportId)
+                                    isPreFilling = false
                                 }
                             }
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = recoveryState !is RecoveryState.Recovering
+                enabled = recoveryState !is RecoveryState.Recovering && !isPreFilling
             ) {
                 Text("Pre-fill from vault share")
             }
@@ -368,8 +372,8 @@ fun RecoverNsecScreen(
             else -> {}
         }
 
-        val canRecover = slots.size >= threshold &&
-            slots.all { it.hasContent() } &&
+        val filledSlots = slots.count { it.hasContent() }
+        val canRecover = filledSlots >= threshold &&
             recoveryState !is RecoveryState.Recovering &&
             recoveryState !is RecoveryState.Success
 
@@ -397,12 +401,17 @@ fun RecoverNsecScreen(
                         }
                         lastAttemptTime = now
 
-                        val shareDataList = slots.map { it.data.valueUnsafe() }
-                        val passphraseList = slots.map { String(it.passphrase.toCharArray()) }
+                        val filled = slots.filter { it.hasContent() }
+                        val shareDataList = filled.map { it.data.valueUnsafe() }
+                        val passphraseList = filled.map { String(it.passphrase.toCharArray()) }
 
                         val groupPk = try {
                             groupPubkey?.let { hex ->
-                                hex.chunked(2).map { it.toInt(16).toByte() }
+                                if (hex.isEmpty() || hex.length % 2 != 0 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                                    recoveryState = RecoveryState.Error("Invalid group public key")
+                                    return@Button
+                                }
+                                hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
                             }
                         } catch (_: NumberFormatException) {
                             recoveryState = RecoveryState.Error("Invalid group public key")
