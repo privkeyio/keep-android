@@ -55,8 +55,9 @@ internal fun isValidKshareFormat(data: String): Boolean {
     val trimmed = data.trim()
     if (trimmed.startsWith("{")) {
         return try {
-            JSONObject(trimmed)
-            true
+            val obj = JSONObject(trimmed)
+            (obj.has("version") && obj.has("encrypted_share")) ||
+                (obj.has("f") && obj.has("t") && obj.has("d"))
         } catch (_: Exception) {
             false
         }
@@ -66,9 +67,9 @@ internal fun isValidKshareFormat(data: String): Boolean {
 
 internal class FrameCollector {
     private val frames = mutableMapOf<Int, String>()
-    private var totalExpected = -1
+    @Volatile private var totalExpected = -1
 
-    var framesCollected: Int = 0
+    @Volatile var framesCollected: Int = 0
         private set
     val total: Int get() = totalExpected
     val isCollecting: Boolean get() = totalExpected > 0
@@ -80,7 +81,7 @@ internal class FrameCollector {
         if (isValidBech32Payload("kshare1", trimmed)) return trimmed
 
         if (trimmed.length > MAX_FRAME_LENGTH) return null
-        val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null }
+        val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null } catch (_: StackOverflowError) { return null }
 
         if (parsed.has("f") && parsed.has("t") && parsed.has("d")) {
             return processAnimatedFrame(parsed, trimmed)
@@ -91,6 +92,7 @@ internal class FrameCollector {
         return null
     }
 
+    @Synchronized
     private fun processAnimatedFrame(parsed: JSONObject, raw: String): String? {
         val idx = parsed.optInt("f", -1)
         val frameTotal = parsed.optInt("t", -1)
@@ -185,8 +187,10 @@ fun ImportShareScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                shareData.update(code)
-                shareDataDisplay = code
+                if (code.length <= MAX_SHARE_LENGTH) {
+                    shareData.update(code)
+                    shareDataDisplay = code
+                }
                 showScanner = false
             },
             onDismiss = { showScanner = false }

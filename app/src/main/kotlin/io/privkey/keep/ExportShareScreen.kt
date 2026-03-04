@@ -41,8 +41,8 @@ sealed class ExportState {
         private var dataChars: CharArray? = data.toCharArray()
         private var frameChars: List<CharArray>? = frames.map { it.toCharArray() }
 
-        val data: String get() = dataChars?.let { String(it) } ?: ""
-        val frames: List<String> get() = frameChars?.map { String(it) } ?: emptyList()
+        val data: String @Synchronized get() = dataChars?.let { String(it) } ?: ""
+        val frames: List<String> @Synchronized get() = frameChars?.map { String(it) } ?: emptyList()
 
         @Synchronized
         fun clear() {
@@ -359,7 +359,7 @@ fun ExportShareScreen(
                                                 }
                                             } catch (e: Exception) {
                                                 if (data.length > MAX_SINGLE_QR_BYTES) {
-                                                    if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed for ${data.length}-byte payload: ${e::class.simpleName}")
+                                                    if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                     exportState = ExportState.Error("Export too large for a single QR code and frame generation failed")
                                                     return@launch
                                                 }
