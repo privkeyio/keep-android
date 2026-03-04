@@ -17,9 +17,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.recoverNsec
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.ShareInfo
+import io.privkey.keep.uniffi.recoverNsec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -62,7 +63,7 @@ private class ShareSlot {
 fun RecoverNsecScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
-    shareInfo: io.privkey.keep.uniffi.ShareInfo?,
+    shareInfo: ShareInfo?,
     allAccounts: List<AccountInfo>,
     onGetCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
@@ -238,20 +239,25 @@ fun RecoverNsecScreen(
         slots.forEachIndexed { index, slot ->
             val isVault = vaultSlotPopulated && index == 0
 
+            val cardColors = if (isVault) {
+                CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            } else {
+                CardDefaults.cardColors()
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = if (isVault) {
-                    CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                } else {
-                    CardDefaults.cardColors()
-                }
+                colors = cardColors
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = if (isVault) "Share ${index + 1} (from vault)" else "Share ${index + 1}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (isVault) MaterialTheme.colorScheme.onPrimaryContainer
+                    val shareLabel = if (isVault) "Share ${index + 1} (from vault)" else "Share ${index + 1}"
+                    val labelColor = if (isVault) MaterialTheme.colorScheme.onPrimaryContainer
                         else MaterialTheme.colorScheme.onSurface
+
+                    Text(
+                        text = shareLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = labelColor
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -391,8 +397,8 @@ fun RecoverNsecScreen(
                         }
                         lastAttemptTime = now
 
-                        val shareDataList = slots.map { it.data.valueUnsafe() }.toMutableList()
-                        val passphraseList = slots.map { String(it.passphrase.toCharArray()) }.toMutableList()
+                        val shareDataList = slots.map { it.data.valueUnsafe() }
+                        val passphraseList = slots.map { String(it.passphrase.toCharArray()) }
 
                         val groupPk = try {
                             groupPubkey?.let { hex ->
@@ -416,9 +422,6 @@ fun RecoverNsecScreen(
                                 recoveryState = RecoveryState.Error(
                                     mapRecoveryError(e.message ?: "Recovery failed")
                                 )
-                            } finally {
-                                shareDataList.clear()
-                                passphraseList.clear()
                             }
                         }
                     },
