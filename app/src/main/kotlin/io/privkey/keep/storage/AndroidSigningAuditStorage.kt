@@ -22,7 +22,7 @@ class AndroidSigningAuditStorage(
         val json = try {
             JSONObject(entryJson)
         } catch (e: Exception) {
-            throw KeepMobileException.StorageException("Invalid JSON for signing audit entry")
+            throw KeepMobileException.StorageException("Invalid JSON for signing audit entry: ${e.message}")
         }
 
         val rustRequestType = json.getString("request_type")
@@ -35,7 +35,7 @@ class AndroidSigningAuditStorage(
             timestamp = json.getLong("timestamp") * 1000,
             callerPackage = json.getString("caller"),
             requestType = fromRustRequestType(rustRequestType),
-            eventKind = if (!json.isNull("event_kind")) json.optInt("event_kind") else null,
+            eventKind = if (!json.isNull("event_kind")) json.getInt("event_kind") else null,
             decision = fromRustDecision(rustDecision),
             wasAutomatic = json.getBoolean("was_automatic"),
             previousHash = prevHashBytes?.toHexString(),
@@ -124,7 +124,11 @@ class AndroidSigningAuditStorage(
 
 private fun JSONArray.toHexString(): String? {
     if (length() == 0) return null
-    val bytes = ByteArray(length()) { i -> getInt(i).toByte() }
+    val bytes = ByteArray(length()) { i ->
+        val v = getInt(i)
+        require(v in 0..255) { "Byte value out of range at index $i: $v" }
+        v.toByte()
+    }
     return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 }
 
