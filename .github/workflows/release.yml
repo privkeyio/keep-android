@@ -39,7 +39,7 @@ jobs:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@7f491e26f71f4ec2e6902c7c95c73043f209ab79 # v2
+        uses: taiki-e/install-action@205eb1d74c6feda89abb1f3a09360601953286c0 # v2
         with:
           tool: cargo-ndk
 
@@ -71,7 +71,7 @@ jobs:
       - name: Rename APK
         run: mv app/build/outputs/apk/release/app-release.apk keep-android-${{ github.ref_name }}.apk
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: apk
           path: keep-android-${{ github.ref_name }}.apk
@@ -80,7 +80,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           path: artifacts
           merge-multiple: true
