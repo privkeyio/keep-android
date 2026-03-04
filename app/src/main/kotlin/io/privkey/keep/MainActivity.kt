@@ -123,7 +123,6 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val requiresBiometric = !isBiometricUnlocked
                     val pinStoreForUnlock = pinStore?.takeIf { it.isPinEnabled() && !isPinUnlocked }
 
                     if (pinStoreForUnlock != null) {
@@ -141,7 +140,7 @@ class MainActivity : FragmentActivity() {
                             } else null,
                             onBiometricSuccess = { isBiometricUnlocked = true }
                         )
-                    } else if (requiresBiometric) {
+                    } else if (!isBiometricUnlocked) {
                         BiometricUnlockScreen(
                             onAuthenticate = {
                                 biometricHelper?.authenticateWithResult(
@@ -481,6 +480,7 @@ fun MainScreen(
     if (showBackupRestore) {
         BackupRestoreScreen(
             keepMobile = keepMobile,
+            storage = storage,
             onGetCipher = { getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)

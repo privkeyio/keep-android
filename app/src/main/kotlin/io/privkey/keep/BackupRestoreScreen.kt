@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.BackupInfo
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.backupMinPassphraseLength
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import javax.crypto.Cipher
 
 private const val MAX_BACKUP_FILE_SIZE = 10L * 1024 * 1024 // 10 MB
@@ -38,7 +40,7 @@ private sealed class RestoreState {
     data object Idle : RestoreState()
     class FileSelected(val data: ByteArray, val fileName: String) : RestoreState()
     data object Verifying : RestoreState()
-    class Verified(val data: ByteArray, val info: BackupInfo) : RestoreState()
+    class Verified(val data: ByteArray, val info: BackupInfo, val fileName: String) : RestoreState()
     data object Restoring : RestoreState()
     data class Restored(val info: BackupInfo) : RestoreState()
     data class Error(val message: String) : RestoreState()
@@ -50,6 +52,7 @@ private fun clearByteArray(bytes: ByteArray) = bytes.fill(0)
 @Composable
 fun BackupRestoreScreen(
     keepMobile: KeepMobile,
+    storage: AndroidKeystoreStorage,
     onGetCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
@@ -65,6 +68,7 @@ fun BackupRestoreScreen(
     var restorePassphrase by remember { mutableStateOf("") }
     var restoreState by remember { mutableStateOf<RestoreState>(RestoreState.Idle) }
     var confirmingRestore by remember { mutableStateOf<RestoreState.Verified?>(null) }
+    val activeRequestIds = remember { mutableStateListOf<String>() }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -79,17 +83,21 @@ fun BackupRestoreScreen(
                 is RestoreState.Verified -> clearByteArray(rs.data)
                 else -> {}
             }
+            for (id in activeRequestIds) {
+                storage.clearPendingCipher(id)
+            }
+            activeRequestIds.clear()
         }
     }
 
-    fun requireBiometricAuth(onAuthed: () -> Unit) {
+    fun requireBiometricAuth(onAuthed: (authedCipher: Cipher) -> Unit) {
         val cipher = onGetCipher()
         if (cipher == null) {
             Toast.makeText(context, "Authentication unavailable", Toast.LENGTH_SHORT).show()
             return
         }
         onBiometricAuth(cipher) { authedCipher ->
-            if (authedCipher != null) onAuthed()
+            if (authedCipher != null) onAuthed(authedCipher)
         }
     }
 
@@ -211,12 +219,21 @@ fun BackupRestoreScreen(
 
                     Button(
                         onClick = {
-                            requireBiometricAuth {
+                            requireBiometricAuth { authedCipher ->
+                                val requestId = UUID.randomUUID().toString()
                                 backupState = BackupState.Creating
+                                val passphrase = backupPassphrase
                                 scope.launch {
                                     try {
+                                        storage.setPendingCipher(requestId, authedCipher)
+                                        activeRequestIds.add(requestId)
                                         val data = withContext(Dispatchers.IO) {
-                                            keepMobile.createBackup(backupPassphrase)
+                                            try {
+                                                storage.setRequestIdContext(requestId)
+                                                keepMobile.createBackup(passphrase)
+                                            } finally {
+                                                storage.clearRequestIdContext()
+                                            }
                                         }
                                         backupState = BackupState.Created(data)
                                         val date = LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
@@ -224,6 +241,9 @@ fun BackupRestoreScreen(
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("BackupRestore", "Backup failed", e)
                                         backupState = BackupState.Error("Backup failed")
+                                    } finally {
+                                        storage.clearPendingCipher(requestId)
+                                        activeRequestIds.remove(requestId)
                                     }
                                 }
                             }
@@ -267,87 +287,60 @@ fun BackupRestoreScreen(
                         Text("Select Backup File")
                     }
 
-                    val currentRestoreState = restoreState
-                    when (currentRestoreState) {
-                        is RestoreState.FileSelected, is RestoreState.Verified -> {
-                            val fileName = if (currentRestoreState is RestoreState.FileSelected)
-                                currentRestoreState.fileName else "Verified"
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                "File: $fileName",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = restorePassphrase,
-                                onValueChange = { restorePassphrase = it },
-                                label = { Text("Backup passphrase") },
-                                visualTransformation = PasswordVisualTransformation(),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            if (currentRestoreState is RestoreState.FileSelected) {
-                                OutlinedButton(
-                                    onClick = {
-                                        restoreState = RestoreState.Verifying
-                                        scope.launch {
-                                            try {
-                                                val info = withContext(Dispatchers.IO) {
-                                                    keepMobile.verifyBackup(
-                                                        currentRestoreState.data,
-                                                        restorePassphrase
-                                                    )
-                                                }
-                                                restoreState = RestoreState.Verified(
-                                                    currentRestoreState.data,
-                                                    info
-                                                )
-                                            } catch (e: Exception) {
-                                                if (BuildConfig.DEBUG) Log.e("BackupRestore", "Verification failed", e)
-                                                clearByteArray(currentRestoreState.data)
-                                                restoreState = RestoreState.Error("Verification failed")
-                                            }
-                                        }
-                                    },
-                                    enabled = restorePassphrase.length >= minPassphraseLength,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Verify")
-                                }
+                    when (val currentRestoreState = restoreState) {
+                        is RestoreState.FileSelected -> {
+                            RestoreFileInfo(currentRestoreState.fileName, restorePassphrase) {
+                                restorePassphrase = it
                             }
-
-                            if (currentRestoreState is RestoreState.Verified) {
-                                BackupSummaryCard(currentRestoreState.info)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(
-                                    onClick = { confirmingRestore = currentRestoreState },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Text("Restore")
-                                }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    restoreState = RestoreState.Verifying
+                                    val passphrase = restorePassphrase
+                                    scope.launch {
+                                        try {
+                                            val info = withContext(Dispatchers.IO) {
+                                                keepMobile.verifyBackup(currentRestoreState.data, passphrase)
+                                            }
+                                            restoreState = RestoreState.Verified(currentRestoreState.data, info, currentRestoreState.fileName)
+                                        } catch (e: Exception) {
+                                            if (BuildConfig.DEBUG) Log.e("BackupRestore", "Verification failed", e)
+                                            clearByteArray(currentRestoreState.data)
+                                            restoreState = RestoreState.Error("Verification failed")
+                                        }
+                                    }
+                                },
+                                enabled = restorePassphrase.length >= minPassphraseLength,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Verify")
                             }
                         }
 
-                        is RestoreState.Verifying, is RestoreState.Restoring -> {
-                            val label = if (currentRestoreState is RestoreState.Verifying)
-                                "Verifying..." else "Restoring..."
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(label)
+                        is RestoreState.Verified -> {
+                            RestoreFileInfo(currentRestoreState.fileName, restorePassphrase) {
+                                restorePassphrase = it
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            BackupSummaryCard(currentRestoreState.info)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { confirmingRestore = currentRestoreState },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Restore")
+                            }
+                        }
+
+                        is RestoreState.Verifying -> {
+                            RestoreProgressRow("Verifying...")
+                        }
+
+                        is RestoreState.Restoring -> {
+                            RestoreProgressRow("Restoring...")
                         }
 
                         is RestoreState.Restored -> {
@@ -384,20 +377,34 @@ fun BackupRestoreScreen(
         AlertDialog(
             onDismissRequest = { confirmingRestore = null },
             title = { Text("Restore Backup?") },
-            text = { Text("This will import all keys, shares, and settings from the backup. Existing data with the same keys will be overwritten.") },
+            text = {
+                Text(
+                    "This will import all keys, shares, and settings from the backup." +
+                        " Existing data with the same keys will be overwritten."
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmingRestore = null
-                        requireBiometricAuth {
+                        requireBiometricAuth { authedCipher ->
+                            val requestId = UUID.randomUUID().toString()
                             restoreState = RestoreState.Restoring
+                            val passphrase = restorePassphrase
                             scope.launch {
                                 try {
+                                    storage.setPendingCipher(requestId, authedCipher)
+                                    activeRequestIds.add(requestId)
                                     val info = withContext(Dispatchers.IO) {
-                                        keepMobile.restoreBackup(
-                                            verifiedState.data,
-                                            restorePassphrase
-                                        )
+                                        try {
+                                            storage.setRequestIdContext(requestId)
+                                            keepMobile.restoreBackup(
+                                                verifiedState.data,
+                                                passphrase
+                                            )
+                                        } finally {
+                                            storage.clearRequestIdContext()
+                                        }
                                     }
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Restored(info)
@@ -407,6 +414,9 @@ fun BackupRestoreScreen(
                                     if (BuildConfig.DEBUG) Log.e("BackupRestore", "Restore failed", e)
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Error("Restore failed")
+                                } finally {
+                                    storage.clearPendingCipher(requestId)
+                                    activeRequestIds.remove(requestId)
                                 }
                             }
                         }
@@ -421,6 +431,42 @@ fun BackupRestoreScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun RestoreFileInfo(
+    fileName: String,
+    passphrase: String,
+    onPassphraseChange: (String) -> Unit
+) {
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        "File: $fileName",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedTextField(
+        value = passphrase,
+        onValueChange = onPassphraseChange,
+        label = { Text("Backup passphrase") },
+        visualTransformation = PasswordVisualTransformation(),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun RestoreProgressRow(label: String) {
+    Spacer(modifier = Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(label)
     }
 }
 
