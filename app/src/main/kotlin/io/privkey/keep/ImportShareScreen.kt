@@ -33,18 +33,100 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import org.json.JSONObject
 import java.util.Arrays
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 
 private const val MAX_SHARE_LENGTH = 8192
+private const val MAX_ANIMATED_FRAMES = 100
 
 internal fun isValidKshareFormat(data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
     if (!data.startsWith("kshare1")) return false
     val payload = data.removePrefix("kshare1")
     return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
+}
+
+private fun isValidBech32Payload(prefix: String, data: String): Boolean {
+    if (data.length > MAX_SHARE_LENGTH) return false
+    if (!data.startsWith(prefix)) return false
+    val payload = data.removePrefix(prefix)
+    return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
+}
+
+internal class FrameCollector {
+    private val frames = ConcurrentHashMap<Int, String>()
+    private val totalExpected = AtomicInteger(-1)
+    private val _framesCollected = AtomicInteger(0)
+
+    val framesCollected: Int get() = _framesCollected.get()
+    val total: Int get() = totalExpected.get()
+    val isCollecting: Boolean get() = totalExpected.get() > 0
+
+    fun processQrContent(content: String): String? {
+        val trimmed = content.trim()
+
+        if (isValidBech32Payload("kshare1", trimmed) ||
+            isValidBech32Payload("nsec1", trimmed) ||
+            isValidBech32Payload("ncryptsec1", trimmed)
+        ) {
+            return trimmed
+        }
+
+        val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null }
+
+        if (parsed.has("f") && parsed.has("t") && parsed.has("d")) {
+            val idx = parsed.optInt("f", -1)
+            val frameTotal = parsed.optInt("t", -1)
+            if (frameTotal <= 0 || frameTotal > MAX_ANIMATED_FRAMES || idx < 0 || idx >= frameTotal) {
+                return null
+            }
+
+            val currentTotal = totalExpected.get()
+            if (currentTotal == -1) {
+                totalExpected.set(frameTotal)
+            } else if (currentTotal != frameTotal) {
+                frames.clear()
+                _framesCollected.set(0)
+                totalExpected.set(frameTotal)
+            }
+
+            frames[idx] = trimmed
+            _framesCollected.set(frames.size)
+
+            if (frames.size == frameTotal) {
+                val orderedFrames = (0 until frameTotal).mapNotNull { frames[it] }
+                if (orderedFrames.size == frameTotal) {
+                    return try {
+                        io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
+                        frames.clear()
+                        _framesCollected.set(0)
+                        totalExpected.set(-1)
+                        null
+                    }
+                }
+            }
+            return null
+        }
+
+        if (parsed.has("version") && parsed.has("encrypted_share")) {
+            return trimmed
+        }
+
+        return null
+    }
+
+    fun reset() {
+        frames.clear()
+        _framesCollected.set(0)
+        totalExpected.set(-1)
+    }
 }
 
 sealed class ImportState {
@@ -371,6 +453,8 @@ private fun CameraPreview(
     title: String
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val frameCollector = remember { FrameCollector() }
+    var frameProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -388,7 +472,10 @@ private fun CameraPreview(
         }
 
         DisposableEffect(Unit) {
-            onDispose { cleanupResources() }
+            onDispose {
+                cleanupResources()
+                frameCollector.reset()
+            }
         }
 
         LaunchedEffect(Unit) {
@@ -421,14 +508,20 @@ private fun CameraPreview(
                 scanner.process(image)
                     .addOnSuccessListener { barcodes ->
                         if (scanned.get()) return@addOnSuccessListener
-                        barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
-                            ?.rawValue
-                            ?.takeIf { validator(it) }
-                            ?.let {
-                                if (scanned.compareAndSet(false, true)) {
-                                    onCodeScanned(it)
-                                }
+                        val rawValue = barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }?.rawValue
+                            ?: return@addOnSuccessListener
+
+                        val result = frameCollector.processQrContent(rawValue)
+
+                        if (frameCollector.isCollecting) {
+                            frameProgress = frameCollector.framesCollected to frameCollector.total
+                        }
+
+                        if (result != null && validator(result)) {
+                            if (scanned.compareAndSet(false, true)) {
+                                onCodeScanned(result)
                             }
+                        }
                     }
                     .addOnCompleteListener { imageProxy.close() }
             }
@@ -449,22 +542,45 @@ private fun CameraPreview(
 
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-        ScannerOverlay(title, onDismiss)
+        ScannerOverlay(title, onDismiss, frameProgress)
     }
 }
 
 @Composable
-private fun ScannerOverlay(title: String, onDismiss: () -> Unit) {
+private fun ScannerOverlay(
+    title: String,
+    onDismiss: () -> Unit,
+    frameProgress: Pair<Int, Int>? = null
+) {
     Column(
         modifier = Modifier.fillMaxSize().statusBarsPadding().padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (frameProgress != null) {
+                val (got, total) = frameProgress
+                Spacer(modifier = Modifier.height(16.dp))
+                LinearProgressIndicator(
+                    progress = { got.toFloat() / total.coerceAtLeast(1) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Scanning frame $got of $total",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
 
         OutlinedButton(onClick = onDismiss) {
             Text("Cancel")
