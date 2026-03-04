@@ -41,8 +41,8 @@ sealed class ExportState {
         private var dataChars: CharArray? = data.toCharArray()
         private var frameChars: List<CharArray>? = frames.map { it.toCharArray() }
 
-        val data: String get() = dataChars?.let { String(it) } ?: ""
-        val frames: List<String> get() = frameChars?.map { String(it) } ?: emptyList()
+        val data: String @Synchronized get() = dataChars?.let { String(it) } ?: ""
+        val frames: List<String> @Synchronized get() = frameChars?.map { String(it) } ?: emptyList()
 
         @Synchronized
         fun clear() {
@@ -56,16 +56,11 @@ sealed class ExportState {
 
 @Composable
 private fun ErrorCard(message: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-    ) {
-        Text(
-            text = message,
-            modifier = Modifier.padding(16.dp),
-            color = MaterialTheme.colorScheme.onErrorContainer
-        )
-    }
+    StatusCard(
+        text = message,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
+    )
 }
 
 private enum class PassphraseStrength(val label: String) {
@@ -353,7 +348,19 @@ fun ExportShareScreen(
                                                 }
                                             }
                                             (exportState as? ExportState.Success)?.clear()
-                                            exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
+                                            val frames = try {
+                                                withContext(Dispatchers.Default) {
+                                                    io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
+                                                }
+                                            } catch (e: Exception) {
+                                                if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
+                                                if (data.length > MAX_SINGLE_QR_BYTES) {
+                                                    exportState = ExportState.Error("Export too large for a single QR code and frame generation failed")
+                                                    return@launch
+                                                }
+                                                listOf(data)
+                                            }
+                                            exportState = ExportState.Success(data, frames)
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                             exportState = ExportState.Error("Export failed. Please try again.")
@@ -448,29 +455,3 @@ private fun ExportSuccessContent(
     }
 }
 
-private fun generateFrames(data: String, maxBytes: Int): List<String> {
-    val dataBytes = data.toByteArray(Charsets.UTF_8)
-    if (dataBytes.size <= maxBytes) return listOf(data)
-
-    fun jsonOverhead(frameIndex: Int, totalFrames: Int): Int {
-        return """{"f":$frameIndex,"t":$totalFrames,"d":""}""".length
-    }
-
-    val chunks = mutableListOf<ByteArray>()
-    var offset = 0
-    while (offset < dataBytes.size) {
-        val frameIndex = chunks.size
-        val estimatedTotal = ((dataBytes.size - offset) / ((maxBytes - 30) / 2) + frameIndex + 1)
-            .coerceAtLeast(frameIndex + 1)
-        val overhead = jsonOverhead(frameIndex, estimatedTotal)
-        val payloadBytes = ((maxBytes - overhead) / 2).coerceAtLeast(1)
-        val end = (offset + payloadBytes).coerceAtMost(dataBytes.size)
-        chunks.add(dataBytes.copyOfRange(offset, end))
-        offset = end
-    }
-
-    return chunks.mapIndexed { index, chunk ->
-        val hex = chunk.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
-    }
-}

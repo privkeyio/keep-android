@@ -33,18 +33,108 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import org.json.JSONObject
 import java.util.Arrays
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
 private const val MAX_SHARE_LENGTH = 8192
+private const val MAX_ANIMATED_FRAMES = 100
+private const val MAX_FRAME_LENGTH = 4096
+
+private fun isValidBech32Payload(prefix: String, data: String): Boolean {
+    if (data.length > MAX_SHARE_LENGTH) return false
+    if (!data.startsWith(prefix)) return false
+    val payload = data.removePrefix(prefix)
+    return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
+}
 
 internal fun isValidKshareFormat(data: String): Boolean {
-    if (data.length > MAX_SHARE_LENGTH) return false
-    if (!data.startsWith("kshare1")) return false
-    val payload = data.removePrefix("kshare1")
-    return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
+    if (isValidBech32Payload("kshare1", data)) return true
+    val trimmed = data.trim()
+    if (trimmed.length > MAX_SHARE_LENGTH) return false
+    if (trimmed.startsWith("{")) {
+        return try {
+            val obj = JSONObject(trimmed)
+            (obj.has("version") && obj.has("encrypted_share")) ||
+                (obj.has("f") && obj.has("t") && obj.has("d"))
+        } catch (_: Exception) {
+            false
+        } catch (_: StackOverflowError) {
+            false
+        }
+    }
+    return false
+}
+
+internal class FrameCollector {
+    private val frames = mutableMapOf<Int, String>()
+    @Volatile private var totalExpected = -1
+
+    @Volatile var framesCollected: Int = 0
+        private set
+    val total: Int get() = totalExpected
+    val isCollecting: Boolean get() = totalExpected > 0
+
+    @Synchronized
+    fun processQrContent(content: String): String? {
+        val trimmed = content.trim()
+
+        if (isValidBech32Payload("kshare1", trimmed)) return trimmed
+
+        if (trimmed.length > MAX_FRAME_LENGTH) return null
+        val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null } catch (_: StackOverflowError) { return null }
+
+        if (parsed.has("f") && parsed.has("t") && parsed.has("d")) {
+            return processAnimatedFrame(parsed, trimmed)
+        }
+
+        if (parsed.has("version") && parsed.has("encrypted_share")) return trimmed
+
+        return null
+    }
+
+    private fun processAnimatedFrame(parsed: JSONObject, raw: String): String? {
+        val idx = parsed.optInt("f", -1)
+        val frameTotal = parsed.optInt("t", -1)
+        if (frameTotal <= 0 || frameTotal > MAX_ANIMATED_FRAMES || idx < 0 || idx >= frameTotal) {
+            return null
+        }
+
+        if (totalExpected == -1) {
+            totalExpected = frameTotal
+        } else if (totalExpected != frameTotal) {
+            reset()
+            totalExpected = frameTotal
+        }
+
+        frames[idx] = raw
+        framesCollected = frames.size
+
+        if (frames.size == frameTotal) {
+            val orderedFrames = (0 until frameTotal).mapNotNull { frames[it] }
+            if (orderedFrames.size == frameTotal) {
+                return try {
+                    val reassembled = io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
+                    reset()
+                    if (reassembled.length > MAX_SHARE_LENGTH) null else reassembled
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
+                    reset()
+                    null
+                }
+            }
+        }
+        return null
+    }
+
+    @Synchronized
+    fun reset() {
+        frames.clear()
+        framesCollected = 0
+        totalExpected = -1
+    }
 }
 
 sealed class ImportState {
@@ -99,8 +189,10 @@ fun ImportShareScreen(
     if (showScanner) {
         QrScannerScreen(
             onCodeScanned = { code ->
-                shareData.update(code)
-                shareDataDisplay = code
+                if (code.length <= MAX_SHARE_LENGTH) {
+                    shareData.update(code)
+                    shareDataDisplay = code
+                }
                 showScanner = false
             },
             onDismiss = { showScanner = false }
@@ -371,6 +463,8 @@ private fun CameraPreview(
     title: String
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val frameCollector = remember { FrameCollector() }
+    var frameProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -388,7 +482,10 @@ private fun CameraPreview(
         }
 
         DisposableEffect(Unit) {
-            onDispose { cleanupResources() }
+            onDispose {
+                cleanupResources()
+                frameCollector.reset()
+            }
         }
 
         LaunchedEffect(Unit) {
@@ -421,14 +518,22 @@ private fun CameraPreview(
                 scanner.process(image)
                     .addOnSuccessListener { barcodes ->
                         if (scanned.get()) return@addOnSuccessListener
-                        barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }
-                            ?.rawValue
-                            ?.takeIf { validator(it) }
-                            ?.let {
-                                if (scanned.compareAndSet(false, true)) {
-                                    onCodeScanned(it)
-                                }
+                        val rawValue = barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }?.rawValue
+                            ?: return@addOnSuccessListener
+
+                        val result = frameCollector.processQrContent(rawValue)
+
+                        frameProgress = if (frameCollector.isCollecting) {
+                            frameCollector.framesCollected to frameCollector.total
+                        } else {
+                            null
+                        }
+
+                        if (result != null && validator(result)) {
+                            if (scanned.compareAndSet(false, true)) {
+                                onCodeScanned(result)
                             }
+                        }
                     }
                     .addOnCompleteListener { imageProxy.close() }
             }
@@ -449,22 +554,45 @@ private fun CameraPreview(
 
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 
-        ScannerOverlay(title, onDismiss)
+        ScannerOverlay(title, onDismiss, frameProgress)
     }
 }
 
 @Composable
-private fun ScannerOverlay(title: String, onDismiss: () -> Unit) {
+private fun ScannerOverlay(
+    title: String,
+    onDismiss: () -> Unit,
+    frameProgress: Pair<Int, Int>? = null
+) {
     Column(
         modifier = Modifier.fillMaxSize().statusBarsPadding().padding(24.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (frameProgress != null) {
+                val (got, total) = frameProgress
+                Spacer(modifier = Modifier.height(16.dp))
+                LinearProgressIndicator(
+                    progress = { got.toFloat() / total.coerceAtLeast(1) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Scanning frame $got of $total",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
 
         OutlinedButton(onClick = onDismiss) {
             Text("Cancel")
