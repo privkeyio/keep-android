@@ -47,7 +47,8 @@ class AndroidSigningAuditStorage(
     override fun loadEntries(limit: UInt?): List<String> {
         val entries = runBlocking(Dispatchers.IO) {
             if (limit != null) {
-                auditDao.getRecent(limit.toInt().coerceAtLeast(0).coerceAtMost(MAX_QUERY_LIMIT))
+                val safeLimit = limit.toLong().coerceAtMost(MAX_QUERY_LIMIT.toLong()).toInt()
+                auditDao.getRecent(safeLimit)
             } else {
                 auditDao.getAllOrdered()
             }
@@ -56,8 +57,8 @@ class AndroidSigningAuditStorage(
     }
 
     override fun loadEntriesPage(offset: UInt, limit: UInt, callerFilter: String?): List<String> {
-        val safeLimit = limit.toInt().coerceAtLeast(0).coerceAtMost(MAX_QUERY_LIMIT)
-        val safeOffset = offset.toInt().coerceAtLeast(0)
+        val safeLimit = limit.toLong().coerceAtMost(MAX_QUERY_LIMIT.toLong()).toInt()
+        val safeOffset = offset.toLong().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val entries = runBlocking(Dispatchers.IO) {
             if (callerFilter != null) {
                 auditDao.getPageForCaller(callerFilter, safeLimit, safeOffset)
@@ -124,14 +125,15 @@ class AndroidSigningAuditStorage(
 private fun JSONArray.toHexString(): String? {
     if (length() == 0) return null
     val bytes = ByteArray(length()) { i -> getInt(i).toByte() }
-    return bytes.joinToString("") { "%02x".format(it) }
+    return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 }
 
 private fun hexToJsonArray(hex: String?): JSONArray {
     if (hex.isNullOrEmpty()) return JSONArray()
+    require(hex.length % 2 == 0) { "Odd-length hex string: ${hex.length}" }
     val arr = JSONArray()
     for (i in hex.indices step 2) {
-        arr.put(hex.substring(i, (i + 2).coerceAtMost(hex.length)).toInt(16))
+        arr.put(hex.substring(i, i + 2).toInt(16))
     }
     return arr
 }
