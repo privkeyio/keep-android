@@ -53,12 +53,15 @@ private fun isValidBech32Payload(prefix: String, data: String): Boolean {
 internal fun isValidKshareFormat(data: String): Boolean {
     if (isValidBech32Payload("kshare1", data)) return true
     val trimmed = data.trim()
+    if (trimmed.length > MAX_SHARE_LENGTH) return false
     if (trimmed.startsWith("{")) {
         return try {
             val obj = JSONObject(trimmed)
             (obj.has("version") && obj.has("encrypted_share")) ||
                 (obj.has("f") && obj.has("t") && obj.has("d"))
         } catch (_: Exception) {
+            false
+        } catch (_: StackOverflowError) {
             false
         }
     }
