@@ -200,21 +200,30 @@ fun RecoverNsecScreen(
                                 val exportId = java.util.UUID.randomUUID().toString()
                                 storage.setPendingCipher(exportId, authedCipher)
                                 try {
-                                    val ephemeralPass = java.util.UUID.randomUUID().toString()
-                                    val exported = withContext(Dispatchers.IO) {
-                                        storage.setRequestIdContext(exportId)
-                                        try {
-                                            keepMobile.exportShare(ephemeralPass)
-                                        } finally {
-                                            storage.clearRequestIdContext()
-                                        }
+                                    val ephemeralChars = CharArray(32).also { buf ->
+                                        val sr = java.security.SecureRandom()
+                                        val hex = "0123456789abcdef"
+                                        for (i in buf.indices) buf[i] = hex[sr.nextInt(16)]
                                     }
-                                    if (slots.isNotEmpty()) {
-                                        slots[0].data.update(exported)
-                                        slots[0].passphrase.update(ephemeralPass)
-                                        slots[0].dataDisplay = exported
-                                        slots[0].passphraseDisplay = ephemeralPass
-                                        vaultSlotPopulated = true
+                                    val ephemeralStr = String(ephemeralChars)
+                                    try {
+                                        val exported = withContext(Dispatchers.IO) {
+                                            storage.setRequestIdContext(exportId)
+                                            try {
+                                                keepMobile.exportShare(ephemeralStr)
+                                            } finally {
+                                                storage.clearRequestIdContext()
+                                            }
+                                        }
+                                        if (slots.isNotEmpty()) {
+                                            slots[0].data.update(exported)
+                                            slots[0].passphrase.updateFromChars(ephemeralChars)
+                                            slots[0].dataDisplay = exported
+                                            slots[0].passphraseDisplay = ephemeralStr
+                                            vaultSlotPopulated = true
+                                        }
+                                    } finally {
+                                        Arrays.fill(ephemeralChars, '\u0000')
                                     }
                                 } catch (e: Exception) {
                                     if (BuildConfig.DEBUG) Log.e("RecoverNsec", "Vault export failed: ${e::class.simpleName}")
@@ -315,8 +324,8 @@ fun RecoverNsecScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         TextButton(
                             onClick = {
-                                slots[index].clear()
-                                slots.removeAt(index)
+                                slot.clear()
+                                slots.remove(slot)
                             },
                             enabled = isInputEnabled
                         ) {
