@@ -50,7 +50,7 @@ class AndroidSigningAuditStorage(
                 val safeLimit = limit.toLong().coerceAtMost(MAX_QUERY_LIMIT.toLong()).toInt()
                 auditDao.getRecent(safeLimit)
             } else {
-                auditDao.getAllOrdered()
+                auditDao.getRecent(MAX_QUERY_LIMIT)
             }
         }
         return entries.map { it.toRustJson() }
@@ -95,16 +95,22 @@ class AndroidSigningAuditStorage(
         private val DECISION_TO_RUST = mapOf(
             "allow" to "Approved",
             "deny" to "Denied",
-            "ask" to "Denied"
+            "ask" to "Pending"
         )
 
         private val RUST_TO_DECISION = mapOf(
             "Approved" to "allow",
-            "Denied" to "deny"
+            "Denied" to "deny",
+            "Pending" to "ask"
         )
 
-        fun toRustRequestType(roomType: String): String =
-            REQUEST_TYPE_TO_RUST[roomType] ?: "SignEvent"
+        fun toRustRequestType(roomType: String): String {
+            val mapped = REQUEST_TYPE_TO_RUST[roomType]
+            if (mapped == null) {
+                Log.w(TAG, "Unknown request type: $roomType, defaulting to SignEvent")
+            }
+            return mapped ?: "SignEvent"
+        }
 
         private fun fromRustRequestType(rustType: String): String {
             val mapped = RUST_TO_REQUEST_TYPE[rustType]

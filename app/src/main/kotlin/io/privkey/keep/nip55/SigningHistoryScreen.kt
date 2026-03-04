@@ -95,7 +95,7 @@ fun SigningHistoryScreen(
                 chainStatus = if (signingAuditLog != null) {
                     val result = signingAuditLog.verifyChain()
                     if (result.verified) ChainVerificationResult.Valid
-                    else ChainVerificationResult.Broken(0)
+                    else ChainVerificationResult.Broken(-1L)
                 } else {
                     permissionStore.verifyAuditChain()
                 }
@@ -264,7 +264,7 @@ private fun SigningHistoryLogsList(
         ) {
             itemsIndexed(
                 items = logs,
-                key = { index, log -> "${index}_${log.timestamp}_${log.caller}_${log.requestType}" }
+                key = { _, log -> "${log.timestamp}_${log.caller}_${log.requestType}" }
             ) { _, log ->
                 AuditLogCard(log)
             }
