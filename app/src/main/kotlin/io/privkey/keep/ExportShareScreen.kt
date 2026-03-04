@@ -355,7 +355,8 @@ fun ExportShareScreen(
                                             (exportState as? ExportState.Success)?.clear()
                                             val frames = try {
                                                 io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
-                                            } catch (_: Exception) {
+                                            } catch (e: Exception) {
+                                                if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                 listOf(data)
                                             }
                                             exportState = ExportState.Success(data, frames)

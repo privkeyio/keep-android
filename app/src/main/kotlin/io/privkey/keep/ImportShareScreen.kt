@@ -35,21 +35,13 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import org.json.JSONObject
 import java.util.Arrays
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 
 private const val MAX_SHARE_LENGTH = 8192
 private const val MAX_ANIMATED_FRAMES = 100
-
-internal fun isValidKshareFormat(data: String): Boolean {
-    if (data.length > MAX_SHARE_LENGTH) return false
-    if (!data.startsWith("kshare1")) return false
-    val payload = data.removePrefix("kshare1")
-    return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
-}
+private const val MAX_FRAME_LENGTH = 4096
 
 private fun isValidBech32Payload(prefix: String, data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
@@ -58,74 +50,74 @@ private fun isValidBech32Payload(prefix: String, data: String): Boolean {
     return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
 }
 
+internal fun isValidKshareFormat(data: String): Boolean = isValidBech32Payload("kshare1", data)
+
 internal class FrameCollector {
-    private val frames = ConcurrentHashMap<Int, String>()
-    private val totalExpected = AtomicInteger(-1)
-    private val _framesCollected = AtomicInteger(0)
+    private val frames = mutableMapOf<Int, String>()
+    private var totalExpected = -1
 
-    val framesCollected: Int get() = _framesCollected.get()
-    val total: Int get() = totalExpected.get()
-    val isCollecting: Boolean get() = totalExpected.get() > 0
+    var framesCollected: Int = 0
+        private set
+    val total: Int get() = totalExpected
+    val isCollecting: Boolean get() = totalExpected > 0
 
+    @Synchronized
     fun processQrContent(content: String): String? {
         val trimmed = content.trim()
 
-        if (isValidBech32Payload("kshare1", trimmed) ||
-            isValidBech32Payload("nsec1", trimmed) ||
-            isValidBech32Payload("ncryptsec1", trimmed)
-        ) {
-            return trimmed
-        }
+        if (isValidBech32Payload("kshare1", trimmed)) return trimmed
 
+        if (trimmed.length > MAX_FRAME_LENGTH) return null
         val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null }
 
         if (parsed.has("f") && parsed.has("t") && parsed.has("d")) {
-            val idx = parsed.optInt("f", -1)
-            val frameTotal = parsed.optInt("t", -1)
-            if (frameTotal <= 0 || frameTotal > MAX_ANIMATED_FRAMES || idx < 0 || idx >= frameTotal) {
-                return null
-            }
-
-            val currentTotal = totalExpected.get()
-            if (currentTotal == -1) {
-                totalExpected.set(frameTotal)
-            } else if (currentTotal != frameTotal) {
-                frames.clear()
-                _framesCollected.set(0)
-                totalExpected.set(frameTotal)
-            }
-
-            frames[idx] = trimmed
-            _framesCollected.set(frames.size)
-
-            if (frames.size == frameTotal) {
-                val orderedFrames = (0 until frameTotal).mapNotNull { frames[it] }
-                if (orderedFrames.size == frameTotal) {
-                    return try {
-                        io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
-                        frames.clear()
-                        _framesCollected.set(0)
-                        totalExpected.set(-1)
-                        null
-                    }
-                }
-            }
-            return null
+            return processAnimatedFrame(parsed, trimmed)
         }
 
-        if (parsed.has("version") && parsed.has("encrypted_share")) {
-            return trimmed
-        }
+        if (parsed.has("version") && parsed.has("encrypted_share")) return trimmed
 
         return null
     }
 
+    private fun processAnimatedFrame(parsed: JSONObject, raw: String): String? {
+        val idx = parsed.optInt("f", -1)
+        val frameTotal = parsed.optInt("t", -1)
+        if (frameTotal <= 0 || frameTotal > MAX_ANIMATED_FRAMES || idx < 0 || idx >= frameTotal) {
+            return null
+        }
+
+        if (totalExpected == -1) {
+            totalExpected = frameTotal
+        } else if (totalExpected != frameTotal) {
+            reset()
+            totalExpected = frameTotal
+        }
+
+        frames[idx] = raw
+        framesCollected = frames.size
+
+        if (frames.size == frameTotal) {
+            val orderedFrames = (0 until frameTotal).mapNotNull { frames[it] }
+            if (orderedFrames.size == frameTotal) {
+                return try {
+                    val reassembled = io.privkey.keep.uniffi.reassembleAnimatedFrames(orderedFrames)
+                    if (reassembled.length > MAX_SHARE_LENGTH) { reset(); null }
+                    else reassembled
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w("FrameCollector", "Reassembly failed: ${e.message}")
+                    reset()
+                    null
+                }
+            }
+        }
+        return null
+    }
+
+    @Synchronized
     fun reset() {
         frames.clear()
-        _framesCollected.set(0)
-        totalExpected.set(-1)
+        framesCollected = 0
+        totalExpected = -1
     }
 }
 
