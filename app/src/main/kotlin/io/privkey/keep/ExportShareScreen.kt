@@ -353,7 +353,12 @@ fun ExportShareScreen(
                                                 }
                                             }
                                             (exportState as? ExportState.Success)?.clear()
-                                            exportState = ExportState.Success(data, generateFrames(data, MAX_SINGLE_QR_BYTES))
+                                            val frames = try {
+                                                io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
+                                            } catch (_: Exception) {
+                                                listOf(data)
+                                            }
+                                            exportState = ExportState.Success(data, frames)
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                             exportState = ExportState.Error("Export failed. Please try again.")
@@ -448,29 +453,3 @@ private fun ExportSuccessContent(
     }
 }
 
-private fun generateFrames(data: String, maxBytes: Int): List<String> {
-    val dataBytes = data.toByteArray(Charsets.UTF_8)
-    if (dataBytes.size <= maxBytes) return listOf(data)
-
-    fun jsonOverhead(frameIndex: Int, totalFrames: Int): Int {
-        return """{"f":$frameIndex,"t":$totalFrames,"d":""}""".length
-    }
-
-    val chunks = mutableListOf<ByteArray>()
-    var offset = 0
-    while (offset < dataBytes.size) {
-        val frameIndex = chunks.size
-        val estimatedTotal = ((dataBytes.size - offset) / ((maxBytes - 30) / 2) + frameIndex + 1)
-            .coerceAtLeast(frameIndex + 1)
-        val overhead = jsonOverhead(frameIndex, estimatedTotal)
-        val payloadBytes = ((maxBytes - overhead) / 2).coerceAtLeast(1)
-        val end = (offset + payloadBytes).coerceAtMost(dataBytes.size)
-        chunks.add(dataBytes.copyOfRange(offset, end))
-        offset = end
-    }
-
-    return chunks.mapIndexed { index, chunk ->
-        val hex = chunk.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        """{"f":$index,"t":${chunks.size},"d":"$hex"}"""
-    }
-}
