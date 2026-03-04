@@ -64,7 +64,6 @@ fun RecoverNsecScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     shareInfo: ShareInfo?,
-    allAccounts: List<AccountInfo>,
     onGetCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
@@ -403,7 +402,8 @@ fun RecoverNsecScreen(
 
                         val filled = slots.filter { it.hasContent() }
                         val shareDataList = filled.map { it.data.valueUnsafe() }
-                        val passphraseList = filled.map { String(it.passphrase.toCharArray()) }
+                        val passphraseChars = filled.map { it.passphrase.toCharArray() }
+                        val passphraseList = passphraseChars.map { String(it) }
 
                         val groupPk = try {
                             groupPubkey?.let { hex ->
@@ -431,6 +431,8 @@ fun RecoverNsecScreen(
                                 recoveryState = RecoveryState.Error(
                                     mapRecoveryError(e.message ?: "Recovery failed")
                                 )
+                            } finally {
+                                passphraseChars.forEach { Arrays.fill(it, '\u0000') }
                             }
                         }
                     },

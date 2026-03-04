@@ -496,7 +496,6 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             shareInfo = shareInfo,
-            allAccounts = allAccounts,
             onGetCipher = { getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Recover nsec", "Authenticate to export vault share", cipher, callback)
