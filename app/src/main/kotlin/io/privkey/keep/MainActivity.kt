@@ -305,6 +305,7 @@ fun MainScreen(
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
     var showBackupRestore by remember { mutableStateOf(false) }
+    var showRecoverNsec by remember { mutableStateOf(false) }
 
     val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
     var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
@@ -486,6 +487,20 @@ fun MainScreen(
                 onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)
             },
             onDismiss = { showBackupRestore = false }
+        )
+        return
+    }
+
+    if (showRecoverNsec) {
+        RecoverNsecScreen(
+            keepMobile = keepMobile,
+            storage = storage,
+            shareInfo = shareInfo,
+            onGetCipher = { getShareAwareCipher(storage) },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Recover nsec", "Authenticate to export vault share", cipher, callback)
+            },
+            onDismiss = { showRecoverNsec = false }
         )
         return
     }
@@ -841,7 +856,8 @@ fun MainScreen(
                     onShareDetailsClick = { showShareDetails = true },
                     onExportClick = { showExportScreen = true },
                     onImport = { showImportScreen = true },
-                    onImportNsec = { showImportNsecScreen = true }
+                    onImportNsec = { showImportNsecScreen = true },
+                    onRecoverNsec = { showRecoverNsec = true }
                 )
             }
         }
@@ -1129,7 +1145,8 @@ private fun AccountTab(
     onShareDetailsClick: () -> Unit,
     onExportClick: () -> Unit,
     onImport: () -> Unit,
-    onImportNsec: () -> Unit
+    onImportNsec: () -> Unit,
+    onRecoverNsec: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1184,6 +1201,18 @@ private fun AccountTab(
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Import nsec")
+                        }
+                    }
+                    if (shareInfo.threshold >= 2u.toUShort()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onRecoverNsec,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("Recover nsec from shares")
                         }
                     }
                 }

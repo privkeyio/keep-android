@@ -64,6 +64,13 @@ internal class SecurePassphrase {
         }
     }
 
+    fun updateFromChars(newValue: CharArray) {
+        if (newValue.size <= MAX_PASSPHRASE_LENGTH) {
+            Arrays.fill(chars, '\u0000')
+            chars = newValue.copyOf()
+        }
+    }
+
     fun clear() {
         Arrays.fill(chars, '\u0000')
         chars = CharArray(0)
@@ -173,10 +180,9 @@ fun QrCodeDisplay(
     modifier: Modifier = Modifier,
     onCopied: () -> Unit = {}
 ) {
-    @SuppressLint("ProduceStateDoesNotAssignValue") // False positive: value is assigned after withContext
+    @SuppressLint("ProduceStateDoesNotAssignValue")
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = data) {
-        val generated = withContext(Dispatchers.Default) { generateQrCode(data) }
-        value = generated
+        value = withContext(Dispatchers.Default) { generateQrCode(data) }
         awaitDispose { value?.recycle() }
     }
 
@@ -324,7 +330,7 @@ private object ClipboardClearManager {
 
 internal fun copySensitiveText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    val clip = ClipData.newPlainText("share", text)
+    val clip = ClipData.newPlainText("", text)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         clip.description.extras = PersistableBundle().apply {
             putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
@@ -334,15 +340,6 @@ internal fun copySensitiveText(context: Context, text: String) {
     ClipboardClearManager.scheduleClear(clipboard, text, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
-/**
- * Manages FLAG_SECURE reference counting for Activity windows.
- *
- * All operations MUST be called from the main thread (enforced via Looper check).
- * This avoids race conditions without requiring synchronization.
- *
- * The manager tracks the current Activity via a WeakReference. If a different Activity
- * is passed (e.g., after Activity recreation), the refCount is reset to handle the new instance.
- */
 private object SecureScreenManager {
     private var refCount = 0
     private var activityRef: WeakReference<Activity>? = null
@@ -365,10 +362,7 @@ private object SecureScreenManager {
 
     fun release(activity: Activity) {
         checkMainThread()
-        val currentActivity = activityRef?.get()
-        if (currentActivity == null || currentActivity !== activity) {
-            return
-        }
+        if (activityRef?.get() !== activity) return
         if (refCount <= 0) {
             refCount = 0
             return
@@ -396,8 +390,7 @@ private fun Context.findActivity(): Activity? {
 }
 
 internal fun setSecureScreen(context: Context, secure: Boolean) {
-    val activity = context.findActivity()
-    if (activity == null) {
+    val activity = context.findActivity() ?: run {
         if (BuildConfig.DEBUG) {
             android.util.Log.w("SecureScreen", "setSecureScreen called with non-Activity context: ${context.javaClass.name}")
         }
