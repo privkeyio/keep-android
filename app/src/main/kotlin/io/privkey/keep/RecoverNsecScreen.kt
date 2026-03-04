@@ -219,7 +219,7 @@ fun RecoverNsecScreen(
                                             slots[0].data.update(exported)
                                             slots[0].passphrase.updateFromChars(ephemeralChars)
                                             slots[0].dataDisplay = exported
-                                            slots[0].passphraseDisplay = ephemeralStr
+                                            slots[0].passphraseDisplay = "\u2022".repeat(ephemeralChars.size)
                                             vaultSlotPopulated = true
                                         }
                                     } finally {
