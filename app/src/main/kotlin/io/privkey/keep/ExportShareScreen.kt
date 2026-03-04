@@ -356,6 +356,11 @@ fun ExportShareScreen(
                                             val frames = try {
                                                 io.privkey.keep.uniffi.generateAnimatedFrames(data, MAX_SINGLE_QR_BYTES.toUInt())
                                             } catch (e: Exception) {
+                                                if (data.length > MAX_SINGLE_QR_BYTES) {
+                                                    if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed for ${data.length}-byte payload: ${e::class.simpleName}")
+                                                    exportState = ExportState.Error("Export too large for a single QR code and frame generation failed")
+                                                    return@launch
+                                                }
                                                 if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                 listOf(data)
                                             }

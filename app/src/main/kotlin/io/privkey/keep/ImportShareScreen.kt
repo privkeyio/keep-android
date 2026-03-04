@@ -50,7 +50,19 @@ private fun isValidBech32Payload(prefix: String, data: String): Boolean {
     return payload.isNotEmpty() && payload.all { io.privkey.keep.uniffi.isValidBech32Char(it.toString()) }
 }
 
-internal fun isValidKshareFormat(data: String): Boolean = isValidBech32Payload("kshare1", data)
+internal fun isValidKshareFormat(data: String): Boolean {
+    if (isValidBech32Payload("kshare1", data)) return true
+    val trimmed = data.trim()
+    if (trimmed.startsWith("{")) {
+        return try {
+            JSONObject(trimmed)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+    return false
+}
 
 internal class FrameCollector {
     private val frames = mutableMapOf<Int, String>()
@@ -507,6 +519,8 @@ private fun CameraPreview(
 
                         if (frameCollector.isCollecting) {
                             frameProgress = frameCollector.framesCollected to frameCollector.total
+                        } else {
+                            frameProgress = null
                         }
 
                         if (result != null && validator(result)) {
