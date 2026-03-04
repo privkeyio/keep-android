@@ -18,6 +18,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.SigningAuditEntry
 import io.privkey.keep.uniffi.SigningAuditLog
+import io.privkey.keep.uniffi.SigningDecision
+import io.privkey.keep.uniffi.SigningRequestType
+import io.privkey.keep.uniffi.formatTimestampDetailed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -284,7 +287,7 @@ private fun SigningHistoryLogsList(
 
 @Composable
 private fun AuditLogCard(log: SigningAuditEntry) {
-    val isAllowed = log.decision == io.privkey.keep.uniffi.SigningDecision.APPROVED
+    val isAllowed = log.decision == SigningDecision.APPROVED
 
     val containerColor = if (isAllowed) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -337,7 +340,7 @@ private fun AuditLogCard(log: SigningAuditEntry) {
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = io.privkey.keep.uniffi.formatTimestampDetailed(log.timestamp),
+                text = formatTimestampDetailed(log.timestamp),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -347,10 +350,10 @@ private fun AuditLogCard(log: SigningAuditEntry) {
 
 @Composable
 private fun DecisionBadge(
-    decision: io.privkey.keep.uniffi.SigningDecision,
+    decision: SigningDecision,
     wasAutomatic: Boolean
 ) {
-    val isAllowed = decision == io.privkey.keep.uniffi.SigningDecision.APPROVED
+    val isAllowed = decision == SigningDecision.APPROVED
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (wasAutomatic) {
@@ -419,37 +422,23 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
     }
 }
 
-private fun formatSigningRequestType(type: io.privkey.keep.uniffi.SigningRequestType): String =
+private fun formatSigningRequestType(type: SigningRequestType): String =
     when (type) {
-        io.privkey.keep.uniffi.SigningRequestType.CONNECT -> "Connect"
-        io.privkey.keep.uniffi.SigningRequestType.GET_PUBLIC_KEY -> "Get public key"
-        io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT -> "Sign event"
-        io.privkey.keep.uniffi.SigningRequestType.NIP04_ENCRYPT -> "NIP-04 encrypt"
-        io.privkey.keep.uniffi.SigningRequestType.NIP04_DECRYPT -> "NIP-04 decrypt"
-        io.privkey.keep.uniffi.SigningRequestType.NIP44_ENCRYPT -> "NIP-44 encrypt"
-        io.privkey.keep.uniffi.SigningRequestType.NIP44_DECRYPT -> "NIP-44 decrypt"
-        io.privkey.keep.uniffi.SigningRequestType.DISCONNECT -> "Disconnect"
-        io.privkey.keep.uniffi.SigningRequestType.KILL_SWITCH -> "Kill switch"
+        SigningRequestType.CONNECT -> "Connect"
+        SigningRequestType.GET_PUBLIC_KEY -> "Get public key"
+        SigningRequestType.SIGN_EVENT -> "Sign event"
+        SigningRequestType.NIP04_ENCRYPT -> "NIP-04 encrypt"
+        SigningRequestType.NIP04_DECRYPT -> "NIP-04 decrypt"
+        SigningRequestType.NIP44_ENCRYPT -> "NIP-44 encrypt"
+        SigningRequestType.NIP44_DECRYPT -> "NIP-44 decrypt"
+        SigningRequestType.DISCONNECT -> "Disconnect"
+        SigningRequestType.KILL_SWITCH -> "Kill switch"
     }
 
 private fun Nip55AuditLog.toSigningAuditEntry(): SigningAuditEntry {
-    val rustRequestType = when (requestType) {
-        "SIGN_EVENT" -> io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT
-        "GET_PUBLIC_KEY" -> io.privkey.keep.uniffi.SigningRequestType.GET_PUBLIC_KEY
-        "CONNECT" -> io.privkey.keep.uniffi.SigningRequestType.CONNECT
-        "DISCONNECT" -> io.privkey.keep.uniffi.SigningRequestType.DISCONNECT
-        "NIP04_ENCRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP04_ENCRYPT
-        "NIP04_DECRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP04_DECRYPT
-        "NIP44_ENCRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP44_ENCRYPT
-        "NIP44_DECRYPT" -> io.privkey.keep.uniffi.SigningRequestType.NIP44_DECRYPT
-        "KILL_SWITCH" -> io.privkey.keep.uniffi.SigningRequestType.KILL_SWITCH
-        else -> io.privkey.keep.uniffi.SigningRequestType.SIGN_EVENT
-    }
-    val rustDecision = if (decision == "allow") {
-        io.privkey.keep.uniffi.SigningDecision.APPROVED
-    } else {
-        io.privkey.keep.uniffi.SigningDecision.DENIED
-    }
+    val rustRequestType = SigningRequestType.entries.find { it.name == requestType }
+        ?: SigningRequestType.SIGN_EVENT
+    val rustDecision = if (decision == "allow") SigningDecision.APPROVED else SigningDecision.DENIED
     return SigningAuditEntry(
         timestamp = timestamp / 1000,
         requestType = rustRequestType,

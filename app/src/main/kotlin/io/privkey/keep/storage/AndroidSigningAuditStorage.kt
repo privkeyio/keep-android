@@ -2,13 +2,12 @@ package io.privkey.keep.storage
 
 import android.util.Log
 import io.privkey.keep.BuildConfig
-import io.privkey.keep.nip55.EVENT_KIND_GENERIC
+import io.privkey.keep.nip55.Nip55AuditLog
 import io.privkey.keep.nip55.Nip55AuditLogDao
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SigningAuditStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import io.privkey.keep.nip55.Nip55AuditLog
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -36,7 +35,7 @@ class AndroidSigningAuditStorage(
             timestamp = json.getLong("timestamp") * 1000,
             callerPackage = json.getString("caller"),
             requestType = fromRustRequestType(rustRequestType),
-            eventKind = if (json.has("event_kind") && !json.isNull("event_kind")) json.getInt("event_kind") else EVENT_KIND_GENERIC,
+            eventKind = if (!json.isNull("event_kind")) json.optInt("event_kind") else null,
             decision = fromRustDecision(rustDecision),
             wasAutomatic = json.getBoolean("was_automatic"),
             previousHash = prevHashBytes?.toHexString(),
@@ -145,11 +144,7 @@ private fun Nip55AuditLog.toRustJson(): String {
     json.put("was_automatic", wasAutomatic)
     json.put("caller", callerPackage)
     json.put("caller_name", JSONObject.NULL)
-    if (eventKind != null && eventKind != -1) {
-        json.put("event_kind", eventKind)
-    } else {
-        json.put("event_kind", JSONObject.NULL)
-    }
+    json.put("event_kind", eventKind?.takeIf { it != -1 } ?: JSONObject.NULL)
     json.put("reason", JSONObject.NULL)
     json.put("prev_hash", hexToJsonArray(previousHash))
     json.put("hash", hexToJsonArray(entryHash.takeIf { it.isNotEmpty() }))
