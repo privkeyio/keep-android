@@ -194,44 +194,27 @@ fun RecoverNsecScreen(
                         return@OutlinedButton
                     }
                     onBiometricAuth(cipher) { authedCipher ->
-                        if (authedCipher != null) {
-                            isPreFilling = true
-                            coroutineScope.launch {
-                                val exportId = java.util.UUID.randomUUID().toString()
-                                storage.setPendingCipher(exportId, authedCipher)
+                        if (authedCipher == null) return@onBiometricAuth
+                        isPreFilling = true
+                        coroutineScope.launch {
+                            try {
+                                val (exported, ephemeralChars) = exportVaultShare(keepMobile, storage, authedCipher)
                                 try {
-                                    val ephemeralChars = CharArray(32).also { buf ->
-                                        val sr = java.security.SecureRandom()
-                                        val hex = "0123456789abcdef"
-                                        for (i in buf.indices) buf[i] = hex[sr.nextInt(16)]
+                                    if (slots.isNotEmpty()) {
+                                        slots[0].data.update(exported)
+                                        slots[0].passphrase.updateFromChars(ephemeralChars)
+                                        slots[0].dataDisplay = exported
+                                        slots[0].passphraseDisplay = "\u2022".repeat(ephemeralChars.size)
+                                        vaultSlotPopulated = true
                                     }
-                                    val ephemeralStr = String(ephemeralChars)
-                                    try {
-                                        val exported = withContext(Dispatchers.IO) {
-                                            storage.setRequestIdContext(exportId)
-                                            try {
-                                                keepMobile.exportShare(ephemeralStr)
-                                            } finally {
-                                                storage.clearRequestIdContext()
-                                            }
-                                        }
-                                        if (slots.isNotEmpty()) {
-                                            slots[0].data.update(exported)
-                                            slots[0].passphrase.updateFromChars(ephemeralChars)
-                                            slots[0].dataDisplay = exported
-                                            slots[0].passphraseDisplay = "\u2022".repeat(ephemeralChars.size)
-                                            vaultSlotPopulated = true
-                                        }
-                                    } finally {
-                                        Arrays.fill(ephemeralChars, '\u0000')
-                                    }
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) Log.e("RecoverNsec", "Vault export failed: ${e::class.simpleName}")
-                                    recoveryState = RecoveryState.Error("Failed to export vault share")
                                 } finally {
-                                    storage.clearPendingCipher(exportId)
-                                    isPreFilling = false
+                                    Arrays.fill(ephemeralChars, '\u0000')
                                 }
+                            } catch (e: Exception) {
+                                if (BuildConfig.DEBUG) Log.e("RecoverNsec", "Vault export failed: ${e::class.simpleName}")
+                                recoveryState = RecoveryState.Error("Failed to export vault share")
+                            } finally {
+                                isPreFilling = false
                             }
                         }
                     }
@@ -414,17 +397,13 @@ fun RecoverNsecScreen(
                         val passphraseChars = filled.map { it.passphrase.toCharArray() }
                         val passphraseList = passphraseChars.map { String(it) }
 
-                        val groupPk = try {
-                            groupPubkey?.let { hex ->
-                                if (hex.isEmpty() || hex.length % 2 != 0 || !hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
-                                    recoveryState = RecoveryState.Error("Invalid group public key")
-                                    return@Button
-                                }
-                                hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                        val groupPk = if (groupPubkey != null) {
+                            parseHexPubkey(groupPubkey) ?: run {
+                                recoveryState = RecoveryState.Error("Invalid group public key")
+                                return@Button
                             }
-                        } catch (_: NumberFormatException) {
-                            recoveryState = RecoveryState.Error("Invalid group public key")
-                            return@Button
+                        } else {
+                            null
                         }
 
                         recoveryState = RecoveryState.Recovering
@@ -519,6 +498,47 @@ private fun NsecResultCard(
             }
         }
     }
+}
+
+private suspend fun exportVaultShare(
+    keepMobile: KeepMobile,
+    storage: AndroidKeystoreStorage,
+    cipher: Cipher
+): Pair<String, CharArray> {
+    val exportId = java.util.UUID.randomUUID().toString()
+    storage.setPendingCipher(exportId, cipher)
+    try {
+        val ephemeralChars = CharArray(32).also { buf ->
+            val sr = java.security.SecureRandom()
+            val hex = "0123456789abcdef"
+            for (i in buf.indices) buf[i] = hex[sr.nextInt(16)]
+        }
+        try {
+            val exported = withContext(Dispatchers.IO) {
+                storage.setRequestIdContext(exportId)
+                try {
+                    keepMobile.exportShare(String(ephemeralChars))
+                } finally {
+                    storage.clearRequestIdContext()
+                }
+            }
+            return exported to ephemeralChars
+        } catch (e: Exception) {
+            Arrays.fill(ephemeralChars, '\u0000')
+            throw e
+        }
+    } finally {
+        storage.clearPendingCipher(exportId)
+    }
+}
+
+private fun isValidHex(hex: String): Boolean =
+    hex.isNotEmpty() && hex.length % 2 == 0 && hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+
+private fun parseHexPubkey(hex: String?): ByteArray? {
+    if (hex == null) return null
+    if (!isValidHex(hex)) return null
+    return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 }
 
 private fun mapRecoveryError(message: String): String = when {
