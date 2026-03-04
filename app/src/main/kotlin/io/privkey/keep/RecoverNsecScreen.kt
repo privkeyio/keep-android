@@ -22,6 +22,7 @@ import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
 import io.privkey.keep.uniffi.recoverNsec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +84,8 @@ fun RecoverNsecScreen(
     var showScanner by remember { mutableStateOf<Int?>(null) }
     var vaultSlotPopulated by remember { mutableStateOf(false) }
     var isPreFilling by remember { mutableStateOf(false) }
+    var prefillJob by remember { mutableStateOf<Job?>(null) }
+    var recoveryJob by remember { mutableStateOf<Job?>(null) }
 
     val slots = remember {
         mutableStateListOf<ShareSlot>().apply {
@@ -91,6 +94,10 @@ fun RecoverNsecScreen(
     }
 
     fun clearAll() {
+        prefillJob?.cancel()
+        prefillJob = null
+        recoveryJob?.cancel()
+        recoveryJob = null
         slots.forEach { it.clear() }
         (recoveryState as? RecoveryState.Success)?.clear()
         recoveryState = RecoveryState.Idle
@@ -193,10 +200,13 @@ fun RecoverNsecScreen(
                         recoveryState = RecoveryState.Error("No encryption key available")
                         return@OutlinedButton
                     }
+                    isPreFilling = true
                     onBiometricAuth(cipher) { authedCipher ->
-                        if (authedCipher == null) return@onBiometricAuth
-                        isPreFilling = true
-                        coroutineScope.launch {
+                        if (authedCipher == null) {
+                            isPreFilling = false
+                            return@onBiometricAuth
+                        }
+                        prefillJob = coroutineScope.launch {
                             try {
                                 val (exported, ephemeralChars) = exportVaultShare(keepMobile, storage, authedCipher)
                                 try {
@@ -407,7 +417,7 @@ fun RecoverNsecScreen(
                         }
 
                         recoveryState = RecoveryState.Recovering
-                        coroutineScope.launch {
+                        recoveryJob = coroutineScope.launch {
                             try {
                                 val nsec = withContext(Dispatchers.IO) {
                                     recoverNsec(shareDataList, passphraseList, groupPk)
