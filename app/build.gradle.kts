@@ -13,8 +13,8 @@ android {
         applicationId = "io.privkey.keep"
         minSdk = 33
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.6.0"
+        versionCode = 9
+        versionName = "0.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -66,6 +66,15 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        jniLibs {
+            excludes += listOf(
+                "/lib/armeabi/**",
+                "/lib/armeabi-v7a/**",
+                "/lib/x86/**",
+                "/lib/mips/**",
+                "/lib/mips64/**",
+            )
         }
     }
 
