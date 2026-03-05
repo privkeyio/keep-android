@@ -29,7 +29,10 @@ class AndroidSigningAuditStorage(
         val rustDecision = json.getString("decision")
 
         val prevHashBytes = json.optJSONArray("prev_hash")
-        val hashBytes = json.optJSONArray("hash")
+        val hashBytes = json.getJSONArray("hash")
+        if (hashBytes.length() == 0) {
+            throw KeepMobileException.StorageException("Audit entry missing or empty hash")
+        }
 
         val log = Nip55AuditLog(
             timestamp = json.getLong("timestamp") * 1000,
@@ -39,7 +42,7 @@ class AndroidSigningAuditStorage(
             decision = fromRustDecision(rustDecision),
             wasAutomatic = json.getBoolean("was_automatic"),
             previousHash = prevHashBytes?.toHexString(),
-            entryHash = hashBytes?.toHexString() ?: ""
+            entryHash = hashBytes.toHexString()!!
         )
         runBlocking(Dispatchers.IO) { auditDao.insert(log) }
     }
@@ -124,8 +127,13 @@ class AndroidSigningAuditStorage(
         fun toRustDecision(dbDecision: String): String =
             DECISION_TO_RUST[dbDecision] ?: "Denied"
 
-        private fun fromRustDecision(rustDecision: String): String =
-            RUST_TO_DECISION[rustDecision] ?: "deny"
+        private fun fromRustDecision(rustDecision: String): String {
+            val mapped = RUST_TO_DECISION[rustDecision]
+            if (mapped == null && BuildConfig.DEBUG) {
+                Log.w(TAG, "Unknown decision from Rust: $rustDecision, defaulting to deny")
+            }
+            return mapped ?: "deny"
+        }
     }
 }
 
