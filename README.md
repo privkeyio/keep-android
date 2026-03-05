@@ -7,7 +7,7 @@ Like [Amber](https://github.com/greenart7c3/Amber), Keep serves as a dedicated N
 <div align="center">
 
 [![CI](https://img.shields.io/github/actions/workflow/status/privkeyio/keep-android/ci.yml?labelColor=27303D)](https://github.com/privkeyio/keep-android/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/github/license/privkeyio/keep-android?labelColor=27303D&color=0877d2)](/LICENSE)
+[![License: MIT](https://img.shields.io/github/license/privkeyio/keep-android?labelColor=27303D&color=0877d2)](/LICENSE)
 
 </div>
 
@@ -68,8 +68,8 @@ KEEP_REPO=../keep ./build-rust.sh
 
 [GitHub issues](https://github.com/privkeyio/keep-android/issues) and [pull requests](https://github.com/privkeyio/keep-android/pulls) are welcome.
 
-By contributing to this repository, you agree to license your work under the AGPL-3.0 license. Any work contributed where you are not the original author must contain its license header with the original author(s) and source.
+By contributing to this repository, you agree to license your work under the MIT license. Any work contributed where you are not the original author must contain its license header with the original author(s) and source.
 
 # License
 
-AGPL-3.0-or-later
+MIT
