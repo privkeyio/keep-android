@@ -279,6 +279,7 @@ fun MainScreen(
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
 
     val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
+    val signingAuditLog = (LocalContext.current.applicationContext as? KeepMobileApp)?.getSigningAuditLog()
     val peers = appLiveState?.peers ?: emptyList()
     val pendingCount = appLiveState?.pendingRequests?.size ?: 0
     val connectionStatus = appLiveState?.connectionStatus
@@ -523,6 +524,7 @@ fun MainScreen(
 
     if (showHistoryScreen) {
         SigningHistoryScreen(
+            signingAuditLog = signingAuditLog,
             permissionStore = permissionStore,
             onDismiss = { showHistoryScreen = false }
         )
@@ -839,6 +841,7 @@ fun MainScreen(
                     },
                     onSecurityClick = { showSecuritySettings = true },
                     onBackupClick = { showBackupRestore = true },
+                    onSigningHistoryClick = { showHistoryScreen = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
                             permissionStore.cleanupExpired()
@@ -1034,6 +1037,7 @@ private fun SettingsTab(
     onForegroundServiceToggle: (Boolean) -> Unit,
     onSecurityClick: () -> Unit,
     onBackupClick: () -> Unit,
+    onSigningHistoryClick: () -> Unit,
     onClearLogsAndActivity: suspend () -> Unit
 ) {
     val context = LocalContext.current
@@ -1095,8 +1099,14 @@ private fun SettingsTab(
         Spacer(modifier = Modifier.height(16.dp))
 
         BackupSettingsCard(onClick = onBackupClick)
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(24.dp))
+        if (hasShare) {
+            SigningHistoryCard(onClick = onSigningHistoryClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1132,6 +1142,28 @@ private fun SecuritySettingsCard(onClick: () -> Unit) {
                 )
             }
             Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SigningHistoryCard(onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Signing History", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "View past signing requests and decisions",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text("View", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

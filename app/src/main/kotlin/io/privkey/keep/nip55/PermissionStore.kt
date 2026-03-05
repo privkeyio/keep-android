@@ -335,6 +335,8 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
+    suspend fun clearAuditLog() = auditDao.deleteAll()
+
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 
     suspend fun getAuditLogPage(

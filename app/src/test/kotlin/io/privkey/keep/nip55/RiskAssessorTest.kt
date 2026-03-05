@@ -222,6 +222,7 @@ class RiskAssessorTest {
         override suspend fun getCount(): Int = 0
         override suspend fun countByPackageAndKind(packageName: String, eventKind: Int): Int = kindCount
         override suspend fun countSince(packageName: String, since: Long): Int = recentCount
+        override suspend fun deleteAll() {}
     }
 
     private class FakeAppSettingsDao(
