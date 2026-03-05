@@ -68,8 +68,18 @@ class AndroidSigningAuditStorage(
         return runBlocking(Dispatchers.IO) { auditDao.getDistinctCallers() }
     }
 
+    override fun loadLastEntry(): String? {
+        return runBlocking(Dispatchers.IO) {
+            auditDao.getRecent(1).firstOrNull()?.toRustJson()
+        }
+    }
+
     override fun entryCount(): UInt {
         return runBlocking(Dispatchers.IO) { auditDao.getCount().toUInt() }
+    }
+
+    override fun clearEntries(confirm: String) {
+        runBlocking(Dispatchers.IO) { auditDao.deleteAll() }
     }
 
     companion object {
