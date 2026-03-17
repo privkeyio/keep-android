@@ -22,6 +22,10 @@ import javax.crypto.spec.SecretKeySpec
 
 object KeystoreEncryptedPrefs {
 
+    private val initLocks = ConcurrentHashMap<String, Any>()
+    private fun initLockFor(prefsName: String): Any =
+        initLocks.getOrPut(prefsName) { Any() }
+
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS_PREFIX = "keep_prefs_"
     private const val GCM_TAG_BITS = 128
@@ -45,7 +49,7 @@ object KeystoreEncryptedPrefs {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
         val secretKey = getOrCreateKey(context, keyAlias)
         val basePrefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        return EncryptingSharedPreferences(basePrefs, secretKey)
+        return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
     }
 
     private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {
@@ -108,7 +112,8 @@ object KeystoreEncryptedPrefs {
 
     private class EncryptingSharedPreferences(
         private val basePrefs: SharedPreferences,
-        private val secretKey: SecretKey
+        private val secretKey: SecretKey,
+        private val prefsName: String
     ) : SharedPreferences {
 
         private val keyCache = ConcurrentHashMap<String, String>()
@@ -123,7 +128,7 @@ object KeystoreEncryptedPrefs {
 
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
-            synchronized(this) {
+            synchronized(initLockFor(prefsName)) {
                 hmacKey?.let { return it }
                 val stored = basePrefs.getString(HMAC_KEY_PREF, null)
                 if (stored != null) {
@@ -145,7 +150,12 @@ object KeystoreEncryptedPrefs {
                         return deterministicKey
                     }
                 } else {
-                    basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit()
+                    if (!basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit()) {
+                        if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
+                        val deterministicKey = deterministicHmacKey()
+                        hmacKey = deterministicKey
+                        return deterministicKey
+                    }
                 }
                 hmacKey = key
                 return key
@@ -161,7 +171,7 @@ object KeystoreEncryptedPrefs {
 
         private fun recoverPlainKeysFromRegistry(oldKey: ByteArray): List<String>? {
             val registryHash = hmacWithKey(KEY_REGISTRY, oldKey)
-            val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return emptyList()
+            val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return null
             return try {
                 val decrypted = decrypt(secretKey, encryptedRegistry)
                 if (!decrypted.startsWith(PREFIX_STRING)) return null
@@ -184,18 +194,17 @@ object KeystoreEncryptedPrefs {
             val editor = basePrefs.edit()
             editor.putString(HMAC_KEY_PREF, encryptedHmacKey)
             if (plainKeys.isEmpty()) {
-                editor.commit()
-                return true
+                return editor.commit()
             }
+            data class KeyMapping(val plainKey: String, val oldHash: String, val newHash: String)
+            val mappings = mutableListOf<KeyMapping>()
             for (plainKey in plainKeys) {
                 val oldHash = hmacWithKey(plainKey, oldKey)
                 val newHash = hmacWithKey(plainKey, newKey)
                 val value = basePrefs.getString(oldHash, null) ?: continue
                 editor.putString(newHash, value)
                 editor.remove(oldHash)
-                keyCache[plainKey] = newHash
-                reverseKeyCache.remove(oldHash)
-                reverseKeyCache[newHash] = plainKey
+                mappings.add(KeyMapping(plainKey, oldHash, newHash))
             }
             val oldRegistryHash = hmacWithKey(KEY_REGISTRY, oldKey)
             val newRegistryHash = hmacWithKey(KEY_REGISTRY, newKey)
@@ -205,8 +214,13 @@ object KeystoreEncryptedPrefs {
                 editor.remove(oldRegistryHash)
             }
             if (!editor.commit()) {
-                if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration commit failed, partial migration possible")
+                if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration commit failed")
                 return false
+            }
+            for (m in mappings) {
+                keyCache[m.plainKey] = m.newHash
+                reverseKeyCache.remove(m.oldHash)
+                reverseKeyCache[m.newHash] = m.plainKey
             }
             return true
         }
