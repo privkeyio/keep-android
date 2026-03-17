@@ -110,7 +110,7 @@ class AndroidSigningAuditStorage(
 
         fun toRustRequestType(dbType: String): String {
             val mapped = REQUEST_TYPE_TO_RUST[dbType]
-            if (mapped == null) {
+            if (mapped == null && BuildConfig.DEBUG) {
                 Log.w(TAG, "Unknown request type: $dbType, defaulting to SignEvent")
             }
             return mapped ?: "SignEvent"

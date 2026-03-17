@@ -387,6 +387,12 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun clearAppSettings(callerPackage: String) {
         appSettingsDao.delete(callerPackage)
     }
+
+    suspend fun hasSignedKindBefore(callerPackage: String, eventKind: Int): Boolean =
+        auditDao.countByPackageAndKind(callerPackage, eventKind) > 0
+
+    suspend fun getAppAgeMs(callerPackage: String): Long? =
+        riskAssessor.getAppAgeMs(callerPackage)
 }
 
 fun formatRequestType(type: String): String =

@@ -417,6 +417,7 @@ private fun ExportSuccessContent(
     val context = LocalContext.current
     val showCopiedToast = { Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show() }
     val isAnimated = frames.size > 1
+    var showClipboardWarning by remember { mutableStateOf(false) }
 
     if (isAnimated) {
         AnimatedQrCodeDisplay(
@@ -436,13 +437,32 @@ private fun ExportSuccessContent(
     Spacer(modifier = Modifier.height(24.dp))
 
     OutlinedButton(
-        onClick = {
-            copySensitiveText(context, data)
-            showCopiedToast()
-        },
+        onClick = { showClipboardWarning = true },
         modifier = Modifier.fillMaxWidth()
     ) {
         Text("Copy to Clipboard")
+    }
+
+    if (showClipboardWarning) {
+        AlertDialog(
+            onDismissRequest = { showClipboardWarning = false },
+            title = { Text("Copy to clipboard?") },
+            text = { Text("Other apps on your device may be able to read clipboard contents. The QR code export is more secure.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClipboardWarning = false
+                    copySensitiveText(context, data)
+                    showCopiedToast()
+                }) {
+                    Text("Copy anyway")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClipboardWarning = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Spacer(modifier = Modifier.height(8.dp))

@@ -30,6 +30,7 @@ fun PinUnlockScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
+    var biometricResetRequired by remember { mutableStateOf(pinStore.requiresBiometricReset()) }
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -47,6 +48,7 @@ fun PinUnlockScreen(
             if (lockoutRemaining <= 0) {
                 isLockedOut = false
                 error = null
+                biometricResetRequired = pinStore.requiresBiometricReset()
                 return@LaunchedEffect
             }
             delay(1000)
@@ -55,11 +57,14 @@ fun PinUnlockScreen(
         isLockedOut = pinStore.isLockedOut()
         if (!isLockedOut) {
             error = null
+            biometricResetRequired = pinStore.requiresBiometricReset()
         }
     }
 
     LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+        if (!biometricResetRequired) {
+            focusRequester.requestFocus()
+        }
     }
 
     fun verifyAndUnlock() {
@@ -108,7 +113,38 @@ fun PinUnlockScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (isLockedOut) {
+            if (biometricResetRequired && onBiometricAuth != null && !isLockedOut) {
+                Text(
+                    text = "Biometric verification required",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Too many failed PIN attempts. Verify your identity with biometrics to continue.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            if (onBiometricAuth()) {
+                                pinStore.clearBiometricResetRequirement()
+                                pinStore.refreshSession()
+                                biometricResetRequired = false
+                                onBiometricSuccess()
+                                onUnlocked()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Use Biometrics")
+                }
+            } else if (isLockedOut) {
                 val seconds = (lockoutRemaining / 1000).toInt()
                 Text(
                     text = "Locked out",
@@ -171,6 +207,7 @@ fun PinUnlockScreen(
                     TextButton(onClick = {
                         coroutineScope.launch {
                             if (auth()) {
+                                pinStore.refreshSession()
                                 onBiometricSuccess()
                                 onUnlocked()
                             }

@@ -27,6 +27,8 @@ class PinStore(private val context: Context) {
         private const val KEY_LOCKOUT_WALL_CLOCK = "lockout_wall_clock"
         private const val KEY_LOCKOUT_DURATION = "lockout_duration"
         private const val KEY_LAST_LOCKOUT_CLEARED = "last_lockout_cleared"
+        private const val KEY_LOCKOUT_EPOCH = "lockout_epoch"
+        private const val KEY_BIOMETRIC_RESET_REQUIRED = "biometric_reset_required"
 
         const val MIN_PIN_LENGTH = 4
         const val MAX_PIN_LENGTH = 16
@@ -36,6 +38,7 @@ class PinStore(private val context: Context) {
         val SESSION_TIMEOUT_OPTIONS_MS = longArrayOf(0L, 60_000L, 300_000L, 600_000L)
         private const val PBKDF2_ITERATIONS = 120_000
         private const val PBKDF2_KEY_LENGTH = 256
+        private const val LOCKOUT_EPOCHS_BEFORE_BIOMETRIC = 3
 
         private const val DUMMY_SALT = "AAAAAAAAAAAAAAAAAAAAAA=="
         private const val DUMMY_HASH = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -103,6 +106,8 @@ class PinStore(private val context: Context) {
                 .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
                 .putLong(KEY_LOCKOUT_DURATION, 0)
                 .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+                .putInt(KEY_LOCKOUT_EPOCH, 0)
+                .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
                 .commit()
             if (success) refreshSession()
             return success
@@ -160,7 +165,7 @@ class PinStore(private val context: Context) {
             val verified = hashesMatch && !invalidLength && !lockedOut && !pinNotSet
 
             if (verified) {
-                clearFailedAttempts()
+                clearFailedAttemptsAndResetEpoch()
                 refreshSession()
             } else if (!lockedOut && !pinNotSet && !invalidLength) {
                 incrementFailedAttempts()
@@ -189,6 +194,8 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+            .putInt(KEY_LOCKOUT_EPOCH, 0)
+            .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
             .commit()
     }
 
@@ -268,7 +275,13 @@ class PinStore(private val context: Context) {
                 clearLockoutTimestampsInternal()
                 return 0
             }
-            return remainingByWallClock
+            val adjustedDuration = remainingByWallClock.coerceAtMost(lockoutDuration)
+            prefs.edit()
+                .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, currentElapsed)
+                .putLong(KEY_LOCKOUT_DURATION, adjustedDuration)
+                .putLong(KEY_LOCKOUT_WALL_CLOCK, currentWallClock)
+                .commit()
+            return adjustedDuration
         }
 
         val remainingByElapsed = lockoutDuration - (currentElapsed - savedSetElapsed)
@@ -277,6 +290,26 @@ class PinStore(private val context: Context) {
             return 0
         }
         return remainingByElapsed
+    }
+
+    @Synchronized
+    fun requiresBiometricReset(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
+
+    @Synchronized
+    fun clearBiometricResetRequirement(): Boolean {
+        val success = prefs.edit()
+            .putInt(KEY_LOCKOUT_EPOCH, 0)
+            .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
+            .putInt(KEY_FAILED_ATTEMPTS, 0)
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+            .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            .putLong(KEY_LOCKOUT_DURATION, 0)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+            .commit()
+        if (!success && BuildConfig.DEBUG) {
+            Log.w("PinStore", "Failed to clear biometric reset requirement")
+        }
+        return success
     }
 
     private fun maybeDecayLockoutLevel() {
@@ -288,8 +321,11 @@ class PinStore(private val context: Context) {
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastCleared
-        if (elapsed < 0) {
-            prefs.edit().putLong(KEY_LAST_LOCKOUT_CLEARED, now).commit()
+        if (elapsed < 0 || elapsed > LOCKOUT_LEVEL_DECAY_MS * (LOCKOUT_DURATIONS_MS.size + 1)) {
+            prefs.edit()
+                .putInt(KEY_LOCKOUT_LEVEL, 0)
+                .putLong(KEY_LAST_LOCKOUT_CLEARED, now)
+                .commit()
             return
         }
 
@@ -305,12 +341,15 @@ class PinStore(private val context: Context) {
     }
 
     private fun clearLockoutTimestampsInternal() {
-        prefs.edit()
+        val editor = prefs.edit()
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
-            .commit()
+        if (!prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)) {
+            editor.putInt(KEY_FAILED_ATTEMPTS, 0)
+        }
+        editor.commit()
     }
 
     @Synchronized
@@ -332,6 +371,12 @@ class PinStore(private val context: Context) {
             editor.putLong(KEY_LOCKOUT_DURATION, duration)
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
+
+            val epoch = prefs.getInt(KEY_LOCKOUT_EPOCH, 0) + 1
+            editor.putInt(KEY_LOCKOUT_EPOCH, epoch)
+            if (epoch >= LOCKOUT_EPOCHS_BEFORE_BIOMETRIC) {
+                editor.putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, true)
+            }
         }
 
         if (!editor.commit()) {
@@ -339,10 +384,12 @@ class PinStore(private val context: Context) {
         }
     }
 
-    private fun clearFailedAttempts() {
+    private fun clearFailedAttemptsAndResetEpoch() {
         val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
         val editor = prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
+            .putInt(KEY_LOCKOUT_EPOCH, 0)
+            .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)

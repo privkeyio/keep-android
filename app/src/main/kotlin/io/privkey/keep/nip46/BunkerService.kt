@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.privkey.keep.BuildConfig
+import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
@@ -75,11 +77,11 @@ class BunkerService : Service() {
         private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
         private val globalPendingCount = AtomicInteger(0)
         private val clientPendingCounts = ConcurrentHashMap<String, AtomicInteger>()
-        private val clientRequestHistory = ConcurrentHashMap<String, MutableList<Long>>()
-        private val clientBackoffUntil = ConcurrentHashMap<String, Long>()
-        private val clientConsecutiveRequests = ConcurrentHashMap<String, AtomicInteger>()
+        private val rateLimitLock = Any()
+        private val clientRequestHistory = LinkedHashMap<String, MutableList<Long>>(16, 0.75f, true)
+        private val clientBackoffUntil = HashMap<String, Long>()
+        private val clientConsecutiveRequests = HashMap<String, AtomicInteger>()
         private val globalRequestHistory = ArrayDeque<Long>(GLOBAL_REQUEST_HISTORY_MAX_SIZE)
-        private val globalRequestLock = Any()
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
@@ -112,7 +114,9 @@ class BunkerService : Service() {
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
-                    clientConsecutiveRequests[pubkey]?.set(0)
+                    synchronized(rateLimitLock) {
+                        clientConsecutiveRequests[pubkey]?.set(0)
+                    }
                 }
                 approval.respond(approved)
             }
@@ -146,7 +150,7 @@ class BunkerService : Service() {
         internal fun isRateLimited(clientPubkey: String): Boolean {
             val now = SystemClock.elapsedRealtime()
 
-            synchronized(globalRequestLock) {
+            synchronized(rateLimitLock) {
                 while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
                     globalRequestHistory.removeFirst()
                 }
@@ -154,31 +158,25 @@ class BunkerService : Service() {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Global rate limit exceeded")
                     return true
                 }
-                if (globalRequestHistory.size >= GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
-                    globalRequestHistory.removeFirst()
-                }
-                globalRequestHistory.addLast(now)
-            }
 
-            val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
-            if (now < backoffUntil) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Client ${truncatePubkey(clientPubkey)} in backoff")
-                return true
-            }
-
-            if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
-                clientRequestHistory.keys.firstOrNull()?.let { evictKey ->
-                    clientRequestHistory.remove(evictKey)
-                    clientBackoffUntil.remove(evictKey)
-                    clientConsecutiveRequests.remove(evictKey)
+                val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
+                if (now < backoffUntil) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Client ${truncatePubkey(clientPubkey)} in backoff")
+                    return true
                 }
-            }
-            val history = clientRequestHistory.computeIfAbsent(clientPubkey) { mutableListOf() }
-            synchronized(history) {
+
+                if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
+                    clientRequestHistory.keys.firstOrNull()?.let { evictKey ->
+                        clientRequestHistory.remove(evictKey)
+                        clientBackoffUntil.remove(evictKey)
+                        clientConsecutiveRequests.remove(evictKey)
+                    }
+                }
+                val history = clientRequestHistory.getOrPut(clientPubkey) { mutableListOf() }
                 history.removeAll { it < now - RATE_LIMIT_WINDOW_MS }
 
                 if (history.size >= MAX_REQUESTS_PER_WINDOW) {
-                    val consecutive = clientConsecutiveRequests.computeIfAbsent(clientPubkey) { AtomicInteger(0) }
+                    val consecutive = clientConsecutiveRequests.getOrPut(clientPubkey) { AtomicInteger(0) }
                     val backoffMs = (BACKOFF_BASE_MS * (1 shl consecutive.getAndIncrement().coerceAtMost(6)))
                         .coerceAtMost(BACKOFF_MAX_MS)
                     clientBackoffUntil[clientPubkey] = now + backoffMs
@@ -187,6 +185,14 @@ class BunkerService : Service() {
                 }
 
                 history.add(now)
+
+                if (globalRequestHistory.size >= GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
+                    globalRequestHistory.removeFirst()
+                }
+                globalRequestHistory.addLast(now)
+            }
+            if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
+                evictStaleMaps()
             }
             return false
         }
@@ -195,13 +201,32 @@ class BunkerService : Service() {
             io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)
 
         internal fun clearRateLimitState() {
-            globalPendingCount.set(0)
-            clientRequestHistory.clear()
-            clientBackoffUntil.clear()
-            clientConsecutiveRequests.clear()
-            clientPendingCounts.clear()
-            synchronized(globalRequestLock) {
+            synchronized(approvalLock) {
+                globalPendingCount.set(0)
+                clientPendingCounts.clear()
+            }
+            synchronized(rateLimitLock) {
+                clientRequestHistory.clear()
+                clientBackoffUntil.clear()
+                clientConsecutiveRequests.clear()
                 globalRequestHistory.clear()
+            }
+        }
+
+        internal fun evictStaleMaps() {
+            synchronized(rateLimitLock) {
+                if (clientBackoffUntil.size > MAX_TRACKED_CLIENTS) {
+                    val now = SystemClock.elapsedRealtime()
+                    clientBackoffUntil.entries.removeAll { it.value < now }
+                }
+                if (clientConsecutiveRequests.size > MAX_TRACKED_CLIENTS) {
+                    clientConsecutiveRequests.entries.removeAll { it.value.get() == 0 }
+                }
+            }
+            synchronized(approvalLock) {
+                if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
+                    clientPendingCounts.entries.removeAll { it.value.get() <= 0 }
+                }
             }
         }
     }
@@ -218,6 +243,11 @@ class BunkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        synchronized(approvalLock) {
+            pendingApprovals.keys.toList().forEach { reqId ->
+                pendingApprovals.remove(reqId)?.respond(false)
+            }
+        }
         clearRateLimitState()
         serviceInstanceRef.set(this)
 
@@ -268,8 +298,18 @@ class BunkerService : Service() {
         return START_STICKY
     }
 
-    private fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
+    private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
         try {
+            val safeRelays = withContext(Dispatchers.IO) {
+                withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
+            }
+            if (safeRelays.isNullOrEmpty()) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
+                _status.value = BunkerStatus.ERROR
+                stopSelf()
+                return
+            }
+
             _status.value = BunkerStatus.STARTING
 
             val handler = BunkerHandler(keepMobile)
@@ -290,9 +330,9 @@ class BunkerService : Service() {
 
             val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
             val proxyStarted = proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535 &&
-                invokeStartBunkerWithProxy(handler, relays, callbacks, "127.0.0.1", proxy.port)
+                invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)
             if (!proxyStarted) {
-                handler.startBunker(relays, callbacks)
+                handler.startBunker(safeRelays, callbacks)
             }
 
             val url = handler.getBunkerUrl()
@@ -362,7 +402,7 @@ class BunkerService : Service() {
 
     private fun logBunkerEvent(event: BunkerLogEvent) {
         val store = permissionStore ?: return
-        val requestType = mapMethodToRequestType(event.action) ?: return
+        val requestType = mapMethodToNip55RequestType(event.action) ?: return
         serviceScope.launch {
             runCatching {
                 store.logOperation(
@@ -377,9 +417,6 @@ class BunkerService : Service() {
             }
         }
     }
-
-    private fun mapMethodToRequestType(method: String): Nip55RequestType? =
-        mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -418,7 +455,9 @@ class BunkerService : Service() {
             if (storedDecision != null) {
                 val allowed = storedDecision == PermissionDecision.ALLOW
                 if (allowed) {
-                    clientConsecutiveRequests[clientPubkey]?.set(0)
+                    synchronized(rateLimitLock) {
+                        clientConsecutiveRequests[clientPubkey]?.set(0)
+                    }
                 }
                 logBunkerEventWithDecision(request, allowed, wasAutomatic = true)
                 if (BuildConfig.DEBUG) Log.d(TAG, "Auto-${if (allowed) "approved" else "denied"} request from ${truncatePubkey(clientPubkey)} based on stored permission")
@@ -475,7 +514,7 @@ class BunkerService : Service() {
         require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
         val store = permissionStore ?: return null
         val callerPackage = "nip46:$clientPubkey"
-        val requestType = mapMethodToRequestType(request.method) ?: return null
+        val requestType = mapMethodToNip55RequestType(request.method) ?: return null
         val eventKind = request.eventKind?.toInt()
 
         return runCatching {
@@ -489,7 +528,7 @@ class BunkerService : Service() {
 
     private fun logBunkerEventWithDecision(request: BunkerApprovalRequest, allowed: Boolean, wasAutomatic: Boolean) {
         val store = permissionStore ?: return
-        val requestType = mapMethodToRequestType(request.method) ?: return
+        val requestType = mapMethodToNip55RequestType(request.method) ?: return
         serviceScope.launch {
             runCatching {
                 store.logOperation(
@@ -538,8 +577,10 @@ class BunkerService : Service() {
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED
 
-        pendingApprovals.keys.toList().forEach { reqId ->
-            pendingApprovals.remove(reqId)?.respond(false)
+        synchronized(approvalLock) {
+            pendingApprovals.keys.toList().forEach { reqId ->
+                pendingApprovals.remove(reqId)?.respond(false)
+            }
         }
         clearRateLimitState()
         serviceInstanceRef.set(null)

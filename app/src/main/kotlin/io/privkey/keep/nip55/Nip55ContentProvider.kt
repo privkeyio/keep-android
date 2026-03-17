@@ -19,9 +19,14 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.PolicyMode
+import io.privkey.keep.uniffi.SignPolicyEvaluation
+import io.privkey.keep.uniffi.SigningRequestContext
+import io.privkey.keep.uniffi.evaluateSignPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -36,8 +41,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
         private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
+        private const val AUTHORITY_NIP04_ENCRYPT = "io.privkey.keep.NIP04_ENCRYPT"
+        private const val AUTHORITY_NIP04_DECRYPT = "io.privkey.keep.NIP04_DECRYPT"
         private const val AUTHORITY_NIP44_ENCRYPT = "io.privkey.keep.NIP44_ENCRYPT"
         private const val AUTHORITY_NIP44_DECRYPT = "io.privkey.keep.NIP44_DECRYPT"
+        private const val AUTHORITY_DECRYPT_ZAP_EVENT = "io.privkey.keep.DECRYPT_ZAP_EVENT"
 
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
@@ -119,8 +127,11 @@ class Nip55ContentProvider : ContentProvider() {
         val requestType = when (val authority = uri.authority) {
             AUTHORITY_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
             AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
+            AUTHORITY_NIP04_ENCRYPT -> Nip55RequestType.NIP04_ENCRYPT
+            AUTHORITY_NIP04_DECRYPT -> Nip55RequestType.NIP04_DECRYPT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
+            AUTHORITY_DECRYPT_ZAP_EVENT -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
                 return errorCursor(GENERIC_ERROR_MESSAGE, null)
@@ -136,9 +147,9 @@ class Nip55ContentProvider : ContentProvider() {
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent)?.takeIf { it >= 0 } else null
 
-        if (store == null) return null
+        if (store == null) return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
         if (velocityCursor != null) return velocityCursor
@@ -146,7 +157,15 @@ class Nip55ContentProvider : ContentProvider() {
         val policyCursor = evaluateAutoSignPolicy(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
         )
-        if (policyCursor != null) return policyCursor.cursorOrNull
+        if (policyCursor != null) {
+            if (policyCursor is PolicyResult.FallToUi) {
+                return checkPermissionWithRisk(
+                    store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser,
+                    policyCursor.hasSignedKindBefore, policyCursor.appAgeMs
+                )
+            }
+            return policyCursor.cursorOrNull
+        }
 
         return checkPermissionWithRisk(
             store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
@@ -176,7 +195,7 @@ class Nip55ContentProvider : ContentProvider() {
     private sealed class PolicyResult {
         val cursorOrNull: Cursor? get() = (this as? Decided)?.cursor
         class Decided(val cursor: Cursor?) : PolicyResult()
-        object FallToUi : PolicyResult()
+        class FallToUi(val hasSignedKindBefore: Boolean, val appAgeMs: Long?) : PolicyResult()
     }
 
     private fun evaluateAutoSignPolicy(
@@ -197,41 +216,57 @@ class Nip55ContentProvider : ContentProvider() {
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
 
-        if (effectivePolicy == SignPolicy.MANUAL) return PolicyResult.FallToUi
-
-        if (effectivePolicy == SignPolicy.AUTO) {
-            if (eventKind != null && isSensitiveKind(eventKind)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi
-            }
-
-            val safeguards = currentApp.getAutoSigningSafeguards()
-            if (safeguards == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for ${hashPackageName(callerPackage)}")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
-                return PolicyResult.Decided(rejectedCursor(null))
-            }
-
-            if (!safeguards.isOptedIn(callerPackage)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi
-            }
-
-            val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
-                is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                    return PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
-                is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
-                is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
-                is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
-                is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
-            }
-            if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for ${hashPackageName(callerPackage)}: $denyReason")
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-            return PolicyResult.Decided(rejectedCursor(null))
+        val policyMode = when (effectivePolicy) {
+            SignPolicy.MANUAL -> PolicyMode.MANUAL
+            SignPolicy.AUTO, SignPolicy.BASIC -> PolicyMode.AUTO
         }
 
-        return null
+        val safeguards = currentApp.getAutoSigningSafeguards()
+        val isOptedIn = safeguards?.isOptedIn(callerPackage) == true
+
+        val defaultVelocity = VelocityConfig()
+        val rateCheck = if (safeguards != null && isOptedIn) {
+            mapUsageResult(safeguards.checkAndRecordUsage(callerPackage), defaultVelocity)
+        } else {
+            AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
+        }
+
+        val hasSignedKindBefore = if (eventKind != null) {
+            runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: true
+        } else true
+        val appAgeMs = runWithTimeout { store.getAppAgeMs(callerPackage) }
+
+        val ctx = SigningRequestContext(
+            operation = requestType,
+            packageName = callerPackage,
+            eventKind = eventKind?.takeIf { it >= 0 }?.toUInt(),
+            hasSignedKindBefore = hasSignedKindBefore,
+            appAgeMs = appAgeMs?.toULong()
+        )
+
+        val evaluation = evaluateSignPolicy(policyMode, ctx, isOptedIn, rateCheck)
+
+        return when (evaluation) {
+            SignPolicyEvaluation.AUTO_APPROVE -> {
+                PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
+            }
+            SignPolicyEvaluation.FALL_TO_UI -> PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
+        }
     }
+
+    private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult, velocity: VelocityConfig): AutoSignDecision =
+        when (result) {
+            is AutoSigningSafeguards.UsageCheckResult.Allowed ->
+                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt(), 0u, velocity.hourlyLimit.toUInt(), velocity.dailyLimit.toUInt())
+            is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded ->
+                AutoSignDecision.HourlyLimitExceeded
+            is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded ->
+                AutoSignDecision.DailyLimitExceeded
+            is AutoSigningSafeguards.UsageCheckResult.UnusualActivity ->
+                AutoSignDecision.UnusualActivity
+            is AutoSigningSafeguards.UsageCheckResult.CoolingOff ->
+                AutoSignDecision.CoolingOff(result.until.toULong())
+        }
 
     private fun checkPermissionWithRisk(
         store: PermissionStore,
@@ -242,7 +277,9 @@ class Nip55ContentProvider : ContentProvider() {
         rawContent: String,
         rawPubkey: String?,
         eventKind: Int?,
-        currentUser: String?
+        currentUser: String?,
+        precomputedHasSignedKindBefore: Boolean? = null,
+        precomputedAppAgeMs: Long? = null
     ): Cursor? {
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
@@ -268,7 +305,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (decision == PermissionDecision.ALLOW) {
-            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind) }
+            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType, precomputedHasSignedKindBefore, precomputedAppAgeMs) }
             if (risk == null) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
                 return null
@@ -372,7 +409,7 @@ class Nip55ContentProvider : ContentProvider() {
             .setAutoCancel(true)
             .build()
 
-        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 1000)
+        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 10000)
         NotificationManagerCompat.from(ctx).notify(notifId, notification)
     }
 
