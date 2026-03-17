@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
@@ -200,8 +201,10 @@ class BunkerService : Service() {
             io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)
 
         internal fun clearRateLimitState() {
-            globalPendingCount.set(0)
-            clientPendingCounts.clear()
+            synchronized(approvalLock) {
+                globalPendingCount.set(0)
+                clientPendingCounts.clear()
+            }
             synchronized(rateLimitLock) {
                 clientRequestHistory.clear()
                 clientBackoffUntil.clear()
@@ -240,8 +243,10 @@ class BunkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        pendingApprovals.keys.toList().forEach { reqId ->
-            pendingApprovals.remove(reqId)?.respond(false)
+        synchronized(approvalLock) {
+            pendingApprovals.keys.toList().forEach { reqId ->
+                pendingApprovals.remove(reqId)?.respond(false)
+            }
         }
         clearRateLimitState()
         serviceInstanceRef.set(this)
@@ -293,10 +298,12 @@ class BunkerService : Service() {
         return START_STICKY
     }
 
-    private fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
+    private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
         try {
-            val safeRelays = filterRelaysAtConnectionTime(relays)
-            if (safeRelays.isEmpty()) {
+            val safeRelays = withContext(Dispatchers.IO) {
+                withTimeoutOrNull(10_000L) { filterRelaysAtConnectionTime(relays) }
+            }
+            if (safeRelays.isNullOrEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
                 _status.value = BunkerStatus.ERROR
                 stopSelf()

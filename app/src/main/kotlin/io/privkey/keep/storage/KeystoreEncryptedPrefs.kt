@@ -124,7 +124,7 @@ object KeystoreEncryptedPrefs {
 
         private fun deterministicHmacKey(): ByteArray =
             MessageDigest.getInstance("SHA-256")
-                .digest(DETERMINISTIC_HMAC_SEED.toByteArray(Charsets.UTF_8))
+                .digest("$DETERMINISTIC_HMAC_SEED:$prefsName".toByteArray(Charsets.UTF_8))
 
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
@@ -176,7 +176,7 @@ object KeystoreEncryptedPrefs {
                 val decrypted = decrypt(secretKey, encryptedRegistry)
                 if (!decrypted.startsWith(PREFIX_STRING)) return null
                 val registryContent = decrypted.removePrefix(PREFIX_STRING)
-                if (registryContent.isEmpty()) return null
+                if (registryContent.isEmpty()) return emptyList()
                 registryContent.split(KEY_REGISTRY_DELIMITER).filter { it.isNotEmpty() && it != KEY_REGISTRY }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to read registry during migration", e)

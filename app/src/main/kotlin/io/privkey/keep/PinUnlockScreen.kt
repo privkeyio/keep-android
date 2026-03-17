@@ -133,6 +133,7 @@ fun PinUnlockScreen(
                         coroutineScope.launch {
                             if (onBiometricAuth()) {
                                 pinStore.clearBiometricResetRequirement()
+                                pinStore.refreshSession()
                                 biometricResetRequired = false
                                 onBiometricSuccess()
                                 onUnlocked()

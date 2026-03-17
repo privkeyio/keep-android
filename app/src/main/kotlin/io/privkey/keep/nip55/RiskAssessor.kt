@@ -68,7 +68,7 @@ class RiskAssessor(
         val ctx = SigningRequestContext(
             operation = requestType,
             packageName = packageName,
-            eventKind = eventKind?.toUInt(),
+            eventKind = eventKind?.takeIf { it >= 0 }?.toUInt(),
             hasSignedKindBefore = hasSignedKindBefore,
             appAgeMs = appAgeMs?.toULong()
         )

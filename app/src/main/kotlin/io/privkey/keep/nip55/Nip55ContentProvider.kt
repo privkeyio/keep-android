@@ -224,7 +224,7 @@ class Nip55ContentProvider : ContentProvider() {
         val ctx = io.privkey.keep.uniffi.SigningRequestContext(
             operation = requestType,
             packageName = callerPackage,
-            eventKind = eventKind?.toUInt(),
+            eventKind = eventKind?.takeIf { it >= 0 }?.toUInt(),
             hasSignedKindBefore = true,
             appAgeMs = null
         )
