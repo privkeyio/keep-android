@@ -19,9 +19,13 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.PolicyMode
+import io.privkey.keep.uniffi.SignPolicyEvaluation
+import io.privkey.keep.uniffi.evaluateSignPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -197,41 +201,73 @@ class Nip55ContentProvider : ContentProvider() {
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
 
-        if (effectivePolicy == SignPolicy.MANUAL) return PolicyResult.FallToUi
-
-        if (effectivePolicy == SignPolicy.AUTO) {
-            if (eventKind != null && isSensitiveKind(eventKind)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO mode blocked for sensitive event kind $eventKind from ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi
-            }
-
-            val safeguards = currentApp.getAutoSigningSafeguards()
-            if (safeguards == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "AUTO signing denied: AutoSigningSafeguards unavailable for ${hashPackageName(callerPackage)}")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_safeguards_unavailable", wasAutomatic = true) }
-                return PolicyResult.Decided(rejectedCursor(null))
-            }
-
-            if (!safeguards.isOptedIn(callerPackage)) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "AUTO signing not opted-in for ${hashPackageName(callerPackage)}")
-                return PolicyResult.FallToUi
-            }
-
-            val denyReason = when (val usageResult = safeguards.checkAndRecordUsage(callerPackage)) {
-                is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                    return PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
-                is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded -> "deny_hourly_limit"
-                is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded -> "deny_daily_limit"
-                is AutoSigningSafeguards.UsageCheckResult.UnusualActivity -> "deny_unusual_activity"
-                is AutoSigningSafeguards.UsageCheckResult.CoolingOff -> "deny_cooling_off"
-            }
-            if (BuildConfig.DEBUG) Log.w(TAG, "Auto-signing denied for ${hashPackageName(callerPackage)}: $denyReason")
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, denyReason, wasAutomatic = true) }
-            return PolicyResult.Decided(rejectedCursor(null))
+        val policyMode = when (effectivePolicy) {
+            SignPolicy.MANUAL -> PolicyMode.MANUAL
+            SignPolicy.AUTO, SignPolicy.BASIC -> PolicyMode.AUTO
         }
 
-        return null
+        val safeguards = currentApp.getAutoSigningSafeguards()
+        val isOptedIn = safeguards?.isOptedIn(callerPackage) == true
+
+        val rateCheck = if (safeguards != null && isOptedIn) {
+            mapUsageResult(safeguards.checkAndRecordUsage(callerPackage))
+        } else {
+            AutoSignDecision.Allowed(0u, 0u)
+        }
+
+        val risk = runWithTimeout {
+            store.riskAssessor.assess(callerPackage, eventKind, requestType)
+        } ?: return PolicyResult.FallToUi
+
+        val rustRisk = io.privkey.keep.uniffi.SigningRiskAssessment(
+            score = risk.score.toUInt(),
+            factors = risk.factors.map { factor ->
+                when (factor) {
+                    RiskFactor.SENSITIVE_EVENT_KIND -> io.privkey.keep.uniffi.SigningRiskFactor.SENSITIVE_EVENT_KIND
+                    RiskFactor.SENSITIVE_OPERATION -> io.privkey.keep.uniffi.SigningRiskFactor.SENSITIVE_OPERATION
+                    RiskFactor.UNUSUAL_TIME -> io.privkey.keep.uniffi.SigningRiskFactor.UNUSUAL_TIME
+                    RiskFactor.HIGH_FREQUENCY -> io.privkey.keep.uniffi.SigningRiskFactor.HIGH_FREQUENCY
+                    RiskFactor.NEW_APP -> io.privkey.keep.uniffi.SigningRiskFactor.NEW_APP
+                    RiskFactor.UNKNOWN_AGE -> io.privkey.keep.uniffi.SigningRiskFactor.UNKNOWN_AGE
+                    RiskFactor.FIRST_KIND -> io.privkey.keep.uniffi.SigningRiskFactor.FIRST_KIND
+                }
+            },
+            requiredAuth = when (risk.requiredAuth) {
+                AuthLevel.NONE -> io.privkey.keep.uniffi.SigningAuthLevel.NONE
+                AuthLevel.PIN -> io.privkey.keep.uniffi.SigningAuthLevel.PIN
+                AuthLevel.BIOMETRIC -> io.privkey.keep.uniffi.SigningAuthLevel.BIOMETRIC
+                AuthLevel.EXPLICIT -> io.privkey.keep.uniffi.SigningAuthLevel.EXPLICIT
+            }
+        )
+
+        val evaluation = evaluateSignPolicy(policyMode, requestType, eventKind?.toUInt(), isOptedIn, rateCheck, rustRisk)
+
+        return when (evaluation) {
+            is SignPolicyEvaluation.AutoApprove -> {
+                PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
+            }
+            is SignPolicyEvaluation.FallToUi -> PolicyResult.FallToUi
+            is SignPolicyEvaluation.Denied -> {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Policy denied for ${hashPackageName(callerPackage)}: ${evaluation.reason}")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_policy", wasAutomatic = true) }
+                PolicyResult.Decided(rejectedCursor(null))
+            }
+        }
     }
+
+    private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult): AutoSignDecision =
+        when (result) {
+            is AutoSigningSafeguards.UsageCheckResult.Allowed ->
+                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt())
+            is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded ->
+                AutoSignDecision.HourlyLimitExceeded
+            is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded ->
+                AutoSignDecision.DailyLimitExceeded
+            is AutoSigningSafeguards.UsageCheckResult.UnusualActivity ->
+                AutoSignDecision.UnusualActivity
+            is AutoSigningSafeguards.UsageCheckResult.CoolingOff ->
+                AutoSignDecision.CoolingOff(result.until.toULong())
+        }
 
     private fun checkPermissionWithRisk(
         store: PermissionStore,
@@ -268,7 +304,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (decision == PermissionDecision.ALLOW) {
-            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind) }
+            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType) }
             if (risk == null) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
                 return null

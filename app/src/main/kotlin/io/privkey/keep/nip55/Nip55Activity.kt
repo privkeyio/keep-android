@@ -114,7 +114,7 @@ class Nip55Activity : FragmentActivity() {
 
         lifecycleScope.launch {
             riskAssessment = runCatching {
-                store.riskAssessor.assess(pkg, req.eventKind())
+                store.riskAssessor.assess(pkg, req.eventKind(), req.requestType)
             }.getOrElse {
                 RiskAssessment(
                     score = 100,

@@ -1,12 +1,13 @@
 package io.privkey.keep.nip55
 
 import android.os.SystemClock
+import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.SigningRequestContext
+import io.privkey.keep.uniffi.SigningRiskAssessment
+import io.privkey.keep.uniffi.SigningAuthLevel
+import io.privkey.keep.uniffi.SigningRiskFactor
+import io.privkey.keep.uniffi.assessSigningRisk
 import java.util.Calendar
-
-// TODO: Delegate to Rust signing policy engine after rebuilding keep-mobile .so
-// The risk assessment logic now lives in keep-mobile/src/signing_policy.rs
-// Once the .so is rebuilt and bindings regenerated, this class should call
-// assessSigningRisk() from Rust instead of computing locally.
 
 data class RiskAssessment(
     val score: Int,
@@ -23,9 +24,11 @@ enum class AuthLevel {
 
 enum class RiskFactor(val weight: Int, val description: String) {
     SENSITIVE_EVENT_KIND(40, "Sensitive event type"),
+    SENSITIVE_OPERATION(40, "Sensitive operation type"),
     UNUSUAL_TIME(10, "Unusual time of day"),
     HIGH_FREQUENCY(20, "High request frequency"),
     NEW_APP(15, "Recently connected app"),
+    UNKNOWN_AGE(5, "Unknown app age"),
     FIRST_KIND(15, "First time signing this event type")
 }
 
@@ -37,7 +40,6 @@ class RiskAssessor(
     private val currentHourProvider: () -> Int = { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
 ) {
     companion object {
-        private const val HIGH_FREQUENCY_THRESHOLD = 10
         private const val FREQUENCY_WINDOW_MS = 60_000L
         private const val NEW_APP_THRESHOLD_MS = 24 * 60 * 60 * 1000L
         private const val MAX_TRACKED_PACKAGES = 500
@@ -48,18 +50,34 @@ class RiskAssessor(
     private val frequencyLock = Any()
     private val frequencyWindows = HashMap<String, FrequencyWindow>()
 
-    suspend fun assess(packageName: String, eventKind: Int?): RiskAssessment {
-        val factors = mutableListOf<RiskFactor>()
-
-        if (eventKind != null) {
-            if (isSensitiveKind(eventKind)) {
-                factors.add(RiskFactor.SENSITIVE_EVENT_KIND)
-            }
-            if (auditDao.countByPackageAndKind(packageName, eventKind) == 0) {
-                factors.add(RiskFactor.FIRST_KIND)
-            }
+    suspend fun assess(
+        packageName: String,
+        eventKind: Int?,
+        requestType: Nip55RequestType = Nip55RequestType.SIGN_EVENT
+    ): RiskAssessment {
+        val recentCount = getRecentRequestCount(packageName)
+        val hasSignedKindBefore = if (eventKind != null) {
+            auditDao.countByPackageAndKind(packageName, eventKind) > 0
+        } else {
+            true
         }
+        val appAgeMs = getAppAgeMs(packageName)
 
+        val ctx = SigningRequestContext(
+            operation = requestType,
+            packageName = packageName,
+            eventKind = eventKind?.toUInt(),
+            currentHour = currentHourProvider().toUInt(),
+            recentRequestCount = recentCount.toUInt(),
+            hasSignedKindBefore = hasSignedKindBefore,
+            appAgeMs = appAgeMs?.toULong()
+        )
+
+        val rustResult = assessSigningRisk(ctx)
+        return mapFromRust(rustResult)
+    }
+
+    private suspend fun getRecentRequestCount(packageName: String): Int {
         val frequencySince = synchronized(frequencyLock) {
             val nowElapsed = elapsedRealtimeProvider()
             val existing = frequencyWindows[packageName]
@@ -71,7 +89,7 @@ class RiskAssessor(
                     frequencyWindows[packageName] = it
                 }
             } else {
-                checkNotNull(existing) { "Frequency window should not be null when windowStale is false" }
+                checkNotNull(existing)
             }
 
             if (frequencyWindows.size > MAX_TRACKED_PACKAGES) {
@@ -80,40 +98,38 @@ class RiskAssessor(
             }
             (window.wallClock - FREQUENCY_WINDOW_MS + (nowElapsed - window.windowStart)).coerceAtLeast(0)
         }
-        val recentCount = auditDao.countSince(packageName, frequencySince)
-        if (recentCount >= HIGH_FREQUENCY_THRESHOLD) {
-            factors.add(RiskFactor.HIGH_FREQUENCY)
-        }
+        return auditDao.countSince(packageName, frequencySince)
+    }
 
-        val hour = currentHourProvider()
-        if (hour < 6 || hour >= 23) {
-            factors.add(RiskFactor.UNUSUAL_TIME)
-        }
-
-        val appSettings = appSettingsDao.getSettings(packageName)
-        if (appSettings == null) {
-            factors.add(RiskFactor.NEW_APP)
+    private suspend fun getAppAgeMs(packageName: String): Long? {
+        val appSettings = appSettingsDao.getSettings(packageName) ?: return null
+        val nowElapsed = elapsedRealtimeProvider()
+        val useMonotonic = appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed
+        return if (useMonotonic) {
+            nowElapsed - appSettings.createdAtElapsed
         } else {
-            val nowElapsed = elapsedRealtimeProvider()
-            val useMonotonic = appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed
-            val appAge = if (useMonotonic) {
-                nowElapsed - appSettings.createdAtElapsed
-            } else {
-                (currentTimeMillisProvider() - appSettings.createdAt).coerceAtLeast(0)
-            }
-            if (appAge < NEW_APP_THRESHOLD_MS) {
-                factors.add(RiskFactor.NEW_APP)
+            (currentTimeMillisProvider() - appSettings.createdAt).coerceAtLeast(0)
+        }
+    }
+
+    private fun mapFromRust(rust: SigningRiskAssessment): RiskAssessment {
+        val factors = rust.factors.mapNotNull { factor ->
+            when (factor) {
+                SigningRiskFactor.SENSITIVE_EVENT_KIND -> RiskFactor.SENSITIVE_EVENT_KIND
+                SigningRiskFactor.SENSITIVE_OPERATION -> RiskFactor.SENSITIVE_OPERATION
+                SigningRiskFactor.UNUSUAL_TIME -> RiskFactor.UNUSUAL_TIME
+                SigningRiskFactor.HIGH_FREQUENCY -> RiskFactor.HIGH_FREQUENCY
+                SigningRiskFactor.NEW_APP -> RiskFactor.NEW_APP
+                SigningRiskFactor.UNKNOWN_AGE -> RiskFactor.UNKNOWN_AGE
+                SigningRiskFactor.FIRST_KIND -> RiskFactor.FIRST_KIND
             }
         }
-
-        val score = factors.sumOf { it.weight }.coerceAtMost(100)
-        val requiredAuth = when {
-            score >= 60 -> AuthLevel.EXPLICIT
-            score >= 40 -> AuthLevel.BIOMETRIC
-            score >= 20 -> AuthLevel.PIN
-            else -> AuthLevel.NONE
+        val authLevel = when (rust.requiredAuth) {
+            SigningAuthLevel.NONE -> AuthLevel.NONE
+            SigningAuthLevel.PIN -> AuthLevel.PIN
+            SigningAuthLevel.BIOMETRIC -> AuthLevel.BIOMETRIC
+            SigningAuthLevel.EXPLICIT -> AuthLevel.EXPLICIT
         }
-
-        return RiskAssessment(score, factors, requiredAuth)
+        return RiskAssessment(rust.score.toInt(), factors, authLevel)
     }
 }
