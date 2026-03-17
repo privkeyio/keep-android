@@ -55,7 +55,7 @@
 
         <provider
             android:name=".nip55.Nip55ContentProvider"
-            android:authorities="io.privkey.keep.GET_PUBLIC_KEY;io.privkey.keep.SIGN_EVENT;io.privkey.keep.NIP44_ENCRYPT;io.privkey.keep.NIP44_DECRYPT"
+            android:authorities="io.privkey.keep.GET_PUBLIC_KEY;io.privkey.keep.SIGN_EVENT;io.privkey.keep.NIP04_ENCRYPT;io.privkey.keep.NIP04_DECRYPT;io.privkey.keep.NIP44_ENCRYPT;io.privkey.keep.NIP44_DECRYPT;io.privkey.keep.DECRYPT_ZAP_EVENT"
             android:exported="true"
             android:permission="io.privkey.keep.NIP55_PROVIDER" />
 

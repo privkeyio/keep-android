@@ -40,8 +40,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
         private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
+        private const val AUTHORITY_NIP04_ENCRYPT = "io.privkey.keep.NIP04_ENCRYPT"
+        private const val AUTHORITY_NIP04_DECRYPT = "io.privkey.keep.NIP04_DECRYPT"
         private const val AUTHORITY_NIP44_ENCRYPT = "io.privkey.keep.NIP44_ENCRYPT"
         private const val AUTHORITY_NIP44_DECRYPT = "io.privkey.keep.NIP44_DECRYPT"
+        private const val AUTHORITY_DECRYPT_ZAP_EVENT = "io.privkey.keep.DECRYPT_ZAP_EVENT"
 
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
@@ -123,8 +126,11 @@ class Nip55ContentProvider : ContentProvider() {
         val requestType = when (val authority = uri.authority) {
             AUTHORITY_GET_PUBLIC_KEY -> Nip55RequestType.GET_PUBLIC_KEY
             AUTHORITY_SIGN_EVENT -> Nip55RequestType.SIGN_EVENT
+            AUTHORITY_NIP04_ENCRYPT -> Nip55RequestType.NIP04_ENCRYPT
+            AUTHORITY_NIP04_DECRYPT -> Nip55RequestType.NIP04_DECRYPT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
+            AUTHORITY_DECRYPT_ZAP_EVENT -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
                 return errorCursor(GENERIC_ERROR_MESSAGE, null)
@@ -212,53 +218,31 @@ class Nip55ContentProvider : ContentProvider() {
         val rateCheck = if (safeguards != null && isOptedIn) {
             mapUsageResult(safeguards.checkAndRecordUsage(callerPackage))
         } else {
-            AutoSignDecision.Allowed(0u, 0u)
+            AutoSignDecision.Allowed(0u, 0u, 0u, 100u, 500u)
         }
 
-        val risk = runWithTimeout {
-            store.riskAssessor.assess(callerPackage, eventKind, requestType)
-        } ?: return PolicyResult.FallToUi
-
-        val rustRisk = io.privkey.keep.uniffi.SigningRiskAssessment(
-            score = risk.score.toUInt(),
-            factors = risk.factors.map { factor ->
-                when (factor) {
-                    RiskFactor.SENSITIVE_EVENT_KIND -> io.privkey.keep.uniffi.SigningRiskFactor.SENSITIVE_EVENT_KIND
-                    RiskFactor.SENSITIVE_OPERATION -> io.privkey.keep.uniffi.SigningRiskFactor.SENSITIVE_OPERATION
-                    RiskFactor.UNUSUAL_TIME -> io.privkey.keep.uniffi.SigningRiskFactor.UNUSUAL_TIME
-                    RiskFactor.HIGH_FREQUENCY -> io.privkey.keep.uniffi.SigningRiskFactor.HIGH_FREQUENCY
-                    RiskFactor.NEW_APP -> io.privkey.keep.uniffi.SigningRiskFactor.NEW_APP
-                    RiskFactor.UNKNOWN_AGE -> io.privkey.keep.uniffi.SigningRiskFactor.UNKNOWN_AGE
-                    RiskFactor.FIRST_KIND -> io.privkey.keep.uniffi.SigningRiskFactor.FIRST_KIND
-                }
-            },
-            requiredAuth = when (risk.requiredAuth) {
-                AuthLevel.NONE -> io.privkey.keep.uniffi.SigningAuthLevel.NONE
-                AuthLevel.PIN -> io.privkey.keep.uniffi.SigningAuthLevel.PIN
-                AuthLevel.BIOMETRIC -> io.privkey.keep.uniffi.SigningAuthLevel.BIOMETRIC
-                AuthLevel.EXPLICIT -> io.privkey.keep.uniffi.SigningAuthLevel.EXPLICIT
-            }
+        val ctx = io.privkey.keep.uniffi.SigningRequestContext(
+            operation = requestType,
+            packageName = callerPackage,
+            eventKind = eventKind?.toUInt(),
+            hasSignedKindBefore = true,
+            appAgeMs = null
         )
 
-        val evaluation = evaluateSignPolicy(policyMode, requestType, eventKind?.toUInt(), isOptedIn, rateCheck, rustRisk)
+        val evaluation = evaluateSignPolicy(policyMode, ctx, isOptedIn, rateCheck)
 
         return when (evaluation) {
-            is SignPolicyEvaluation.AutoApprove -> {
+            SignPolicyEvaluation.AUTO_APPROVE -> {
                 PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
             }
-            is SignPolicyEvaluation.FallToUi -> PolicyResult.FallToUi
-            is SignPolicyEvaluation.Denied -> {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Policy denied for ${hashPackageName(callerPackage)}: ${evaluation.reason}")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_policy", wasAutomatic = true) }
-                PolicyResult.Decided(rejectedCursor(null))
-            }
+            SignPolicyEvaluation.FALL_TO_UI -> PolicyResult.FallToUi
         }
     }
 
     private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult): AutoSignDecision =
         when (result) {
             is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt())
+                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt(), 0u, 100u, 500u)
             is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded ->
                 AutoSignDecision.HourlyLimitExceeded
             is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded ->
