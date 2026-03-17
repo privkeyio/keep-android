@@ -336,13 +336,15 @@ class PinStore(private val context: Context) {
     }
 
     private fun clearLockoutTimestampsInternal() {
-        if (prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)) return
-        prefs.edit()
+        val editor = prefs.edit()
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
-            .commit()
+        if (!prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)) {
+            editor.putInt(KEY_FAILED_ATTEMPTS, 0)
+        }
+        editor.commit()
     }
 
     @Synchronized

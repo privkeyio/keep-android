@@ -140,7 +140,7 @@ class Nip55ContentProvider : ContentProvider() {
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
             return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent)?.takeIf { it >= 0 } else null
 
         if (store == null) return errorCursor(GENERIC_ERROR_MESSAGE, null)
 

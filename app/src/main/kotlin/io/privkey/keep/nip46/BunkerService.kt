@@ -220,8 +220,10 @@ class BunkerService : Service() {
                     clientConsecutiveRequests.entries.removeAll { it.value.get() == 0 }
                 }
             }
-            if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
-                clientPendingCounts.entries.removeAll { it.value.get() <= 0 }
+            synchronized(approvalLock) {
+                if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
+                    clientPendingCounts.entries.removeAll { it.value.get() <= 0 }
+                }
             }
         }
     }
@@ -238,7 +240,9 @@ class BunkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        pendingApprovals.clear()
+        pendingApprovals.keys.toList().forEach { reqId ->
+            pendingApprovals.remove(reqId)?.respond(false)
+        }
         clearRateLimitState()
         serviceInstanceRef.set(this)
 
