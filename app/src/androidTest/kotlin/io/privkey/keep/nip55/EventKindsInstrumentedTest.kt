@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -153,6 +154,7 @@ class EventKindsInstrumentedTest {
 
     @Test
     fun sensitiveKindWarningReturnsWarningForNegativeKinds() {
-        assertNotNull(sensitiveKindWarning(-1))
+        assertEquals("Invalid event kind", sensitiveKindWarning(-1))
+        assertEquals("Invalid event kind", sensitiveKindWarning(Int.MIN_VALUE))
     }
 }

@@ -207,6 +207,7 @@ fun PinUnlockScreen(
                     TextButton(onClick = {
                         coroutineScope.launch {
                             if (auth()) {
+                                pinStore.refreshSession()
                                 onBiometricSuccess()
                                 onUnlocked()
                             }

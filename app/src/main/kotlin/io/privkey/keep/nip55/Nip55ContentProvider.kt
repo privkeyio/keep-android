@@ -221,6 +221,10 @@ class Nip55ContentProvider : ContentProvider() {
             AutoSignDecision.Allowed(0u, 0u, 0u, 100u, 500u)
         }
 
+        // Placeholder values: ContentProvider query() runs synchronously on a binder
+        // thread so we cannot perform async DB lookups for hasSignedKindBefore/appAgeMs.
+        // This makes auto-sign slightly more permissive (skips FirstKind penalty) but
+        // the path is already gated by opt-in, non-sensitive-kind, and rate limits.
         val ctx = io.privkey.keep.uniffi.SigningRequestContext(
             operation = requestType,
             packageName = callerPackage,

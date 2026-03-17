@@ -577,8 +577,10 @@ class BunkerService : Service() {
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED
 
-        pendingApprovals.keys.toList().forEach { reqId ->
-            pendingApprovals.remove(reqId)?.respond(false)
+        synchronized(approvalLock) {
+            pendingApprovals.keys.toList().forEach { reqId ->
+                pendingApprovals.remove(reqId)?.respond(false)
+            }
         }
         clearRateLimitState()
         serviceInstanceRef.set(null)

@@ -165,11 +165,7 @@ class PinStore(private val context: Context) {
             val verified = hashesMatch && !invalidLength && !lockedOut && !pinNotSet
 
             if (verified) {
-                clearFailedAttempts()
-                prefs.edit()
-                    .putInt(KEY_LOCKOUT_EPOCH, 0)
-                    .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
-                    .commit()
+                clearFailedAttemptsAndResetEpoch()
                 refreshSession()
             } else if (!lockedOut && !pinNotSet && !invalidLength) {
                 incrementFailedAttempts()
@@ -384,10 +380,12 @@ class PinStore(private val context: Context) {
         }
     }
 
-    private fun clearFailedAttempts() {
+    private fun clearFailedAttemptsAndResetEpoch() {
         val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
         val editor = prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
+            .putInt(KEY_LOCKOUT_EPOCH, 0)
+            .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
             .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)

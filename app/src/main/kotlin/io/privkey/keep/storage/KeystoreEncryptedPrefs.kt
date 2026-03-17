@@ -122,6 +122,10 @@ object KeystoreEncryptedPrefs {
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
 
+        // Migration-only fallback: predictable by design since it only obfuscates
+        // preference key names, not values (values are AES-GCM encrypted with Keystore).
+        // Used only when the random HMAC key cannot be persisted or the registry is
+        // unreadable. Once migration succeeds, the random key replaces this.
         private fun deterministicHmacKey(): ByteArray =
             MessageDigest.getInstance("SHA-256")
                 .digest("$DETERMINISTIC_HMAC_SEED:$prefsName".toByteArray(Charsets.UTF_8))
@@ -439,10 +443,12 @@ object KeystoreEncryptedPrefs {
 
             private fun applyChanges() {
                 if (clearRequested) {
-                    baseEditor.clear()
-                    keyCache.clear()
-                    reverseKeyCache.clear()
-                    hmacKey = null
+                    synchronized(initLockFor(prefsName)) {
+                        baseEditor.clear()
+                        keyCache.clear()
+                        reverseKeyCache.clear()
+                        hmacKey = null
+                    }
                 }
 
                 for (plainKey in pendingRemoves) {
