@@ -190,6 +190,9 @@ class BunkerService : Service() {
                 }
                 globalRequestHistory.addLast(now)
             }
+            if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
+                evictStaleMaps()
+            }
             return false
         }
 
@@ -206,6 +209,21 @@ class BunkerService : Service() {
                 globalRequestHistory.clear()
             }
         }
+
+        internal fun evictStaleMaps() {
+            synchronized(rateLimitLock) {
+                if (clientBackoffUntil.size > MAX_TRACKED_CLIENTS) {
+                    val now = SystemClock.elapsedRealtime()
+                    clientBackoffUntil.entries.removeAll { it.value < now }
+                }
+                if (clientConsecutiveRequests.size > MAX_TRACKED_CLIENTS) {
+                    clientConsecutiveRequests.entries.removeAll { it.value.get() == 0 }
+                }
+            }
+            if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
+                clientPendingCounts.entries.removeAll { it.value.get() <= 0 }
+            }
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -220,6 +238,7 @@ class BunkerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        pendingApprovals.clear()
         clearRateLimitState()
         serviceInstanceRef.set(this)
 

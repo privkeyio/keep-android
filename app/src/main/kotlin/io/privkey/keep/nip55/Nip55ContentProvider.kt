@@ -142,7 +142,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent) else null
 
-        if (store == null) return null
+        if (store == null) return errorCursor(GENERIC_ERROR_MESSAGE, null)
 
         val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
         if (velocityCursor != null) return velocityCursor
@@ -408,7 +408,7 @@ class Nip55ContentProvider : ContentProvider() {
             .setAutoCancel(true)
             .build()
 
-        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 1000)
+        val notifId = 2000 + Math.floorMod(backgroundNotificationId.getAndIncrement(), 10000)
         NotificationManagerCompat.from(ctx).notify(notifId, notification)
     }
 

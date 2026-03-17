@@ -130,11 +130,12 @@ object KeystoreEncryptedPrefs {
                 val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
                 val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
                 val encryptedHmacKey = encrypt(secretKey, encoded)
-                val hasExistingEntries = basePrefs.all.keys.any {
-                    it != HMAC_KEY_PREF
-                }
+                val registryHash = hmacWithKey(KEY_REGISTRY, MessageDigest.getInstance("SHA-256")
+                    .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8)))
+                val hasExistingEntries = basePrefs.contains(registryHash)
                 if (hasExistingEntries) {
                     if (!migrateFromDeterministicKey(key, encryptedHmacKey)) {
+                        if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
                         val deterministicKey = MessageDigest.getInstance("SHA-256")
                             .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
                         hmacKey = deterministicKey
@@ -201,7 +202,10 @@ object KeystoreEncryptedPrefs {
                 editor.putString(newRegistryHash, registryValue)
                 editor.remove(oldRegistryHash)
             }
-            editor.commit()
+            if (!editor.commit()) {
+                if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration commit failed, partial migration possible")
+                return false
+            }
             return true
         }
 
@@ -422,6 +426,7 @@ object KeystoreEncryptedPrefs {
                     baseEditor.clear()
                     keyCache.clear()
                     reverseKeyCache.clear()
+                    hmacKey = null
                 }
 
                 for (plainKey in pendingRemoves) {

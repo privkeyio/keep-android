@@ -279,7 +279,11 @@ class PinStore(private val context: Context) {
                 clearLockoutTimestampsInternal()
                 return 0
             }
-            return remainingByWallClock
+            prefs.edit()
+                .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, currentElapsed)
+                .putLong(KEY_LOCKOUT_DURATION, remainingByWallClock.coerceAtMost(lockoutDuration))
+                .commit()
+            return remainingByWallClock.coerceAtMost(lockoutDuration)
         }
 
         val remainingByElapsed = lockoutDuration - (currentElapsed - savedSetElapsed)
@@ -315,7 +319,7 @@ class PinStore(private val context: Context) {
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastCleared
-        if (elapsed < 0) {
+        if (elapsed < 0 || elapsed > LOCKOUT_LEVEL_DECAY_MS * (LOCKOUT_DURATIONS_MS.size + 1)) {
             prefs.edit().putLong(KEY_LAST_LOCKOUT_CLEARED, now).commit()
             return
         }
