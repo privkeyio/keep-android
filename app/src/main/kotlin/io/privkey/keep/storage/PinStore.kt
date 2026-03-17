@@ -296,8 +296,8 @@ class PinStore(private val context: Context) {
     fun requiresBiometricReset(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
 
     @Synchronized
-    fun clearBiometricResetRequirement() {
-        prefs.edit()
+    fun clearBiometricResetRequirement(): Boolean {
+        val success = prefs.edit()
             .putInt(KEY_LOCKOUT_EPOCH, 0)
             .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
             .putInt(KEY_FAILED_ATTEMPTS, 0)
@@ -306,6 +306,10 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
             .commit()
+        if (!success && BuildConfig.DEBUG) {
+            Log.w("PinStore", "Failed to clear biometric reset requirement")
+        }
+        return success
     }
 
     private fun maybeDecayLockoutLevel() {

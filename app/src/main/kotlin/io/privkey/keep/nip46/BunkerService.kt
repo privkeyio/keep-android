@@ -14,7 +14,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.privkey.keep.BuildConfig
-import io.privkey.keep.filterRelaysAtConnectionTime
+import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
@@ -301,7 +301,7 @@ class BunkerService : Service() {
     private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
         try {
             val safeRelays = withContext(Dispatchers.IO) {
-                withTimeoutOrNull(10_000L) { filterRelaysAtConnectionTime(relays) }
+                withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
             }
             if (safeRelays.isNullOrEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")

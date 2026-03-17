@@ -391,16 +391,8 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun hasSignedKindBefore(callerPackage: String, eventKind: Int): Boolean =
         auditDao.countByPackageAndKind(callerPackage, eventKind) > 0
 
-    suspend fun getAppAgeMs(callerPackage: String): Long? {
-        val settings = appSettingsDao.getSettings(callerPackage) ?: return null
-        val nowElapsed = SystemClock.elapsedRealtime()
-        val useMonotonic = settings.createdAtElapsed > 0 && nowElapsed > settings.createdAtElapsed
-        return if (useMonotonic) {
-            nowElapsed - settings.createdAtElapsed
-        } else {
-            (System.currentTimeMillis() - settings.createdAt).coerceAtLeast(0)
-        }
-    }
+    suspend fun getAppAgeMs(callerPackage: String): Long? =
+        riskAssessor.getAppAgeMs(callerPackage)
 }
 
 fun formatRequestType(type: String): String =

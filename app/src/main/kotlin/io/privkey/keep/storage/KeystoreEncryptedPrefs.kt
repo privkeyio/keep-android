@@ -146,23 +146,18 @@ object KeystoreEncryptedPrefs {
                 val encryptedHmacKey = encrypt(secretKey, encoded)
                 val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
                 val hasExistingEntries = basePrefs.contains(registryHash)
-                if (hasExistingEntries) {
-                    if (!migrateFromDeterministicKey(key, encryptedHmacKey)) {
-                        if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
-                        val deterministicKey = deterministicHmacKey()
-                        hmacKey = deterministicKey
-                        return deterministicKey
+                val persisted = if (hasExistingEntries) {
+                    migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
+                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
                     }
                 } else {
-                    if (!basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit()) {
-                        if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
-                        val deterministicKey = deterministicHmacKey()
-                        hmacKey = deterministicKey
-                        return deterministicKey
+                    basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit().also { ok ->
+                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
                     }
                 }
-                hmacKey = key
-                return key
+                val result = if (persisted) key else deterministicHmacKey()
+                hmacKey = result
+                return result
             }
         }
 
@@ -432,23 +427,34 @@ object KeystoreEncryptedPrefs {
             }
 
             override fun commit(): Boolean {
+                if (clearRequested) {
+                    return synchronized(initLockFor(prefsName)) {
+                        applyChanges()
+                        baseEditor.commit()
+                    }
+                }
                 applyChanges()
                 return baseEditor.commit()
             }
 
             override fun apply() {
+                if (clearRequested) {
+                    synchronized(initLockFor(prefsName)) {
+                        applyChanges()
+                        baseEditor.apply()
+                    }
+                    return
+                }
                 applyChanges()
                 baseEditor.apply()
             }
 
             private fun applyChanges() {
                 if (clearRequested) {
-                    synchronized(initLockFor(prefsName)) {
-                        baseEditor.clear()
-                        keyCache.clear()
-                        reverseKeyCache.clear()
-                        hmacKey = null
-                    }
+                    baseEditor.clear()
+                    keyCache.clear()
+                    reverseKeyCache.clear()
+                    hmacKey = null
                 }
 
                 for (plainKey in pendingRemoves) {

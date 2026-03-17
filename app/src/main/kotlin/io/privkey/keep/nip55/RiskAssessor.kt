@@ -43,7 +43,6 @@ class RiskAssessor(
 ) {
     companion object {
         private const val FREQUENCY_WINDOW_MS = 60_000L
-        private const val NEW_APP_THRESHOLD_MS = 24 * 60 * 60 * 1000L
         private const val MAX_TRACKED_PACKAGES = 500
     }
 
@@ -55,15 +54,17 @@ class RiskAssessor(
     suspend fun assess(
         packageName: String,
         eventKind: Int?,
-        requestType: Nip55RequestType = Nip55RequestType.SIGN_EVENT
+        requestType: Nip55RequestType = Nip55RequestType.SIGN_EVENT,
+        precomputedHasSignedKindBefore: Boolean? = null,
+        precomputedAppAgeMs: Long? = null
     ): RiskAssessment {
         val recentCount = getRecentRequestCount(packageName)
-        val hasSignedKindBefore = if (eventKind != null) {
+        val hasSignedKindBefore = precomputedHasSignedKindBefore ?: if (eventKind != null) {
             auditDao.countByPackageAndKind(packageName, eventKind) > 0
         } else {
             true
         }
-        val appAgeMs = getAppAgeMs(packageName)
+        val appAgeMs = precomputedAppAgeMs ?: getAppAgeMs(packageName)
 
         val ctx = SigningRequestContext(
             operation = requestType,
@@ -89,7 +90,7 @@ class RiskAssessor(
                     frequencyWindows[packageName] = it
                 }
             } else {
-                checkNotNull(existing)
+                checkNotNull(existing) { "Frequency window missing for $packageName" }
             }
 
             if (frequencyWindows.size > MAX_TRACKED_PACKAGES) {
@@ -101,7 +102,7 @@ class RiskAssessor(
         return auditDao.countSince(packageName, frequencySince)
     }
 
-    private suspend fun getAppAgeMs(packageName: String): Long? {
+    internal suspend fun getAppAgeMs(packageName: String): Long? {
         val appSettings = appSettingsDao.getSettings(packageName) ?: return null
         val nowElapsed = elapsedRealtimeProvider()
         val useMonotonic = appSettings.createdAtElapsed > 0 && nowElapsed > appSettings.createdAtElapsed
@@ -113,7 +114,7 @@ class RiskAssessor(
     }
 
     private fun mapFromRust(rust: SigningRiskAssessment): RiskAssessment {
-        val factors = rust.factors.mapNotNull { factor ->
+        val factors = rust.factors.map { factor ->
             when (factor) {
                 SigningRiskFactor.SENSITIVE_EVENT_KIND -> RiskFactor.SENSITIVE_EVENT_KIND
                 SigningRiskFactor.SENSITIVE_OPERATION -> RiskFactor.SENSITIVE_OPERATION

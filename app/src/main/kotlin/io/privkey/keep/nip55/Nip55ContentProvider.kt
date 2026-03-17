@@ -25,6 +25,7 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
+import io.privkey.keep.uniffi.SigningRequestContext
 import io.privkey.keep.uniffi.evaluateSignPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -156,7 +157,15 @@ class Nip55ContentProvider : ContentProvider() {
         val policyCursor = evaluateAutoSignPolicy(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
         )
-        if (policyCursor != null) return policyCursor.cursorOrNull
+        if (policyCursor != null) {
+            if (policyCursor is PolicyResult.FallToUi) {
+                return checkPermissionWithRisk(
+                    store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser,
+                    policyCursor.hasSignedKindBefore, policyCursor.appAgeMs
+                )
+            }
+            return policyCursor.cursorOrNull
+        }
 
         return checkPermissionWithRisk(
             store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
@@ -186,7 +195,7 @@ class Nip55ContentProvider : ContentProvider() {
     private sealed class PolicyResult {
         val cursorOrNull: Cursor? get() = (this as? Decided)?.cursor
         class Decided(val cursor: Cursor?) : PolicyResult()
-        object FallToUi : PolicyResult()
+        class FallToUi(val hasSignedKindBefore: Boolean, val appAgeMs: Long?) : PolicyResult()
     }
 
     private fun evaluateAutoSignPolicy(
@@ -215,10 +224,11 @@ class Nip55ContentProvider : ContentProvider() {
         val safeguards = currentApp.getAutoSigningSafeguards()
         val isOptedIn = safeguards?.isOptedIn(callerPackage) == true
 
+        val defaultVelocity = VelocityConfig()
         val rateCheck = if (safeguards != null && isOptedIn) {
-            mapUsageResult(safeguards.checkAndRecordUsage(callerPackage))
+            mapUsageResult(safeguards.checkAndRecordUsage(callerPackage), defaultVelocity)
         } else {
-            AutoSignDecision.Allowed(0u, 0u, 0u, 100u, 500u)
+            AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
         }
 
         val hasSignedKindBefore = if (eventKind != null) {
@@ -226,7 +236,7 @@ class Nip55ContentProvider : ContentProvider() {
         } else true
         val appAgeMs = runWithTimeout { store.getAppAgeMs(callerPackage) }
 
-        val ctx = io.privkey.keep.uniffi.SigningRequestContext(
+        val ctx = SigningRequestContext(
             operation = requestType,
             packageName = callerPackage,
             eventKind = eventKind?.takeIf { it >= 0 }?.toUInt(),
@@ -240,14 +250,14 @@ class Nip55ContentProvider : ContentProvider() {
             SignPolicyEvaluation.AUTO_APPROVE -> {
                 PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
             }
-            SignPolicyEvaluation.FALL_TO_UI -> PolicyResult.FallToUi
+            SignPolicyEvaluation.FALL_TO_UI -> PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
         }
     }
 
-    private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult): AutoSignDecision =
+    private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult, velocity: VelocityConfig): AutoSignDecision =
         when (result) {
             is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt(), 0u, 100u, 500u)
+                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt(), 0u, velocity.hourlyLimit.toUInt(), velocity.dailyLimit.toUInt())
             is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded ->
                 AutoSignDecision.HourlyLimitExceeded
             is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded ->
@@ -267,7 +277,9 @@ class Nip55ContentProvider : ContentProvider() {
         rawContent: String,
         rawPubkey: String?,
         eventKind: Int?,
-        currentUser: String?
+        currentUser: String?,
+        precomputedHasSignedKindBefore: Boolean? = null,
+        precomputedAppAgeMs: Long? = null
     ): Cursor? {
         val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
         if (isAppExpired == null) {
@@ -293,7 +305,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (decision == PermissionDecision.ALLOW) {
-            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType) }
+            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType, precomputedHasSignedKindBefore, precomputedAppAgeMs) }
             if (risk == null) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
                 return null

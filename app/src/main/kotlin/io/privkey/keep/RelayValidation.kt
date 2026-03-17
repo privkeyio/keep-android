@@ -15,15 +15,18 @@ internal fun isValidRelayPort(url: String): Boolean {
     return port in 1..65535
 }
 
+private fun parseHost(url: String): String? = runCatching {
+    URI(url).host?.removeSurrounding("[", "]")
+}.getOrNull()
+
+private fun resolveAddresses(host: String): List<InetAddress>? {
+    if (host.equals("localhost", ignoreCase = true)) return null
+    return runCatching { InetAddress.getAllByName(host).toList() }.getOrNull()
+}
+
 internal fun isInternalHost(url: String): Boolean {
-    val host = runCatching {
-        val uri = URI(url)
-        uri.host?.removeSurrounding("[", "]")
-    }.getOrNull() ?: return true
-
-    if (host.equals("localhost", ignoreCase = true)) return true
-
-    val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull() ?: return true
+    val host = parseHost(url) ?: return true
+    val addresses = resolveAddresses(host) ?: return true
     return addresses.any { isInternalAddress(it) }
 }
 
@@ -31,17 +34,10 @@ internal fun isInternalHost(url: String): Boolean {
 // A DNS rebinding attack could return a safe address here and an internal address
 // at connection time. Full mitigation requires pinning resolved addresses at the
 // socket layer, which is not currently supported by the WebSocket library.
-internal fun filterRelaysAtConnectionTime(relays: List<String>): List<String> {
+internal fun filterRelaysPreConnection(relays: List<String>): List<String> {
     return relays.filter { url ->
-        val host = runCatching {
-            val uri = URI(url)
-            uri.host?.removeSurrounding("[", "]")
-        }.getOrNull() ?: return@filter false
-
-        if (host.equals("localhost", ignoreCase = true)) return@filter false
-
-        val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull()
-            ?: return@filter false
+        val host = parseHost(url) ?: return@filter false
+        val addresses = resolveAddresses(host) ?: return@filter false
         addresses.none { isInternalAddress(it) }
     }
 }

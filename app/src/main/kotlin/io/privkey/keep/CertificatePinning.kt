@@ -8,7 +8,11 @@ data class CertificatePin(
 )
 
 fun KeepMobile.getCertificatePinsCompat(): List<CertificatePin> = runCatching {
-    val method = javaClass.methods.firstOrNull { it.name == "getCertificatePins" } ?: return emptyList()
+    val method = javaClass.methods.firstOrNull { it.name == "getCertificatePins" }
+    if (method == null) {
+        android.util.Log.w("CertificatePinning", "getCertificatePins method not found via reflection, pinning disabled")
+        return emptyList()
+    }
     val result = method.invoke(this) as? List<*> ?: return emptyList()
     result.filterNotNull().mapNotNull { pin ->
         val cls = pin::class.java

@@ -134,6 +134,12 @@ class Nip55Activity : FragmentActivity() {
         if (nonce != null && verificationStore != null) {
             val nonceResult = verificationStore.consumeNonce(nonce)
             if (nonceResult is CallerVerificationStore.NonceResult.Valid) {
+                val directCaller = callingActivity?.packageName
+                if (directCaller != null && directCaller != nonceResult.packageName) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Nonce package mismatch: nonce=${nonceResult.packageName}, caller=$directCaller")
+                    clearCallerState()
+                    return
+                }
                 val result = verificationStore.verifyOrTrust(nonceResult.packageName)
                 if (result is CallerVerificationStore.VerificationResult.SignatureMismatch) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Signature mismatch for ${nonceResult.packageName}")
