@@ -395,7 +395,7 @@ class BunkerService : Service() {
 
     private fun logBunkerEvent(event: BunkerLogEvent) {
         val store = permissionStore ?: return
-        val requestType = mapMethodToRequestType(event.action) ?: return
+        val requestType = mapMethodToNip55RequestType(event.action) ?: return
         serviceScope.launch {
             runCatching {
                 store.logOperation(
@@ -410,9 +410,6 @@ class BunkerService : Service() {
             }
         }
     }
-
-    private fun mapMethodToRequestType(method: String): Nip55RequestType? =
-        mapMethodToNip55RequestType(method)
 
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -510,7 +507,7 @@ class BunkerService : Service() {
         require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
         val store = permissionStore ?: return null
         val callerPackage = "nip46:$clientPubkey"
-        val requestType = mapMethodToRequestType(request.method) ?: return null
+        val requestType = mapMethodToNip55RequestType(request.method) ?: return null
         val eventKind = request.eventKind?.toInt()
 
         return runCatching {
@@ -524,7 +521,7 @@ class BunkerService : Service() {
 
     private fun logBunkerEventWithDecision(request: BunkerApprovalRequest, allowed: Boolean, wasAutomatic: Boolean) {
         val store = permissionStore ?: return
-        val requestType = mapMethodToRequestType(request.method) ?: return
+        val requestType = mapMethodToNip55RequestType(request.method) ?: return
         serviceScope.launch {
             runCatching {
                 store.logOperation(

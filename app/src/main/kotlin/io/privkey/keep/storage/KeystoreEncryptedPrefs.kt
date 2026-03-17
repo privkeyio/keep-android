@@ -39,6 +39,7 @@ object KeystoreEncryptedPrefs {
     private const val KEY_REGISTRY_DELIMITER = "\u0000"
     private const val HMAC_KEY_PREF = "__hmac_key__"
     private const val HMAC_KEY_LENGTH = 32
+    private const val DETERMINISTIC_HMAC_SEED = "keystore_prefs_hmac_key"
 
     fun create(context: Context, prefsName: String): SharedPreferences {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
@@ -116,6 +117,10 @@ object KeystoreEncryptedPrefs {
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
 
+        private fun deterministicHmacKey(): ByteArray =
+            MessageDigest.getInstance("SHA-256")
+                .digest(DETERMINISTIC_HMAC_SEED.toByteArray(Charsets.UTF_8))
+
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
             synchronized(this) {
@@ -130,14 +135,12 @@ object KeystoreEncryptedPrefs {
                 val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
                 val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
                 val encryptedHmacKey = encrypt(secretKey, encoded)
-                val registryHash = hmacWithKey(KEY_REGISTRY, MessageDigest.getInstance("SHA-256")
-                    .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8)))
+                val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
                 val hasExistingEntries = basePrefs.contains(registryHash)
                 if (hasExistingEntries) {
                     if (!migrateFromDeterministicKey(key, encryptedHmacKey)) {
                         if (BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
-                        val deterministicKey = MessageDigest.getInstance("SHA-256")
-                            .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
+                        val deterministicKey = deterministicHmacKey()
                         hmacKey = deterministicKey
                         return deterministicKey
                     }
@@ -172,8 +175,7 @@ object KeystoreEncryptedPrefs {
         }
 
         private fun migrateFromDeterministicKey(newKey: ByteArray, encryptedHmacKey: String): Boolean {
-            val oldKey = MessageDigest.getInstance("SHA-256")
-                .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
+            val oldKey = deterministicHmacKey()
             val plainKeys = recoverPlainKeysFromRegistry(oldKey)
             if (plainKeys == null) {
                 if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable during HMAC migration, falling back to deterministic key")
