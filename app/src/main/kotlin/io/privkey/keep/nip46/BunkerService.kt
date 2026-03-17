@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.privkey.keep.BuildConfig
+import io.privkey.keep.filterRelaysAtConnectionTime
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
@@ -270,6 +271,13 @@ class BunkerService : Service() {
 
     private fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
         try {
+            val safeRelays = filterRelaysAtConnectionTime(relays)
+            if (safeRelays.isEmpty()) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
+                _status.value = BunkerStatus.ERROR
+                return
+            }
+
             _status.value = BunkerStatus.STARTING
 
             val handler = BunkerHandler(keepMobile)
@@ -290,9 +298,9 @@ class BunkerService : Service() {
 
             val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
             val proxyStarted = proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535 &&
-                invokeStartBunkerWithProxy(handler, relays, callbacks, "127.0.0.1", proxy.port)
+                invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)
             if (!proxyStarted) {
-                handler.startBunker(relays, callbacks)
+                handler.startBunker(safeRelays, callbacks)
             }
 
             val url = handler.getBunkerUrl()

@@ -27,7 +27,22 @@ internal fun isInternalHost(url: String): Boolean {
     return addresses.any { isInternalAddress(it) }
 }
 
-private fun isInternalAddress(addr: InetAddress): Boolean {
+internal fun filterRelaysAtConnectionTime(relays: List<String>): List<String> {
+    return relays.filter { url ->
+        val host = runCatching {
+            val uri = URI(url)
+            uri.host?.removeSurrounding("[", "]")
+        }.getOrNull() ?: return@filter false
+
+        if (host.equals("localhost", ignoreCase = true)) return@filter false
+
+        val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull()
+            ?: return@filter false
+        addresses.none { isInternalAddress(it) }
+    }
+}
+
+internal fun isInternalAddress(addr: InetAddress): Boolean {
     if (addr.isLoopbackAddress ||
         addr.isLinkLocalAddress ||
         addr.isSiteLocalAddress ||
