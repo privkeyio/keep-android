@@ -15,11 +15,13 @@ data class RiskAssessment(
     val requiredAuth: AuthLevel
 )
 
-enum class AuthLevel {
-    NONE,
-    PIN,
-    BIOMETRIC,
-    EXPLICIT
+enum class AuthLevel(val level: Int) {
+    NONE(0),
+    PIN(1),
+    BIOMETRIC(2),
+    EXPLICIT(3);
+
+    fun atLeast(other: AuthLevel): Boolean = this.level >= other.level
 }
 
 enum class RiskFactor(val weight: Int, val description: String) {
@@ -67,13 +69,11 @@ class RiskAssessor(
             operation = requestType,
             packageName = packageName,
             eventKind = eventKind?.toUInt(),
-            currentHour = currentHourProvider().toUInt(),
-            recentRequestCount = recentCount.toUInt(),
             hasSignedKindBefore = hasSignedKindBefore,
             appAgeMs = appAgeMs?.toULong()
         )
 
-        val rustResult = assessSigningRisk(ctx)
+        val rustResult = assessSigningRisk(ctx, recentCount.toUInt(), currentHourProvider().toUInt())
         return mapFromRust(rustResult)
     }
 

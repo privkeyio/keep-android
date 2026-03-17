@@ -242,7 +242,7 @@ class Nip55Activity : FragmentActivity() {
         }
         val store = permissionStore
         val eventKind = req.eventKind()
-        val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE) >= AuthLevel.PIN
+        val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
         val needsBiometric = riskRequiresAuth || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
         if (callerPendingFirstUse) {
