@@ -165,8 +165,7 @@ class BunkerService : Service() {
                 }
 
                 if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
-                    val evictKey = clientRequestHistory.keys.iterator().let { if (it.hasNext()) it.next() else null }
-                    if (evictKey != null) {
+                    clientRequestHistory.keys.firstOrNull()?.let { evictKey ->
                         clientRequestHistory.remove(evictKey)
                         clientBackoffUntil.remove(evictKey)
                         clientConsecutiveRequests.remove(evictKey)

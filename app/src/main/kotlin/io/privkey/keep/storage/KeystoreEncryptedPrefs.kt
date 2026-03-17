@@ -131,7 +131,7 @@ object KeystoreEncryptedPrefs {
                 val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
                 val encryptedHmacKey = encrypt(secretKey, encoded)
                 val hasExistingEntries = basePrefs.all.keys.any {
-                    it != HMAC_KEY_PREF && it != KEY_REGISTRY
+                    it != HMAC_KEY_PREF
                 }
                 if (hasExistingEntries) {
                     migrateFromDeterministicKey(key, encryptedHmacKey)
@@ -172,6 +172,7 @@ object KeystoreEncryptedPrefs {
             val editor = basePrefs.edit()
             editor.putString(HMAC_KEY_PREF, encryptedHmacKey)
             if (plainKeys.isEmpty()) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable during HMAC migration, existing entries may be orphaned")
                 editor.commit()
                 return
             }
@@ -195,12 +196,8 @@ object KeystoreEncryptedPrefs {
             editor.commit()
         }
 
-        private fun calculateKeyHash(plainKey: String): String {
-            val mac = Mac.getInstance("HmacSHA256")
-            mac.init(SecretKeySpec(getHmacKey(), "HmacSHA256"))
-            val hash = mac.doFinal(plainKey.toByteArray(Charsets.UTF_8))
-            return Base64.encodeToString(hash, Base64.NO_WRAP or Base64.URL_SAFE)
-        }
+        private fun calculateKeyHash(plainKey: String): String =
+            hmacWithKey(plainKey, getHmacKey())
 
         private fun getEncryptedKeyName(plainKey: String): String {
             keyCache[plainKey]?.let { return it }
