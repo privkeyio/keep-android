@@ -113,7 +113,7 @@ fun PinUnlockScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (biometricResetRequired && !isLockedOut) {
+            if (biometricResetRequired && onBiometricAuth != null && !isLockedOut) {
                 Text(
                     text = "Biometric verification required",
                     style = MaterialTheme.typography.titleMedium,
@@ -127,23 +127,21 @@ fun PinUnlockScreen(
                     textAlign = TextAlign.Center
                 )
 
-                onBiometricAuth?.let { auth ->
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                if (auth()) {
-                                    pinStore.clearBiometricResetRequirement()
-                                    biometricResetRequired = false
-                                    onBiometricSuccess()
-                                    onUnlocked()
-                                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            if (onBiometricAuth()) {
+                                pinStore.clearBiometricResetRequirement()
+                                biometricResetRequired = false
+                                onBiometricSuccess()
+                                onUnlocked()
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Use Biometrics")
-                    }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Use Biometrics")
                 }
             } else if (isLockedOut) {
                 val seconds = (lockoutRemaining / 1000).toInt()

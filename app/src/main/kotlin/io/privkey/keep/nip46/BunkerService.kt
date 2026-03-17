@@ -276,6 +276,7 @@ class BunkerService : Service() {
             if (safeRelays.isEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
                 _status.value = BunkerStatus.ERROR
+                stopSelf()
                 return
             }
 

@@ -168,6 +168,7 @@ class PinStore(private val context: Context) {
                 clearFailedAttempts()
                 prefs.edit()
                     .putInt(KEY_LOCKOUT_EPOCH, 0)
+                    .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
                     .commit()
                 refreshSession()
             } else if (!lockedOut && !pinNotSet && !invalidLength) {
