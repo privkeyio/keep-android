@@ -27,6 +27,10 @@ internal fun isInternalHost(url: String): Boolean {
     return addresses.any { isInternalAddress(it) }
 }
 
+// NOTE: DNS is resolved here but the actual WebSocket connection happens later.
+// A DNS rebinding attack could return a safe address here and an internal address
+// at connection time. Full mitigation requires pinning resolved addresses at the
+// socket layer, which is not currently supported by the WebSocket library.
 internal fun filterRelaysAtConnectionTime(relays: List<String>): List<String> {
     return relays.filter { url ->
         val host = runCatching {
@@ -46,11 +50,17 @@ internal fun isInternalAddress(addr: InetAddress): Boolean {
     if (addr.isLoopbackAddress ||
         addr.isLinkLocalAddress ||
         addr.isSiteLocalAddress ||
-        addr.isAnyLocalAddress) {
+        addr.isAnyLocalAddress ||
+        addr.isMulticastAddress) {
         return true
     }
-    if (addr is Inet6Address || addr.address.size == 16) {
-        val bytes = addr.address
+    val bytes = addr.address
+    if (bytes.size == 4) {
+        val b0 = bytes[0].toInt() and 0xFF
+        val b1 = bytes[1].toInt() and 0xFF
+        if (b0 == 100 && (b1 and 0xC0) == 64) return true
+    }
+    if (addr is Inet6Address || bytes.size == 16) {
         if ((bytes[0].toInt() and 0xFE) == 0xFC) {
             return true
         }
@@ -67,7 +77,5 @@ private fun isIPv4MappedPrivate(addr: InetAddress): Boolean {
     if (bytes[10] != 0xFF.toByte() || bytes[11] != 0xFF.toByte()) return false
     val ipv4 = byteArrayOf(bytes[12], bytes[13], bytes[14], bytes[15])
     val mappedAddr = runCatching { InetAddress.getByAddress(ipv4) }.getOrNull() ?: return false
-    return mappedAddr.isLoopbackAddress ||
-        mappedAddr.isLinkLocalAddress ||
-        mappedAddr.isSiteLocalAddress
+    return isInternalAddress(mappedAddr)
 }

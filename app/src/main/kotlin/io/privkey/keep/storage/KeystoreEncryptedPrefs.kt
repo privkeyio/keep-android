@@ -128,15 +128,16 @@ object KeystoreEncryptedPrefs {
                     return key
                 }
                 val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
+                val encryptedHmacKey = encrypt(secretKey, encoded)
                 val hasExistingEntries = basePrefs.all.keys.any {
                     it != HMAC_KEY_PREF && it != KEY_REGISTRY
                 }
                 if (hasExistingEntries) {
-                    migrateFromDeterministicKey(key)
+                    migrateFromDeterministicKey(key, encryptedHmacKey)
+                } else {
+                    basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit()
                 }
-                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
-                val encrypted = encrypt(secretKey, encoded)
-                basePrefs.edit().putString(HMAC_KEY_PREF, encrypted).commit()
                 hmacKey = key
                 return key
             }
@@ -164,12 +165,16 @@ object KeystoreEncryptedPrefs {
             }
         }
 
-        private fun migrateFromDeterministicKey(newKey: ByteArray) {
+        private fun migrateFromDeterministicKey(newKey: ByteArray, encryptedHmacKey: String) {
             val oldKey = MessageDigest.getInstance("SHA-256")
                 .digest("keystore_prefs_hmac_key".toByteArray(Charsets.UTF_8))
             val plainKeys = recoverPlainKeysFromRegistry(oldKey)
-            if (plainKeys.isEmpty()) return
             val editor = basePrefs.edit()
+            editor.putString(HMAC_KEY_PREF, encryptedHmacKey)
+            if (plainKeys.isEmpty()) {
+                editor.commit()
+                return
+            }
             for (plainKey in plainKeys) {
                 val oldHash = hmacWithKey(plainKey, oldKey)
                 val newHash = hmacWithKey(plainKey, newKey)

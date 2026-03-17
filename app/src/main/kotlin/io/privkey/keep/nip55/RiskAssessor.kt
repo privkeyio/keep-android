@@ -81,7 +81,7 @@ class RiskAssessor(
             (window.wallClock - FREQUENCY_WINDOW_MS + (nowElapsed - window.windowStart)).coerceAtLeast(0)
         }
         val recentCount = auditDao.countSince(packageName, frequencySince)
-        if (recentCount > HIGH_FREQUENCY_THRESHOLD) {
+        if (recentCount >= HIGH_FREQUENCY_THRESHOLD) {
             factors.add(RiskFactor.HIGH_FREQUENCY)
         }
 
