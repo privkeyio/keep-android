@@ -1,5 +1,9 @@
 package io.privkey.keep.nip55
 
+// TODO: Delegate to Rust signing policy engine after rebuilding keep-mobile .so
+// import io.privkey.keep.uniffi.isSensitiveKind as rustIsSensitiveKind
+// import io.privkey.keep.uniffi.sensitiveKindWarning as rustSensitiveKindWarning
+
 private val SENSITIVE_KINDS = setOf(
     0,      // Metadata (profile)
     3,      // Contacts (follow list)

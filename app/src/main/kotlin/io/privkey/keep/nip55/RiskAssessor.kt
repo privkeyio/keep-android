@@ -3,6 +3,11 @@ package io.privkey.keep.nip55
 import android.os.SystemClock
 import java.util.Calendar
 
+// TODO: Delegate to Rust signing policy engine after rebuilding keep-mobile .so
+// The risk assessment logic now lives in keep-mobile/src/signing_policy.rs
+// Once the .so is rebuilt and bindings regenerated, this class should call
+// assessSigningRisk() from Rust instead of computing locally.
+
 data class RiskAssessment(
     val score: Int,
     val factors: List<RiskFactor>,
