@@ -1,70 +1,73 @@
 package io.privkey.keep.nip55
 
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
 
-class EventKindsTest {
+@RunWith(AndroidJUnit4::class)
+class EventKindsInstrumentedTest {
 
     @Test
-    fun `isSensitiveKind returns true for metadata kind 0`() {
+    fun isSensitiveKindReturnsTrueForMetadataKind0() {
         assertTrue(isSensitiveKind(0))
     }
 
     @Test
-    fun `isSensitiveKind returns true for contacts kind 3`() {
+    fun isSensitiveKindReturnsTrueForContactsKind3() {
         assertTrue(isSensitiveKind(3))
     }
 
     @Test
-    fun `isSensitiveKind returns true for encrypted DM kind 4`() {
+    fun isSensitiveKindReturnsTrueForEncryptedDmKind4() {
         assertTrue(isSensitiveKind(4))
     }
 
     @Test
-    fun `isSensitiveKind returns true for gift wrap kind 1059`() {
+    fun isSensitiveKindReturnsTrueForGiftWrapKind1059() {
         assertTrue(isSensitiveKind(1059))
     }
 
     @Test
-    fun `isSensitiveKind returns true for report kind 1984`() {
+    fun isSensitiveKindReturnsTrueForReportKind1984() {
         assertTrue(isSensitiveKind(1984))
     }
 
     @Test
-    fun `isSensitiveKind returns true for mute list kind 10000`() {
+    fun isSensitiveKindReturnsTrueForMuteListKind10000() {
         assertTrue(isSensitiveKind(10000))
     }
 
     @Test
-    fun `isSensitiveKind returns true for relay list metadata kind 10002`() {
+    fun isSensitiveKindReturnsTrueForRelayListMetadataKind10002() {
         assertTrue(isSensitiveKind(10002))
     }
 
     @Test
-    fun `isSensitiveKind returns true for bookmark list kind 10003`() {
+    fun isSensitiveKindReturnsTrueForBookmarkListKind10003() {
         assertTrue(isSensitiveKind(10003))
     }
 
     @Test
-    fun `isSensitiveKind returns true for search relay list kind 10004`() {
+    fun isSensitiveKindReturnsTrueForSearchRelayListKind10004() {
         assertTrue(isSensitiveKind(10004))
     }
 
     @Test
-    fun `isSensitiveKind returns true for blocked relays list kind 10006`() {
+    fun isSensitiveKindReturnsTrueForBlockedRelaysListKind10006() {
         assertTrue(isSensitiveKind(10006))
     }
 
     @Test
-    fun `isSensitiveKind returns true for DM relay list kind 10050`() {
+    fun isSensitiveKindReturnsTrueForDmRelayListKind10050() {
         assertTrue(isSensitiveKind(10050))
     }
 
     @Test
-    fun `isSensitiveKind returns true for replaceable events 30000-39999`() {
+    fun isSensitiveKindReturnsTrueForReplaceableEvents() {
         assertTrue(isSensitiveKind(30000))
         assertTrue(isSensitiveKind(30023))
         assertTrue(isSensitiveKind(35000))
@@ -72,28 +75,34 @@ class EventKindsTest {
     }
 
     @Test
-    fun `isSensitiveKind returns false for regular text note kind 1`() {
+    fun isSensitiveKindReturnsFalseForRegularTextNoteKind1() {
         assertFalse(isSensitiveKind(1))
     }
 
     @Test
-    fun `isSensitiveKind returns false for reaction kind 7`() {
+    fun isSensitiveKindReturnsFalseForReactionKind7() {
         assertFalse(isSensitiveKind(7))
     }
 
     @Test
-    fun `isSensitiveKind returns false for repost kind 6`() {
+    fun isSensitiveKindReturnsFalseForRepostKind6() {
         assertFalse(isSensitiveKind(6))
     }
 
     @Test
-    fun `isSensitiveKind returns false for outside replaceable range`() {
+    fun isSensitiveKindReturnsFalseForOutsideReplaceableRange() {
         assertFalse(isSensitiveKind(29999))
         assertFalse(isSensitiveKind(40000))
     }
 
     @Test
-    fun `sensitiveKindWarning returns warning for sensitive kinds`() {
+    fun isSensitiveKindReturnsTrueForNegativeKinds() {
+        assertTrue(isSensitiveKind(-1))
+        assertTrue(isSensitiveKind(Int.MIN_VALUE))
+    }
+
+    @Test
+    fun sensitiveKindWarningReturnsWarningForSensitiveKinds() {
         assertNotNull(sensitiveKindWarning(0))
         assertNotNull(sensitiveKindWarning(3))
         assertNotNull(sensitiveKindWarning(4))
@@ -108,37 +117,42 @@ class EventKindsTest {
     }
 
     @Test
-    fun `sensitiveKindWarning returns warning for replaceable events`() {
+    fun sensitiveKindWarningReturnsWarningForReplaceableEvents() {
         assertNotNull(sensitiveKindWarning(30000))
         assertNotNull(sensitiveKindWarning(35000))
         assertNotNull(sensitiveKindWarning(39999))
     }
 
     @Test
-    fun `sensitiveKindWarning returns null for non-sensitive kinds`() {
+    fun sensitiveKindWarningReturnsNullForNonSensitiveKinds() {
         assertNull(sensitiveKindWarning(1))
         assertNull(sensitiveKindWarning(7))
         assertNull(sensitiveKindWarning(6))
     }
 
     @Test
-    fun `sensitiveKindWarning contains relevant info for metadata`() {
+    fun sensitiveKindWarningContainsRelevantInfoForMetadata() {
         val warning = sensitiveKindWarning(0)
         assertNotNull(warning)
         assertTrue(warning!!.contains("profile") || warning.contains("Metadata"))
     }
 
     @Test
-    fun `sensitiveKindWarning contains relevant info for contacts`() {
+    fun sensitiveKindWarningContainsRelevantInfoForContacts() {
         val warning = sensitiveKindWarning(3)
         assertNotNull(warning)
         assertTrue(warning!!.contains("contacts") || warning.contains("follow"))
     }
 
     @Test
-    fun `sensitiveKindWarning contains relevant info for encrypted DM`() {
+    fun sensitiveKindWarningContainsRelevantInfoForEncryptedDm() {
         val warning = sensitiveKindWarning(4)
         assertNotNull(warning)
         assertTrue(warning!!.contains("private") || warning.contains("Encrypted"))
+    }
+
+    @Test
+    fun sensitiveKindWarningReturnsWarningForNegativeKinds() {
+        assertNotNull(sensitiveKindWarning(-1))
     }
 }
