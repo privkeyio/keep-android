@@ -38,6 +38,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.crypto.Cipher
@@ -64,6 +66,7 @@ class KeepMobileApp : Application() {
     private var initError: String? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
+    private val initMutex = Mutex()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -236,16 +239,18 @@ class KeepMobileApp : Application() {
 
     suspend fun ensureInitialized() {
         val mobile = keepMobile ?: return
-        if (mobile.getShareInfo() != null) {
-            val nodeReady = runCatching {
-                withContext(Dispatchers.IO) { mobile.getPeers() }
-            }.isSuccess
-            if (nodeReady) return
+        initMutex.withLock {
+            if (mobile.getShareInfo() != null) {
+                val nodeReady = runCatching {
+                    withContext(Dispatchers.IO) { mobile.getPeers() }
+                }.isSuccess
+                if (nodeReady) return
+            }
+            val relays = getActiveRelays().ifEmpty {
+                listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
+            }
+            withContext(Dispatchers.IO) { initializeConnection(mobile, relays) }
         }
-        val relays = getActiveRelays().ifEmpty {
-            listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
-        }
-        withContext(Dispatchers.IO) { initializeConnection(mobile, relays) }
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
