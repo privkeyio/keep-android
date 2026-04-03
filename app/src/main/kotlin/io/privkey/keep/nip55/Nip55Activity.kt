@@ -25,9 +25,9 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.URL
 import java.security.MessageDigest
 
 class Nip55Activity : FragmentActivity() {
@@ -50,9 +50,14 @@ class Nip55Activity : FragmentActivity() {
     private var isNotificationOriginated: Boolean = false
     private var riskAssessment: RiskAssessment? = null
 
+    private val signingDispatcher = Dispatchers.Default.limitedParallelism(1)
+
     companion object {
         private const val TAG = "Nip55Activity"
         private const val GENERIC_ERROR_MESSAGE = "An error occurred"
+        private const val MAX_CONTENT_LENGTH = 1024 * 1024
+        private const val MAX_PUBKEY_LENGTH = 128
+        private const val MAX_EXTRA_LENGTH = 2048
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -251,16 +256,31 @@ class Nip55Activity : FragmentActivity() {
         }
         val uriBody = uri.removePrefix("nostrsigner:")
         val content = if (uriBody.isNotEmpty()) {
-            java.net.URLDecoder.decode(uriBody, "UTF-8")
+            runCatching { java.net.URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
         } else {
             extras.getString("data") ?: ""
         }
+        if (content.length > MAX_CONTENT_LENGTH) return null
+
         val pubkey = extras.getString("pubKey") ?: extras.getString("pubkey")
+        if (pubkey != null && pubkey.length > MAX_PUBKEY_LENGTH) return null
+
         val returnType = extras.getString("returnType") ?: "signature"
         val compressionType = extras.getString("compressionType") ?: "none"
-        val callbackUrl = extras.getString("callbackUrl")
         val currentUser = extras.getString("current_user")
         val permissions = extras.getString("permissions")
+
+        if (returnType.length > MAX_EXTRA_LENGTH) return null
+        if (compressionType.length > MAX_EXTRA_LENGTH) return null
+        if (currentUser != null && currentUser.length > MAX_PUBKEY_LENGTH) return null
+        if (permissions != null && permissions.length > MAX_CONTENT_LENGTH) return null
+
+        val callbackUrl = extras.getString("callbackUrl")?.let { raw ->
+            if (raw.length > MAX_EXTRA_LENGTH) return null
+            val parsed = runCatching { URL(raw) }.getOrNull() ?: return@let null
+            if (parsed.protocol != "https") return@let null
+            raw
+        }
 
         return Nip55Request(
             requestType = type,
@@ -291,18 +311,6 @@ class Nip55Activity : FragmentActivity() {
         val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
         val needsBiometric = riskRequiresAuth || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
-        if (callerPendingFirstUse) {
-            val sigHash = callerSignatureHash
-            val verificationStore = callerVerificationStore
-            if (sigHash != null && verificationStore != null) {
-                verificationStore.trustPackage(callerId, sigHash)
-                callerPendingFirstUse = false
-                callerVerified = true
-            } else {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
-            }
-        }
-
         lifecycleScope.launch {
             val currentApp = application as? KeepMobileApp
             val mobile = currentApp?.getKeepMobile()
@@ -318,7 +326,7 @@ class Nip55Activity : FragmentActivity() {
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
-                withContext(java.util.concurrent.Executors.newSingleThreadExecutor().asCoroutineDispatcher()) {
+                withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
                         currentApp?.getKeepMobile()?.setSigningPreApproved(true)
@@ -329,6 +337,17 @@ class Nip55Activity : FragmentActivity() {
                     }
                 }
                     .onSuccess { response ->
+                        if (callerPendingFirstUse) {
+                            val sigHash = callerSignatureHash
+                            val verificationStore = callerVerificationStore
+                            if (sigHash != null && verificationStore != null) {
+                                verificationStore.trustPackage(callerId, sigHash)
+                                callerPendingFirstUse = false
+                                callerVerified = true
+                            } else {
+                                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                            }
+                        }
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)
                     }
@@ -390,15 +409,20 @@ class Nip55Activity : FragmentActivity() {
 
         val initId = java.util.UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
-        keystoreStorage.setRequestIdContext(initId)
         return try {
-            withContext(Dispatchers.IO) { app?.ensureInitialized() }
+            withContext(Dispatchers.IO) {
+                keystoreStorage.setRequestIdContext(initId)
+                try {
+                    app?.ensureInitialized()
+                } finally {
+                    keystoreStorage.clearRequestIdContext()
+                }
+            }
             true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
             false
         } finally {
-            keystoreStorage.clearRequestIdContext()
             keystoreStorage.clearPendingCipher(initId)
         }
     }
