@@ -28,7 +28,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
+import java.net.URLDecoder
 import java.security.MessageDigest
+import java.util.UUID
 
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
@@ -256,7 +258,7 @@ class Nip55Activity : FragmentActivity() {
         }
         val uriBody = uri.removePrefix("nostrsigner:")
         val content = if (uriBody.isNotEmpty()) {
-            runCatching { java.net.URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
+            runCatching { URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
         } else {
             extras.getString("data") ?: ""
         }
@@ -276,7 +278,7 @@ class Nip55Activity : FragmentActivity() {
         if (permissions != null && permissions.length > MAX_CONTENT_LENGTH) return null
 
         val callbackUrl = extras.getString("callbackUrl")?.let { raw ->
-            if (raw.length > MAX_EXTRA_LENGTH) return null
+            if (raw.length > MAX_EXTRA_LENGTH) return@let null
             val parsed = runCatching { URL(raw) }.getOrNull() ?: return@let null
             if (parsed.protocol != "https") return@let null
             raw
@@ -390,7 +392,7 @@ class Nip55Activity : FragmentActivity() {
             return false
         }
 
-        val reqId = requestId ?: java.util.UUID.randomUUID().toString().also { requestId = it }
+        val reqId = requestId ?: UUID.randomUUID().toString().also { requestId = it }
         keystoreStorage.setPendingCipher(reqId, authedCipher)
         return true
     }
@@ -407,7 +409,7 @@ class Nip55Activity : FragmentActivity() {
             )
         }.getOrNull() ?: return false
 
-        val initId = java.util.UUID.randomUUID().toString()
+        val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
         return try {
             withContext(Dispatchers.IO) {
