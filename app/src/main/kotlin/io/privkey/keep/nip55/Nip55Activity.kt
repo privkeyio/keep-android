@@ -25,6 +25,7 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
@@ -227,12 +228,51 @@ class Nip55Activity : FragmentActivity() {
         val h = handler ?: return finishWithError("Handler not initialized")
 
         val parsed = runCatching { h.parseIntentUri(uri) }.getOrNull()
+            ?: parseRequestFromExtras(intent, uri)
             ?: return finishWithError("Invalid request")
 
         request = parsed
         if (requestId.isNullOrBlank()) {
             requestId = parsed.id
         }
+    }
+
+    private fun parseRequestFromExtras(intent: Intent, uri: String): Nip55Request? {
+        val extras = intent.extras ?: return null
+        val type = when (extras.getString("type")) {
+            "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
+            "sign_event" -> Nip55RequestType.SIGN_EVENT
+            "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
+            "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
+            "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
+            "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+            "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
+            else -> return null
+        }
+        val uriBody = uri.removePrefix("nostrsigner:")
+        val content = if (uriBody.isNotEmpty()) {
+            java.net.URLDecoder.decode(uriBody, "UTF-8")
+        } else {
+            extras.getString("data") ?: ""
+        }
+        val pubkey = extras.getString("pubKey") ?: extras.getString("pubkey")
+        val returnType = extras.getString("returnType") ?: "signature"
+        val compressionType = extras.getString("compressionType") ?: "none"
+        val callbackUrl = extras.getString("callbackUrl")
+        val currentUser = extras.getString("current_user")
+        val permissions = extras.getString("permissions")
+
+        return Nip55Request(
+            requestType = type,
+            content = content,
+            pubkey = pubkey,
+            returnType = returnType,
+            compressionType = compressionType,
+            callbackUrl = callbackUrl,
+            id = extras.getString("id"),
+            currentUser = currentUser,
+            permissions = permissions
+        )
     }
 
     private fun handleApprove(duration: PermissionDuration) {
@@ -264,16 +304,27 @@ class Nip55Activity : FragmentActivity() {
         }
 
         lifecycleScope.launch {
+            val currentApp = application as? KeepMobileApp
+            val mobile = currentApp?.getKeepMobile()
+            val nodeNeedsInit = mobile?.getShareInfo() == null ||
+                runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isFailure
+
+            if (nodeNeedsInit && keystoreStorage != null) {
+                if (!initializeNode(keystoreStorage, currentApp)) return@launch
+            }
+
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
-                withContext(Dispatchers.Default) {
+                withContext(java.util.concurrent.Executors.newSingleThreadExecutor().asCoroutineDispatcher()) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
+                        currentApp?.getKeepMobile()?.setSigningPreApproved(true)
                         runCatching { nip55Handler.handleRequest(req, callerId) }
                     } finally {
+                        currentApp?.getKeepMobile()?.setSigningPreApproved(false)
                         keystoreStorage?.clearRequestIdContext()
                     }
                 }
@@ -282,7 +333,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithResult(response)
                     }
                     .onFailure { e ->
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}: ${e.message}")
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {
@@ -323,6 +374,33 @@ class Nip55Activity : FragmentActivity() {
         val reqId = requestId ?: java.util.UUID.randomUUID().toString().also { requestId = it }
         keystoreStorage.setPendingCipher(reqId, authedCipher)
         return true
+    }
+
+    private suspend fun initializeNode(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp?): Boolean {
+        val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
+            .getOrNull() ?: return false
+
+        val authedCipher = runCatching {
+            biometricHelper.authenticateWithCrypto(
+                cipher = cipher,
+                title = "Connect to Network",
+                subtitle = "Authenticate to enable signing"
+            )
+        }.getOrNull() ?: return false
+
+        val initId = java.util.UUID.randomUUID().toString()
+        keystoreStorage.setPendingCipher(initId, authedCipher)
+        keystoreStorage.setRequestIdContext(initId)
+        return try {
+            withContext(Dispatchers.IO) { app?.ensureInitialized() }
+            true
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
+            false
+        } finally {
+            keystoreStorage.clearRequestIdContext()
+            keystoreStorage.clearPendingCipher(initId)
+        }
     }
 
     private fun mapExceptionToError(e: Throwable): String = when (e) {

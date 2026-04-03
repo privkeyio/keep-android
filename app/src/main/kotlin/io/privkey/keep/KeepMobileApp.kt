@@ -234,6 +234,20 @@ class KeepMobileApp : Application() {
         }
     }
 
+    suspend fun ensureInitialized() {
+        val mobile = keepMobile ?: return
+        if (mobile.getShareInfo() != null) {
+            val nodeReady = runCatching {
+                withContext(Dispatchers.IO) { mobile.getPeers() }
+            }.isSuccess
+            if (nodeReady) return
+        }
+        val relays = getActiveRelays().ifEmpty {
+            listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
+        }
+        withContext(Dispatchers.IO) { initializeConnection(mobile, relays) }
+    }
+
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: return onError("KeepMobile not initialized")
         val store = storage ?: return onError("Storage not available")
