@@ -258,9 +258,7 @@ class Nip55Activity : FragmentActivity() {
             "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> return null
         }
-        val parsedUri = android.net.Uri.parse(uri)
-        val schemeSpecificPart = parsedUri.schemeSpecificPart
-        val uriBody = schemeSpecificPart?.substringBefore('?') ?: ""
+        val uriBody = android.net.Uri.parse(uri).schemeSpecificPart?.substringBefore('?') ?: ""
         val content = if (uriBody.isNotEmpty()) {
             runCatching { URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
         } else {
@@ -281,12 +279,9 @@ class Nip55Activity : FragmentActivity() {
         if (currentUser != null && currentUser.length > MAX_PUBKEY_LENGTH) return null
         if (permissions != null && permissions.length > MAX_CONTENT_LENGTH) return null
 
-        val callbackUrl = extras.getString("callbackUrl")?.let { raw ->
-            if (raw.length > MAX_EXTRA_LENGTH) return@let null
-            val parsed = runCatching { URL(raw) }.getOrNull() ?: return@let null
-            if (parsed.protocol != "https") return@let null
-            raw
-        }
+        val callbackUrl = extras.getString("callbackUrl")
+            ?.takeIf { it.length <= MAX_EXTRA_LENGTH }
+            ?.takeIf { runCatching { URL(it) }.getOrNull()?.protocol == "https" }
 
         return Nip55Request(
             requestType = type,
@@ -319,12 +314,9 @@ class Nip55Activity : FragmentActivity() {
 
         lifecycleScope.launch {
             val currentApp = application as? KeepMobileApp
-            val mobile = currentApp?.getKeepMobile()
-            val nodeNeedsInit = mobile?.getShareInfo() == null ||
-                runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isFailure
 
-            if (nodeNeedsInit && keystoreStorage != null) {
-                if (!initializeNode(keystoreStorage, currentApp)) {
+            if (keystoreStorage != null && currentApp != null) {
+                if (!initializeNodeIfNeeded(keystoreStorage, currentApp)) {
                     finishWithError("Node initialization failed")
                     return@launch
                 }
@@ -402,9 +394,14 @@ class Nip55Activity : FragmentActivity() {
         return true
     }
 
-    private suspend fun initializeNode(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp?): Boolean {
+    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean? {
+        val mobile = app.getKeepMobile() ?: return null
+        val nodeReady = mobile.getShareInfo() != null &&
+            runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
+        if (nodeReady) return false
+
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-            .getOrNull() ?: return false
+            .getOrNull() ?: return null
 
         val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
@@ -412,17 +409,16 @@ class Nip55Activity : FragmentActivity() {
                 title = "Connect to Network",
                 subtitle = "Authenticate to enable signing"
             )
-        }.getOrNull() ?: return false
+        }.getOrNull() ?: return null
 
         val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
         return try {
-            val currentApp = app ?: return false
-            currentApp.ensureInitialized(requestId = initId)
+            app.ensureInitialized(requestId = initId)
             true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
-            false
+            null
         } finally {
             keystoreStorage.clearPendingCipher(initId)
         }

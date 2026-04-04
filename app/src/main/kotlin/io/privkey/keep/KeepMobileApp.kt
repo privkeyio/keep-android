@@ -241,17 +241,15 @@ class KeepMobileApp : Application() {
     suspend fun ensureInitialized(requestId: String? = null) {
         val mobile = keepMobile
             ?: throw IllegalStateException("KeepMobile not initialized")
-        val store = storage
         initMutex.withLock {
-            if (mobile.getShareInfo() != null) {
-                val nodeReady = runCatching {
-                    withContext(Dispatchers.IO) { mobile.getPeers() }
-                }.isSuccess
-                if (nodeReady) return
-            }
+            val alreadyReady = mobile.getShareInfo() != null &&
+                runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
+            if (alreadyReady) return
+
             val relays = getActiveRelays().ifEmpty {
                 listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
             }
+            val store = storage
             withContext(initDispatcher) {
                 if (requestId != null && store != null) {
                     store.setRequestIdContext(requestId)
