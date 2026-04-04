@@ -241,6 +241,7 @@ class Nip55Activity : FragmentActivity() {
             ?: return finishWithError("Invalid request")
 
         request = parsed
+        if (BuildConfig.DEBUG) Log.d(TAG, "Parsed request: type=${parsed.requestType.name}, contentLen=${parsed.content.length}, pubkey=${parsed.pubkey?.take(8)}")
         if (requestId.isNullOrBlank()) {
             requestId = parsed.id
         }
@@ -472,7 +473,9 @@ class Nip55Activity : FragmentActivity() {
             }
         }
 
+        if (BuildConfig.DEBUG) Log.d(TAG, "Returning result for ${req?.requestType?.name} (requestId=${requestId})")
         val resultIntent = Intent().apply {
+            putExtra("signature", response.result)
             putExtra("result", response.result)
             putExtra("package", packageName)
             response.event?.let { putExtra("event", it) }
