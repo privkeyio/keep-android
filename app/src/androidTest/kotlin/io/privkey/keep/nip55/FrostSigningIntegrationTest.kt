@@ -27,11 +27,24 @@ class FrostSigningIntegrationTest {
     private fun ensureShareExists() {
         val mobile = app?.getKeepMobile() ?: return
         val storage = app?.getStorage() ?: return
-        if (storage.hasShare()) return
+
+        if (storage.hasShare()) {
+            val metadata = storage.getShareMetadata()
+            if (metadata != null && metadata.threshold == 2u.toUShort() && metadata.totalShares == 2u.toUShort()) return
+        }
 
         val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", "test")
         val exportData = result.shares.first().exportData
-        mobile.importShare(exportData, "test", "test")
+        val requestId = "test-setup"
+        val cipher = storage.getCipherForEncryption()
+        storage.setRequestIdContext(requestId)
+        storage.setPendingCipher(requestId, cipher)
+        try {
+            mobile.importShare(exportData, "test", "test")
+        } finally {
+            storage.clearRequestIdContext()
+            storage.clearPendingCipher(requestId)
+        }
     }
 
     @Test

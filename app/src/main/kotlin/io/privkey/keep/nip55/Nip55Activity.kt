@@ -28,7 +28,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
-import java.net.URLDecoder
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -100,7 +99,9 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("unknown_caller")
         }
 
-        requestId = intent.getStringExtra("id")?.takeIf { it.length <= MAX_EXTRA_LENGTH }
+        val rawId = intent.getStringExtra("id")
+        if (rawId != null && rawId.length > MAX_EXTRA_LENGTH) return finishWithError("Invalid request")
+        requestId = rawId
         intentUri = intent.data?.let { uri ->
             if (uri.scheme != "nostrsigner") return finishWithError("Invalid URI scheme")
             uri.toString()
@@ -261,7 +262,7 @@ class Nip55Activity : FragmentActivity() {
         }
         val uriBody = android.net.Uri.parse(uri).schemeSpecificPart?.substringBefore('?') ?: ""
         val content = if (uriBody.isNotEmpty()) {
-            runCatching { URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
+            uriBody
         } else {
             extras.getString("data") ?: ""
         }
@@ -278,7 +279,7 @@ class Nip55Activity : FragmentActivity() {
         if (returnType.length > MAX_EXTRA_LENGTH) return null
         if (compressionType.length > MAX_EXTRA_LENGTH) return null
         if (currentUser != null && currentUser.length > MAX_PUBKEY_LENGTH) return null
-        if (permissions != null && permissions.length > MAX_CONTENT_LENGTH) return null
+        if (permissions != null && permissions.length > MAX_EXTRA_LENGTH) return null
 
         val callbackUrl = extras.getString("callbackUrl")
             ?.takeIf { it.length <= MAX_EXTRA_LENGTH }
@@ -326,21 +327,28 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                store?.grantPermission(callerId, req.requestType, eventKind, duration)
-                if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
-                    store?.grantPermission(callerId, req.requestType, null, duration)
-                }
-
-                if (callerPendingFirstUse) {
-                    val sigHash = callerSignatureHash
-                    val verificationStore = callerVerificationStore
-                    if (sigHash != null && verificationStore != null) {
-                        verificationStore.trustPackage(callerId, sigHash)
-                        callerPendingFirstUse = false
-                        callerVerified = true
-                    } else {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                val permResult = runCatching {
+                    store?.grantPermission(callerId, req.requestType, eventKind, duration)
+                    if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+                        store?.grantPermission(callerId, req.requestType, null, duration)
                     }
+
+                    if (callerPendingFirstUse) {
+                        val sigHash = callerSignatureHash
+                        val verificationStore = callerVerificationStore
+                        if (sigHash != null && verificationStore != null) {
+                            verificationStore.trustPackage(callerId, sigHash)
+                            callerPendingFirstUse = false
+                            callerVerified = true
+                        } else {
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                        }
+                    }
+                }
+                if (permResult.isFailure) {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
+                    finishWithError("request_failed")
+                    return@launch
                 }
 
                 withContext(signingDispatcher) {
