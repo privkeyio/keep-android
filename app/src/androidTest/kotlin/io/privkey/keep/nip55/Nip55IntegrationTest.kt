@@ -308,6 +308,7 @@ class Nip55IntegrationTest {
 
     @Test
     fun contentProvider_allAuthorities_areDeclared() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val expectedAuthorities = listOf(
             "io.privkey.keep.GET_PUBLIC_KEY",
             "io.privkey.keep.SIGN_EVENT",
@@ -318,8 +319,8 @@ class Nip55IntegrationTest {
             "io.privkey.keep.DECRYPT_ZAP_EVENT"
         )
         for (authority in expectedAuthorities) {
-            val uri = Uri.parse("content://$authority")
-            assertNotNull("Authority $authority should parse", uri.authority)
+            val providerInfo = context.packageManager.resolveContentProvider(authority, 0)
+            assertNotNull("Content provider for authority $authority should be registered", providerInfo)
         }
     }
 
@@ -328,9 +329,10 @@ class Nip55IntegrationTest {
     @Test
     fun rateLimiter_allowsNormalRequests() {
         val limiter = RateLimiter()
-        for (i in 1..5) {
+        for (i in 1..limiter.maxRequests) {
             assertTrue("Request $i should be allowed", limiter.checkRateLimit("com.test.app"))
         }
+        assertFalse("Request beyond maxRequests should be rejected", limiter.checkRateLimit("com.test.app"))
     }
 
     // --- Risk Assessment Integration ---

@@ -316,7 +316,7 @@ class Nip55Activity : FragmentActivity() {
         lifecycleScope.launch {
             val currentApp = application as? KeepMobileApp
 
-            if (keystoreStorage != null && currentApp != null) {
+            if (keystoreStorage != null && currentApp != null && req.requestType != Nip55RequestType.GET_PUBLIC_KEY) {
                 if (!initializeNodeIfNeeded(keystoreStorage, currentApp)) {
                     finishWithError("Node initialization failed")
                     return@launch

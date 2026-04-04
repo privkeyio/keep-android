@@ -29,7 +29,7 @@ class FrostSigningIntegrationTest {
         val storage = app?.getStorage() ?: return
         if (storage.hasShare()) return
 
-        val result = mobile.frostGenerate(1u.toUShort(), 1u.toUShort(), "test", "test")
+        val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", "test")
         val exportData = result.shares.first().exportData
         mobile.importShare(exportData, "test", "test")
     }
@@ -60,25 +60,25 @@ class FrostSigningIntegrationTest {
         assertNotNull("Share metadata should be readable", metadata)
 
         assertTrue("Identifier should be positive", metadata!!.identifier > 0u.toUShort())
-        assertTrue("Threshold should be >= 1", metadata.threshold >= 1u.toUShort())
+        assertTrue("Threshold should be >= 2", metadata.threshold >= 2u.toUShort())
         assertTrue("Total shares should be >= threshold", metadata.totalShares >= metadata.threshold)
         assertTrue("Group pubkey should not be empty", metadata.groupPubkey.isNotEmpty())
     }
 
     @Test
-    fun shareMetadata_singleParticipant_hasThreshold1() {
+    fun shareMetadata_hasExpectedThresholdAndTotal() {
         val storage = app!!.getStorage()
         val metadata = storage?.getShareMetadata()
         assertNotNull("Share metadata should be present", metadata)
 
         assertEquals(
-            "Single-participant FROST should have threshold=1",
-            1u.toUShort(),
+            "FROST threshold should be 2",
+            2u.toUShort(),
             metadata!!.threshold
         )
         assertEquals(
-            "Single-participant FROST should have totalShares=1",
-            1u.toUShort(),
+            "FROST totalShares should be 2",
+            2u.toUShort(),
             metadata.totalShares
         )
     }
@@ -107,9 +107,9 @@ class FrostSigningIntegrationTest {
 
     @Test
     fun nip55Handler_getPublicKey_returnsValidPubkey() {
-        val handler = app!!.getNip55Handler() ?: return
-        val mobile = app!!.getKeepMobile() ?: return
-        val shareInfo = mobile.getShareInfo() ?: return
+        val handler = requireNotNull(app!!.getNip55Handler()) { "Nip55Handler must not be null" }
+        val mobile = requireNotNull(app!!.getKeepMobile()) { "KeepMobile must not be null" }
+        val shareInfo = requireNotNull(mobile.getShareInfo()) { "ShareInfo must not be null" }
 
         val request = Nip55Request(
             requestType = Nip55RequestType.GET_PUBLIC_KEY,
@@ -132,9 +132,9 @@ class FrostSigningIntegrationTest {
 
     @Test
     fun nip55Handler_getPublicKey_matchesStoredMetadata() {
-        val handler = app!!.getNip55Handler() ?: return
-        val storage = app!!.getStorage() ?: return
-        val metadata = storage.getShareMetadata() ?: return
+        val handler = requireNotNull(app!!.getNip55Handler()) { "Nip55Handler must not be null" }
+        val storage = requireNotNull(app!!.getStorage()) { "Storage must not be null" }
+        val metadata = requireNotNull(storage.getShareMetadata()) { "ShareMetadata must not be null" }
 
         val request = Nip55Request(
             requestType = Nip55RequestType.GET_PUBLIC_KEY,
