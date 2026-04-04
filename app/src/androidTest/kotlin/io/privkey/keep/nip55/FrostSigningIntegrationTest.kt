@@ -21,6 +21,17 @@ class FrostSigningIntegrationTest {
     fun setup() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         app = context.applicationContext as? KeepMobileApp
+        ensureShareExists()
+    }
+
+    private fun ensureShareExists() {
+        val mobile = app?.getKeepMobile() ?: return
+        val storage = app?.getStorage() ?: return
+        if (storage.hasShare()) return
+
+        val result = mobile.frostGenerate(1u.toUShort(), 1u.toUShort(), "test", "test")
+        val exportData = result.shares.first().exportData
+        mobile.importShare(exportData, "test", "test")
     }
 
     @Test
