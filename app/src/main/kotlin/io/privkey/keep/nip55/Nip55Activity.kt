@@ -394,14 +394,14 @@ class Nip55Activity : FragmentActivity() {
         return true
     }
 
-    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean? {
-        val mobile = app.getKeepMobile() ?: return null
+    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean {
+        val mobile = app.getKeepMobile() ?: return false
         val nodeReady = mobile.getShareInfo() != null &&
             runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
-        if (nodeReady) return false
+        if (nodeReady) return true
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-            .getOrNull() ?: return null
+            .getOrNull() ?: return false
 
         val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
@@ -409,7 +409,7 @@ class Nip55Activity : FragmentActivity() {
                 title = "Connect to Network",
                 subtitle = "Authenticate to enable signing"
             )
-        }.getOrNull() ?: return null
+        }.getOrNull() ?: return false
 
         val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
@@ -418,7 +418,7 @@ class Nip55Activity : FragmentActivity() {
             true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
-            null
+            false
         } finally {
             keystoreStorage.clearPendingCipher(initId)
         }
