@@ -52,10 +52,9 @@ class Nip55Activity : FragmentActivity() {
     private var isNotificationOriginated: Boolean = false
     private var riskAssessment: RiskAssessment? = null
 
-    private val signingDispatcher = Dispatchers.Default.limitedParallelism(1)
-
     companion object {
         private const val TAG = "Nip55Activity"
+        private val signingDispatcher = Dispatchers.Default.limitedParallelism(1)
         private const val GENERIC_ERROR_MESSAGE = "An error occurred"
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val MAX_PUBKEY_LENGTH = 128
@@ -235,7 +234,7 @@ class Nip55Activity : FragmentActivity() {
         val h = handler ?: return finishWithError("Handler not initialized")
 
         val parsed = runCatching { h.parseIntentUri(uri) }.getOrNull()
-            ?: parseRequestFromExtras(intent, uri)
+            ?: (if (uri.startsWith("nostrsigner:")) parseRequestFromExtras(intent, uri) else null)
             ?: return finishWithError("Invalid request")
 
         request = parsed
@@ -321,7 +320,10 @@ class Nip55Activity : FragmentActivity() {
 
             var alreadyAuthenticated = false
             if (nodeNeedsInit && keystoreStorage != null) {
-                if (!initializeNode(keystoreStorage, currentApp)) return@launch
+                if (!initializeNode(keystoreStorage, currentApp)) {
+                    finishWithError("Node initialization failed")
+                    return@launch
+                }
                 alreadyAuthenticated = true
             }
 
