@@ -100,8 +100,11 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("unknown_caller")
         }
 
-        requestId = intent.getStringExtra("id")
-        intentUri = intent.data?.toString()
+        requestId = intent.getStringExtra("id")?.takeIf { it.length <= MAX_EXTRA_LENGTH }
+        intentUri = intent.data?.let { uri ->
+            if (uri.scheme != "nostrsigner") return finishWithError("Invalid URI scheme")
+            uri.toString()
+        }
         parseAndSetRequest(intent)
         if (request != null) {
             showNotification()
@@ -255,7 +258,9 @@ class Nip55Activity : FragmentActivity() {
             "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> return null
         }
-        val uriBody = uri.removePrefix("nostrsigner:")
+        val parsedUri = android.net.Uri.parse(uri)
+        val schemeSpecificPart = parsedUri.schemeSpecificPart
+        val uriBody = schemeSpecificPart?.substringBefore('?') ?: ""
         val content = if (uriBody.isNotEmpty()) {
             runCatching { URLDecoder.decode(uriBody, "UTF-8") }.getOrNull() ?: return null
         } else {
@@ -290,7 +295,7 @@ class Nip55Activity : FragmentActivity() {
             returnType = returnType,
             compressionType = compressionType,
             callbackUrl = callbackUrl,
-            id = extras.getString("id"),
+            id = extras.getString("id")?.takeIf { it.length <= MAX_EXTRA_LENGTH },
             currentUser = currentUser,
             permissions = permissions
         )
@@ -398,6 +403,12 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private suspend fun initializeNode(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp?): Boolean {
+        val mobile = app?.getKeepMobile()
+        if (mobile?.getShareInfo() != null) {
+            val alreadyReady = runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
+            if (alreadyReady) return true
+        }
+
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
             .getOrNull() ?: return false
 
@@ -412,14 +423,7 @@ class Nip55Activity : FragmentActivity() {
         val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
         return try {
-            withContext(Dispatchers.IO) {
-                keystoreStorage.setRequestIdContext(initId)
-                try {
-                    app?.ensureInitialized()
-                } finally {
-                    keystoreStorage.clearRequestIdContext()
-                }
-            }
+            app?.ensureInitialized(requestId = initId)
             true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")

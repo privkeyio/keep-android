@@ -237,8 +237,10 @@ class KeepMobileApp : Application() {
         }
     }
 
-    suspend fun ensureInitialized() {
-        val mobile = keepMobile ?: return
+    suspend fun ensureInitialized(requestId: String? = null) {
+        val mobile = keepMobile
+            ?: throw IllegalStateException("KeepMobile not initialized")
+        val store = storage
         initMutex.withLock {
             if (mobile.getShareInfo() != null) {
                 val nodeReady = runCatching {
@@ -249,7 +251,18 @@ class KeepMobileApp : Application() {
             val relays = getActiveRelays().ifEmpty {
                 listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
             }
-            withContext(Dispatchers.IO) { initializeConnection(mobile, relays) }
+            withContext(Dispatchers.IO) {
+                if (requestId != null && store != null) {
+                    store.setRequestIdContext(requestId)
+                }
+                try {
+                    initializeConnection(mobile, relays)
+                } finally {
+                    if (requestId != null && store != null) {
+                        store.clearRequestIdContext()
+                    }
+                }
+            }
         }
     }
 
@@ -293,8 +306,6 @@ class KeepMobileApp : Application() {
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
-            val shareInfo = mobile.getShareInfo()
-            Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, hasGroup=${shareInfo?.groupPubkey != null}")
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
         }
         if (proxyConfig != null && proxyConfig.enabled && proxyConfig.port.toInt() in 1..65535) {
