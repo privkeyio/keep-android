@@ -305,14 +305,17 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (decision == PermissionDecision.ALLOW) {
-            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType, precomputedHasSignedKindBefore, precomputedAppAgeMs) }
-            if (risk == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
-                return null
-            }
-            if (risk.requiredAuth != AuthLevel.NONE) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for ${hashPackageName(callerPackage)}: score=${risk.score}, auth=${risk.requiredAuth}")
-                return null
+            val isSensitive = eventKind != null && isSensitiveKind(eventKind)
+            if (isSensitive) {
+                val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType, precomputedHasSignedKindBefore, precomputedAppAgeMs) }
+                if (risk == null) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
+                    return null
+                }
+                if (risk.requiredAuth.atLeast(AuthLevel.EXPLICIT)) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for ${hashPackageName(callerPackage)}: score=${risk.score}, auth=${risk.requiredAuth}")
+                    return null
+                }
             }
         }
 

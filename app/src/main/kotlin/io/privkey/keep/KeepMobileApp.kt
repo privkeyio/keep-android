@@ -242,9 +242,7 @@ class KeepMobileApp : Application() {
         val mobile = keepMobile
             ?: throw IllegalStateException("KeepMobile not initialized")
         initMutex.withLock {
-            val alreadyReady = mobile.getShareInfo() != null &&
-                runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
-            if (alreadyReady) return
+            if (liveState != null && mobile.getShareInfo() != null) return
 
             val relays = getActiveRelays().ifEmpty {
                 listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")

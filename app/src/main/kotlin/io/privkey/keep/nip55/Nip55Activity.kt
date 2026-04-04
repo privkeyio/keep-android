@@ -327,6 +327,18 @@ class Nip55Activity : FragmentActivity() {
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
 
+                if (callerPendingFirstUse) {
+                    val sigHash = callerSignatureHash
+                    val verificationStore = callerVerificationStore
+                    if (sigHash != null && verificationStore != null) {
+                        verificationStore.trustPackage(callerId, sigHash)
+                        callerPendingFirstUse = false
+                        callerVerified = true
+                    } else {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                    }
+                }
+
                 withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
@@ -336,17 +348,6 @@ class Nip55Activity : FragmentActivity() {
                     }
                 }
                     .onSuccess { response ->
-                        if (callerPendingFirstUse) {
-                            val sigHash = callerSignatureHash
-                            val verificationStore = callerVerificationStore
-                            if (sigHash != null && verificationStore != null) {
-                                verificationStore.trustPackage(callerId, sigHash)
-                                callerPendingFirstUse = false
-                                callerVerified = true
-                            } else {
-                                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
-                            }
-                        }
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)
                     }
@@ -396,9 +397,9 @@ class Nip55Activity : FragmentActivity() {
 
     private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean {
         val mobile = app.getKeepMobile() ?: return false
-        val nodeReady = mobile.getShareInfo() != null &&
-            runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
-        if (nodeReady) return true
+        if (!mobile.hasShare()) return false
+
+        if (app.liveState != null) return true
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
             .getOrNull() ?: return false
