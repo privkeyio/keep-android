@@ -318,16 +318,14 @@ class Nip55Activity : FragmentActivity() {
             val nodeNeedsInit = mobile?.getShareInfo() == null ||
                 runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isFailure
 
-            var alreadyAuthenticated = false
             if (nodeNeedsInit && keystoreStorage != null) {
                 if (!initializeNode(keystoreStorage, currentApp)) {
                     finishWithError("Node initialization failed")
                     return@launch
                 }
-                alreadyAuthenticated = true
             }
 
-            if (needsBiometric && !alreadyAuthenticated && !authenticateForRequest(keystoreStorage, req)) return@launch
+            if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
