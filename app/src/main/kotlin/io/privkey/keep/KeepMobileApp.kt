@@ -67,6 +67,7 @@ class KeepMobileApp : Application() {
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
     private val initMutex = Mutex()
+    private val initDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -251,7 +252,7 @@ class KeepMobileApp : Application() {
             val relays = getActiveRelays().ifEmpty {
                 listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
             }
-            withContext(Dispatchers.IO) {
+            withContext(initDispatcher) {
                 if (requestId != null && store != null) {
                     store.setRequestIdContext(requestId)
                 }

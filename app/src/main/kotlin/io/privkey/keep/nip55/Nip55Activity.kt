@@ -403,12 +403,6 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private suspend fun initializeNode(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp?): Boolean {
-        val mobile = app?.getKeepMobile()
-        if (mobile?.getShareInfo() != null) {
-            val alreadyReady = runCatching { withContext(Dispatchers.IO) { mobile.getPeers() } }.isSuccess
-            if (alreadyReady) return true
-        }
-
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
             .getOrNull() ?: return false
 
@@ -423,7 +417,8 @@ class Nip55Activity : FragmentActivity() {
         val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
         return try {
-            app?.ensureInitialized(requestId = initId)
+            val currentApp = app ?: return false
+            currentApp.ensureInitialized(requestId = initId)
             true
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
