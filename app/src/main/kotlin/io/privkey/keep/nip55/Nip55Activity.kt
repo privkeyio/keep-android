@@ -326,6 +326,9 @@ class Nip55Activity : FragmentActivity() {
 
             try {
                 store?.grantPermission(callerId, req.requestType, eventKind, duration)
+                if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+                    store?.grantPermission(callerId, req.requestType, null, duration)
+                }
 
                 if (callerPendingFirstUse) {
                     val sigHash = callerSignatureHash
