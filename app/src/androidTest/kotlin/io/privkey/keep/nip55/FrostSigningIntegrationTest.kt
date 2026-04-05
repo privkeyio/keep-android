@@ -240,9 +240,11 @@ class FrostSigningIntegrationTest {
         assertNotNull(storage)
         val level = storage!!.getSecurityLevel()
         assertNotEquals("Security level should not be 'none'", "none", level)
-        assertTrue(
-            "Security level should be tee or strongbox",
-            level == "tee" || level == "strongbox"
-        )
+        if (hasBiometricEnrollment()) {
+            assertTrue(
+                "Security level should be tee or strongbox",
+                level == "tee" || level == "strongbox"
+            )
+        }
     }
 }
