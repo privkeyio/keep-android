@@ -208,7 +208,7 @@ internal class AccountActions(
                     Toast.makeText(appContext, "Failed to rename account", Toast.LENGTH_SHORT).show()
                 }
             } finally {
-                refreshAccountState()
+                runCatching { refreshAccountState() }
             }
         }
     }

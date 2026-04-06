@@ -555,6 +555,7 @@ class AndroidKeystoreStorage(
         return fallbackKey
     }
 
+    @Synchronized
     override fun setActiveShareKey(key: String?) {
         if (key != null) require(key.isNotBlank()) { "Active share key must not be blank" }
         val editor = multiSharePrefs.edit()
