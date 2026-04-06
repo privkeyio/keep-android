@@ -307,9 +307,6 @@ class Nip55ContentProvider : ContentProvider() {
             return rejectedCursor(null)
         }
 
-        if (decision == PermissionDecision.ALLOW) {
-        }
-
         return when (decision) {
             PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
             PermissionDecision.DENY -> {
