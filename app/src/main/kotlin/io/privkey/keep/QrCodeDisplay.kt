@@ -323,6 +323,11 @@ private object ClipboardClearManager {
     }
 }
 
+internal fun copyPublicText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText("", text))
+}
+
 internal fun copySensitiveText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     val clip = ClipData.newPlainText("", text)

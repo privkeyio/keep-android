@@ -103,6 +103,8 @@ internal class AccountActions(
                             onDismiss()
                         }
                     }
+                } else {
+                    onDismiss()
                 }
             }
         }
@@ -127,8 +129,11 @@ internal class AccountActions(
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(appContext, "Failed to delete account", Toast.LENGTH_SHORT).show()
                             }
+                            onDismiss()
                         }
                     }
+                } else {
+                    onDismiss()
                 }
             }
         }
@@ -139,7 +144,7 @@ internal class AccountActions(
         val wasActive = account.groupPubkeyHex == activeAccountKey
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)
-            keepMobile.deleteRelayConfig(account.groupPubkeyHex)
+            runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
         }
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }

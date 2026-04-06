@@ -116,7 +116,7 @@ fun AccountSwitcherSheet(
                     if (isOnlyAccount) {
                         Text("You cannot delete your only account. Import another account first before removing this one.")
                     } else {
-                        Text("This will permanently delete \"${target.name}\" and its FROST share from this device.")
+                        Text("This will permanently delete \"${target.name}\" and its ${if (target.isNsecKey) "nsec key" else "FROST share"} from this device.")
                         if (isActive) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -174,7 +174,7 @@ private fun RenameAccountDialog(
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = { if (it.length <= 64) name = it },
                 label = { Text("Account name") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
@@ -257,7 +257,7 @@ private fun AccountRow(
         IconButton(onClick = {
             val npub = hexToNpub(account.groupPubkeyHex)
             if (npub != null) {
-                copySensitiveText(context, npub)
+                copyPublicText(context, npub)
                 Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
             }
         }) {

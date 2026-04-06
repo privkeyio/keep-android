@@ -538,13 +538,7 @@ class AndroidKeystoreStorage(
     }
 
     override fun getActiveShareKey(): String? {
-        val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
-        if (active != null) return active
-
-        val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        val fallback = keys.firstOrNull() ?: return null
-        multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, fallback).commit()
-        return fallback
+        return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
     }
 
     override fun setActiveShareKey(key: String?) {
