@@ -37,6 +37,21 @@ val AccountInfo.isNsecKey: Boolean
 val AccountInfo.typeBadgeText: String
     get() = if (isNsecKey) "nsec" else "FROST Share"
 
+@Composable
+fun AccountTypeBadge(isNsec: Boolean) {
+    Badge(
+        containerColor = if (isNsec)
+            MaterialTheme.colorScheme.tertiary
+        else
+            MaterialTheme.colorScheme.secondary
+    ) {
+        Text(
+            if (isNsec) "nsec" else "FROST Share",
+            modifier = Modifier.padding(horizontal = 2.dp)
+        )
+    }
+}
+
 internal fun ShareMetadataInfo.toAccountInfo() = AccountInfo(
     groupPubkeyHex = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) },
     name = name,
@@ -238,14 +253,7 @@ private fun AccountRow(
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(modifier = Modifier.height(2.dp))
-            Badge(
-                containerColor = if (account.isNsecKey) colors.tertiary else colors.secondary
-            ) {
-                Text(
-                    account.typeBadgeText,
-                    modifier = Modifier.padding(horizontal = 2.dp)
-                )
-            }
+            AccountTypeBadge(isNsec = account.isNsecKey)
             Spacer(modifier = Modifier.height(2.dp))
             if (!account.isNsecKey) {
                 Text(

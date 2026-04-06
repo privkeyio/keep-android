@@ -49,17 +49,7 @@ fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(info.name, style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(4.dp))
-            Badge(
-                containerColor = if (isNsec)
-                    MaterialTheme.colorScheme.tertiary
-                else
-                    MaterialTheme.colorScheme.secondary
-            ) {
-                Text(
-                    if (isNsec) "nsec" else "FROST Share",
-                    modifier = Modifier.padding(horizontal = 2.dp)
-                )
-            }
+            AccountTypeBadge(isNsec = isNsec)
             Spacer(modifier = Modifier.height(8.dp))
             if (!isNsec) {
                 Text("Share ${info.shareIndex} of ${info.totalShares}")

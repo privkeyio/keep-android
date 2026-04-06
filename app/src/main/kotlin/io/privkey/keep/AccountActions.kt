@@ -72,39 +72,24 @@ internal class AccountActions(
         onStateChanged(result)
     }
 
-    fun switchAccount(account: AccountInfo, onDismiss: () -> Unit) {
+    private fun withBiometricAuth(
+        accountKey: String,
+        title: String,
+        subtitle: String,
+        onDismiss: () -> Unit,
+        action: suspend (Cipher) -> Unit
+    ) {
         coroutineScope.launch {
             val cipher = withContext(Dispatchers.IO) {
-                runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
+                runCatching { storage.getCipherForShareDecryption(accountKey) }.getOrNull()
             }
             if (cipher == null) {
                 onDismiss()
                 return@launch
             }
-            onBiometricRequest("Switch Account", "Authenticate to switch", cipher) { authedCipher ->
+            onBiometricRequest(title, subtitle, cipher) { authedCipher ->
                 if (authedCipher != null) {
-                    coroutineScope.launch {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                val currentKey = storage.getActiveShareKey()
-                                if (currentKey != null) {
-                                    val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
-                                        ?: EMPTY_RELAY_CONFIG
-                                    keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
-                                }
-                            }
-                            activateShare(authedCipher, account.groupPubkeyHex)
-                            onAccountSwitched()
-                            refreshAccountState()
-                            onDismiss()
-                        } catch (e: Exception) {
-                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Switch failed: ${e::class.simpleName}")
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(appContext, "Failed to switch account", Toast.LENGTH_SHORT).show()
-                            }
-                            onDismiss()
-                        }
-                    }
+                    coroutineScope.launch { action(authedCipher) }
                 } else {
                     onDismiss()
                 }
@@ -112,31 +97,42 @@ internal class AccountActions(
         }
     }
 
-    fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
-        coroutineScope.launch {
-            val cipher = withContext(Dispatchers.IO) {
-                runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
-            }
-            if (cipher == null) {
-                onDismiss()
-                return@launch
-            }
-            onBiometricRequest("Delete Account", "Authenticate to delete account", cipher) { authedCipher ->
-                if (authedCipher != null) {
-                    coroutineScope.launch {
-                        try {
-                            performDelete(account, onDismiss)
-                        } catch (e: Exception) {
-                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Delete failed: ${e::class.simpleName}")
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(appContext, "Failed to delete account", Toast.LENGTH_SHORT).show()
-                            }
-                            onDismiss()
-                        }
+    private fun logAndToast(tag: String, message: String, e: Exception) {
+        if (BuildConfig.DEBUG) Log.e("AccountActions", "$tag: ${e::class.simpleName}")
+        coroutineScope.launch(Dispatchers.Main) {
+            Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun switchAccount(account: AccountInfo, onDismiss: () -> Unit) {
+        withBiometricAuth(account.groupPubkeyHex, "Switch Account", "Authenticate to switch", onDismiss) { authedCipher ->
+            try {
+                withContext(Dispatchers.IO) {
+                    val currentKey = storage.getActiveShareKey()
+                    if (currentKey != null) {
+                        val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
+                            ?: EMPTY_RELAY_CONFIG
+                        keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
                     }
-                } else {
-                    onDismiss()
                 }
+                activateShare(authedCipher, account.groupPubkeyHex)
+                onAccountSwitched()
+                refreshAccountState()
+            } catch (e: Exception) {
+                logAndToast("Switch failed", "Failed to switch account", e)
+            } finally {
+                onDismiss()
+            }
+        }
+    }
+
+    fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
+        withBiometricAuth(account.groupPubkeyHex, "Delete Account", "Authenticate to delete account", onDismiss) {
+            try {
+                performDelete(account, onDismiss)
+            } catch (e: Exception) {
+                logAndToast("Delete failed", "Failed to delete account", e)
+                onDismiss()
             }
         }
     }
@@ -203,10 +199,7 @@ internal class AccountActions(
                     storage.renameShare(account.groupPubkeyHex, newName)
                 }
             } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("AccountActions", "Rename failed: ${e::class.simpleName}")
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "Failed to rename account", Toast.LENGTH_SHORT).show()
-                }
+                logAndToast("Rename failed", "Failed to rename account", e)
             } finally {
                 runCatching { refreshAccountState() }
             }
