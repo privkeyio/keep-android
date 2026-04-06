@@ -263,6 +263,8 @@ private fun AccountRow(
             if (npub != null) {
                 copyPublicText(context, npub)
                 Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Failed to copy npub", Toast.LENGTH_SHORT).show()
             }
         }) {
             Icon(
