@@ -130,14 +130,17 @@ fun AccountSwitcherSheet(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (!isOnlyAccount) {
-                            onDeleteAccount(target)
-                            deleteTarget = null
-                        }
+                        onDeleteAccount(target)
+                        deleteTarget = null
                     },
                     enabled = !isOnlyAccount
                 ) {
-                    Text("Delete", color = if (isOnlyAccount) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.error)
+                    val color = if (isOnlyAccount) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                    Text("Delete", color = color)
                 }
             },
             dismissButton = {
@@ -167,6 +170,7 @@ private fun RenameAccountDialog(
     onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf(currentName) }
+    val trimmedName = name.trim()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -182,8 +186,8 @@ private fun RenameAccountDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(name.trim()) },
-                enabled = name.trim().isNotBlank()
+                onClick = { onConfirm(trimmedName) },
+                enabled = trimmedName.isNotBlank()
             ) {
                 Text("Save")
             }

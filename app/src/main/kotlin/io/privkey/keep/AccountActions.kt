@@ -15,6 +15,8 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.crypto.Cipher
 
+private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), emptyList())
+
 internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
@@ -64,7 +66,7 @@ internal class AccountActions(
             val activeKey = storage.getActiveShareKey()
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
-                ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+                ?: EMPTY_RELAY_CONFIG
             AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays)
         }
         onStateChanged(result)
@@ -87,7 +89,7 @@ internal class AccountActions(
                                 val currentKey = storage.getActiveShareKey()
                                 if (currentKey != null) {
                                     val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
-                                        ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+                                        ?: EMPTY_RELAY_CONFIG
                                     keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
                                 }
                             }
@@ -145,6 +147,7 @@ internal class AccountActions(
         withContext(Dispatchers.IO) {
             keepMobile.deleteShareByKey(account.groupPubkeyHex)
             runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
+                .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
         }
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }
