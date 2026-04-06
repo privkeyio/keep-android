@@ -28,8 +28,11 @@ data class AccountInfo(
     val totalShares: UShort
 )
 
+fun isNsecKey(shareIndex: UShort, threshold: UShort, totalShares: UShort): Boolean =
+    shareIndex == 1.toUShort() && threshold == 1.toUShort() && totalShares == 1.toUShort()
+
 val AccountInfo.isNsecKey: Boolean
-    get() = shareIndex == 1.toUShort() && threshold == 1.toUShort() && totalShares == 1.toUShort()
+    get() = isNsecKey(shareIndex, threshold, totalShares)
 
 val AccountInfo.typeBadgeText: String
     get() = if (isNsecKey) "nsec" else "FROST Share"
@@ -187,7 +190,7 @@ private fun RenameAccountDialog(
         confirmButton = {
             TextButton(
                 onClick = { onConfirm(trimmedName) },
-                enabled = trimmedName.isNotBlank()
+                enabled = trimmedName.isNotBlank() && trimmedName != currentName.trim()
             ) {
                 Text("Save")
             }

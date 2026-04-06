@@ -40,9 +40,7 @@ fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
-    val isNsec = info.shareIndex == 1.toUShort() &&
-        info.threshold == 1.toUShort() &&
-        info.totalShares == 1.toUShort()
+    val isNsec = isNsecKey(info.shareIndex, info.threshold, info.totalShares)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
