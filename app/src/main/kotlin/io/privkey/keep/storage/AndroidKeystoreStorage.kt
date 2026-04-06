@@ -141,8 +141,11 @@ class AndroidKeystoreStorage(
     fun getCipherForEncryption(): Cipher = initCipher(Cipher.ENCRYPT_MODE, null)
 
     fun getCipherForDecryption(): Cipher? {
-        val iv = prefs.getString(KEY_SHARE_IV, null)
-        if (iv != null) return initCipher(Cipher.DECRYPT_MODE, iv)
+        val legacyIv = prefs.getString(KEY_SHARE_IV, null)
+        val legacyData = prefs.getString(KEY_SHARE_DATA, null)
+        if (legacyIv != null && legacyData != null) {
+            return initCipher(Cipher.DECRYPT_MODE, legacyIv)
+        }
 
         val activeKey = getActiveShareKey() ?: return null
         return getCipherForShareDecryption(activeKey)
@@ -184,9 +187,13 @@ class AndroidKeystoreStorage(
     }
 
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
-        val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
-            ?: getActiveShareKey()?.let { getSharePrefs(it).getString(KEY_SHARE_DATA, null) }
-            ?: throw KeepMobileException.StorageException("No share stored")
+        val legacyIv = prefs.getString(KEY_SHARE_IV, null)
+        val legacyData = prefs.getString(KEY_SHARE_DATA, null)
+        val encryptedData = if (legacyIv != null && legacyData != null) {
+            legacyData
+        } else {
+            getActiveShareKey()?.let { getSharePrefs(it).getString(KEY_SHARE_DATA, null) }
+        } ?: throw KeepMobileException.StorageException("No share stored")
         return decryptWithCipher(cipher, encryptedData)
     }
 
