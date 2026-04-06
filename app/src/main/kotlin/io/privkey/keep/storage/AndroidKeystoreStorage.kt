@@ -476,6 +476,26 @@ class AndroidKeystoreStorage(
         return keys.mapNotNull(::getShareMetadataByKey)
     }
 
+    @Synchronized
+    fun renameShare(key: String, newName: String) {
+        require(key.isNotBlank()) { "Share key must not be blank" }
+        val sanitized = newName.trim()
+        if (sanitized.isBlank()) {
+            throw KeepMobileException.StorageException("Share name must not be blank")
+        }
+        if (sanitized.length > 64) {
+            throw KeepMobileException.StorageException("Share name must not exceed 64 characters")
+        }
+        val sharePrefs = getSharePrefs(key)
+        if (!sharePrefs.contains(KEY_SHARE_DATA)) {
+            throw KeepMobileException.StorageException("No share stored for key: $key")
+        }
+        val saved = sharePrefs.edit().putString(KEY_SHARE_NAME, sanitized).commit()
+        if (!saved) {
+            throw KeepMobileException.StorageException("Failed to rename share")
+        }
+    }
+
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return null
@@ -524,10 +544,20 @@ class AndroidKeystoreStorage(
         }
     }
 
+    @Synchronized
     override fun getActiveShareKey(): String? {
-        return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
+        val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        if (keys.isEmpty()) return null
+        val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
+        if (active != null && keys.contains(active) &&
+            getSharePrefs(active).contains(KEY_SHARE_DATA)) return active
+        val fallbackKey = keys.sorted().firstOrNull { getSharePrefs(it).contains(KEY_SHARE_DATA) }
+            ?: return null
+        setActiveShareKey(fallbackKey)
+        return fallbackKey
     }
 
+    @Synchronized
     override fun setActiveShareKey(key: String?) {
         if (key != null) require(key.isNotBlank()) { "Active share key must not be blank" }
         val editor = multiSharePrefs.edit()

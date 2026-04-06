@@ -606,6 +606,9 @@ fun MainScreen(
             onDeleteAccount = { account ->
                 accountActions.deleteAccount(account) { showAccountSwitcher = false }
             },
+            onRenameAccount = { account, newName ->
+                accountActions.renameAccount(account, newName)
+            },
             onImportAccount = {
                 showAccountSwitcher = false
                 showImportScreen = true
