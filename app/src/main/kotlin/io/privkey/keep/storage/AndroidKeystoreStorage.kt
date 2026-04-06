@@ -479,17 +479,18 @@ class AndroidKeystoreStorage(
     @Synchronized
     fun renameShare(key: String, newName: String) {
         require(key.isNotBlank()) { "Share key must not be blank" }
-        if (newName.isBlank()) {
+        val sanitized = newName.trim()
+        if (sanitized.isBlank()) {
             throw KeepMobileException.StorageException("Share name must not be blank")
         }
-        if (newName.length > 64) {
+        if (sanitized.length > 64) {
             throw KeepMobileException.StorageException("Share name must not exceed 64 characters")
         }
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) {
             throw KeepMobileException.StorageException("No share stored for key: $key")
         }
-        val saved = sharePrefs.edit().putString(KEY_SHARE_NAME, newName).commit()
+        val saved = sharePrefs.edit().putString(KEY_SHARE_NAME, sanitized).commit()
         if (!saved) {
             throw KeepMobileException.StorageException("Failed to rename share")
         }
@@ -543,12 +544,15 @@ class AndroidKeystoreStorage(
         }
     }
 
+    @Synchronized
     override fun getActiveShareKey(): String? {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         if (keys.isEmpty()) return null
         val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
         if (active != null && keys.contains(active)) return active
-        return keys.minOrNull()
+        val fallbackKey = keys.minOrNull() ?: return null
+        setActiveShareKey(fallbackKey)
+        return fallbackKey
     }
 
     override fun setActiveShareKey(key: String?) {
