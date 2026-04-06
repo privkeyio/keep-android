@@ -53,7 +53,10 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val BACKGROUND_SIGNING_CHANNEL_ID = "background_signing"
 
-        private val RESULT_COLUMNS = arrayOf("result", "event", "error", "id", "pubkey", "rejected")
+        private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
+        private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
+        private val REJECTED_COLUMNS = arrayOf("rejected")
+        private val ERROR_COLUMNS = arrayOf("error")
 
         private fun hashPackageName(pkg: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(pkg.toByteArray(Charsets.UTF_8))
@@ -304,18 +307,6 @@ class Nip55ContentProvider : ContentProvider() {
             return rejectedCursor(null)
         }
 
-        if (decision == PermissionDecision.ALLOW) {
-            val risk = runWithTimeout { store.riskAssessor.assess(callerPackage, eventKind, requestType, precomputedHasSignedKindBefore, precomputedAppAgeMs) }
-            if (risk == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Risk assessment timed out for ${hashPackageName(callerPackage)}, falling back to UI")
-                return null
-            }
-            if (risk.requiredAuth != AuthLevel.NONE) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Risk escalation for ${hashPackageName(callerPackage)}: score=${risk.score}, auth=${risk.requiredAuth}")
-                return null
-            }
-        }
-
         return when (decision) {
             PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
             PermissionDecision.DENY -> {
@@ -372,13 +363,19 @@ class Nip55ContentProvider : ContentProvider() {
                 }.onFailure { e ->
                     if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
-                val cursor = MatrixCursor(RESULT_COLUMNS)
-                val pubkeyValue = if (requestType == Nip55RequestType.GET_PUBLIC_KEY) response.result else null
-                cursor.addRow(arrayOf(response.result, response.event, response.error, id, pubkeyValue, null))
-                cursor
+                val isSign = requestType == Nip55RequestType.SIGN_EVENT || requestType == Nip55RequestType.GET_PUBLIC_KEY
+                if (isSign) {
+                    MatrixCursor(SIGN_COLUMNS).apply {
+                        addRow(arrayOf(response.result, response.event, response.result))
+                    }
+                } else {
+                    MatrixCursor(ENCRYPT_COLUMNS).apply {
+                        addRow(arrayOf(response.result, response.result))
+                    }
+                }
             }
             .getOrElse { e ->
-                if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}")
+                if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
                 errorCursor(GENERIC_ERROR_MESSAGE, id)
             }
     }
@@ -435,15 +432,11 @@ class Nip55ContentProvider : ContentProvider() {
     }
 
     private fun errorCursor(error: String, id: String?): MatrixCursor {
-        val cursor = MatrixCursor(RESULT_COLUMNS)
-        cursor.addRow(arrayOf(null, null, error, id, null, null))
-        return cursor
+        return MatrixCursor(ERROR_COLUMNS).apply { addRow(arrayOf(error)) }
     }
 
     private fun rejectedCursor(id: String?): MatrixCursor {
-        val cursor = MatrixCursor(RESULT_COLUMNS)
-        cursor.addRow(arrayOf(null, null, null, id, null, "true"))
-        return cursor
+        return MatrixCursor(REJECTED_COLUMNS).apply { addRow(arrayOf("true")) }
     }
 
     override fun getType(uri: Uri): String {

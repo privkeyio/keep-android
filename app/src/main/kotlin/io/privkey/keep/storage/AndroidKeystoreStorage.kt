@@ -24,7 +24,10 @@ import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
-class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
+class AndroidKeystoreStorage(
+    private val context: Context,
+    private val requireUserAuth: Boolean = true
+) : SecureStorage {
 
     companion object {
         private const val TAG = "AndroidKeystoreStorage"
@@ -114,7 +117,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
     @Synchronized
-    private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS)
+    private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS, requireUserAuth)
 
     private fun isStrongBoxAvailable(): Boolean = runCatching {
         context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
@@ -138,8 +141,14 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     fun getCipherForEncryption(): Cipher = initCipher(Cipher.ENCRYPT_MODE, null)
 
     fun getCipherForDecryption(): Cipher? {
-        val iv = prefs.getString(KEY_SHARE_IV, null) ?: return null
-        return initCipher(Cipher.DECRYPT_MODE, iv)
+        val legacyIv = prefs.getString(KEY_SHARE_IV, null)
+        val legacyData = prefs.getString(KEY_SHARE_DATA, null)
+        if (legacyIv != null && legacyData != null) {
+            return initCipher(Cipher.DECRYPT_MODE, legacyIv)
+        }
+
+        val activeKey = getActiveShareKey() ?: return null
+        return getCipherForShareDecryption(activeKey)
     }
 
     private fun initCipher(mode: Int, ivBase64: String?): Cipher =
@@ -178,8 +187,13 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
     }
 
     fun loadShareWithCipher(cipher: Cipher): ByteArray {
-        val encryptedData = prefs.getString(KEY_SHARE_DATA, null)
-            ?: throw KeepMobileException.StorageException("No share stored")
+        val legacyIv = prefs.getString(KEY_SHARE_IV, null)
+        val legacyData = prefs.getString(KEY_SHARE_DATA, null)
+        val encryptedData = if (legacyIv != null && legacyData != null) {
+            legacyData
+        } else {
+            getActiveShareKey()?.let { getSharePrefs(it).getString(KEY_SHARE_DATA, null) }
+        } ?: throw KeepMobileException.StorageException("No share stored")
         return decryptWithCipher(cipher, encryptedData)
     }
 
@@ -351,7 +365,7 @@ class AndroidKeystoreStorage(private val context: Context) : SecureStorage {
             return keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey
                 ?: throw KeepMobileException.StorageException("Key $KEYSTORE_ALIAS is not a SecretKey")
         }
-        return getOrCreateKeyWithAlias(newAlias)
+        return getOrCreateKeyWithAlias(newAlias, requireUserAuth)
     }
 
     private fun isLegacyAccount(key: String): Boolean {

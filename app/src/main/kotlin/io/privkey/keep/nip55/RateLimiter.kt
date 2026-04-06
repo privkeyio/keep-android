@@ -4,7 +4,7 @@ import android.os.SystemClock
 
 class RateLimiter(
     val windowMs: Long = 1000L,
-    val maxRequests: Int = 10,
+    val maxRequests: Int = 30,
     private val maxEntries: Int = 1000,
     private val timeProvider: () -> Long = { SystemClock.elapsedRealtime() }
 ) {

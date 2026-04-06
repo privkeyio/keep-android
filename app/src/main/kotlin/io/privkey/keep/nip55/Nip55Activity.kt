@@ -27,7 +27,9 @@ import io.privkey.keep.uniffi.Nip55Response
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.URL
 import java.security.MessageDigest
+import java.util.UUID
 
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
@@ -51,7 +53,11 @@ class Nip55Activity : FragmentActivity() {
 
     companion object {
         private const val TAG = "Nip55Activity"
+        private val signingDispatcher = Dispatchers.Default.limitedParallelism(1)
         private const val GENERIC_ERROR_MESSAGE = "An error occurred"
+        private const val MAX_CONTENT_LENGTH = 1024 * 1024
+        private const val MAX_PUBKEY_LENGTH = 128
+        private const val MAX_EXTRA_LENGTH = 2048
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,8 +99,13 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("unknown_caller")
         }
 
-        requestId = intent.getStringExtra("id")
-        intentUri = intent.data?.toString()
+        val rawId = intent.getStringExtra("id")
+        if (rawId != null && rawId.length > MAX_EXTRA_LENGTH) return finishWithError("Invalid request")
+        requestId = rawId
+        intentUri = intent.data?.let { uri ->
+            if (uri.scheme != "nostrsigner") return finishWithError("Invalid URI scheme")
+            uri.toString()
+        }
         parseAndSetRequest(intent)
         if (request != null) {
             showNotification()
@@ -227,12 +238,64 @@ class Nip55Activity : FragmentActivity() {
         val h = handler ?: return finishWithError("Handler not initialized")
 
         val parsed = runCatching { h.parseIntentUri(uri) }.getOrNull()
+            ?: (if (uri.startsWith("nostrsigner:")) parseRequestFromExtras(intent, uri) else null)
             ?: return finishWithError("Invalid request")
 
         request = parsed
+        if (BuildConfig.DEBUG) Log.d(TAG, "Parsed request: type=${parsed.requestType.name}, contentLen=${parsed.content.length}, pubkey=${parsed.pubkey?.take(8)}")
         if (requestId.isNullOrBlank()) {
             requestId = parsed.id
         }
+    }
+
+    private fun parseRequestFromExtras(intent: Intent, uri: String): Nip55Request? {
+        val extras = intent.extras ?: return null
+        val type = when (extras.getString("type")) {
+            "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
+            "sign_event" -> Nip55RequestType.SIGN_EVENT
+            "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
+            "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
+            "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
+            "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+            "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
+            else -> return null
+        }
+        val uriBody = android.net.Uri.parse(uri).schemeSpecificPart?.substringBefore('?') ?: ""
+        val content = if (uriBody.isNotEmpty()) {
+            uriBody
+        } else {
+            extras.getString("data") ?: ""
+        }
+        if (content.length > MAX_CONTENT_LENGTH) return null
+
+        val pubkey = extras.getString("pubKey") ?: extras.getString("pubkey")
+        if (pubkey != null && pubkey.length > MAX_PUBKEY_LENGTH) return null
+
+        val returnType = extras.getString("returnType") ?: "signature"
+        val compressionType = extras.getString("compressionType") ?: "none"
+        val currentUser = extras.getString("current_user")
+        val permissions = extras.getString("permissions")
+
+        if (returnType.length > MAX_EXTRA_LENGTH) return null
+        if (compressionType.length > MAX_EXTRA_LENGTH) return null
+        if (currentUser != null && currentUser.length > MAX_PUBKEY_LENGTH) return null
+        if (permissions != null && permissions.length > MAX_EXTRA_LENGTH) return null
+
+        val callbackUrl = extras.getString("callbackUrl")
+            ?.takeIf { it.length <= MAX_EXTRA_LENGTH }
+            ?.takeIf { runCatching { URL(it) }.getOrNull()?.protocol == "https" }
+
+        return Nip55Request(
+            requestType = type,
+            content = content,
+            pubkey = pubkey,
+            returnType = returnType,
+            compressionType = compressionType,
+            callbackUrl = callbackUrl,
+            id = extras.getString("id")?.takeIf { it.length <= MAX_EXTRA_LENGTH },
+            currentUser = currentUser,
+            permissions = permissions
+        )
     }
 
     private fun handleApprove(duration: PermissionDuration) {
@@ -251,25 +314,44 @@ class Nip55Activity : FragmentActivity() {
         val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
         val needsBiometric = riskRequiresAuth || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
 
-        if (callerPendingFirstUse) {
-            val sigHash = callerSignatureHash
-            val verificationStore = callerVerificationStore
-            if (sigHash != null && verificationStore != null) {
-                verificationStore.trustPackage(callerId, sigHash)
-                callerPendingFirstUse = false
-                callerVerified = true
-            } else {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
-            }
-        }
-
         lifecycleScope.launch {
+            val currentApp = application as? KeepMobileApp
+
+            if (keystoreStorage != null && currentApp != null && req.requestType != Nip55RequestType.GET_PUBLIC_KEY) {
+                if (!initializeNodeIfNeeded(keystoreStorage, currentApp)) {
+                    finishWithError("Node initialization failed")
+                    return@launch
+                }
+            }
+
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                store?.grantPermission(callerId, req.requestType, eventKind, duration)
+                val permResult = runCatching {
+                    store?.grantPermission(callerId, req.requestType, eventKind, duration)
+                    if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+                        store?.grantPermission(callerId, req.requestType, null, duration)
+                    }
 
-                withContext(Dispatchers.Default) {
+                    if (callerPendingFirstUse) {
+                        val sigHash = callerSignatureHash
+                        val verificationStore = callerVerificationStore
+                        if (sigHash != null && verificationStore != null) {
+                            verificationStore.trustPackage(callerId, sigHash)
+                            callerPendingFirstUse = false
+                            callerVerified = true
+                        } else {
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                        }
+                    }
+                }
+                if (permResult.isFailure) {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
+                    finishWithError("request_failed")
+                    return@launch
+                }
+
+                withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
                         runCatching { nip55Handler.handleRequest(req, callerId) }
@@ -282,7 +364,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithResult(response)
                     }
                     .onFailure { e ->
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}: ${e.message}")
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {
@@ -320,9 +402,39 @@ class Nip55Activity : FragmentActivity() {
             return false
         }
 
-        val reqId = requestId ?: java.util.UUID.randomUUID().toString().also { requestId = it }
+        val reqId = requestId ?: UUID.randomUUID().toString().also { requestId = it }
         keystoreStorage.setPendingCipher(reqId, authedCipher)
         return true
+    }
+
+    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean {
+        val mobile = app.getKeepMobile() ?: return false
+        if (!mobile.hasShare()) return false
+
+        if (app.liveState != null) return true
+
+        val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
+            .getOrNull() ?: return false
+
+        val authedCipher = runCatching {
+            biometricHelper.authenticateWithCrypto(
+                cipher = cipher,
+                title = "Connect to Network",
+                subtitle = "Authenticate to enable signing"
+            )
+        }.getOrNull() ?: return false
+
+        val initId = UUID.randomUUID().toString()
+        keystoreStorage.setPendingCipher(initId, authedCipher)
+        return try {
+            app.ensureInitialized(requestId = initId)
+            true
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
+            false
+        } finally {
+            keystoreStorage.clearPendingCipher(initId)
+        }
     }
 
     private fun mapExceptionToError(e: Throwable): String = when (e) {
@@ -369,7 +481,9 @@ class Nip55Activity : FragmentActivity() {
             }
         }
 
+        if (BuildConfig.DEBUG) Log.d(TAG, "Returning result for ${req?.requestType?.name} (requestId=${requestId})")
         val resultIntent = Intent().apply {
+            putExtra("signature", response.result)
             putExtra("result", response.result)
             putExtra("package", packageName)
             response.event?.let { putExtra("event", it) }

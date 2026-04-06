@@ -38,6 +38,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.crypto.Cipher
@@ -64,6 +66,8 @@ class KeepMobileApp : Application() {
     private var initError: String? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
+    private val initMutex = Mutex()
+    private val initDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -234,6 +238,31 @@ class KeepMobileApp : Application() {
         }
     }
 
+    suspend fun ensureInitialized(requestId: String? = null) {
+        val mobile = keepMobile
+            ?: throw IllegalStateException("KeepMobile not initialized")
+        initMutex.withLock {
+            if (liveState != null && mobile.getShareInfo() != null) return
+
+            val relays = getActiveRelays().ifEmpty {
+                listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
+            }
+            val store = storage
+            withContext(initDispatcher) {
+                if (requestId != null && store != null) {
+                    store.setRequestIdContext(requestId)
+                }
+                try {
+                    initializeConnection(mobile, relays)
+                } finally {
+                    if (requestId != null && store != null) {
+                        store.clearRequestIdContext()
+                    }
+                }
+            }
+        }
+    }
+
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val mobile = keepMobile ?: return onError("KeepMobile not initialized")
         val store = storage ?: return onError("Storage not available")
@@ -274,8 +303,6 @@ class KeepMobileApp : Application() {
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
-            val shareInfo = mobile.getShareInfo()
-            Log.d(TAG, "Share: index=${shareInfo?.shareIndex}, hasGroup=${shareInfo?.groupPubkey != null}")
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
         }
         if (proxyConfig != null && proxyConfig.enabled && proxyConfig.port.toInt() in 1..65535) {
