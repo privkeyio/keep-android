@@ -1,16 +1,22 @@
 package io.privkey.keep
 
+import android.widget.Toast
 import io.privkey.keep.uniffi.formatPubkeyDisplay
+import io.privkey.keep.uniffi.hexToNpub
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareMetadataInfo
 
@@ -21,6 +27,12 @@ data class AccountInfo(
     val threshold: UShort,
     val totalShares: UShort
 )
+
+val AccountInfo.isNsecKey: Boolean
+    get() = shareIndex == 1.toUShort() && threshold == 1.toUShort() && totalShares == 1.toUShort()
+
+val AccountInfo.typeBadgeText: String
+    get() = if (isNsecKey) "nsec" else "FROST Share"
 
 internal fun ShareMetadataInfo.toAccountInfo() = AccountInfo(
     groupPubkeyHex = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) },
@@ -37,11 +49,13 @@ fun AccountSwitcherSheet(
     activeAccountKey: String?,
     onSwitchAccount: (AccountInfo) -> Unit,
     onDeleteAccount: (AccountInfo) -> Unit,
+    onRenameAccount: (AccountInfo, String) -> Unit,
     onImportAccount: () -> Unit,
     onImportNsec: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var deleteTarget by remember { mutableStateOf<AccountInfo?>(null) }
+    var editTarget by remember { mutableStateOf<AccountInfo?>(null) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -64,6 +78,7 @@ fun AccountSwitcherSheet(
                     onClick = {
                         if (!isActive) onSwitchAccount(account)
                     },
+                    onEdit = { editTarget = account },
                     onDelete = { deleteTarget = account }
                 )
             }
@@ -132,6 +147,53 @@ fun AccountSwitcherSheet(
             }
         )
     }
+
+    editTarget?.let { target ->
+        RenameAccountDialog(
+            currentName = target.name,
+            onConfirm = { newName ->
+                onRenameAccount(target, newName)
+                editTarget = null
+            },
+            onDismiss = { editTarget = null }
+        )
+    }
+}
+
+@Composable
+private fun RenameAccountDialog(
+    currentName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf(currentName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename Account") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Account name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim()) },
+                enabled = name.trim().isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
@@ -139,9 +201,11 @@ private fun AccountRow(
     account: AccountInfo,
     isActive: Boolean,
     onClick: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
 
     Row(
         modifier = Modifier
@@ -150,29 +214,65 @@ private fun AccountRow(
             .padding(horizontal = 24.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isActive) {
+            Icon(
+                imageVector = Icons.Default.RadioButtonChecked,
+                contentDescription = "Active account",
+                tint = colors.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+        } else {
+            Spacer(modifier = Modifier.width(36.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = account.name,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Badge(
+                containerColor = if (account.isNsecKey) colors.tertiary else colors.secondary
+            ) {
                 Text(
-                    text = account.name,
-                    style = MaterialTheme.typography.titleMedium
+                    account.typeBadgeText,
+                    modifier = Modifier.padding(horizontal = 2.dp)
                 )
-                if (isActive) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Badge(containerColor = colors.primary) {
-                        Text("ACTIVE", modifier = Modifier.padding(horizontal = 2.dp))
-                    }
-                }
             }
             Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "Share ${account.shareIndex} of ${account.totalShares} · Threshold ${account.threshold}",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant
-            )
+            if (!account.isNsecKey) {
+                Text(
+                    text = "Share ${account.shareIndex} of ${account.totalShares} \u00b7 Threshold ${account.threshold}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
+                )
+            }
             Text(
                 text = formatPubkeyDisplay(account.groupPubkeyHex),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant
+            )
+        }
+
+        IconButton(onClick = {
+            val npub = hexToNpub(account.groupPubkeyHex)
+            if (npub != null) {
+                copySensitiveText(context, npub)
+                Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+            }
+        }) {
+            Icon(
+                Icons.Default.ContentCopy,
+                contentDescription = "Copy npub",
+                tint = colors.onSurfaceVariant
+            )
+        }
+
+        IconButton(onClick = onEdit) {
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = "Edit name",
+                tint = colors.onSurfaceVariant
             )
         }
 

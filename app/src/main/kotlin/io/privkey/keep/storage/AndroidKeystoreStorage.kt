@@ -476,6 +476,19 @@ class AndroidKeystoreStorage(
         return keys.mapNotNull(::getShareMetadataByKey)
     }
 
+    @Synchronized
+    fun renameShare(key: String, newName: String) {
+        require(key.isNotBlank()) { "Share key must not be blank" }
+        val sharePrefs = getSharePrefs(key)
+        if (!sharePrefs.contains(KEY_SHARE_DATA)) {
+            throw KeepMobileException.StorageException("No share stored for key: $key")
+        }
+        val saved = sharePrefs.edit().putString(KEY_SHARE_NAME, newName).commit()
+        if (!saved) {
+            throw KeepMobileException.StorageException("Failed to rename share")
+        }
+    }
+
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return null
@@ -525,7 +538,13 @@ class AndroidKeystoreStorage(
     }
 
     override fun getActiveShareKey(): String? {
-        return multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
+        val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
+        if (active != null) return active
+
+        val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        val fallback = keys.firstOrNull() ?: return null
+        multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, fallback).commit()
+        return fallback
     }
 
     override fun setActiveShareKey(key: String?) {

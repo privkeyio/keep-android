@@ -40,16 +40,34 @@ fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
+    val isNsec = info.shareIndex == 1.toUShort() &&
+        info.threshold == 1.toUShort() &&
+        info.totalShares == 1.toUShort()
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         onClick = onClick
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(info.name, style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(4.dp))
+            Badge(
+                containerColor = if (isNsec)
+                    MaterialTheme.colorScheme.tertiary
+                else
+                    MaterialTheme.colorScheme.secondary
+            ) {
+                Text(
+                    if (isNsec) "nsec" else "FROST Share",
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Share ${info.shareIndex} of ${info.totalShares}")
-            Text("Threshold: ${info.threshold}")
-            Spacer(modifier = Modifier.height(8.dp))
+            if (!isNsec) {
+                Text("Share ${info.shareIndex} of ${info.totalShares}")
+                Text("Threshold: ${info.threshold}")
+                Spacer(modifier = Modifier.height(8.dp))
+            }
             Text(
                 "Group: ${io.privkey.keep.uniffi.truncateStr(info.groupPubkey, 8u, 6u)}",
                 style = MaterialTheme.typography.bodySmall,

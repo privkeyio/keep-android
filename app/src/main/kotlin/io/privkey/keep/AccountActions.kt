@@ -188,6 +188,22 @@ internal class AccountActions(
         }
     }
 
+    fun renameAccount(account: AccountInfo, newName: String) {
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    storage.renameShare(account.groupPubkeyHex, newName)
+                }
+                refreshAccountState()
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e("AccountActions", "Rename failed: ${e::class.simpleName}")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, "Failed to rename account", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     fun importShare(
         data: String,
         passphrase: String,
