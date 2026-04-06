@@ -549,8 +549,10 @@ class AndroidKeystoreStorage(
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         if (keys.isEmpty()) return null
         val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
-        if (active != null && keys.contains(active)) return active
-        val fallbackKey = keys.minOrNull() ?: return null
+        if (active != null && keys.contains(active) &&
+            getSharePrefs(active).contains(KEY_SHARE_DATA)) return active
+        val fallbackKey = keys.sorted().firstOrNull { getSharePrefs(it).contains(KEY_SHARE_DATA) }
+            ?: return null
         setActiveShareKey(fallbackKey)
         return fallbackKey
     }
