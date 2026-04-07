@@ -46,6 +46,7 @@ jobs:
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
