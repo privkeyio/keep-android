@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: privkeyio/keep
-          ref: 3bf8cfa102b8c2aa4126e9162f68a31940aaefb3
+          ref: 607ec4b1198ab5c49e943d1b30887815f1d99ab7
           path: keep
 
       - name: Set up JDK 17
@@ -46,6 +46,7 @@ jobs:
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
