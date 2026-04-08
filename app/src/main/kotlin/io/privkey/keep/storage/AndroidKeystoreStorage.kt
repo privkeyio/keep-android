@@ -383,26 +383,41 @@ class AndroidKeystoreStorage(
                 "AndroidKeyStore"
             )
 
-            val builder = KeyGenParameterSpec.Builder(
-                alias,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
+            fun buildSpec(useStrongBox: Boolean): KeyGenParameterSpec {
+                val builder = KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
 
-            if (requireUserAuth) {
-                builder.setUserAuthenticationRequired(true)
-                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-                    .setInvalidatedByBiometricEnrollment(true)
+                if (requireUserAuth) {
+                    builder.setUserAuthenticationRequired(true)
+                        .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                        .setInvalidatedByBiometricEnrollment(true)
+                }
+
+                if (useStrongBox) {
+                    builder.setIsStrongBoxBacked(true)
+                }
+
+                return builder.build()
             }
 
             if (isStrongBoxAvailable()) {
-                builder.setIsStrongBoxBacked(true)
+                try {
+                    keyGenerator.init(buildSpec(useStrongBox = true))
+                    keyGenerator.generateKey()
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
+                    keyGenerator.init(buildSpec(useStrongBox = false))
+                    keyGenerator.generateKey()
+                }
+            } else {
+                keyGenerator.init(buildSpec(useStrongBox = false))
+                keyGenerator.generateKey()
             }
-
-            keyGenerator.init(builder.build())
-            keyGenerator.generateKey()
         }
 
         return keyStore.getKey(alias, null) as? SecretKey
