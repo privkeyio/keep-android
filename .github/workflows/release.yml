@@ -25,7 +25,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@651bceb6f9ca583f16b8d75b62c36ded2ae6fc9c # v4.0.0
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Install Android NDK
         run: sdkmanager --install "ndk;29.0.14206865"
@@ -37,7 +37,7 @@ jobs:
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2
+        uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk
 
@@ -49,7 +49,7 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
 
       - name: Decode keystore
         env:
