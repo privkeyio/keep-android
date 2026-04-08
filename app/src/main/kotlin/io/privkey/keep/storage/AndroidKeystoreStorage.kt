@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.ProviderException
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -383,26 +384,38 @@ class AndroidKeystoreStorage(
                 "AndroidKeyStore"
             )
 
-            val builder = KeyGenParameterSpec.Builder(
-                alias,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-
-            if (requireUserAuth) {
-                builder.setUserAuthenticationRequired(true)
-                    .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
-                    .setInvalidatedByBiometricEnrollment(true)
-            }
+            fun buildSpec(useStrongBox: Boolean): KeyGenParameterSpec =
+                KeyGenParameterSpec.Builder(
+                    alias,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                ).apply {
+                    setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    setKeySize(256)
+                    if (requireUserAuth) {
+                        setUserAuthenticationRequired(true)
+                        setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                        setInvalidatedByBiometricEnrollment(true)
+                    }
+                    if (useStrongBox) {
+                        setIsStrongBoxBacked(true)
+                    }
+                }.build()
 
             if (isStrongBoxAvailable()) {
-                builder.setIsStrongBoxBacked(true)
+                try {
+                    keyGenerator.init(buildSpec(useStrongBox = true))
+                    keyGenerator.generateKey()
+                } catch (e: ProviderException) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
+                    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+                    keyGenerator.init(buildSpec(useStrongBox = false))
+                    keyGenerator.generateKey()
+                }
+            } else {
+                keyGenerator.init(buildSpec(useStrongBox = false))
+                keyGenerator.generateKey()
             }
-
-            keyGenerator.init(builder.build())
-            keyGenerator.generateKey()
         }
 
         return keyStore.getKey(alias, null) as? SecretKey
