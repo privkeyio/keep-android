@@ -106,7 +106,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    implementation("net.zetetic:sqlcipher-android:4.14.0")
+    implementation("net.zetetic:sqlcipher-android:4.14.1")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
