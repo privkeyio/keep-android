@@ -7,6 +7,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.ProviderException
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -409,8 +411,14 @@ class AndroidKeystoreStorage(
                 try {
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
-                } catch (e: Exception) {
+                } catch (e: StrongBoxUnavailableException) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
+                    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+                    keyGenerator.init(buildSpec(useStrongBox = false))
+                    keyGenerator.generateKey()
+                } catch (e: ProviderException) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
+                    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
                     keyGenerator.init(buildSpec(useStrongBox = false))
                     keyGenerator.generateKey()
                 }
