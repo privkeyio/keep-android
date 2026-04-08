@@ -44,7 +44,7 @@ jobs:
           workspaces: keep/keep-mobile
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2
+        uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk
 
@@ -57,7 +57,7 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
 
       - name: Build, test, and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
@@ -92,7 +92,7 @@ jobs:
           workspaces: keep/keep-mobile
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2
+        uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk
 
@@ -105,7 +105,7 @@ jobs:
           AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@39e147cb9de83bb9910b8ef8bd7fff0ee20fcd6f # v6.0.1
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
 
       - name: Enable KVM
         run: |
