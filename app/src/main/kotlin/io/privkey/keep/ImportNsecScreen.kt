@@ -194,7 +194,7 @@ fun ImportNsecScreen(
                         onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("ImportNsec", "Failed to initialize cipher: ${e::class.simpleName}: ${e.message}", e)
-                        onError("Failed to initialize encryption")
+                        onError(e.message ?: "Failed to initialize encryption")
                     }
                 }
             )

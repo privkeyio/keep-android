@@ -261,7 +261,7 @@ fun ImportShareScreen(
                 } catch (e: Exception) {
                     clearChars()
                     if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth: ${e::class.simpleName}")
-                    onError("Failed to initialize encryption")
+                    onError(e.message ?: "Failed to initialize encryption")
                 }
             }
         )

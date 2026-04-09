@@ -626,7 +626,10 @@ fun MainScreen(
             onImport = { data, passphrase, name, cipher ->
                 accountActions.importShare(data, passphrase, name, cipher) { importState = it }
             },
-            onGetCipher = { storage.getCipherForEncryption() },
+            onGetCipher = {
+                if (!biometricAvailable) throw IllegalStateException("Please enroll a fingerprint or face in your device settings to use Keep")
+                storage.getCipherForEncryption()
+            },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Import Share", "Authenticate to store share securely", cipher, callback)
             },
@@ -644,7 +647,10 @@ fun MainScreen(
             onImport = { nsec, name, cipher ->
                 accountActions.importNsec(nsec, name, cipher) { importState = it }
             },
-            onGetCipher = { storage.getCipherForEncryption() },
+            onGetCipher = {
+                if (!biometricAvailable) throw IllegalStateException("Please enroll a fingerprint or face in your device settings to use Keep")
+                storage.getCipherForEncryption()
+            },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Import nsec", "Authenticate to store key securely", cipher, callback)
             },
