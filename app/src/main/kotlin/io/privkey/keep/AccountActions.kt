@@ -180,16 +180,19 @@ internal class AccountActions(
             onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
                 coroutineScope.launch {
                     accountMutex.withLock {
-                        if (switchAuthed != null) {
-                            try {
-                                activateShare(switchAuthed, nextAccount.groupPubkeyHex)
-                            } catch (e: Exception) {
-                                if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-delete switch failed: ${e::class.simpleName}")
+                        try {
+                            if (switchAuthed != null) {
+                                try {
+                                    activateShare(switchAuthed, nextAccount.groupPubkeyHex)
+                                } catch (e: Exception) {
+                                    if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-delete switch failed: ${e::class.simpleName}")
+                                }
                             }
+                            onAccountSwitched()
+                            refreshAccountState()
+                        } finally {
+                            onDismiss()
                         }
-                        onAccountSwitched()
-                        refreshAccountState()
-                        onDismiss()
                     }
                 }
             }
@@ -281,7 +284,11 @@ internal class AccountActions(
                         }
                     }
                     onImportStateChanged(ImportState.Success(result.name))
-                    refreshAccountState()
+                    try {
+                        refreshAccountState()
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-import refresh failed: ${e::class.simpleName}")
+                    }
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
                     onImportStateChanged(ImportState.Error("Import failed. Please try again."))

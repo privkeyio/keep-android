@@ -46,7 +46,7 @@ fun CreateAccountScreen(
             val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
             mnemonicData.update(mnemonic)
         } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to generate mnemonic: ${e::class.simpleName}: ${e.message}", e)
+            if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to generate mnemonic: ${e::class.simpleName}")
             generateError = "Failed to generate seed words. Please try again."
         } finally {
             isGenerating = false
@@ -183,7 +183,7 @@ private fun SetupStep(
                 Button(
                     onClick = onNext,
                     modifier = Modifier.weight(1f),
-                    enabled = !isGenerating && keyName.isNotBlank()
+                    enabled = keyName.isNotBlank()
                 ) {
                     Text("Next")
                 }
@@ -352,16 +352,16 @@ private fun ConfirmStep(
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
                             if (authedCipher != null) {
-                                onCreateAccount(mnemonicData.valueUnsafe(), "", keyName, authedCipher)
+                                onCreateAccount(mnemonicData.valueUnsafe(), "", keyName.trim(), authedCipher)
                             }
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Biometric key invalidated: ${e::class.simpleName}")
                         onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
-                        onError(e.message ?: "Biometric authentication is unavailable")
+                        onError("Biometric authentication is unavailable")
                     } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to initialize cipher: ${e::class.simpleName}: ${e.message}", e)
+                        if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to initialize cipher: ${e::class.simpleName}")
                         onError("Failed to initialize encryption")
                     }
                 }

@@ -47,10 +47,7 @@ fun MnemonicRecoveryScreen(
     fun updateWordCount(newCount: Int) {
         wordCount = newCount
         while (words.size < newCount) words.add("")
-        while (words.size > newCount) {
-            words[words.lastIndex] = ""
-            words.removeAt(words.lastIndex)
-        }
+        while (words.size > newCount) words.removeLast()
     }
 
     DisposableEffect(context) {
@@ -159,20 +156,18 @@ fun MnemonicRecoveryScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        val currentPasteError = pasteError
-        if (currentPasteError != null) {
+        pasteError?.let { error ->
             StatusCard(
-                text = currentPasteError,
+                text = error,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        val currentValidationError = validationError
-        if (currentValidationError != null) {
+        validationError?.let { error ->
             StatusCard(
-                text = currentValidationError,
+                text = error,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -202,7 +197,7 @@ fun MnemonicRecoveryScreen(
         } else {
             ImportButtons(
                 importState = importState,
-                canImport = filledCount == wordCount && isInputEnabled,
+                canImport = filledCount == wordCount && keyName.isNotBlank() && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = { onError ->
                     val name = keyName.trim()
@@ -226,9 +221,9 @@ fun MnemonicRecoveryScreen(
                         if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric key invalidated: ${e::class.simpleName}")
                         onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
-                        onError(e.message ?: "Biometric authentication is unavailable")
+                        onError("Biometric authentication is unavailable")
                     } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}: ${e.message}", e)
+                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}")
                         onError("Failed to initialize encryption")
                     }
                 }
@@ -262,8 +257,8 @@ private fun WordInputColumn(
                         handlePaste(trimmed, i, words, wordCount, onUpdateWordCount, onPasteRejected)
                     } else {
                         words[i] = newValue.lowercase().filter { it.isLetter() }
-                        onClearValidation()
                     }
+                    onClearValidation()
                 },
                 focusRequester = focusRequesters[i],
                 onNext = {
@@ -354,28 +349,28 @@ private fun handlePaste(
     onPasteRejected: (() -> Unit)? = null
 ) {
     val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
+        .map { it.filter { c -> c.isLetter() } }
+        .filter { it.isNotEmpty() }
     if (pasteWords.size > 24) {
         onPasteRejected?.invoke()
         return
     }
-    val effectiveStart = if (pasteWords.size in listOf(12, 24) && startIndex > 0) 0 else startIndex
-    if (pasteWords.size > 24 - effectiveStart) {
+    val effectiveStart = if (pasteWords.size in setOf(12, 24) && startIndex > 0) 0 else startIndex
+    if (effectiveStart + pasteWords.size > 24) {
         onPasteRejected?.invoke()
         return
     }
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
-    if (totalNeeded > wordCount && totalNeeded <= 24) {
-        val newCount = if (totalNeeded > 12) 24 else 12
-        if (newCount > wordCount) {
-            onWordCountChange(newCount)
-            effectiveWordCount = newCount
-        }
+    val newCount = if (totalNeeded > 12) 24 else 12
+    if (newCount != wordCount) {
+        onWordCountChange(newCount)
+        effectiveWordCount = newCount
     }
     pasteWords.forEachIndexed { i, word ->
         val targetIndex = effectiveStart + i
         if (targetIndex < effectiveWordCount) {
-            words[targetIndex] = word.filter { it.isLetter() }
+            words[targetIndex] = word
         }
     }
 }

@@ -88,11 +88,11 @@ internal class SecureShareData(private val maxLength: Int) {
 
     val length: Int get() = chars.size
 
-    fun update(newValue: String) {
-        if (newValue.length <= maxLength) {
-            Arrays.fill(chars, '\u0000')
-            chars = newValue.toCharArray()
-        }
+    fun update(newValue: String): Boolean {
+        if (newValue.length > maxLength) return false
+        Arrays.fill(chars, '\u0000')
+        chars = newValue.toCharArray()
+        return true
     }
 
     fun clear() {
@@ -399,9 +399,5 @@ internal fun setSecureScreen(context: Context, secure: Boolean) {
         }
         return
     }
-    if (secure) {
-        SecureScreenManager.acquire(activity)
-    } else {
-        SecureScreenManager.release(activity)
-    }
+    if (secure) SecureScreenManager.acquire(activity) else SecureScreenManager.release(activity)
 }
