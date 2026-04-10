@@ -237,6 +237,19 @@ internal class AccountActions(
         }
     }
 
+    fun createAccountFromMnemonic(
+        mnemonic: String,
+        passphrase: String,
+        name: String,
+        cipher: Cipher,
+        onImportStateChanged: (ImportState) -> Unit
+    ) {
+        onImportStateChanged(ImportState.Importing)
+        executeImport(cipher, onImportStateChanged) {
+            keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
+        }
+    }
+
     private fun executeImport(
         cipher: Cipher,
         onImportStateChanged: (ImportState) -> Unit,

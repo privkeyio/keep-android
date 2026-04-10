@@ -72,7 +72,12 @@ fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
 }
 
 @Composable
-fun NoShareCard(onImport: () -> Unit, onImportNsec: () -> Unit) {
+fun NoShareCard(
+    onImport: () -> Unit,
+    onImportNsec: () -> Unit,
+    onCreateAccount: () -> Unit,
+    onRecoverMnemonic: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -80,7 +85,17 @@ fun NoShareCard(onImport: () -> Unit, onImportNsec: () -> Unit) {
         ) {
             Text("No key stored")
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onCreateAccount, modifier = Modifier.fillMaxWidth()) {
+                Text("Create Account")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onRecoverMnemonic, modifier = Modifier.fillMaxWidth()) {
+                Text("Import from Seed Words")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
                 Text("Import FROST Share")
             }
             Spacer(modifier = Modifier.height(8.dp))
