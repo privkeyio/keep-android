@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ContentProvider
+import io.privkey.keep.BiometricHelper
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -37,8 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
-        private const val GENERIC_ERROR_MESSAGE = "An error occurred"
-
         private const val AUTHORITY_GET_PUBLIC_KEY = "io.privkey.keep.GET_PUBLIC_KEY"
         private const val AUTHORITY_SIGN_EVENT = "io.privkey.keep.SIGN_EVENT"
         private const val AUTHORITY_NIP04_ENCRYPT = "io.privkey.keep.NIP04_ENCRYPT"
@@ -106,25 +105,26 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        val currentApp = app ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
-        if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
-        }
-        if (currentApp.getPinStore()?.requiresAuthentication() == true) {
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
-        }
-        val h = currentApp.getNip55Handler() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
-        val store = currentApp.getPermissionStore()
+        val currentApp = app ?: return errorCursor("Request denied", null)
 
-        val callerPackage = getVerifiedCaller() ?: return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        val callerPackage = getVerifiedCaller() ?: return errorCursor("Request denied", null)
         if (callerPackage.isBlank()) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Caller package is blank")
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            return errorCursor("Request denied", null)
         }
+
+        if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
+            return errorCursor("Signing is disabled (kill switch is active)", null)
+        }
+        if (currentApp.getPinStore()?.requiresAuthentication() == true) {
+            return errorCursor("Keep is locked, please unlock it first", null)
+        }
+        val h = currentApp.getNip55Handler() ?: return errorCursor("Signing service is not available", null)
+        val store = currentApp.getPermissionStore()
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            return errorCursor("Too many requests, please try again later", null)
         }
 
         val requestType = when (val authority = uri.authority) {
@@ -137,7 +137,7 @@ class Nip55ContentProvider : ContentProvider() {
             AUTHORITY_DECRYPT_ZAP_EVENT -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
-                return errorCursor(GENERIC_ERROR_MESSAGE, null)
+                return errorCursor("Invalid request", null)
             }
         }
 
@@ -146,13 +146,13 @@ class Nip55ContentProvider : ContentProvider() {
         val currentUser = projection?.getOrNull(2)?.takeIf { it.isNotBlank() }
 
         if (rawContent.length > MAX_CONTENT_LENGTH)
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            return errorCursor("Request content is too large", null)
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
-            return errorCursor(GENERIC_ERROR_MESSAGE, null)
+            return errorCursor("Invalid public key", null)
 
         val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent)?.takeIf { it >= 0 } else null
 
-        if (store == null) return errorCursor(GENERIC_ERROR_MESSAGE, null)
+        if (store == null) return errorCursor("Permission store is not available", null)
 
         val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
         if (velocityCursor != null) return velocityCursor
@@ -376,7 +376,11 @@ class Nip55ContentProvider : ContentProvider() {
             }
             .getOrElse { e ->
                 if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
-                errorCursor(GENERIC_ERROR_MESSAGE, id)
+                if (e is BiometricHelper.BiometricNotReadyException) {
+                    errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+                } else {
+                    errorCursor("Request failed", id)
+                }
             }
     }
 

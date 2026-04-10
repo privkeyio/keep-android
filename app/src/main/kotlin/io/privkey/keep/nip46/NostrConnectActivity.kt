@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,7 @@ class NostrConnectActivity : FragmentActivity() {
         }
 
         if (killSwitchStore?.isEnabled() == true) {
+            Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -100,6 +102,17 @@ class NostrConnectActivity : FragmentActivity() {
 
         val keystoreStorage = storage
         if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
+            if (killSwitchStore?.isEnabled() == true) {
+                Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
+            }
+            onComplete(false)
+            finish()
+            return
+        }
+
+        val status = biometricHelper.checkBiometricStatus()
+        if (status != BiometricHelper.BiometricStatus.AVAILABLE) {
+            Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(status), Toast.LENGTH_LONG).show()
             onComplete(false)
             finish()
             return
@@ -111,6 +124,7 @@ class NostrConnectActivity : FragmentActivity() {
                 .getOrNull()
 
             if (cipher == null) {
+                Toast.makeText(this@NostrConnectActivity, "Failed to access stored keys", Toast.LENGTH_SHORT).show()
                 onComplete(false)
                 finish()
                 return@launch
