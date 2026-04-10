@@ -44,7 +44,10 @@ fun MnemonicRecoveryScreen(
     fun updateWordCount(newCount: Int) {
         wordCount = newCount
         while (words.size < newCount) words.add("")
-        while (words.size > newCount) words.removeAt(words.lastIndex)
+        while (words.size > newCount) {
+            words[words.lastIndex] = ""
+            words.removeAt(words.lastIndex)
+        }
     }
 
     DisposableEffect(context) {
@@ -125,76 +128,28 @@ fun MnemonicRecoveryScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                for (i in 0 until halfSize) {
-                    WordInputField(
-                        index = i,
-                        value = words[i],
-                        onValueChange = { newValue ->
-                            val trimmed = newValue.trim()
-                            if (trimmed.contains(" ")) {
-                                handlePaste(trimmed, i, words, wordCount)
-                            } else {
-                                words[i] = newValue.lowercase().filter { it.isLetter() }
-                            }
-                            validationError = null
-                        },
-                        focusRequester = focusRequesters[i],
-                        onNext = {
-                            if (i + 1 < wordCount) {
-                                focusRequesters[i + 1].requestFocus()
-                            }
-                        },
-                        enabled = isInputEnabled,
-                        onPaste = {
-                            val clip = clipboardManager.getText()?.text ?: return@WordInputField
-                            val pasteWords = clip.trim().split("\\s+".toRegex())
-                            if (pasteWords.size > 1) {
-                                handlePaste(clip, i, words, wordCount)
-                                validationError = null
-                            }
-                        }
-                    )
-                    if (i < halfSize - 1) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                for (i in halfSize until wordCount) {
-                    WordInputField(
-                        index = i,
-                        value = words[i],
-                        onValueChange = { newValue ->
-                            val trimmed = newValue.trim()
-                            if (trimmed.contains(" ")) {
-                                handlePaste(trimmed, i, words, wordCount)
-                            } else {
-                                words[i] = newValue.lowercase().filter { it.isLetter() }
-                            }
-                            validationError = null
-                        },
-                        focusRequester = focusRequesters[i],
-                        onNext = {
-                            if (i + 1 < wordCount) {
-                                focusRequesters[i + 1].requestFocus()
-                            }
-                        },
-                        enabled = isInputEnabled,
-                        onPaste = {
-                            val clip = clipboardManager.getText()?.text ?: return@WordInputField
-                            val pasteWords = clip.trim().split("\\s+".toRegex())
-                            if (pasteWords.size > 1) {
-                                handlePaste(clip, i, words, wordCount)
-                                validationError = null
-                            }
-                        }
-                    )
-                    if (i < wordCount - 1) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
+            WordInputColumn(
+                range = 0 until halfSize,
+                words = words,
+                wordCount = wordCount,
+                focusRequesters = focusRequesters,
+                enabled = isInputEnabled,
+                clipboardManager = clipboardManager,
+                onUpdateWordCount = ::updateWordCount,
+                onClearValidation = { validationError = null },
+                modifier = Modifier.weight(1f)
+            )
+            WordInputColumn(
+                range = halfSize until wordCount,
+                words = words,
+                wordCount = wordCount,
+                focusRequesters = focusRequesters,
+                enabled = isInputEnabled,
+                clipboardManager = clipboardManager,
+                onUpdateWordCount = ::updateWordCount,
+                onClearValidation = { validationError = null },
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -266,6 +221,55 @@ fun MnemonicRecoveryScreen(
 }
 
 @Composable
+private fun WordInputColumn(
+    range: IntRange,
+    words: MutableList<String>,
+    wordCount: Int,
+    focusRequesters: List<FocusRequester>,
+    enabled: Boolean,
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
+    onUpdateWordCount: (Int) -> Unit,
+    onClearValidation: () -> Unit,
+    modifier: Modifier
+) {
+    Column(modifier = modifier) {
+        for (i in range) {
+            WordInputField(
+                index = i,
+                value = words[i],
+                onValueChange = { newValue ->
+                    val trimmed = newValue.trim()
+                    if (trimmed.contains(" ")) {
+                        handlePaste(trimmed, i, words, wordCount, onUpdateWordCount)
+                    } else {
+                        words[i] = newValue.lowercase().filter { it.isLetter() }
+                    }
+                    onClearValidation()
+                },
+                focusRequester = focusRequesters[i],
+                onNext = {
+                    if (i + 1 < focusRequesters.size) {
+                        focusRequesters[i + 1].requestFocus()
+                    }
+                },
+                enabled = enabled,
+                onPaste = {
+                    val clip = clipboardManager.getText()?.text ?: return@WordInputField
+                    val pasteWords = clip.trim().split("\\s+".toRegex())
+                    if (pasteWords.size > 1) {
+                        handlePaste(clip, i, words, wordCount, onUpdateWordCount)
+                        onClearValidation()
+                    }
+                }
+            )
+            if (i < range.last) {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+@Composable
 private fun WordInputField(
     index: Int,
     value: String,
@@ -292,15 +296,8 @@ private fun WordInputField(
         OutlinedTextField(
             value = value,
             onValueChange = { newValue ->
-                if (newValue.contains(" ")) {
-                    val trimmed = newValue.trim().replace(" ", "")
-                    if (trimmed.isNotEmpty()) {
-                        onValueChange(newValue)
-                    }
-                    onNext()
-                } else {
-                    onValueChange(newValue)
-                }
+                onValueChange(newValue)
+                if (newValue.contains(" ")) onNext()
             },
             prefix = { Text("${index + 1}. ") },
             modifier = Modifier
@@ -333,12 +330,23 @@ private fun handlePaste(
     text: String,
     startIndex: Int,
     words: MutableList<String>,
-    wordCount: Int
+    wordCount: Int,
+    onWordCountChange: (Int) -> Unit
 ) {
     val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
+    val effectiveStart = if (pasteWords.size in listOf(12, 24) && startIndex > 0) 0 else startIndex
+    val totalNeeded = effectiveStart + pasteWords.size
+    var effectiveWordCount = wordCount
+    if (totalNeeded > wordCount && totalNeeded <= 24) {
+        val newCount = if (totalNeeded > 12) 24 else 12
+        if (newCount > wordCount) {
+            onWordCountChange(newCount)
+            effectiveWordCount = newCount
+        }
+    }
     pasteWords.forEachIndexed { i, word ->
-        val targetIndex = startIndex + i
-        if (targetIndex < wordCount) {
+        val targetIndex = effectiveStart + i
+        if (targetIndex < effectiveWordCount) {
             words[targetIndex] = word.filter { it.isLetter() }
         }
     }

@@ -29,10 +29,8 @@ fun CreateAccountScreen(
     onDismiss: () -> Unit,
     importState: ImportState
 ) {
-    val context = LocalContext.current
     var step by remember { mutableStateOf(CreateAccountStep.SETUP) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }
-    var mnemonicWords by remember { mutableStateOf<List<String>>(emptyList()) }
     var keyName by remember { mutableStateOf("Mobile Key") }
     var isGenerating by remember { mutableStateOf(true) }
 
@@ -41,21 +39,18 @@ fun CreateAccountScreen(
     LaunchedEffect(Unit) {
         val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
         mnemonicData.update(mnemonic)
-        mnemonicWords = mnemonic.split(" ")
         isGenerating = false
     }
 
     LaunchedEffect(importState) {
         if (importState is ImportState.Success) {
             mnemonicData.clear()
-            mnemonicWords = emptyList()
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
             mnemonicData.clear()
-            mnemonicWords = emptyList()
         }
     }
 
@@ -69,8 +64,7 @@ fun CreateAccountScreen(
             onDismiss = onDismiss
         )
         CreateAccountStep.SEED_WORDS -> SeedWordsStep(
-            words = mnemonicWords,
-            mnemonic = mnemonicData.valueUnsafe(),
+            mnemonicData = mnemonicData,
             onNext = { step = CreateAccountStep.CONFIRM },
             onBack = { step = CreateAccountStep.SETUP }
         )
@@ -148,7 +142,7 @@ private fun SetupStep(
                 Button(
                     onClick = onNext,
                     modifier = Modifier.weight(1f),
-                    enabled = !isGenerating
+                    enabled = !isGenerating && keyName.isNotBlank()
                 ) {
                     Text("Next")
                 }
@@ -159,12 +153,12 @@ private fun SetupStep(
 
 @Composable
 private fun SeedWordsStep(
-    words: List<String>,
-    mnemonic: String,
+    mnemonicData: SecureShareData,
     onNext: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val words = mnemonicData.words()
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -187,49 +181,19 @@ private fun SeedWordsStep(
         Spacer(modifier = Modifier.height(24.dp))
 
         val halfSize = words.size / 2
-        val leftColumn = words.take(halfSize)
-        val rightColumn = words.drop(halfSize)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                leftColumn.forEachIndexed { index, word ->
-                    OutlinedTextField(
-                        value = word,
-                        onValueChange = {},
-                        readOnly = true,
-                        prefix = { Text("${index + 1}. ") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    if (index < leftColumn.lastIndex) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                rightColumn.forEachIndexed { index, word ->
-                    OutlinedTextField(
-                        value = word,
-                        onValueChange = {},
-                        readOnly = true,
-                        prefix = { Text("${index + halfSize + 1}. ") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    if (index < rightColumn.lastIndex) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
+            SeedWordColumn(words, 0 until halfSize, Modifier.weight(1f))
+            SeedWordColumn(words, halfSize until words.size, Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedButton(
-            onClick = { copySensitiveText(context, mnemonic) },
+            onClick = { copySensitiveText(context, mnemonicData.valueUnsafe()) },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Copy to clipboard")
@@ -260,6 +224,25 @@ private fun SeedWordsStep(
                 modifier = Modifier.weight(1f)
             ) {
                 Text("I've saved my seed words")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeedWordColumn(words: List<String>, range: IntRange, modifier: Modifier) {
+    Column(modifier = modifier) {
+        for (i in range) {
+            OutlinedTextField(
+                value = words[i],
+                onValueChange = {},
+                readOnly = true,
+                prefix = { Text("${i + 1}. ") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            if (i < range.last) {
+                Spacer(modifier = Modifier.height(4.dp))
             }
         }
     }

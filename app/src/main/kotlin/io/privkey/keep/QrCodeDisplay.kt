@@ -102,6 +102,9 @@ internal class SecureShareData(private val maxLength: Int) {
 
     fun isNotBlank(): Boolean = chars.isNotEmpty() && chars.any { !it.isWhitespace() }
 
+    fun words(): List<String> =
+        if (chars.isEmpty()) emptyList() else String(chars).split(" ")
+
     fun valueUnsafe(): String = String(chars)
 
     override fun toString(): String = "<redacted>"
