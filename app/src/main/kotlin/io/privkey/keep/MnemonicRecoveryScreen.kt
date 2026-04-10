@@ -20,6 +20,7 @@ import javax.crypto.Cipher
 
 private const val MAX_MNEMONIC_LENGTH = 1024
 
+@Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MnemonicRecoveryScreen(
@@ -222,6 +223,7 @@ fun MnemonicRecoveryScreen(
     }
 }
 
+@Suppress("DEPRECATION")
 @Composable
 private fun WordInputColumn(
     range: IntRange,
