@@ -737,7 +737,7 @@ fun MainScreen(
                                     getShareAwareCipher(storage)
                                 }
                             } catch (e: BiometricHelper.BiometricNotReadyException) {
-                                Toast.makeText(appContext, e.message, Toast.LENGTH_LONG).show()
+                                Toast.makeText(appContext, e.message ?: "Biometric authentication is unavailable", Toast.LENGTH_LONG).show()
                                 return@launch
                             }
                             if (cipher == null) {
