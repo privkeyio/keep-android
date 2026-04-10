@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ContentProvider
+import io.privkey.keep.BiometricHelper
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -104,7 +105,14 @@ class Nip55ContentProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?
     ): Cursor? {
-        val currentApp = app ?: return errorCursor("Keep is not initialized", null)
+        val currentApp = app ?: return errorCursor("Request denied", null)
+
+        val callerPackage = getVerifiedCaller() ?: return errorCursor("Request denied", null)
+        if (callerPackage.isBlank()) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Caller package is blank")
+            return errorCursor("Request denied", null)
+        }
+
         if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
             return errorCursor("Signing is disabled (kill switch is active)", null)
         }
@@ -113,12 +121,6 @@ class Nip55ContentProvider : ContentProvider() {
         }
         val h = currentApp.getNip55Handler() ?: return errorCursor("Signing service is not available", null)
         val store = currentApp.getPermissionStore()
-
-        val callerPackage = getVerifiedCaller() ?: return errorCursor("Request from unverified app", null)
-        if (callerPackage.isBlank()) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Caller package is blank")
-            return errorCursor("Request from unverified app", null)
-        }
 
         if (!rateLimiter.checkRateLimit(callerPackage)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
@@ -374,7 +376,11 @@ class Nip55ContentProvider : ContentProvider() {
             }
             .getOrElse { e ->
                 if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
-                errorCursor("Request failed", id)
+                if (e is BiometricHelper.BiometricNotReadyException) {
+                    errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+                } else {
+                    errorCursor("Request failed", id)
+                }
             }
     }
 
