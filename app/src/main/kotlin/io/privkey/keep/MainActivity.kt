@@ -1270,7 +1270,7 @@ private fun AccountTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Account", style = MaterialTheme.typography.headlineLarge)
+        Text(text = "Keys", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (allAccounts.isNotEmpty()) {
@@ -1328,6 +1328,22 @@ private fun AccountTab(
                         ) {
                             Text("Recover nsec from shares")
                         }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onCreateAccount,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Create Account")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRecoverMnemonic,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Import from Seed Words")
                     }
                 }
             }
