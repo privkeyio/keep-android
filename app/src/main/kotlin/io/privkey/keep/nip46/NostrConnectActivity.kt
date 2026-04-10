@@ -102,6 +102,9 @@ class NostrConnectActivity : FragmentActivity() {
 
         val keystoreStorage = storage
         if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
+            if (killSwitchStore?.isEnabled() == true) {
+                Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
+            }
             onComplete(false)
             finish()
             return
