@@ -37,8 +37,11 @@ fun CreateAccountScreen(
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
     var generateError by remember { mutableStateOf<String?>(null) }
+    var generateTrigger by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(generateTrigger) {
+        isGenerating = true
+        generateError = null
         try {
             val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
             mnemonicData.update(mnemonic)
@@ -70,6 +73,7 @@ fun CreateAccountScreen(
             onKeyNameChange = { if (it.length <= 64) keyName = it },
             isInputEnabled = isInputEnabled,
             onNext = { step = CreateAccountStep.SEED_WORDS },
+            onRetry = { generateTrigger++ },
             onDismiss = onDismiss
         )
         CreateAccountStep.SEED_WORDS -> SeedWordsStep(
@@ -98,6 +102,7 @@ private fun SetupStep(
     onKeyNameChange: (String) -> Unit,
     isInputEnabled: Boolean,
     onNext: () -> Unit,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
     Column(
@@ -121,6 +126,26 @@ private fun SetupStep(
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Retry")
+                }
+            }
         } else if (isGenerating) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
