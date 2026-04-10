@@ -192,9 +192,11 @@ fun ImportNsecScreen(
                     } catch (e: KeyPermanentlyInvalidatedException) {
                         if (BuildConfig.DEBUG) Log.e("ImportNsec", "Biometric key invalidated: ${e::class.simpleName}")
                         onError("Biometric key invalidated. Please re-enroll biometrics.")
+                    } catch (e: BiometricHelper.BiometricNotReadyException) {
+                        onError(e.message ?: "Biometric authentication is unavailable")
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("ImportNsec", "Failed to initialize cipher: ${e::class.simpleName}: ${e.message}", e)
-                        onError(e.message ?: "Failed to initialize encryption")
+                        onError("Failed to initialize encryption")
                     }
                 }
             )

@@ -88,12 +88,13 @@ class MainActivity : FragmentActivity() {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
 
-            var biometricAvailable by remember {
+            var biometricStatus by remember {
                 mutableStateOf(
-                    biometricHelper?.checkBiometricStatus() ==
-                        BiometricHelper.BiometricStatus.AVAILABLE
+                    biometricHelper?.checkBiometricStatus()
+                        ?: BiometricHelper.BiometricStatus.NOT_AVAILABLE
                 )
             }
+            val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
 
             var isBiometricUnlocked by remember {
                 val lockOnLaunch = biometricAvailable &&
@@ -105,8 +106,8 @@ class MainActivity : FragmentActivity() {
                 val observer = LifecycleEventObserver { _, event ->
                     if (event == Lifecycle.Event.ON_RESUME) {
                         isPinUnlocked = pinStore?.isSessionValid() ?: true
-                        biometricAvailable = biometricHelper?.checkBiometricStatus() ==
-                            BiometricHelper.BiometricStatus.AVAILABLE
+                        biometricStatus = biometricHelper?.checkBiometricStatus()
+                            ?: BiometricHelper.BiometricStatus.NOT_AVAILABLE
                         if (biometricAvailable &&
                             biometricTimeoutStore?.isLockOnLaunchEnabled() == true &&
                             biometricTimeoutStore.requiresBiometric()) {
@@ -173,7 +174,7 @@ class MainActivity : FragmentActivity() {
                             permissionStore = safePermissionStore,
                             securityLevel = safeStorage.getSecurityLevel(),
                             lifecycleOwner = this@MainActivity,
-                            biometricAvailable = biometricAvailable,
+                            biometricStatus = biometricStatus,
                             onRelaysChanged = { relays ->
                                 lifecycleScope.launch { app.initializeWithRelays(relays) }
                             },
@@ -248,7 +249,7 @@ fun MainScreen(
     onRelaysChanged: (List<String>) -> Unit,
     onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
-    biometricAvailable: Boolean = false,
+    biometricStatus: BiometricHelper.BiometricStatus = BiometricHelper.BiometricStatus.NOT_AVAILABLE,
     onBiometricAuth: (suspend () -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
@@ -260,6 +261,8 @@ fun MainScreen(
     onAccountSwitched: suspend () -> Unit = {}
 ) {
     val appContext = LocalContext.current.applicationContext
+    val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
+    val requireBiometricReady = { BiometricHelper.requireBiometricReady(biometricStatus) }
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var allAccounts by remember { mutableStateOf<List<AccountInfo>>(emptyList()) }
@@ -483,7 +486,7 @@ fun MainScreen(
         BackupRestoreScreen(
             keepMobile = keepMobile,
             storage = storage,
-            onGetCipher = { getShareAwareCipher(storage) },
+            onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)
             },
@@ -497,7 +500,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             shareInfo = shareInfo,
-            onGetCipher = { getShareAwareCipher(storage) },
+            onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Recover nsec", "Authenticate to export vault share", cipher, callback)
             },
@@ -537,7 +540,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             shareInfo = currentShareInfoForScreens,
             storage = storage,
-            onGetCipher = { getShareAwareCipher(storage) },
+            onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
             },
@@ -627,7 +630,7 @@ fun MainScreen(
                 accountActions.importShare(data, passphrase, name, cipher) { importState = it }
             },
             onGetCipher = {
-                if (!biometricAvailable) throw IllegalStateException("Please enroll a fingerprint or face in your device settings to use Keep")
+                requireBiometricReady()
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
@@ -648,7 +651,7 @@ fun MainScreen(
                 accountActions.importNsec(nsec, name, cipher) { importState = it }
             },
             onGetCipher = {
-                if (!biometricAvailable) throw IllegalStateException("Please enroll a fingerprint or face in your device settings to use Keep")
+                requireBiometricReady()
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
@@ -728,8 +731,14 @@ fun MainScreen(
                     onImportNsec = { showImportNsecScreen = true },
                     onConnect = {
                         coroutineScope.launch {
-                            val cipher = withContext(Dispatchers.IO) {
-                                getShareAwareCipher(storage)
+                            val cipher = try {
+                                requireBiometricReady()
+                                withContext(Dispatchers.IO) {
+                                    getShareAwareCipher(storage)
+                                }
+                            } catch (e: BiometricHelper.BiometricNotReadyException) {
+                                Toast.makeText(appContext, e.message, Toast.LENGTH_LONG).show()
+                                return@launch
                             }
                             if (cipher == null) {
                                 Toast.makeText(appContext, "Failed to initialize encryption", Toast.LENGTH_SHORT).show()
