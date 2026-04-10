@@ -317,8 +317,14 @@ class Nip55Activity : FragmentActivity() {
             val currentApp = application as? KeepMobileApp
 
             if (keystoreStorage != null && currentApp != null && req.requestType != Nip55RequestType.GET_PUBLIC_KEY) {
-                if (!initializeNodeIfNeeded(keystoreStorage, currentApp)) {
-                    finishWithError("Node initialization failed")
+                try {
+                    val initError = initializeNodeIfNeeded(keystoreStorage, currentApp)
+                    if (initError != null) {
+                        finishWithError("Node initialization failed", initError)
+                        return@launch
+                    }
+                } catch (e: BiometricHelper.BiometricNotReadyException) {
+                    finishWithError("biometric_not_ready", e.message)
                     return@launch
                 }
             }
@@ -378,9 +384,9 @@ class Nip55Activity : FragmentActivity() {
             return false
         }
 
-        val status = biometricHelper.checkBiometricStatus()
-        if (status != BiometricHelper.BiometricStatus.AVAILABLE) {
-            finishWithError("biometric_not_ready")
+        val biometricStatus = biometricHelper.checkBiometricStatus()
+        if (biometricStatus != BiometricHelper.BiometricStatus.AVAILABLE) {
+            finishWithError("biometric_not_ready", BiometricHelper.getBiometricNotReadyMessage(biometricStatus))
             return false
         }
 
@@ -412,16 +418,16 @@ class Nip55Activity : FragmentActivity() {
         return true
     }
 
-    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): Boolean {
-        val mobile = app.getKeepMobile() ?: return false
-        if (!mobile.hasShare()) return false
+    private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): String? {
+        val mobile = app.getKeepMobile() ?: return "No key is stored in Keep"
+        if (!mobile.hasShare()) return "No key is stored in Keep"
 
-        if (app.liveState != null) return true
+        if (app.liveState != null) return null
 
-        if (biometricHelper.checkBiometricStatus() != BiometricHelper.BiometricStatus.AVAILABLE) return false
+        BiometricHelper.requireBiometricReady(biometricHelper.checkBiometricStatus())
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
-            .getOrNull() ?: return false
+            .getOrNull() ?: return "Failed to access stored keys"
 
         val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
@@ -429,16 +435,16 @@ class Nip55Activity : FragmentActivity() {
                 title = "Connect to Network",
                 subtitle = "Authenticate to enable signing"
             )
-        }.getOrNull() ?: return false
+        }.getOrNull() ?: return "Authentication failed"
 
         val initId = UUID.randomUUID().toString()
         keystoreStorage.setPendingCipher(initId, authedCipher)
         return try {
             app.ensureInitialized(requestId = initId)
-            true
+            null
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Node initialization failed: ${e::class.simpleName}")
-            false
+            "Failed to connect to network"
         } finally {
             keystoreStorage.clearPendingCipher(initId)
         }
@@ -452,9 +458,6 @@ class Nip55Activity : FragmentActivity() {
         "Storage error" -> "Failed to access stored keys"
         "No share stored" -> "No key is stored in Keep"
         "Authentication failed" -> "Biometric authentication failed"
-        "biometric_not_ready" -> BiometricHelper.getBiometricNotReadyMessage(
-            biometricHelper.checkBiometricStatus()
-        )
         "request_failed" -> "Request failed"
         "rate_limited" -> "Too many requests, please try again later"
         "not_initialized" -> "Keep is not connected to the network"
@@ -462,7 +465,9 @@ class Nip55Activity : FragmentActivity() {
         "invalid_timestamp" -> "Request has an invalid timestamp"
         "pubkey_verification_failed" -> "Public key verification failed"
         "Node initialization failed" -> "Failed to connect to network"
-        else -> error
+        "User rejected" -> "Request was declined"
+        "biometric_not_ready" -> "Biometric authentication is currently unavailable"
+        else -> "Request failed"
     }
 
     private fun mapExceptionToError(e: Throwable): String = when (e) {
@@ -524,14 +529,14 @@ class Nip55Activity : FragmentActivity() {
         finish()
     }
 
-    private fun finishWithError(error: String) {
+    private fun finishWithError(error: String, userMessage: String? = null) {
         notificationManager?.cancelNotification(notificationRequestId)
         if (BuildConfig.DEBUG) {
             val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
             Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
         }
         val resultIntent = Intent().apply {
-            putExtra("error", mapErrorToUserMessage(error))
+            putExtra("error", userMessage ?: mapErrorToUserMessage(error))
         }
         setResult(RESULT_CANCELED, resultIntent)
         finish()
