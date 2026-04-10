@@ -268,8 +268,10 @@ internal class AccountActions(
         coroutineScope.launch {
             accountMutex.withLock {
                 val importId = UUID.randomUUID().toString()
-                storage.setPendingCipher(importId, cipher)
+                var pendingSet = false
                 try {
+                    storage.setPendingCipher(importId, cipher)
+                    pendingSet = true
                     val result = withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(importId)
                         try {
@@ -284,7 +286,7 @@ internal class AccountActions(
                     if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
                     onImportStateChanged(ImportState.Error("Import failed. Please try again."))
                 } finally {
-                    storage.clearPendingCipher(importId)
+                    if (pendingSet) storage.clearPendingCipher(importId)
                 }
             }
         }
