@@ -129,17 +129,19 @@ class BiometricHelper(
     class BiometricNotReadyException(message: String) : Exception(message)
 
     companion object {
+        fun getBiometricNotReadyMessage(status: BiometricStatus): String = when (status) {
+            BiometricStatus.AVAILABLE -> ""
+            BiometricStatus.NOT_ENROLLED ->
+                "Please enroll a fingerprint or face in your device settings to use Keep"
+            BiometricStatus.NOT_AVAILABLE ->
+                "This device does not support biometric authentication required by Keep"
+            BiometricStatus.ERROR ->
+                "Biometric authentication is currently unavailable"
+        }
+
         fun requireBiometricReady(status: BiometricStatus) {
-            val message = when (status) {
-                BiometricStatus.AVAILABLE -> return
-                BiometricStatus.NOT_ENROLLED ->
-                    "Please enroll a fingerprint or face in your device settings to use Keep"
-                BiometricStatus.NOT_AVAILABLE ->
-                    "This device does not support biometric authentication required by Keep"
-                BiometricStatus.ERROR ->
-                    "Biometric authentication is currently unavailable"
-            }
-            throw BiometricNotReadyException(message)
+            if (status == BiometricStatus.AVAILABLE) return
+            throw BiometricNotReadyException(getBiometricNotReadyMessage(status))
         }
     }
 }
