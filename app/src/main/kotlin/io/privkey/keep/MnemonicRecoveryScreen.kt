@@ -19,6 +19,7 @@ import io.privkey.keep.uniffi.KeepMobile
 import javax.crypto.Cipher
 
 private const val MAX_MNEMONIC_LENGTH = 1024
+private const val PASTE_TOO_MANY_WORDS = "Pasted text has too many words (max 24)"
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +38,7 @@ fun MnemonicRecoveryScreen(
     val words = remember { mutableStateListOf(*Array(12) { "" }) }
     var keyName by remember { mutableStateOf("Mobile Key") }
     var validationError by remember { mutableStateOf<String?>(null) }
+    var pasteError by remember { mutableStateOf<String?>(null) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
@@ -137,7 +139,8 @@ fun MnemonicRecoveryScreen(
                 enabled = isInputEnabled,
                 clipboardManager = clipboardManager,
                 onUpdateWordCount = ::updateWordCount,
-                onClearValidation = { validationError = null },
+                onClearValidation = { validationError = null; pasteError = null },
+                onPasteRejected = { pasteError = PASTE_TOO_MANY_WORDS },
                 modifier = Modifier.weight(1f)
             )
             WordInputColumn(
@@ -148,12 +151,23 @@ fun MnemonicRecoveryScreen(
                 enabled = isInputEnabled,
                 clipboardManager = clipboardManager,
                 onUpdateWordCount = ::updateWordCount,
-                onClearValidation = { validationError = null },
+                onClearValidation = { validationError = null; pasteError = null },
+                onPasteRejected = { pasteError = PASTE_TOO_MANY_WORDS },
                 modifier = Modifier.weight(1f)
             )
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        val currentPasteError = pasteError
+        if (currentPasteError != null) {
+            StatusCard(
+                text = currentPasteError,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         val currentValidationError = validationError
         if (currentValidationError != null) {
@@ -234,6 +248,7 @@ private fun WordInputColumn(
     clipboardManager: androidx.compose.ui.platform.ClipboardManager,
     onUpdateWordCount: (Int) -> Unit,
     onClearValidation: () -> Unit,
+    onPasteRejected: () -> Unit,
     modifier: Modifier
 ) {
     Column(modifier = modifier) {
@@ -244,11 +259,11 @@ private fun WordInputColumn(
                 onValueChange = { newValue ->
                     val trimmed = newValue.trim()
                     if (trimmed.contains(" ")) {
-                        handlePaste(trimmed, i, words, wordCount, onUpdateWordCount)
+                        handlePaste(trimmed, i, words, wordCount, onUpdateWordCount, onPasteRejected)
                     } else {
                         words[i] = newValue.lowercase().filter { it.isLetter() }
+                        onClearValidation()
                     }
-                    onClearValidation()
                 },
                 focusRequester = focusRequesters[i],
                 onNext = {
@@ -261,7 +276,7 @@ private fun WordInputColumn(
                     val clip = clipboardManager.getText()?.text ?: return@WordInputField
                     val pasteWords = clip.trim().split("\\s+".toRegex())
                     if (pasteWords.size > 1) {
-                        handlePaste(clip, i, words, wordCount, onUpdateWordCount)
+                        handlePaste(clip, i, words, wordCount, onUpdateWordCount, onPasteRejected)
                         onClearValidation()
                     }
                 }
@@ -335,12 +350,19 @@ private fun handlePaste(
     startIndex: Int,
     words: MutableList<String>,
     wordCount: Int,
-    onWordCountChange: (Int) -> Unit
+    onWordCountChange: (Int) -> Unit,
+    onPasteRejected: (() -> Unit)? = null
 ) {
     val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
-    if (pasteWords.size > 24) return
+    if (pasteWords.size > 24) {
+        onPasteRejected?.invoke()
+        return
+    }
     val effectiveStart = if (pasteWords.size in listOf(12, 24) && startIndex > 0) 0 else startIndex
-    if (pasteWords.size > 24 - effectiveStart) return
+    if (pasteWords.size > 24 - effectiveStart) {
+        onPasteRejected?.invoke()
+        return
+    }
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
     if (totalNeeded > wordCount && totalNeeded <= 24) {

@@ -11,6 +11,8 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.crypto.Cipher
@@ -34,6 +36,8 @@ internal class AccountActions(
         val relays: List<String>,
         val profileRelays: List<String>
     )
+
+    private val accountMutex = Mutex()
 
     @Volatile
     private var currentRelays: List<String> = emptyList()
@@ -106,33 +110,37 @@ internal class AccountActions(
 
     fun switchAccount(account: AccountInfo, onDismiss: () -> Unit) {
         withBiometricAuth(account.groupPubkeyHex, "Switch Account", "Authenticate to switch", onDismiss) { authedCipher ->
-            try {
-                withContext(Dispatchers.IO) {
-                    val currentKey = storage.getActiveShareKey()
-                    if (currentKey != null) {
-                        val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
-                            ?: EMPTY_RELAY_CONFIG
-                        keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
+            accountMutex.withLock {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val currentKey = storage.getActiveShareKey()
+                        if (currentKey != null) {
+                            val existing = runCatching { keepMobile.getRelayConfig(currentKey) }.getOrNull()
+                                ?: EMPTY_RELAY_CONFIG
+                            keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
+                        }
                     }
+                    activateShare(authedCipher, account.groupPubkeyHex)
+                    onAccountSwitched()
+                    refreshAccountState()
+                } catch (e: Exception) {
+                    logAndToast("Switch failed", "Failed to switch account", e)
+                } finally {
+                    onDismiss()
                 }
-                activateShare(authedCipher, account.groupPubkeyHex)
-                onAccountSwitched()
-                refreshAccountState()
-            } catch (e: Exception) {
-                logAndToast("Switch failed", "Failed to switch account", e)
-            } finally {
-                onDismiss()
             }
         }
     }
 
     fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
         withBiometricAuth(account.groupPubkeyHex, "Delete Account", "Authenticate to delete account", onDismiss) {
-            try {
-                performDelete(account, onDismiss)
-            } catch (e: Exception) {
-                logAndToast("Delete failed", "Failed to delete account", e)
-                onDismiss()
+            accountMutex.withLock {
+                try {
+                    performDelete(account, onDismiss)
+                } catch (e: Exception) {
+                    logAndToast("Delete failed", "Failed to delete account", e)
+                    onDismiss()
+                }
             }
         }
     }
@@ -164,14 +172,14 @@ internal class AccountActions(
         }
     }
 
-    private fun switchToNextAccountAfterDelete(nextAccount: AccountInfo, onDismiss: () -> Unit) {
-        coroutineScope.launch {
-            val switchCipher = withContext(Dispatchers.IO) {
-                runCatching { storage.getCipherForShareDecryption(nextAccount.groupPubkeyHex) }.getOrNull()
-            }
-            if (switchCipher != null) {
-                onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
-                    coroutineScope.launch {
+    private suspend fun switchToNextAccountAfterDelete(nextAccount: AccountInfo, onDismiss: () -> Unit) {
+        val switchCipher = withContext(Dispatchers.IO) {
+            runCatching { storage.getCipherForShareDecryption(nextAccount.groupPubkeyHex) }.getOrNull()
+        }
+        if (switchCipher != null) {
+            onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
+                coroutineScope.launch {
+                    accountMutex.withLock {
                         if (switchAuthed != null) {
                             try {
                                 activateShare(switchAuthed, nextAccount.groupPubkeyHex)
@@ -184,24 +192,26 @@ internal class AccountActions(
                         onDismiss()
                     }
                 }
-            } else {
-                onAccountSwitched()
-                refreshAccountState()
-                onDismiss()
             }
+        } else {
+            onAccountSwitched()
+            refreshAccountState()
+            onDismiss()
         }
     }
 
     fun renameAccount(account: AccountInfo, newName: String) {
         coroutineScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    storage.renameShare(account.groupPubkeyHex, newName)
+            accountMutex.withLock {
+                try {
+                    withContext(Dispatchers.IO) {
+                        storage.renameShare(account.groupPubkeyHex, newName)
+                    }
+                } catch (e: Exception) {
+                    logAndToast("Rename failed", "Failed to rename account", e)
+                } finally {
+                    runCatching { refreshAccountState() }
                 }
-            } catch (e: Exception) {
-                logAndToast("Rename failed", "Failed to rename account", e)
-            } finally {
-                runCatching { refreshAccountState() }
             }
         }
     }
@@ -256,24 +266,26 @@ internal class AccountActions(
         apiCall: suspend () -> ShareInfo
     ) {
         coroutineScope.launch {
-            val importId = UUID.randomUUID().toString()
-            storage.setPendingCipher(importId, cipher)
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    storage.setRequestIdContext(importId)
-                    try {
-                        apiCall()
-                    } finally {
-                        storage.clearRequestIdContext()
+            accountMutex.withLock {
+                val importId = UUID.randomUUID().toString()
+                storage.setPendingCipher(importId, cipher)
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(importId)
+                        try {
+                            apiCall()
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
                     }
+                    onImportStateChanged(ImportState.Success(result.name))
+                    refreshAccountState()
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
+                    onImportStateChanged(ImportState.Error("Import failed. Please try again."))
+                } finally {
+                    storage.clearPendingCipher(importId)
                 }
-                onImportStateChanged(ImportState.Success(result.name))
-                refreshAccountState()
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
-                onImportStateChanged(ImportState.Error("Import failed. Please try again."))
-            } finally {
-                storage.clearPendingCipher(importId)
             }
         }
     }
