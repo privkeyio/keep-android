@@ -195,7 +195,12 @@ fun RecoverNsecScreen(
         if (shareInfo != null && !vaultSlotPopulated) {
             OutlinedButton(
                 onClick = {
-                    val cipher = onGetCipher()
+                    val cipher = try {
+                        onGetCipher()
+                    } catch (e: BiometricHelper.BiometricNotReadyException) {
+                        recoveryState = RecoveryState.Error(e.message ?: "Biometric authentication is unavailable")
+                        return@OutlinedButton
+                    }
                     if (cipher == null) {
                         recoveryState = RecoveryState.Error("No encryption key available")
                         return@OutlinedButton

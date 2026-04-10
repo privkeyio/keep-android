@@ -91,7 +91,12 @@ fun BackupRestoreScreen(
     }
 
     fun requireBiometricAuth(onAuthed: (authedCipher: Cipher) -> Unit) {
-        val cipher = onGetCipher()
+        val cipher = try {
+            onGetCipher()
+        } catch (e: BiometricHelper.BiometricNotReadyException) {
+            Toast.makeText(context, e.message ?: "Biometric authentication is unavailable", Toast.LENGTH_LONG).show()
+            return
+        }
         if (cipher == null) {
             Toast.makeText(context, "Authentication unavailable", Toast.LENGTH_SHORT).show()
             return

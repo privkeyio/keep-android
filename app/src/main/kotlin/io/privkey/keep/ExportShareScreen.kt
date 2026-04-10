@@ -318,7 +318,12 @@ fun ExportShareScreen(
                             return@ExportInputForm
                         }
                         cipherError = null
-                        val cipher = onGetCipher()
+                        val cipher = try {
+                            onGetCipher()
+                        } catch (e: BiometricHelper.BiometricNotReadyException) {
+                            cipherError = e.message ?: "Biometric authentication is unavailable"
+                            return@ExportInputForm
+                        }
                         if (cipher == null) {
                             cipherError = "No encryption key available"
                             return@ExportInputForm
