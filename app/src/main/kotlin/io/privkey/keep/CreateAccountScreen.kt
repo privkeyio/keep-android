@@ -36,10 +36,18 @@ fun CreateAccountScreen(
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
+    var generateError by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
-        val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
-        mnemonicData.update(mnemonic)
-        isGenerating = false
+        try {
+            val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
+            mnemonicData.update(mnemonic)
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to generate mnemonic: ${e::class.simpleName}: ${e.message}", e)
+            generateError = "Failed to generate seed words. Please try again."
+        } finally {
+            isGenerating = false
+        }
     }
 
     LaunchedEffect(importState) {
@@ -57,6 +65,7 @@ fun CreateAccountScreen(
     when (step) {
         CreateAccountStep.SETUP -> SetupStep(
             isGenerating = isGenerating,
+            generateError = generateError,
             keyName = keyName,
             onKeyNameChange = { if (it.length <= 64) keyName = it },
             isInputEnabled = isInputEnabled,
@@ -84,6 +93,7 @@ fun CreateAccountScreen(
 @Composable
 private fun SetupStep(
     isGenerating: Boolean,
+    generateError: String?,
     keyName: String,
     onKeyNameChange: (String) -> Unit,
     isInputEnabled: Boolean,
@@ -105,7 +115,13 @@ private fun SetupStep(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (isGenerating) {
+        if (generateError != null) {
+            StatusCard(
+                text = generateError,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            )
+        } else if (isGenerating) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
             Text("Generating seed words...")

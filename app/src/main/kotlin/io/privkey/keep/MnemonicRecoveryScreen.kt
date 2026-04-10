@@ -190,6 +190,8 @@ fun MnemonicRecoveryScreen(
                 canImport = filledCount == wordCount && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = { onError ->
+                    val name = keyName.trim()
+                    if (name.isBlank()) return@ImportButtons
                     val mnemonic = words.joinToString(" ")
                     try {
                         keepMobile.validateMnemonic(mnemonic)
@@ -202,7 +204,7 @@ fun MnemonicRecoveryScreen(
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
                             if (authedCipher != null) {
-                                onCreateAccount(mnemonicData.valueUnsafe(), "", keyName, authedCipher)
+                                onCreateAccount(mnemonicData.valueUnsafe(), "", name, authedCipher)
                             }
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
@@ -334,7 +336,9 @@ private fun handlePaste(
     onWordCountChange: (Int) -> Unit
 ) {
     val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
+    if (pasteWords.size > 24) return
     val effectiveStart = if (pasteWords.size in listOf(12, 24) && startIndex > 0) 0 else startIndex
+    if (pasteWords.size > 24 - effectiveStart) return
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
     if (totalNeeded > wordCount && totalNeeded <= 24) {
