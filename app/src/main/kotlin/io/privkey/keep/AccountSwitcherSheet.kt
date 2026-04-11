@@ -70,6 +70,8 @@ fun AccountSwitcherSheet(
     onRenameAccount: (AccountInfo, String) -> Unit,
     onImportAccount: () -> Unit,
     onImportNsec: () -> Unit,
+    onCreateAccount: () -> Unit,
+    onRecoverMnemonic: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var deleteTarget by remember { mutableStateOf<AccountInfo?>(null) }
@@ -102,6 +104,24 @@ fun AccountSwitcherSheet(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            TextButton(
+                onClick = onCreateAccount,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text("Create Account")
+            }
+
+            TextButton(
+                onClick = onRecoverMnemonic,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text("Import from Seed Words")
+            }
 
             TextButton(
                 onClick = onImportAccount,

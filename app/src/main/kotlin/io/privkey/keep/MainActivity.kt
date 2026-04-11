@@ -310,6 +310,8 @@ fun MainScreen(
     var showSecuritySettings by remember { mutableStateOf(false) }
     var showBackupRestore by remember { mutableStateOf(false) }
     var showRecoverNsec by remember { mutableStateOf(false) }
+    var showCreateAccountScreen by remember { mutableStateOf(false) }
+    var showMnemonicRecoveryScreen by remember { mutableStateOf(false) }
 
     val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
     var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
@@ -620,6 +622,14 @@ fun MainScreen(
                 showAccountSwitcher = false
                 showImportNsecScreen = true
             },
+            onCreateAccount = {
+                showAccountSwitcher = false
+                showCreateAccountScreen = true
+            },
+            onRecoverMnemonic = {
+                showAccountSwitcher = false
+                showMnemonicRecoveryScreen = true
+            },
             onDismiss = { showAccountSwitcher = false }
         )
     }
@@ -659,6 +669,50 @@ fun MainScreen(
             },
             onDismiss = {
                 showImportNsecScreen = false
+                importState = ImportState.Idle
+            },
+            importState = importState
+        )
+        return
+    }
+
+    if (showCreateAccountScreen) {
+        CreateAccountScreen(
+            keepMobile = keepMobile,
+            onCreateAccount = { mnemonic, passphrase, name, cipher ->
+                accountActions.createAccountFromMnemonic(mnemonic, passphrase, name, cipher) { importState = it }
+            },
+            onGetCipher = {
+                requireBiometricReady()
+                storage.getCipherForEncryption()
+            },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Create Account", "Authenticate to store key securely", cipher, callback)
+            },
+            onDismiss = {
+                showCreateAccountScreen = false
+                importState = ImportState.Idle
+            },
+            importState = importState
+        )
+        return
+    }
+
+    if (showMnemonicRecoveryScreen) {
+        MnemonicRecoveryScreen(
+            keepMobile = keepMobile,
+            onCreateAccount = { mnemonic, passphrase, name, cipher ->
+                accountActions.createAccountFromMnemonic(mnemonic, passphrase, name, cipher) { importState = it }
+            },
+            onGetCipher = {
+                requireBiometricReady()
+                storage.getCipherForEncryption()
+            },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Import from Seed Words", "Authenticate to store key securely", cipher, callback)
+            },
+            onDismiss = {
+                showMnemonicRecoveryScreen = false
                 importState = ImportState.Idle
             },
             importState = importState
@@ -729,6 +783,8 @@ fun MainScreen(
                     onAccountSwitcherClick = { showAccountSwitcher = true },
                     onImport = { showImportScreen = true },
                     onImportNsec = { showImportNsecScreen = true },
+                    onCreateAccount = { showCreateAccountScreen = true },
+                    onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
                     onConnect = {
                         coroutineScope.launch {
                             val cipher = try {
@@ -878,6 +934,8 @@ fun MainScreen(
                     onExportClick = { showExportScreen = true },
                     onImport = { showImportScreen = true },
                     onImportNsec = { showImportNsecScreen = true },
+                    onCreateAccount = { showCreateAccountScreen = true },
+                    onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
                     onRecoverNsec = { showRecoverNsec = true }
                 )
             }
@@ -902,6 +960,8 @@ private fun HomeTab(
     onAccountSwitcherClick: () -> Unit,
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
+    onCreateAccount: () -> Unit,
+    onRecoverMnemonic: () -> Unit,
     onConnect: () -> Unit,
     biometricAvailable: Boolean,
     onKillSwitchToggle: (Boolean) -> Unit
@@ -961,7 +1021,9 @@ private fun HomeTab(
         } else {
             NoShareCard(
                 onImport = onImport,
-                onImportNsec = onImportNsec
+                onImportNsec = onImportNsec,
+                onCreateAccount = onCreateAccount,
+                onRecoverMnemonic = onRecoverMnemonic
             )
         }
 
@@ -1196,6 +1258,8 @@ private fun AccountTab(
     onExportClick: () -> Unit,
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
+    onCreateAccount: () -> Unit,
+    onRecoverMnemonic: () -> Unit,
     onRecoverNsec: () -> Unit
 ) {
     Column(
@@ -1206,7 +1270,7 @@ private fun AccountTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Account", style = MaterialTheme.typography.headlineLarge)
+        Text(text = "Keys", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (allAccounts.isNotEmpty()) {
@@ -1265,12 +1329,30 @@ private fun AccountTab(
                             Text("Recover nsec from shares")
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onCreateAccount,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Create Account")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onRecoverMnemonic,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Import from Seed Words")
+                    }
                 }
             }
         } else {
             NoShareCard(
                 onImport = onImport,
-                onImportNsec = onImportNsec
+                onImportNsec = onImportNsec,
+                onCreateAccount = onCreateAccount,
+                onRecoverMnemonic = onRecoverMnemonic
             )
         }
 
