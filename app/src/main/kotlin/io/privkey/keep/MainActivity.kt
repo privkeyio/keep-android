@@ -272,6 +272,7 @@ fun MainScreen(
     var showImportNsecScreen by remember { mutableStateOf(false) }
     var showShareDetails by remember { mutableStateOf(false) }
     var showExportScreen by remember { mutableStateOf(false) }
+    var showExportNcryptsecScreen by remember { mutableStateOf(false) }
     var showPermissionsScreen by remember { mutableStateOf(false) }
     var showHistoryScreen by remember { mutableStateOf(false) }
     var showSignPolicyScreen by remember { mutableStateOf(false) }
@@ -547,6 +548,20 @@ fun MainScreen(
                 onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
             },
             onDismiss = { showExportScreen = false }
+        )
+        return
+    }
+
+    if (showExportNcryptsecScreen && currentShareInfoForScreens != null) {
+        ExportNcryptsecScreen(
+            keepMobile = keepMobile,
+            shareInfo = currentShareInfoForScreens,
+            storage = storage,
+            onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest("Export Encrypted Key", "Authenticate to export encrypted key", cipher, callback)
+            },
+            onDismiss = { showExportNcryptsecScreen = false }
         )
         return
     }
@@ -932,6 +947,7 @@ fun MainScreen(
                     onAccountSwitcherClick = { showAccountSwitcher = true },
                     onShareDetailsClick = { showShareDetails = true },
                     onExportClick = { showExportScreen = true },
+                    onExportNcryptsecClick = { showExportNcryptsecScreen = true },
                     onImport = { showImportScreen = true },
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
@@ -1256,6 +1272,7 @@ private fun AccountTab(
     onAccountSwitcherClick: () -> Unit,
     onShareDetailsClick: () -> Unit,
     onExportClick: () -> Unit,
+    onExportNcryptsecClick: () -> Unit,
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
@@ -1298,6 +1315,15 @@ private fun AccountTab(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Export Share")
+                    }
+                    if (shareInfo.threshold == 1u.toUShort() && shareInfo.totalShares == 1u.toUShort()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onExportNcryptsecClick,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Export Encrypted (NIP-49)")
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
