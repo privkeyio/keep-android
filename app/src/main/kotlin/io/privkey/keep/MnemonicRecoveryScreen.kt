@@ -206,6 +206,7 @@ fun MnemonicRecoveryScreen(
                     try {
                         keepMobile.validateMnemonic(mnemonic)
                     } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
                         validationError = "Invalid seed words. Please check and try again."
                         return@ImportButtons
                     }
@@ -362,7 +363,7 @@ private fun handlePaste(
     }
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
-    val newCount = if (pasteWords.size in setOf(12, 24) && startIndex == 0) pasteWords.size
+    val newCount = if (pasteWords.size in setOf(12, 24) && effectiveStart == 0) pasteWords.size
         else if (totalNeeded > wordCount) 24
         else wordCount
     if (newCount != wordCount) {
