@@ -16,6 +16,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import io.privkey.keep.uniffi.KeepMobile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 private const val MAX_MNEMONIC_LENGTH = 1024
@@ -40,8 +43,10 @@ fun MnemonicRecoveryScreen(
     var validationError by remember { mutableStateOf<String?>(null) }
     var pasteError by remember { mutableStateOf<String?>(null) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }
+    var isValidating by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
+    val isInputEnabled = (importState is ImportState.Idle || importState is ImportState.Error) && !isValidating
     val focusRequesters = remember(wordCount) { List(wordCount) { FocusRequester() } }
 
     fun updateWordCount(newCount: Int) {
@@ -203,30 +208,35 @@ fun MnemonicRecoveryScreen(
                     val name = keyName.trim()
                     if (name.isBlank()) return@ImportButtons
                     val mnemonic = words.joinToString(" ")
-                    try {
-                        keepMobile.validateMnemonic(mnemonic)
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
-                        validationError = "Invalid seed words. Please check and try again."
-                        return@ImportButtons
-                    }
-                    mnemonicData.update(mnemonic)
-                    try {
-                        val cipher = onGetCipher()
-                        onBiometricAuth(cipher) { authedCipher ->
-                            if (authedCipher != null) {
-                                onCreateAccount(mnemonicData.valueUnsafe(), "", name, authedCipher)
-                            }
+                    scope.launch {
+                        isValidating = true
+                        try {
+                            withContext(Dispatchers.IO) { keepMobile.validateMnemonic(mnemonic) }
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
+                            validationError = "Invalid seed words. Please check and try again."
+                            return@launch
+                        } finally {
+                            isValidating = false
                         }
-                    } catch (e: KeyPermanentlyInvalidatedException) {
-                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric key invalidated: ${e::class.simpleName}")
-                        onError("Biometric key invalidated. Please re-enroll biometrics.")
-                    } catch (e: BiometricHelper.BiometricNotReadyException) {
-                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric not ready: ${e::class.simpleName}")
-                        onError("Biometric authentication is unavailable")
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}")
-                        onError("Failed to initialize encryption")
+                        mnemonicData.update(mnemonic)
+                        try {
+                            val cipher = onGetCipher()
+                            onBiometricAuth(cipher) { authedCipher ->
+                                if (authedCipher != null) {
+                                    onCreateAccount(mnemonicData.valueUnsafe(), "", name, authedCipher)
+                                }
+                            }
+                        } catch (e: KeyPermanentlyInvalidatedException) {
+                            if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric key invalidated: ${e::class.simpleName}")
+                            onError("Biometric key invalidated. Please re-enroll biometrics.")
+                        } catch (e: BiometricHelper.BiometricNotReadyException) {
+                            if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric not ready: ${e::class.simpleName}")
+                            onError("Biometric authentication is unavailable")
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}")
+                            onError("Failed to initialize encryption")
+                        }
                     }
                 }
             )

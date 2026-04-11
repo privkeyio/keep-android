@@ -200,6 +200,7 @@ private fun SeedWordsStep(
 ) {
     val context = LocalContext.current
     val words = mnemonicData.words()
+    var showCopyWarning by remember { mutableStateOf(false) }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -234,10 +235,27 @@ private fun SeedWordsStep(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedButton(
-            onClick = { copySensitiveText(context, mnemonicData.valueUnsafe()) },
+            onClick = { showCopyWarning = true },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Copy to clipboard")
+        }
+
+        if (showCopyWarning) {
+            AlertDialog(
+                onDismissRequest = { showCopyWarning = false },
+                title = { Text("Copy seed words?") },
+                text = { Text("Your seed words will be placed on the clipboard, where other apps may be able to read them. The clipboard will be cleared after 10 seconds.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCopyWarning = false
+                        copySensitiveText(context, mnemonicData.valueUnsafe())
+                    }) { Text("Copy") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showCopyWarning = false }) { Text("Cancel") }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
