@@ -211,15 +211,18 @@ fun MnemonicRecoveryScreen(
                     val mnemonic = words.joinToString(" ")
                     isValidating = true
                     scope.launch {
-                        try {
+                        val isValid = try {
                             withContext(Dispatchers.IO) { keepMobile.validateMnemonic(mnemonic) }
+                            true
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
                             validationError = "Invalid seed words. Please check and try again."
-                            return@launch
+                            false
                         } finally {
                             isValidating = false
                         }
+                        if (!isValid) return@launch
+
                         mnemonicData.update(mnemonic)
                         try {
                             val cipher = onGetCipher()
@@ -371,23 +374,23 @@ private fun handlePaste(
         onPasteRejected?.invoke()
         return false
     }
-    val effectiveStart = if (pasteWords.size in setOf(12, 24) && startIndex > 0) 0 else startIndex
+    val isFullMnemonic = pasteWords.size in setOf(12, 24)
+    val effectiveStart = if (isFullMnemonic && startIndex > 0) 0 else startIndex
     if (effectiveStart + pasteWords.size > 24) {
         onPasteRejected?.invoke()
         return false
     }
-    val totalNeeded = effectiveStart + pasteWords.size
-    var effectiveWordCount = wordCount
-    val newCount = if (pasteWords.size in setOf(12, 24) && effectiveStart == 0) pasteWords.size
-        else if (totalNeeded > wordCount) 24
-        else wordCount
+    val newCount = when {
+        isFullMnemonic && effectiveStart == 0 -> pasteWords.size
+        effectiveStart + pasteWords.size > wordCount -> 24
+        else -> wordCount
+    }
     if (newCount != wordCount) {
         onWordCountChange(newCount)
-        effectiveWordCount = newCount
     }
     pasteWords.forEachIndexed { i, word ->
         val targetIndex = effectiveStart + i
-        if (targetIndex < effectiveWordCount) {
+        if (targetIndex < newCount) {
             words[targetIndex] = word
         }
     }
