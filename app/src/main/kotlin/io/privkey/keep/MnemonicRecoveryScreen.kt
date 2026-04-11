@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import io.privkey.keep.uniffi.KeepMobile
+import java.util.Locale
 import io.privkey.keep.uniffi.hexToNpub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -211,7 +212,7 @@ fun MnemonicRecoveryScreen(
         } else {
             ImportButtons(
                 importState = importState,
-                canImport = filledCount == wordCount && keyName.isNotBlank() && isInputEnabled,
+                canImport = filledCount == wordCount && keyName.trim().isNotBlank() && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = { onError ->
                     if (isValidating) return@ImportButtons
@@ -283,7 +284,7 @@ private fun WordInputColumn(
                             onClearValidation()
                         }
                     } else {
-                        words[i] = newValue.lowercase().filter { it.isLetter() }
+                        words[i] = newValue.lowercase(Locale.ROOT).filter { it.isLetter() }
                         onClearValidation()
                     }
                 },
@@ -376,7 +377,7 @@ private fun handlePaste(
     onWordCountChange: (Int) -> Unit,
     onPasteRejected: (() -> Unit)? = null
 ): Boolean {
-    val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
+    val pasteWords = text.trim().lowercase(Locale.ROOT).split("\\s+".toRegex())
         .map { it.filter { c -> c.isLetter() } }
         .filter { it.isNotEmpty() }
     if (pasteWords.size > 24) {

@@ -135,24 +135,30 @@ internal class AccountActions(
     fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
         withBiometricAuth(account.groupPubkeyHex, "Delete Account", "Authenticate to delete account", onDismiss) {
             accountMutex.withLock {
+                val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+                val wasActive = account.groupPubkeyHex == activeAccountKey
                 try {
-                    performDelete(account, onDismiss)
+                    withContext(Dispatchers.IO) {
+                        keepMobile.deleteShareByKey(account.groupPubkeyHex)
+                        runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
+                            .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
+                    }
                 } catch (e: Exception) {
                     logAndToast("Delete failed", "Failed to delete account", e)
+                    onDismiss()
+                    return@withLock
+                }
+                try {
+                    postDeleteCleanup(wasActive, onDismiss)
+                } catch (e: Exception) {
+                    logAndToast("Post-delete refresh failed", "Account deleted, but failed to refresh", e)
                     onDismiss()
                 }
             }
         }
     }
 
-    private suspend fun performDelete(account: AccountInfo, onDismiss: () -> Unit) {
-        val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-        val wasActive = account.groupPubkeyHex == activeAccountKey
-        withContext(Dispatchers.IO) {
-            keepMobile.deleteShareByKey(account.groupPubkeyHex)
-            runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
-                .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
-        }
+    private suspend fun postDeleteCleanup(wasActive: Boolean, onDismiss: () -> Unit) {
         val remainingAccounts = withContext(Dispatchers.IO) {
             storage.listAllShares().map { it.toAccountInfo() }
         }
