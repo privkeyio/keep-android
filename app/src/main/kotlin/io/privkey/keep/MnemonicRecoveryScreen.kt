@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.hexToNpub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -195,6 +196,14 @@ fun MnemonicRecoveryScreen(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Spacer(modifier = Modifier.height(16.dp))
+
+            val npub = remember(importState.groupPubkey) {
+                hexToNpub(importState.groupPubkey) ?: ""
+            }
+            if (npub.isNotBlank()) {
+                NpubDisplay(npub = npub)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
 
         if (importState is ImportState.Importing) {

@@ -11,7 +11,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.hexToNpub
+import io.privkey.keep.uniffi.truncateStr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
@@ -356,6 +359,14 @@ private fun ConfirmStep(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Spacer(modifier = Modifier.height(16.dp))
+
+            val npub = remember(importState.groupPubkey) {
+                hexToNpub(importState.groupPubkey) ?: ""
+            }
+            if (npub.isNotBlank()) {
+                NpubDisplay(npub = npub)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
 
         if (importState is ImportState.Importing) {

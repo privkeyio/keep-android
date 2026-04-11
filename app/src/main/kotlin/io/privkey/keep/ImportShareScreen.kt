@@ -141,7 +141,7 @@ sealed class ImportState {
     object Idle : ImportState()
     object Importing : ImportState()
     data class Error(val message: String) : ImportState()
-    data class Success(val name: String) : ImportState()
+    data class Success(val name: String, val groupPubkey: String = "") : ImportState()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

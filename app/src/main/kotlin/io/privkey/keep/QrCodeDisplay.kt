@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.widget.Toast
 import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.os.Build
@@ -400,4 +401,33 @@ internal fun setSecureScreen(context: Context, secure: Boolean) {
         return
     }
     if (secure) SecureScreenManager.acquire(activity) else SecureScreenManager.release(activity)
+}
+
+@Composable
+internal fun NpubDisplay(npub: String) {
+    val context = LocalContext.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Your public key (npub)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = io.privkey.keep.uniffi.truncateStr(npub, 12u, 8u),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = {
+            copyPublicText(context, npub)
+            Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Copy npub")
+    }
 }

@@ -286,7 +286,7 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
-                    onImportStateChanged(ImportState.Success(result.name))
+                    onImportStateChanged(ImportState.Success(result.name, result.groupPubkey))
                     try {
                         refreshAccountState()
                     } catch (e: Exception) {
