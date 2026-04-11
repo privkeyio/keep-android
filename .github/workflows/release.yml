@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: privkeyio/keep
-          ref: e06064199fc7af752d1b36174dd857a1e0411110
+          ref: 657ebbd084f3a8261bb95f764864714f525b044d
           path: keep
 
       - name: Set up JDK 17
