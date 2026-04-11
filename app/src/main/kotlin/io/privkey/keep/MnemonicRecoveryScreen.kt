@@ -256,11 +256,13 @@ private fun WordInputColumn(
                 onValueChange = { newValue ->
                     val trimmed = newValue.trim()
                     if (trimmed.contains(" ")) {
-                        handlePaste(trimmed, i, words, wordCount, onUpdateWordCount, onPasteRejected)
+                        if (handlePaste(trimmed, i, words, wordCount, onUpdateWordCount, onPasteRejected)) {
+                            onClearValidation()
+                        }
                     } else {
                         words[i] = newValue.lowercase().filter { it.isLetter() }
+                        onClearValidation()
                     }
-                    onClearValidation()
                 },
                 focusRequester = focusRequesters[i],
                 onNext = {
@@ -273,8 +275,9 @@ private fun WordInputColumn(
                     val clip = clipboardManager.getText()?.text ?: return@WordInputField
                     val pasteWords = clip.trim().split("\\s+".toRegex())
                     if (pasteWords.size > 1) {
-                        handlePaste(clip, i, words, wordCount, onUpdateWordCount, onPasteRejected)
-                        onClearValidation()
+                        if (handlePaste(clip, i, words, wordCount, onUpdateWordCount, onPasteRejected)) {
+                            onClearValidation()
+                        }
                     }
                 }
             )
@@ -349,18 +352,18 @@ private fun handlePaste(
     wordCount: Int,
     onWordCountChange: (Int) -> Unit,
     onPasteRejected: (() -> Unit)? = null
-) {
+): Boolean {
     val pasteWords = text.trim().lowercase().split("\\s+".toRegex())
         .map { it.filter { c -> c.isLetter() } }
         .filter { it.isNotEmpty() }
     if (pasteWords.size > 24) {
         onPasteRejected?.invoke()
-        return
+        return false
     }
     val effectiveStart = if (pasteWords.size in setOf(12, 24) && startIndex > 0) 0 else startIndex
     if (effectiveStart + pasteWords.size > 24) {
         onPasteRejected?.invoke()
-        return
+        return false
     }
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
@@ -377,4 +380,5 @@ private fun handlePaste(
             words[targetIndex] = word
         }
     }
+    return true
 }
