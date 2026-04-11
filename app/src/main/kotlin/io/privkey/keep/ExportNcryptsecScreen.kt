@@ -249,8 +249,8 @@ private fun calculatePasswordStrength(password: SecurePassphrase): PasswordStren
     if (password.length < MIN_PASSWORD_LENGTH) return PasswordStrength.WEAK
 
     var score = 0
-    if (password.length >= 12) score++
     if (password.length >= 16) score++
+    if (password.length >= 20) score++
     if (password.any { it.isUpperCase() } && password.any { it.isLowerCase() }) score++
     if (password.any { it.isDigit() }) score++
     if (password.any { !it.isLetterOrDigit() }) score++
@@ -420,6 +420,7 @@ private fun NcryptsecSuccessContent(
     QrCodeDisplay(
         data = ncryptsec,
         label = "NIP-49 Encrypted Key",
+        onTapToCopy = { showClipboardWarning = true },
         onCopied = showCopiedToast
     )
 
