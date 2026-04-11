@@ -222,6 +222,7 @@ fun MnemonicRecoveryScreen(
                         if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric key invalidated: ${e::class.simpleName}")
                         onError("Biometric key invalidated. Please re-enroll biometrics.")
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
+                        if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric not ready: ${e::class.simpleName}")
                         onError("Biometric authentication is unavailable")
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}")
