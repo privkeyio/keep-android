@@ -68,11 +68,14 @@ fun ExportNcryptsecScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var exportJob by remember { mutableStateOf<Job?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
 
         fun clearSensitiveData() {
+            exportJob?.cancel()
+            exportJob = null
             password.clear()
             confirmPassword.clear()
             passwordDisplay = ""
@@ -128,11 +131,11 @@ fun ExportNcryptsecScreen(
                     confirmPasswordDisplay = confirmPasswordDisplay,
                     onPasswordChange = {
                         password.update(it)
-                        passwordDisplay = it
+                        passwordDisplay = if (password.length == it.length) it else passwordDisplay
                     },
                     onConfirmPasswordChange = {
                         confirmPassword.update(it)
-                        confirmPasswordDisplay = it
+                        confirmPasswordDisplay = if (confirmPassword.length == it.length) it else confirmPasswordDisplay
                     },
                     onExport = {
                         if (password.length < MIN_PASSWORD_LENGTH) {
@@ -166,7 +169,7 @@ fun ExportNcryptsecScreen(
                                     val exportId = java.util.UUID.randomUUID().toString()
                                     storage.setPendingCipher(exportId, authedCipher)
                                     exportState = NcryptsecExportState.Encrypting
-                                    coroutineScope.launch {
+                                    exportJob = coroutineScope.launch {
                                         currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
                                             if (cause is CancellationException) {
                                                 clearChars()
@@ -182,6 +185,11 @@ fun ExportNcryptsecScreen(
                                                     storage.clearRequestIdContext()
                                                 }
                                             }
+                                            clearChars()
+                                            password.clear()
+                                            confirmPassword.clear()
+                                            passwordDisplay = ""
+                                            confirmPasswordDisplay = ""
                                             (exportState as? NcryptsecExportState.Success)?.clear()
                                             exportState = NcryptsecExportState.Success(ncryptsec)
                                         } catch (e: Exception) {
