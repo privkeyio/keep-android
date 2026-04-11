@@ -47,7 +47,7 @@ fun MnemonicRecoveryScreen(
     fun updateWordCount(newCount: Int) {
         wordCount = newCount
         while (words.size < newCount) words.add("")
-        while (words.size > newCount) words.removeLast()
+        while (words.size > newCount) words.removeAt(words.lastIndex)
     }
 
     DisposableEffect(context) {
