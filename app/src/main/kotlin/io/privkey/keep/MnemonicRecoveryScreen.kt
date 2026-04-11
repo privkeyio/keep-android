@@ -205,11 +205,12 @@ fun MnemonicRecoveryScreen(
                 canImport = filledCount == wordCount && keyName.isNotBlank() && isInputEnabled,
                 onDismiss = onDismiss,
                 onImportClick = { onError ->
+                    if (isValidating) return@ImportButtons
                     val name = keyName.trim()
                     if (name.isBlank()) return@ImportButtons
                     val mnemonic = words.joinToString(" ")
+                    isValidating = true
                     scope.launch {
-                        isValidating = true
                         try {
                             withContext(Dispatchers.IO) { keepMobile.validateMnemonic(mnemonic) }
                         } catch (e: Exception) {
