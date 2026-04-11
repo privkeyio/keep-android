@@ -285,6 +285,15 @@ private fun PasswordStrengthIndicator(strength: PasswordStrength) {
 }
 
 @Composable
+private fun ErrorCard(message: String) {
+    StatusCard(
+        text = message,
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer
+    )
+}
+
+@Composable
 private fun NcryptsecInputForm(
     errorMessage: String?,
     cipherError: String?,
@@ -312,20 +321,12 @@ private fun NcryptsecInputForm(
     Spacer(modifier = Modifier.height(16.dp))
 
     errorMessage?.let {
-        StatusCard(
-            text = it,
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer
-        )
+        ErrorCard(it)
         Spacer(modifier = Modifier.height(16.dp))
     }
 
     cipherError?.let {
-        StatusCard(
-            text = it,
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer
-        )
+        ErrorCard(it)
         Spacer(modifier = Modifier.height(16.dp))
     }
 
