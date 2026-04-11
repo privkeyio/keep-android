@@ -362,7 +362,9 @@ private fun handlePaste(
     }
     val totalNeeded = effectiveStart + pasteWords.size
     var effectiveWordCount = wordCount
-    val newCount = if (totalNeeded > 12) 24 else 12
+    val newCount = if (pasteWords.size in setOf(12, 24) && startIndex == 0) pasteWords.size
+        else if (totalNeeded > wordCount) 24
+        else wordCount
     if (newCount != wordCount) {
         onWordCountChange(newCount)
         effectiveWordCount = newCount

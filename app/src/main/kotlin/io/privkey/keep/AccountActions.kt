@@ -197,9 +197,12 @@ internal class AccountActions(
                 }
             }
         } else {
-            onAccountSwitched()
-            refreshAccountState()
-            onDismiss()
+            try {
+                onAccountSwitched()
+                refreshAccountState()
+            } finally {
+                onDismiss()
+            }
         }
     }
 
