@@ -38,7 +38,7 @@ internal fun SeedWordsScreen(
 
     DisposableEffect(lifecycleOwner, mnemonicData) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP || event == Lifecycle.Event.ON_PAUSE) {
+            if (event == Lifecycle.Event.ON_STOP) {
                 mnemonicData?.clear()
             }
         }
@@ -75,7 +75,7 @@ internal fun SeedWordsScreen(
             return@Column
         }
 
-        if (mnemonicData == null || !mnemonicData.isNotBlank()) {
+        if (mnemonicData?.isNotBlank() != true) {
             StatusCard(
                 text = "No seed words available for this account. Seed words are only available for accounts created from a mnemonic in this app.",
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,

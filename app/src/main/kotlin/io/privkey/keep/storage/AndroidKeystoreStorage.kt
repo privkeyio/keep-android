@@ -222,8 +222,10 @@ class AndroidKeystoreStorage(
             }
         }
         expired.forEach { entry ->
-            pendingCiphers.remove(entry.key)
-            cipherConsumedCallbacks.remove(entry.key)
+            pendingCiphers.remove(entry.key, entry.value)
+            cipherConsumedCallbacks[entry.key]?.let { cbQueue ->
+                cipherConsumedCallbacks.remove(entry.key, cbQueue)
+            }
         }
     }
 

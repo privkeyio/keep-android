@@ -990,8 +990,9 @@ fun MainScreen(
                     onExportClick = { showExportScreen = true },
                     onExportNcryptsecClick = { showExportNcryptsecScreen = true },
                     onViewSeedWords = {
-                        val activeKey = activeAccountKey
-                        val acct = activeKey?.let { k -> allAccounts.firstOrNull { it.groupPubkeyHex == k } }
+                        val acct = activeAccountKey?.let { key ->
+                            allAccounts.firstOrNull { it.groupPubkeyHex == key }
+                        }
                         if (acct != null) {
                             seedWordsLoading = true
                             seedWordsData.clear()
