@@ -59,6 +59,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
+private const val MAX_SEED_WORDS_LENGTH = 1024
+
 class MainActivity : FragmentActivity() {
     private var biometricHelper: BiometricHelper? = null
 
@@ -313,6 +315,10 @@ fun MainScreen(
     var showRecoverNsec by remember { mutableStateOf(false) }
     var showCreateAccountScreen by remember { mutableStateOf(false) }
     var showMnemonicRecoveryScreen by remember { mutableStateOf(false) }
+    var activeDidBackup by remember { mutableStateOf<Boolean?>(null) }
+    var showSeedWordsScreen by remember { mutableStateOf(false) }
+    val seedWordsData = remember { SecureShareData(MAX_SEED_WORDS_LENGTH) }
+    var seedWordsLoading by remember { mutableStateOf(false) }
 
     val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
     var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
@@ -347,6 +353,7 @@ fun MainScreen(
                 allAccounts = state.allAccounts
                 relays = state.relays
                 profileRelays = state.profileRelays
+                activeDidBackup = state.activeDidBackup
             }
         )
     }
@@ -405,7 +412,7 @@ fun MainScreen(
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
-                val (newHasShare, newShareInfo, newAccounts, newActiveKey, newDescriptorCount) = withContext(Dispatchers.IO) {
+                val pollResult = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
                     val a = storage.listAllShares().map { it.toAccountInfo() }
@@ -415,15 +422,17 @@ fun MainScreen(
                             .onFailure { if (it is CancellationException) throw it }
                             .getOrDefault(descriptorCount)
                     } else 0
-                    PollResult(h, s, a, k, dc)
+                    val db = runCatching { keepMobile.getActiveShare()?.didBackup }.getOrNull()
+                    PollResult(h, s, a, k, dc, db)
                 }
-                hasShare = newHasShare
-                shareInfo = newShareInfo
-                allAccounts = newAccounts
-                activeAccountKey = newActiveKey
-                descriptorCount = newDescriptorCount
+                hasShare = pollResult.hasShare
+                shareInfo = pollResult.shareInfo
+                allAccounts = pollResult.allAccounts
+                activeAccountKey = pollResult.activeAccountKey
+                descriptorCount = pollResult.descriptorCount
+                activeDidBackup = pollResult.activeDidBackup
                 refreshCertificatePins()
-                profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(newActiveKey) }
+                profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(pollResult.activeAccountKey) }
                 delay(10_000)
             }
         }
@@ -713,6 +722,36 @@ fun MainScreen(
         return
     }
 
+    DisposableEffect(Unit) {
+        onDispose { seedWordsData.clear() }
+    }
+
+    if (showSeedWordsScreen) {
+        val activeAccount = remember(activeAccountKey, allAccounts) {
+            activeAccountKey?.let { key -> allAccounts.firstOrNull { it.groupPubkeyHex == key } }
+        }
+        SeedWordsScreen(
+            mnemonicData = if (seedWordsLoading) null else seedWordsData,
+            didBackup = activeDidBackup == true,
+            onConfirmBackedUp = {
+                val acct = activeAccount
+                if (acct != null) {
+                    accountActions.markBackedUp(acct) { success ->
+                        if (success) {
+                            seedWordsData.clear()
+                            showSeedWordsScreen = false
+                        }
+                    }
+                }
+            },
+            onDismiss = {
+                seedWordsData.clear()
+                showSeedWordsScreen = false
+            }
+        )
+        return
+    }
+
     if (showMnemonicRecoveryScreen) {
         MnemonicRecoveryScreen(
             keepMobile = keepMobile,
@@ -944,10 +983,35 @@ fun MainScreen(
                     hasShare = hasShare,
                     shareInfo = shareInfo,
                     allAccounts = allAccounts,
+                    activeDidBackup = activeDidBackup,
                     onAccountSwitcherClick = { showAccountSwitcher = true },
                     onShareDetailsClick = { showShareDetails = true },
                     onExportClick = { showExportScreen = true },
                     onExportNcryptsecClick = { showExportNcryptsecScreen = true },
+                    onViewSeedWords = {
+                        val activeKey = activeAccountKey
+                        val acct = activeKey?.let { k -> allAccounts.firstOrNull { it.groupPubkeyHex == k } }
+                        if (acct != null) {
+                            seedWordsLoading = true
+                            seedWordsData.clear()
+                            showSeedWordsScreen = true
+                            accountActions.viewSeedWords(
+                                acct,
+                                onResult = { mnemonic ->
+                                    if (mnemonic != null) {
+                                        seedWordsData.update(mnemonic)
+                                    }
+                                    seedWordsLoading = false
+                                },
+                                onDismiss = {
+                                    seedWordsLoading = false
+                                    if (!seedWordsData.isNotBlank()) {
+                                        showSeedWordsScreen = false
+                                    }
+                                }
+                            )
+                        }
+                    },
                     onImport = { showImportScreen = true },
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
@@ -1269,10 +1333,12 @@ private fun AccountTab(
     hasShare: Boolean,
     shareInfo: ShareInfo?,
     allAccounts: List<AccountInfo>,
+    activeDidBackup: Boolean?,
     onAccountSwitcherClick: () -> Unit,
     onShareDetailsClick: () -> Unit,
     onExportClick: () -> Unit,
     onExportNcryptsecClick: () -> Unit,
+    onViewSeedWords: () -> Unit,
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
@@ -1289,6 +1355,11 @@ private fun AccountTab(
     ) {
         Text(text = "Keys", style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (hasShare && activeDidBackup == false) {
+            BackupPromptCard(onClick = onViewSeedWords)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         if (allAccounts.isNotEmpty()) {
             AccountSelectorCard(
@@ -1310,6 +1381,13 @@ private fun AccountTab(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Key Management", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onViewSeedWords,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("View Seed Words")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = onExportClick,
                         modifier = Modifier.fillMaxWidth()
@@ -1393,12 +1471,39 @@ private data class AccountInitial(
     val profileRelays: List<String>
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BackupPromptCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Back up your seed words",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "You haven't confirmed that you've saved your seed words. Tap to view them and back up your account.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
+
 private data class PollResult(
     val hasShare: Boolean,
     val shareInfo: ShareInfo?,
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
-    val descriptorCount: Int
+    val descriptorCount: Int,
+    val activeDidBackup: Boolean?
 )
 
 @Composable

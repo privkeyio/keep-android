@@ -56,7 +56,7 @@ class AndroidKeystoreStorage(
         val creatingThreadId: Long,
         val createdAtMs: Long
     )
-    private val pendingCiphers = ConcurrentHashMap<String, PendingCipherData>()
+    private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
     private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
@@ -206,7 +206,9 @@ class AndroidKeystoreStorage(
             creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime()
         )
-        pendingCiphers[requestId] = data
+        pendingCiphers.compute(requestId) { _, existing ->
+            (existing ?: ArrayDeque()).apply { add(data) }
+        }
         if (onConsumed != null) {
             cipherConsumedCallbacks[requestId] = onConsumed
         }
@@ -214,7 +216,9 @@ class AndroidKeystoreStorage(
 
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
-        val expired = pendingCiphers.entries.filter { now - it.value.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+        val expired = pendingCiphers.entries.filter { entry ->
+            entry.value.isEmpty() || entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+        }
         expired.forEach { entry ->
             pendingCiphers.remove(entry.key)
             cipherConsumedCallbacks.remove(entry.key)
@@ -227,11 +231,18 @@ class AndroidKeystoreStorage(
     }
 
     fun consumePendingCipher(requestId: String): Cipher? {
-        val data = pendingCiphers.remove(requestId) ?: return null
-        val callback = cipherConsumedCallbacks.remove(requestId)
+        val queue = pendingCiphers[requestId] ?: return null
+        val data = synchronized(queue) { if (queue.isEmpty()) null else queue.removeFirst() } ?: return null
+        if (queue.isEmpty()) {
+            pendingCiphers.remove(requestId, queue)
+            val callback = cipherConsumedCallbacks.remove(requestId)
+            val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+            if (isExpired) return null
+            callback?.invoke()
+            return data.cipher
+        }
         val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
         if (isExpired) return null
-        callback?.invoke()
         return data.cipher
     }
 

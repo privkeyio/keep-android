@@ -34,7 +34,8 @@ internal class AccountActions(
         val activeAccountKey: String?,
         val allAccounts: List<AccountInfo>,
         val relays: List<String>,
-        val profileRelays: List<String>
+        val profileRelays: List<String>,
+        val activeDidBackup: Boolean?
     )
 
     private val accountMutex = Mutex()
@@ -71,7 +72,8 @@ internal class AccountActions(
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: EMPTY_RELAY_CONFIG
-            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays)
+            val activeDidBackup = runCatching { keepMobile.getActiveShare()?.didBackup }.getOrNull()
+            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
         }
         onStateChanged(result)
     }
@@ -269,6 +271,104 @@ internal class AccountActions(
         onImportStateChanged(ImportState.Importing)
         executeImport(cipher, onImportStateChanged) {
             keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
+        }
+    }
+
+    fun viewSeedWords(
+        account: AccountInfo,
+        onResult: (String?) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", onDismiss) { authedCipher ->
+            val requestId = UUID.randomUUID().toString()
+            var pendingSet = false
+            var result: String? = null
+            try {
+                storage.setPendingCipher(requestId, authedCipher)
+                pendingSet = true
+                withContext(Dispatchers.IO) {
+                    storage.setRequestIdContext(requestId)
+                    try {
+                        result = keepMobile.getSeedWords(account.groupPubkeyHex)
+                    } finally {
+                        storage.clearRequestIdContext()
+                    }
+                }
+                onResult(result)
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e("AccountActions", "View seed words failed: ${e::class.simpleName}")
+                logAndToast("View seed words failed", "Failed to retrieve seed words", e)
+                onResult(null)
+            } finally {
+                if (pendingSet) storage.clearPendingCipher(requestId)
+                onDismiss()
+            }
+        }
+    }
+
+    fun markBackedUp(
+        account: AccountInfo,
+        onComplete: (Boolean) -> Unit
+    ) {
+        coroutineScope.launch {
+            val decryptCipher = withContext(Dispatchers.IO) {
+                runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
+            }
+            if (decryptCipher == null) {
+                onComplete(false)
+                return@launch
+            }
+            onBiometricRequest("Confirm Backup", "Authenticate to confirm backup", decryptCipher) { authedDecrypt ->
+                if (authedDecrypt == null) {
+                    onComplete(false)
+                    return@onBiometricRequest
+                }
+                coroutineScope.launch {
+                    val encryptCipher = withContext(Dispatchers.IO) {
+                        runCatching { storage.getCipherForShareEncryption(account.groupPubkeyHex) }.getOrNull()
+                    }
+                    if (encryptCipher == null) {
+                        onComplete(false)
+                        return@launch
+                    }
+                    onBiometricRequest("Confirm Backup", "Authenticate again to save", encryptCipher) { authedEncrypt ->
+                        if (authedEncrypt == null) {
+                            onComplete(false)
+                            return@onBiometricRequest
+                        }
+                        coroutineScope.launch {
+                            accountMutex.withLock {
+                                val requestId = UUID.randomUUID().toString()
+                                var pendingSet = false
+                                try {
+                                    storage.setPendingCipher(requestId, authedDecrypt)
+                                    storage.setPendingCipher(requestId, authedEncrypt)
+                                    pendingSet = true
+                                    withContext(Dispatchers.IO) {
+                                        storage.setRequestIdContext(requestId)
+                                        try {
+                                            keepMobile.markShareBackedUp(account.groupPubkeyHex)
+                                        } finally {
+                                            storage.clearRequestIdContext()
+                                        }
+                                    }
+                                    try {
+                                        refreshAccountState()
+                                    } catch (e: Exception) {
+                                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-mark refresh failed: ${e::class.simpleName}")
+                                    }
+                                    onComplete(true)
+                                } catch (e: Exception) {
+                                    logAndToast("Mark backed up failed", "Failed to mark account as backed up", e)
+                                    onComplete(false)
+                                } finally {
+                                    if (pendingSet) storage.clearPendingCipher(requestId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
