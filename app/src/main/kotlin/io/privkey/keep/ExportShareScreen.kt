@@ -23,7 +23,6 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Arrays
@@ -238,11 +237,16 @@ fun ExportShareScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var exportJob by remember { mutableStateOf<Job?>(null) }
+    val sessionCanceled = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
 
         fun clearSensitiveData() {
+            sessionCanceled.set(true)
+            exportJob?.cancel()
+            exportJob = null
             passphrase.clear()
             confirmPassphrase.clear()
             passphraseDisplay = ""
@@ -330,19 +334,18 @@ fun ExportShareScreen(
                         }
                         val passphraseChars = passphrase.toCharArray()
                         fun clearChars() = Arrays.fill(passphraseChars, '\u0000')
+                        sessionCanceled.set(false)
                         try {
                             onBiometricAuth(cipher) { authedCipher ->
+                                if (sessionCanceled.get()) {
+                                    clearChars()
+                                    return@onBiometricAuth
+                                }
                                 if (authedCipher != null) {
                                     val exportId = java.util.UUID.randomUUID().toString()
                                     storage.setPendingCipher(exportId, authedCipher)
                                     exportState = ExportState.Exporting
-                                    coroutineScope.launch {
-                                        currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-                                            if (cause is CancellationException) {
-                                                clearChars()
-                                                storage.clearPendingCipher(exportId)
-                                            }
-                                        }
+                                    exportJob = coroutineScope.launch {
                                         try {
                                             val data = withContext(Dispatchers.IO) {
                                                 storage.setRequestIdContext(exportId)
@@ -352,6 +355,10 @@ fun ExportShareScreen(
                                                     storage.clearRequestIdContext()
                                                 }
                                             }
+                                            passphrase.clear()
+                                            confirmPassphrase.clear()
+                                            passphraseDisplay = ""
+                                            confirmPassphraseDisplay = ""
                                             (exportState as? ExportState.Success)?.clear()
                                             val frames = try {
                                                 withContext(Dispatchers.Default) {
@@ -366,12 +373,17 @@ fun ExportShareScreen(
                                                 listOf(data)
                                             }
                                             exportState = ExportState.Success(data, frames)
+                                        } catch (e: CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                             exportState = ExportState.Error("Export failed. Please try again.")
-                                        } finally {
+                                        }
+                                    }.also { job ->
+                                        job.invokeOnCompletion {
                                             clearChars()
                                             storage.clearPendingCipher(exportId)
+                                            if (exportJob === job) exportJob = null
                                         }
                                     }
                                 } else {

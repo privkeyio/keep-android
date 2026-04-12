@@ -117,6 +117,7 @@ private fun QrDisplayContainer(
     copyData: String,
     onCopied: () -> Unit,
     modifier: Modifier = Modifier,
+    onTapToCopy: (() -> Unit)? = null,
     extraContent: @Composable (ColumnScope.() -> Unit)? = null,
     qrContent: @Composable BoxScope.() -> Unit
 ) {
@@ -132,8 +133,12 @@ private fun QrDisplayContainer(
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White)
                 .clickable {
-                    copySensitiveText(context, copyData)
-                    onCopied()
+                    if (onTapToCopy != null) {
+                        onTapToCopy()
+                    } else {
+                        copySensitiveText(context, copyData)
+                        onCopied()
+                    }
                 },
             contentAlignment = Alignment.Center,
             content = qrContent
@@ -182,6 +187,7 @@ fun QrCodeDisplay(
     data: String,
     label: String,
     modifier: Modifier = Modifier,
+    onTapToCopy: (() -> Unit)? = null,
     onCopied: () -> Unit = {}
 ) {
     @SuppressLint("ProduceStateDoesNotAssignValue")
@@ -195,6 +201,7 @@ fun QrCodeDisplay(
         copyData = data,
         onCopied = onCopied,
         modifier = modifier,
+        onTapToCopy = onTapToCopy,
         qrContent = {
             val bmp = bitmap
             if (bmp != null) {
