@@ -72,7 +72,9 @@ internal class AccountActions(
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: EMPTY_RELAY_CONFIG
-            val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }.getOrNull()
+            val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
+                .onFailure { Log.w("AccountActions", "getActiveShareMetadata failed; treating as not backed up: ${it::class.simpleName}") }
+                .getOrDefault(false)
             AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
         }
         onStateChanged(result)
@@ -280,34 +282,39 @@ internal class AccountActions(
         onDismiss: (Boolean) -> Unit
     ) {
         withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", { onDismiss(false) }) { authedCipher ->
-            val requestId = UUID.randomUUID().toString()
-            var pendingSet = false
-            var result: String? = null
-            var success = false
-            try {
-                val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-                if (activeNow != account.groupPubkeyHex) {
-                    onResult(null)
-                    return@withBiometricAuth
-                }
-                storage.setPendingCipher(requestId, authedCipher)
-                pendingSet = true
-                withContext(Dispatchers.IO) {
-                    storage.setRequestIdContext(requestId)
-                    try {
-                        result = keepMobile.getSeedWords(account.groupPubkeyHex)
-                    } finally {
-                        storage.clearRequestIdContext()
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                var result: String? = null
+                var success = false
+                try {
+                    val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+                    if (activeNow != account.groupPubkeyHex) {
+                        onResult(null)
+                        return@withLock
                     }
+                    storage.setPendingCipher(requestId, authedCipher)
+                    pendingSet = true
+                    withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            result = keepMobile.getSeedWords(account.groupPubkeyHex)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    val toDeliver = result
+                    result = null
+                    onResult(toDeliver)
+                    success = toDeliver != null
+                } catch (e: Exception) {
+                    logAndToast("View seed words failed", "Failed to retrieve seed words", e)
+                    onResult(null)
+                } finally {
+                    result = null
+                    if (pendingSet) storage.clearPendingCipher(requestId)
+                    onDismiss(success)
                 }
-                success = result != null
-                onResult(result)
-            } catch (e: Exception) {
-                logAndToast("View seed words failed", "Failed to retrieve seed words", e)
-                onResult(null)
-            } finally {
-                if (pendingSet) storage.clearPendingCipher(requestId)
-                onDismiss(success)
             }
         }
     }

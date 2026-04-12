@@ -426,15 +426,13 @@ fun MainScreen(
                             .onFailure { if (it is CancellationException) throw it }
                             .getOrDefault(descriptorCount)
                     } else 0
-                    val db = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }.getOrNull()
-                    PollResult(h, s, a, k, dc, db)
+                    PollResult(h, s, a, k, dc)
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
                 allAccounts = pollResult.allAccounts
                 activeAccountKey = pollResult.activeAccountKey
                 descriptorCount = pollResult.descriptorCount
-                activeDidBackup = pollResult.activeDidBackup
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(pollResult.activeAccountKey) }
                 delay(10_000)
@@ -1001,7 +999,9 @@ fun MainScreen(
                                 acct,
                                 onResult = { mnemonic ->
                                     if (mnemonic != null) {
-                                        seedWordsData.update(mnemonic)
+                                        if (!seedWordsData.update(mnemonic)) {
+                                            Log.w("MainActivity", "Seed words exceeded MAX_SEED_WORDS_LENGTH=$MAX_SEED_WORDS_LENGTH; truncated/rejected")
+                                        }
                                     }
                                     seedWordsLoading = false
                                 },
@@ -1504,8 +1504,7 @@ private data class PollResult(
     val shareInfo: ShareInfo?,
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
-    val descriptorCount: Int,
-    val activeDidBackup: Boolean?
+    val descriptorCount: Int
 )
 
 @Composable

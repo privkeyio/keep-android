@@ -207,10 +207,26 @@ class AndroidKeystoreStorage(
             creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime()
         )
-        val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
-        synchronized(queue) { queue.add(data) }
-        val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
-        synchronized(cbQueue) { cbQueue.add(onConsumed) }
+        while (true) {
+            val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+            val added = synchronized(queue) {
+                if (pendingCiphers[requestId] === queue) {
+                    queue.add(data)
+                    true
+                } else false
+            }
+            if (added) break
+        }
+        while (true) {
+            val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+            val added = synchronized(cbQueue) {
+                if (cipherConsumedCallbacks[requestId] === cbQueue) {
+                    cbQueue.add(onConsumed)
+                    true
+                } else false
+            }
+            if (added) break
+        }
     }
 
     private fun cleanupExpiredCiphers() {
@@ -383,7 +399,7 @@ class AndroidKeystoreStorage(
             threshold = threshold.toUShort(),
             totalShares = totalShares.toUShort(),
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP),
-            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, false)
+            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, true)
         )
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.e(TAG, "Failed to parse stored key metadata", e)

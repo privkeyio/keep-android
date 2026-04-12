@@ -40,6 +40,7 @@ internal fun SeedWordsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 mnemonicData?.clear()
+                onDismiss()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
