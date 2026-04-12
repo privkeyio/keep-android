@@ -231,15 +231,15 @@ class AndroidKeystoreStorage(
 
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
-        val expired = pendingCiphers.entries.filter { entry ->
+        pendingCiphers.entries.forEach { entry ->
             synchronized(entry.value) {
-                entry.value.isEmpty() || entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
-            }
-        }
-        expired.forEach { entry ->
-            pendingCiphers.remove(entry.key, entry.value)
-            cipherConsumedCallbacks[entry.key]?.let { cbQueue ->
-                cipherConsumedCallbacks.remove(entry.key, cbQueue)
+                val stale = entry.value.isEmpty() ||
+                    entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+                if (stale && pendingCiphers.remove(entry.key, entry.value)) {
+                    cipherConsumedCallbacks[entry.key]?.let { cbQueue ->
+                        cipherConsumedCallbacks.remove(entry.key, cbQueue)
+                    }
+                }
             }
         }
     }

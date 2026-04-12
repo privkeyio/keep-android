@@ -355,8 +355,8 @@ internal class AccountActions(
                                 var pendingSet = false
                                 try {
                                     storage.setPendingCipher(requestId, authedDecrypt)
-                                    storage.setPendingCipher(requestId, authedEncrypt)
                                     pendingSet = true
+                                    storage.setPendingCipher(requestId, authedEncrypt)
                                     withContext(Dispatchers.IO) {
                                         storage.setRequestIdContext(requestId)
                                         try {
