@@ -57,7 +57,7 @@ class AndroidKeystoreStorage(
         val createdAtMs: Long
     )
     private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
-    private val cipherConsumedCallbacks = ConcurrentHashMap<String, ArrayDeque<() -> Unit>>()
+    private val cipherConsumedCallbacks = ConcurrentHashMap<String, ArrayDeque<(() -> Unit)?>>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -208,10 +208,8 @@ class AndroidKeystoreStorage(
         )
         val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
         synchronized(queue) { queue.add(data) }
-        if (onConsumed != null) {
-            val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
-            synchronized(cbQueue) { cbQueue.add(onConsumed) }
-        }
+        val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+        synchronized(cbQueue) { cbQueue.add(onConsumed) }
     }
 
     private fun cleanupExpiredCiphers() {
