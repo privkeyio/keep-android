@@ -277,13 +277,19 @@ internal class AccountActions(
     fun viewSeedWords(
         account: AccountInfo,
         onResult: (String?) -> Unit,
-        onDismiss: () -> Unit
+        onDismiss: (Boolean) -> Unit
     ) {
-        withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", onDismiss) { authedCipher ->
+        withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", { onDismiss(false) }) { authedCipher ->
             val requestId = UUID.randomUUID().toString()
             var pendingSet = false
             var result: String? = null
+            var success = false
             try {
+                val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+                if (activeNow != account.groupPubkeyHex) {
+                    onResult(null)
+                    return@withBiometricAuth
+                }
                 storage.setPendingCipher(requestId, authedCipher)
                 pendingSet = true
                 withContext(Dispatchers.IO) {
@@ -294,14 +300,14 @@ internal class AccountActions(
                         storage.clearRequestIdContext()
                     }
                 }
+                success = result != null
                 onResult(result)
             } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("AccountActions", "View seed words failed: ${e::class.simpleName}")
                 logAndToast("View seed words failed", "Failed to retrieve seed words", e)
                 onResult(null)
             } finally {
                 if (pendingSet) storage.clearPendingCipher(requestId)
-                onDismiss()
+                onDismiss(success)
             }
         }
     }

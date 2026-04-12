@@ -1,29 +1,52 @@
 package io.privkey.keep
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.password
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
 internal fun SeedWordsScreen(
     mnemonicData: SecureShareData?,
+    isLoading: Boolean,
     didBackup: Boolean,
     onConfirmBackedUp: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var showCopyWarning by remember { mutableStateOf(false) }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
         onDispose { setSecureScreen(context, false) }
     }
+
+    DisposableEffect(lifecycleOwner, mnemonicData) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP || event == Lifecycle.Event.ON_PAUSE) {
+                mnemonicData?.clear()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    BackHandler { onDismiss() }
 
     Column(
         modifier = Modifier
@@ -39,6 +62,18 @@ internal fun SeedWordsScreen(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (isLoading) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(24.dp))
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Back")
+            }
+            return@Column
+        }
 
         if (mnemonicData == null || !mnemonicData.isNotBlank()) {
             StatusCard(
@@ -59,7 +94,7 @@ internal fun SeedWordsScreen(
         }
 
         val words = mnemonicData.words()
-        val halfSize = words.size / 2
+        val halfSize = (words.size + 1) / 2
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -134,15 +169,29 @@ internal fun SeedWordsScreen(
 private fun SeedWordColumn(words: List<String>, range: IntRange, modifier: Modifier) {
     Column(modifier = modifier) {
         for (i in range) {
-            OutlinedTextField(
-                value = words[i],
-                onValueChange = {},
-                readOnly = true,
-                prefix = { Text("${i + 1}. ") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            if (i < range.last) {
+            if (i >= words.size) break
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .semantics { password() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${i + 1}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(28.dp)
+                )
+                Text(
+                    text = words[i],
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            if (i < range.last && i + 1 < words.size) {
                 Spacer(modifier = Modifier.height(4.dp))
             }
         }

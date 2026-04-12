@@ -57,7 +57,7 @@ class AndroidKeystoreStorage(
         val createdAtMs: Long
     )
     private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
-    private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private val cipherConsumedCallbacks = ConcurrentHashMap<String, ArrayDeque<() -> Unit>>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -206,18 +206,20 @@ class AndroidKeystoreStorage(
             creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime()
         )
-        pendingCiphers.compute(requestId) { _, existing ->
-            (existing ?: ArrayDeque()).apply { add(data) }
-        }
+        val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+        synchronized(queue) { queue.add(data) }
         if (onConsumed != null) {
-            cipherConsumedCallbacks[requestId] = onConsumed
+            val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+            synchronized(cbQueue) { cbQueue.add(onConsumed) }
         }
     }
 
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
         val expired = pendingCiphers.entries.filter { entry ->
-            entry.value.isEmpty() || entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+            synchronized(entry.value) {
+                entry.value.isEmpty() || entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+            }
         }
         expired.forEach { entry ->
             pendingCiphers.remove(entry.key)
@@ -225,25 +227,63 @@ class AndroidKeystoreStorage(
         }
     }
 
+    // Drops all pending ciphers and callbacks for the given requestId.
     fun clearPendingCipher(requestId: String) {
-        cipherConsumedCallbacks.remove(requestId)
-        pendingCiphers.remove(requestId)
+        val queue = pendingCiphers[requestId]
+        if (queue != null) {
+            synchronized(queue) {
+                queue.clear()
+                pendingCiphers.remove(requestId, queue)
+            }
+        }
+        val cbQueue = cipherConsumedCallbacks[requestId]
+        if (cbQueue != null) {
+            synchronized(cbQueue) {
+                cbQueue.clear()
+                cipherConsumedCallbacks.remove(requestId, cbQueue)
+            }
+        }
     }
 
+    // Consumes pending ciphers in FIFO order. Callers MUST setPendingCipher in the
+    // same order the Rust FFI consumes them (e.g. markShareBackedUp: decrypt then encrypt).
     fun consumePendingCipher(requestId: String): Cipher? {
         val queue = pendingCiphers[requestId] ?: return null
-        val data = synchronized(queue) { if (queue.isEmpty()) null else queue.removeFirst() } ?: return null
-        if (queue.isEmpty()) {
-            pendingCiphers.remove(requestId, queue)
-            val callback = cipherConsumedCallbacks.remove(requestId)
-            val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
-            if (isExpired) return null
-            callback?.invoke()
-            return data.cipher
+        val cbQueue = cipherConsumedCallbacks[requestId]
+        var poppedCipher: Cipher? = null
+        var callbackToFire: (() -> Unit)? = null
+        synchronized(queue) {
+            if (queue.isEmpty()) {
+                pendingCiphers.remove(requestId, queue)
+                return null
+            }
+            val popped = queue.removeFirst()
+            val isExpired = SystemClock.elapsedRealtime() - popped.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
+            if (isExpired) {
+                // Drain the whole queue on expiry: remaining entries are stale and should not be served later.
+                queue.clear()
+                pendingCiphers.remove(requestId, queue)
+                if (cbQueue != null) {
+                    synchronized(cbQueue) {
+                        cbQueue.clear()
+                        cipherConsumedCallbacks.remove(requestId, cbQueue)
+                    }
+                }
+                return null
+            }
+            poppedCipher = popped.cipher
+            if (cbQueue != null) {
+                synchronized(cbQueue) {
+                    if (cbQueue.isNotEmpty()) callbackToFire = cbQueue.removeFirst()
+                    if (cbQueue.isEmpty()) cipherConsumedCallbacks.remove(requestId, cbQueue)
+                }
+            }
+            if (queue.isEmpty()) {
+                pendingCiphers.remove(requestId, queue)
+            }
         }
-        val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
-        if (isExpired) return null
-        return data.cipher
+        callbackToFire?.invoke()
+        return poppedCipher
     }
 
     private val requestIdContext = ThreadLocal<String>()

@@ -320,6 +320,10 @@ fun MainScreen(
     val seedWordsData = remember { SecureShareData(MAX_SEED_WORDS_LENGTH) }
     var seedWordsLoading by remember { mutableStateOf(false) }
 
+    DisposableEffect(Unit) {
+        onDispose { seedWordsData.clear() }
+    }
+
     val proxyConfig = remember { runCatching { keepMobile.getProxyConfig() }.getOrNull() }
     var proxyEnabled by remember { mutableStateOf(proxyConfig?.enabled == true) }
     var proxyPort by remember { mutableStateOf(proxyConfig?.port?.toInt() ?: 9050) }
@@ -722,16 +726,13 @@ fun MainScreen(
         return
     }
 
-    DisposableEffect(Unit) {
-        onDispose { seedWordsData.clear() }
-    }
-
     if (showSeedWordsScreen) {
         val activeAccount = remember(activeAccountKey, allAccounts) {
             activeAccountKey?.let { key -> allAccounts.firstOrNull { it.groupPubkeyHex == key } }
         }
         SeedWordsScreen(
-            mnemonicData = if (seedWordsLoading) null else seedWordsData,
+            mnemonicData = seedWordsData,
+            isLoading = seedWordsLoading,
             didBackup = activeDidBackup == true,
             onConfirmBackedUp = {
                 val acct = activeAccount
@@ -1003,9 +1004,9 @@ fun MainScreen(
                                     }
                                     seedWordsLoading = false
                                 },
-                                onDismiss = {
+                                onDismiss = { success ->
                                     seedWordsLoading = false
-                                    if (!seedWordsData.isNotBlank()) {
+                                    if (!success) {
                                         showSeedWordsScreen = false
                                     }
                                 }
