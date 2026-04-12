@@ -337,8 +337,13 @@ internal class AccountActions(
                     return@onBiometricRequest
                 }
                 coroutineScope.launch {
-                    val encryptCipher = withContext(Dispatchers.IO) {
-                        runCatching { storage.getCipherForShareEncryption(account.groupPubkeyHex) }.getOrNull()
+                    val encryptCipher = accountMutex.withLock {
+                        withContext(Dispatchers.IO) {
+                            val stillExists = storage.listAllShares()
+                                .any { it.toAccountInfo().groupPubkeyHex == account.groupPubkeyHex }
+                            if (!stillExists) null
+                            else runCatching { storage.getCipherForShareEncryption(account.groupPubkeyHex) }.getOrNull()
+                        }
                     }
                     if (encryptCipher == null) {
                         onComplete(false)
@@ -351,6 +356,13 @@ internal class AccountActions(
                         }
                         coroutineScope.launch {
                             accountMutex.withLock {
+                                val stillExists = withContext(Dispatchers.IO) {
+                                    storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == account.groupPubkeyHex }
+                                }
+                                if (!stillExists) {
+                                    onComplete(false)
+                                    return@withLock
+                                }
                                 val requestId = UUID.randomUUID().toString()
                                 var pendingSet = false
                                 try {
