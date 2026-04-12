@@ -22,8 +22,6 @@ import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Arrays
@@ -337,12 +335,6 @@ fun ExportShareScreen(
                                     storage.setPendingCipher(exportId, authedCipher)
                                     exportState = ExportState.Exporting
                                     coroutineScope.launch {
-                                        currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-                                            if (cause is CancellationException) {
-                                                clearChars()
-                                                storage.clearPendingCipher(exportId)
-                                            }
-                                        }
                                         try {
                                             val data = withContext(Dispatchers.IO) {
                                                 storage.setRequestIdContext(exportId)
@@ -366,10 +358,14 @@ fun ExportShareScreen(
                                                 listOf(data)
                                             }
                                             exportState = ExportState.Success(data, frames)
+                                        } catch (e: CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
                                             exportState = ExportState.Error("Export failed. Please try again.")
-                                        } finally {
+                                        }
+                                    }.also { job ->
+                                        job.invokeOnCompletion {
                                             clearChars()
                                             storage.clearPendingCipher(exportId)
                                         }

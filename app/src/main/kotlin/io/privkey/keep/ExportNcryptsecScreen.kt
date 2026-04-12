@@ -23,7 +23,6 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Arrays
@@ -169,13 +168,11 @@ fun ExportNcryptsecScreen(
                                     val exportId = java.util.UUID.randomUUID().toString()
                                     storage.setPendingCipher(exportId, authedCipher)
                                     exportState = NcryptsecExportState.Encrypting
+                                    // NOTE: String(passwordChars) below materializes an unwipable
+                                    // copy because the UniFFI surface requires String. Residual
+                                    // risk: password bytes linger in the String's backing array
+                                    // until GC. Same applies to the returned ncryptsec.
                                     exportJob = coroutineScope.launch {
-                                        currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-                                            if (cause is CancellationException) {
-                                                clearChars()
-                                                storage.clearPendingCipher(exportId)
-                                            }
-                                        }
                                         try {
                                             val ncryptsec = withContext(Dispatchers.IO) {
                                                 storage.setRequestIdContext(exportId)
@@ -185,19 +182,23 @@ fun ExportNcryptsecScreen(
                                                     storage.clearRequestIdContext()
                                                 }
                                             }
-                                            clearChars()
                                             password.clear()
                                             confirmPassword.clear()
                                             passwordDisplay = ""
                                             confirmPasswordDisplay = ""
                                             (exportState as? NcryptsecExportState.Success)?.clear()
                                             exportState = NcryptsecExportState.Success(ncryptsec)
+                                        } catch (e: CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportNcryptsec", "Export failed: ${e::class.simpleName}")
                                             exportState = NcryptsecExportState.Error("Export failed. Please try again.")
-                                        } finally {
+                                        }
+                                    }.also { job ->
+                                        job.invokeOnCompletion {
                                             clearChars()
                                             storage.clearPendingCipher(exportId)
+                                            exportJob = null
                                         }
                                     }
                                 } else {
