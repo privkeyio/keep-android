@@ -68,11 +68,13 @@ fun ExportNcryptsecScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var exportJob by remember { mutableStateOf<Job?>(null) }
+    val sessionCanceled = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
 
         fun clearSensitiveData() {
+            sessionCanceled.set(true)
             exportJob?.cancel()
             exportJob = null
             password.clear()
@@ -162,8 +164,13 @@ fun ExportNcryptsecScreen(
                         }
                         val passwordChars = password.toCharArray()
                         fun clearChars() = Arrays.fill(passwordChars, '\u0000')
+                        sessionCanceled.set(false)
                         try {
                             onBiometricAuth(cipher) { authedCipher ->
+                                if (sessionCanceled.get()) {
+                                    clearChars()
+                                    return@onBiometricAuth
+                                }
                                 if (authedCipher != null) {
                                     val exportId = java.util.UUID.randomUUID().toString()
                                     storage.setPendingCipher(exportId, authedCipher)
@@ -198,7 +205,7 @@ fun ExportNcryptsecScreen(
                                         job.invokeOnCompletion {
                                             clearChars()
                                             storage.clearPendingCipher(exportId)
-                                            exportJob = null
+                                            if (exportJob === job) exportJob = null
                                         }
                                     }
                                 } else {
