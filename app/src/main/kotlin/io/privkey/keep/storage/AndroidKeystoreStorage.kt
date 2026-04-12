@@ -44,6 +44,7 @@ class AndroidKeystoreStorage(
         private const val KEY_SHARE_THRESHOLD = "share_threshold"
         private const val KEY_SHARE_TOTAL = "share_total"
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
+        private const val KEY_SHARE_DID_BACKUP = "share_did_backup"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
@@ -323,6 +324,7 @@ class AndroidKeystoreStorage(
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
+            .putBoolean(KEY_SHARE_DID_BACKUP, metadata.didBackup)
             .commit()
         if (!saved) {
             throw KeepMobileException.StorageException("Failed to save share data")
@@ -380,7 +382,8 @@ class AndroidKeystoreStorage(
             identifier = identifier.toUShort(),
             threshold = threshold.toUShort(),
             totalShares = totalShares.toUShort(),
-            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
+            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP),
+            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, false)
         )
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.e(TAG, "Failed to parse stored key metadata", e)
@@ -670,6 +673,7 @@ class AndroidKeystoreStorage(
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
+            .putBoolean(KEY_SHARE_DID_BACKUP, metadata.didBackup)
             .commit()
         if (!saved) return
 

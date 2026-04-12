@@ -426,7 +426,7 @@ fun MainScreen(
                             .onFailure { if (it is CancellationException) throw it }
                             .getOrDefault(descriptorCount)
                     } else 0
-                    val db = runCatching { keepMobile.getActiveShare()?.didBackup }.getOrNull()
+                    val db = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }.getOrNull()
                     PollResult(h, s, a, k, dc, db)
                 }
                 hasShare = pollResult.hasShare

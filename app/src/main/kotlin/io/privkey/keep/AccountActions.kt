@@ -72,7 +72,7 @@ internal class AccountActions(
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: EMPTY_RELAY_CONFIG
-            val activeDidBackup = runCatching { keepMobile.getActiveShare()?.didBackup }.getOrNull()
+            val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }.getOrNull()
             AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
         }
         onStateChanged(result)
