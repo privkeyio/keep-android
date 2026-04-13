@@ -115,7 +115,6 @@ fun ExportLogsScreen(
                     ExportAction.Share -> {
                         val uri = withContext(NonCancellable + Dispatchers.IO) {
                             val dir = File(context.cacheDir, "logs").apply { mkdirs() }
-                            dir.listFiles()?.forEach { it.delete() }
                             val file = File(dir, fileName)
                             file.writeText(content, Charsets.UTF_8)
                             FileProvider.getUriForFile(
