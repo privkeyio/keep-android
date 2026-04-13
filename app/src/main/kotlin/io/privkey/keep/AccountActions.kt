@@ -409,7 +409,7 @@ internal class AccountActions(
                     }
                     onComplete(true)
                 } catch (e: Exception) {
-                    logAndToast("Mark backed up failed", "Failed to mark account as backed up", e)
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "Mark backed up failed", e)
                     onComplete(false)
                 } finally {
                     if (pendingSet) storage.clearPendingCipher(requestId)

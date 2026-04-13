@@ -319,6 +319,7 @@ fun MainScreen(
     var showSeedWordsScreen by remember { mutableStateOf(false) }
     val seedWordsData = remember { SecureShareData(MAX_SEED_WORDS_LENGTH) }
     var seedWordsLoading by remember { mutableStateOf(false) }
+    var seedWordsRequestToken by remember { mutableStateOf(0) }
 
     DisposableEffect(Unit) {
         onDispose { seedWordsData.clear() }
@@ -1004,12 +1005,14 @@ fun MainScreen(
                             allAccounts.firstOrNull { it.groupPubkeyHex == key }
                         }
                         if (acct != null) {
+                            val token = ++seedWordsRequestToken
                             seedWordsLoading = true
                             seedWordsData.clear()
                             showSeedWordsScreen = true
                             accountActions.viewSeedWords(
                                 acct,
                                 onResult = { mnemonic ->
+                                    if (token != seedWordsRequestToken || !showSeedWordsScreen) return@viewSeedWords
                                     if (mnemonic != null) {
                                         if (!seedWordsData.update(mnemonic)) {
                                             Log.w("MainActivity", "Seed words exceeded MAX_SEED_WORDS_LENGTH=$MAX_SEED_WORDS_LENGTH; truncated/rejected")
@@ -1018,6 +1021,7 @@ fun MainScreen(
                                     seedWordsLoading = false
                                 },
                                 onDismiss = { success ->
+                                    if (token != seedWordsRequestToken) return@viewSeedWords
                                     seedWordsLoading = false
                                     if (!success) {
                                         seedWordsData.clear()
