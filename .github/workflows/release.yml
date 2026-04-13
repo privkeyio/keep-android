@@ -8,6 +8,7 @@ on:
 permissions: {}
 
 env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
   CARGO_NDK_VERSION: "4.1.2"
   RUST_VERSION: "1.89.0"
