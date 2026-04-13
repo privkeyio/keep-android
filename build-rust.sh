@@ -53,7 +53,8 @@ if ! command -v cargo-ndk >/dev/null 2>&1; then
     echo "Fix: cargo install --locked cargo-ndk --version $CARGO_NDK_VERSION" >&2
     exit 1
 fi
-ACTUAL_CARGO_NDK=$(cargo ndk --version | grep -E '^cargo-ndk ' | awk '{print $2}')
+VERSION_OUTPUT="$(cargo ndk --version 2>/dev/null || true)"
+ACTUAL_CARGO_NDK="$(echo "$VERSION_OUTPUT" | grep -E '^cargo-ndk ' | awk '{print $2}' || true)"
 if [ "$ACTUAL_CARGO_NDK" != "$CARGO_NDK_VERSION" ]; then
     echo "error: cargo-ndk version mismatch" >&2
     echo "  expected: $CARGO_NDK_VERSION" >&2

@@ -17,8 +17,8 @@ if (runningJavaVersion.majorVersion.toInt() != expectedJavaMajor) {
 val expectedNdkVersion = "29.0.14206865"
 
 fun resolveAndroidSdkDir(): String? {
-    System.getenv("ANDROID_HOME")?.let { return it }
-    System.getenv("ANDROID_SDK_ROOT")?.let { return it }
+    System.getenv("ANDROID_HOME")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    System.getenv("ANDROID_SDK_ROOT")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
     val localProps = file("${rootDir}/local.properties")
     if (localProps.exists()) {
         val props = java.util.Properties()

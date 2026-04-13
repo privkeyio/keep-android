@@ -87,7 +87,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Verify APK is signed
-        run: $ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+        run: |
+          "$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk
 
       - name: Rename APK
         run: mv app/build/outputs/apk/release/app-release.apk "keep-android-${{ github.ref_name }}.apk"
