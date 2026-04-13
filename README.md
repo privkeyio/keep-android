@@ -44,25 +44,14 @@ Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip04_encrypt`, `n
 
 # Building
 
+Requires Rust 1.89+, Android NDK r29, and `cargo-ndk`.
+
 ```bash
+git clone https://github.com/privkeyio/keep keep
 ./gradlew assembleDebug
 ```
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`
-
-# Development
-
-To rebuild the native libraries from source:
-
-```bash
-# Requirements: Rust 1.85+, Android NDK r29, cargo-ndk
-
-# Clone keep workspace
-git clone https://github.com/privkeyio/keep ../keep
-
-# Rebuild native libs and bindings
-KEEP_REPO=../keep ./build-rust.sh
-```
+APK output: `app/build/outputs/apk/debug/app-debug.apk`. Gradle rebuilds the Rust libraries automatically when sources change. Set `KEEP_REPO` if the `keep` checkout lives elsewhere.
 
 # Contributing
 
