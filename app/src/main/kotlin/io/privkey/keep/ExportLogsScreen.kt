@@ -56,10 +56,11 @@ fun ExportLogsScreen(
     ) { uri ->
         val content = pendingContent
         pendingContent = null
-        if (content == null || uri == null) {
-            if (uri == null) state = ExportLogsState.Idle
+        if (uri == null) {
+            state = ExportLogsState.Idle
             return@rememberLauncherForActivityResult
         }
+        if (content == null) return@rememberLauncherForActivityResult
         state = ExportLogsState.Saving
         scope.launch {
             try {
@@ -77,7 +78,6 @@ fun ExportLogsScreen(
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
-                pendingContent = null
                 state = ExportLogsState.Error("Failed to save logs")
             }
         }
@@ -126,7 +126,7 @@ fun ExportLogsScreen(
                             "personal information or attacker-controlled content. Review the " +
                             "file before sharing.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = MaterialTheme.colorScheme.tertiary
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
