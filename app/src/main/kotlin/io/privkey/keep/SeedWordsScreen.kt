@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import android.app.Activity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.password
 import androidx.compose.ui.semantics.semantics
@@ -39,8 +40,13 @@ internal fun SeedWordsScreen(
     DisposableEffect(lifecycleOwner, mnemonicData) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                mnemonicData?.clear()
-                onDismiss()
+                // Skip wipe across configuration changes (e.g. rotation): otherwise the user
+                // would be forced to re-authenticate to re-fetch the same mnemonic mid-display.
+                val isConfigChange = (context as? Activity)?.isChangingConfigurations == true
+                if (!isConfigChange) {
+                    mnemonicData?.clear()
+                    onDismiss()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -166,7 +172,9 @@ private fun SeedWordColumn(words: List<CharArray>, range: IntRange, modifier: Mo
                 // Compose Text requires a String/AnnotatedString; there is no sink that
                 // accepts CharArray. This constructs a per-word String that cannot be
                 // zeroed, but the lifetime is scoped to the composition and the underlying
-                // CharArray is wiped on dispose.
+                // CharArray is wiped on dispose. Per-word BIP-39 dictionary entries in
+                // isolation (without ordering) are far lower-risk than the full mnemonic;
+                // the CharArray that preserves ordering is the one we explicitly wipe.
                 Text(
                     text = String(words[i]),
                     style = MaterialTheme.typography.bodyLarge,
