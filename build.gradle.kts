@@ -60,9 +60,53 @@ gradle.taskGraph.whenReady {
 
 val keepRepo = file(System.getenv("KEEP_REPO") ?: "${rootDir}/keep")
 
+tasks.register("verifyKeepVersion") {
+    group = "verification"
+    description = "Verifies that the local keep checkout matches the pinned SHA in keep.version."
+    val keepVersionFile = file("${rootDir}/keep.version")
+    inputs.file(keepVersionFile).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!keepVersionFile.exists()) {
+            throw GradleException("keep.version not found at ${keepVersionFile.absolutePath}.")
+        }
+        val pinnedSha = keepVersionFile.readText().trim()
+        if (!pinnedSha.matches(Regex("^[0-9a-f]{40}$"))) {
+            throw GradleException(
+                "keep.version at ${keepVersionFile.absolutePath} must be a 40-char lowercase hex SHA, got: '$pinnedSha'."
+            )
+        }
+        val keepPath = keepRepo.absolutePath
+        if (!keepRepo.isDirectory) {
+            throw GradleException(
+                "keep workspace not found at $keepPath. " +
+                "Fix: git clone https://github.com/privkeyio/keep.git $keepPath && " +
+                "git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        val process = ProcessBuilder("git", "-C", keepPath, "rev-parse", "HEAD")
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+        val actualSha = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        if (process.waitFor() != 0) {
+            throw GradleException(
+                "Failed to read HEAD of $keepPath. " +
+                "Fix: git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        if (actualSha != pinnedSha) {
+            throw GradleException(
+                "keep checkout at $keepPath is at $actualSha but keep.version pins $pinnedSha. " +
+                "Fix: git -C $keepPath checkout $pinnedSha"
+            )
+        }
+    }
+}
+
 tasks.register<Exec>("buildRust") {
     group = "rust"
     description = "Builds keep-mobile Rust native libraries and regenerates UniFFI Kotlin bindings."
+    dependsOn("verifyKeepVersion")
     workingDir = rootDir
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)

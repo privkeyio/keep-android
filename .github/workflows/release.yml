@@ -23,12 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Checkout keep repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: privkeyio/keep
-          ref: 81a820f6b29b8d10025bf4c7e7bdd9f986b01378
-          path: keep
+      - name: Setup keep checkout
+        uses: ./.github/actions/setup-keep
 
       - name: Verify toolchain version pins are consistent
         run: ./scripts/check-toolchain-pins.sh
