@@ -73,8 +73,8 @@ internal class AccountActions(
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: EMPTY_RELAY_CONFIG
             val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
-                .onFailure { Log.w("AccountActions", "getActiveShareMetadata failed; treating as not backed up: ${it::class.simpleName}") }
-                .getOrDefault(false)
+                .onFailure { Log.w("AccountActions", "getActiveShareMetadata failed: ${it::class.simpleName}") }
+                .getOrNull()
             AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
         }
         onStateChanged(result)
