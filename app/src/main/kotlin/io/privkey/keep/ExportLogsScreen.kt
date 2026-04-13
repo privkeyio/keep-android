@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.content.Intent
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
@@ -15,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
+import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.SigningAuditLog
@@ -23,7 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.BufferedOutputStream
+import java.io.File
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -32,10 +38,11 @@ import java.time.format.DateTimeFormatter
 private sealed class ExportLogsState {
     data object Idle : ExportLogsState()
     data object Collecting : ExportLogsState()
-    data object Ready : ExportLogsState()
     data object Saving : ExportLogsState()
     data class Error(val message: String) : ExportLogsState()
 }
+
+private enum class ExportAction { Save, Share }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +50,7 @@ fun ExportLogsScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     signingAuditLog: SigningAuditLog?,
+    permissionStore: PermissionStore?,
     foregroundServiceEnabled: Boolean,
     onDismiss: () -> Unit
 ) {
@@ -83,6 +91,57 @@ fun ExportLogsScreen(
         }
     }
 
+    fun runExport(action: ExportAction) {
+        state = ExportLogsState.Collecting
+        scope.launch {
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    buildExportContent(
+                        keepMobile = keepMobile,
+                        storage = storage,
+                        signingAuditLog = signingAuditLog,
+                        permissionStore = permissionStore,
+                        foregroundServiceEnabled = foregroundServiceEnabled
+                    )
+                }
+                val timestamp = LocalDateTime.now()
+                    .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+                val fileName = "keep-logs-$timestamp.txt"
+                when (action) {
+                    ExportAction.Save -> {
+                        pendingContent = content
+                        saveFileLauncher.launch(fileName)
+                    }
+                    ExportAction.Share -> {
+                        val uri = withContext(NonCancellable + Dispatchers.IO) {
+                            val dir = File(context.cacheDir, "logs").apply { mkdirs() }
+                            dir.listFiles()?.forEach { it.delete() }
+                            val file = File(dir, fileName)
+                            file.writeText(content, Charsets.UTF_8)
+                            FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                file
+                            )
+                        }
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "Share logs"))
+                        state = ExportLogsState.Idle
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e("ExportLogs", "Export failed", e)
+                state = ExportLogsState.Error("Failed to collect logs")
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -110,10 +169,10 @@ fun ExportLogsScreen(
                     Text(
                         "Collects app diagnostics into a plain text file. Includes: device " +
                             "manufacturer/model, Android version, app version and build type, " +
-                            "account count, foreground service and Tor/proxy configuration, and " +
+                            "account count, foreground service and Tor/proxy configuration, " +
                             "signing audit history (caller package names, caller display names, " +
-                            "event kinds, and free-text reasons). Does not include private keys, " +
-                            "nsec, or seed words.",
+                            "event kinds, and free-text reasons), and NIP-55 permission audit " +
+                            "history. Does not include private keys, nsec, or seed words.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -133,44 +192,30 @@ fun ExportLogsScreen(
 
                     val isBusy = state is ExportLogsState.Collecting || state is ExportLogsState.Saving
 
-                    Button(
-                        onClick = {
-                            state = ExportLogsState.Collecting
-                            scope.launch {
-                                try {
-                                    val content = withContext(Dispatchers.IO) {
-                                        buildExportContent(
-                                            keepMobile = keepMobile,
-                                            storage = storage,
-                                            signingAuditLog = signingAuditLog,
-                                            foregroundServiceEnabled = foregroundServiceEnabled
-                                        )
-                                    }
-                                    pendingContent = content
-                                    state = ExportLogsState.Ready
-                                    val timestamp = LocalDateTime.now()
-                                        .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-                                    saveFileLauncher.launch("keep-logs-$timestamp.txt")
-                                } catch (e: CancellationException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    if (BuildConfig.DEBUG) Log.e("ExportLogs", "Collection failed", e)
-                                    state = ExportLogsState.Error("Failed to collect logs")
-                                }
-                            }
-                        },
-                        enabled = !isBusy && state !is ExportLogsState.Ready,
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (isBusy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = { runExport(ExportAction.Save) },
+                            enabled = !isBusy,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Save to File") }
+                        Button(
+                            onClick = { runExport(ExportAction.Share) },
+                            enabled = !isBusy,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (isBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Text("Share")
                         }
-                        Text("Export Logs")
                     }
 
                     val errorState = state as? ExportLogsState.Error
@@ -190,10 +235,11 @@ fun ExportLogsScreen(
     }
 }
 
-private fun buildExportContent(
+private suspend fun buildExportContent(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     signingAuditLog: SigningAuditLog?,
+    permissionStore: PermissionStore?,
     foregroundServiceEnabled: Boolean
 ): String {
     val accountCountDisplay = runCatching { storage.listAllShares().size }.fold(
@@ -209,6 +255,27 @@ private fun buildExportContent(
     val timestamp = DateTimeFormatter.ISO_OFFSET_DATE_TIME
         .withZone(ZoneId.systemDefault())
         .format(Instant.now())
+
+    val nip55AuditJson = permissionStore?.let { store ->
+        runCatching {
+            val entries = store.getAuditLog(limit = 1000)
+            val array = JSONArray()
+            for (e in entries) {
+                val obj = JSONObject()
+                obj.put("id", e.id)
+                obj.put("timestamp", e.timestamp)
+                obj.put("callerPackage", e.callerPackage)
+                obj.put("requestType", e.requestType)
+                obj.put("eventKind", e.eventKind ?: JSONObject.NULL)
+                obj.put("decision", e.decision)
+                obj.put("wasAutomatic", e.wasAutomatic)
+                array.put(obj)
+            }
+            array.toString(2)
+        }.getOrElse { e ->
+            "(export failed: ${e::class.simpleName})"
+        }
+    }
 
     return buildString {
         appendLine("=== Keep Diagnostics ===")
@@ -234,5 +301,8 @@ private fun buildExportContent(
                 appendLine("(export failed: ${e::class.simpleName}${if (sanitized.isNullOrBlank()) "" else ": $sanitized"})")
             }
         }
+        appendLine()
+        appendLine("=== NIP-55 Audit Log ===")
+        appendLine(nip55AuditJson ?: "(unavailable)")
     }
 }

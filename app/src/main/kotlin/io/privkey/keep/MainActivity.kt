@@ -511,6 +511,7 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             signingAuditLog = signingAuditLog,
+            permissionStore = permissionStore,
             foregroundServiceEnabled = foregroundServiceEnabled,
             onDismiss = { showExportLogs = false }
         )
