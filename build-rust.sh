@@ -1,14 +1,80 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 KEEP_REPO="${KEEP_REPO:-./keep}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUST_PROJECT="$KEEP_REPO/keep-mobile"
 JNILIBS_DIR="$SCRIPT_DIR/app/src/main/jniLibs"
 
+# Pinned toolchain versions. Keep in sync with CI workflows and rust-toolchain.toml.
+EXPECTED_RUST="1.89.0"
+CARGO_NDK_VERSION="4.1.2"
+
+if [[ ! "$EXPECTED_RUST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: EXPECTED_RUST ($EXPECTED_RUST) is not a valid semver version." >&2
+    exit 1
+fi
+
+if [ ! -d "$RUST_PROJECT" ]; then
+    echo "error: keep-mobile not found at $RUST_PROJECT" >&2
+    echo "Set KEEP_REPO to the path of your local keep checkout." >&2
+    exit 1
+fi
+
+TOOLCHAIN_FILE="$KEEP_REPO/rust-toolchain.toml"
+if [ ! -f "$TOOLCHAIN_FILE" ]; then
+    echo "error: $TOOLCHAIN_FILE not found; cannot determine pinned Rust version." >&2
+    exit 1
+fi
+TOOLCHAIN_CHANNEL=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$TOOLCHAIN_FILE" | head -1)
+if [ -z "$TOOLCHAIN_CHANNEL" ]; then
+    echo "error: could not parse channel from $TOOLCHAIN_FILE" >&2
+    exit 1
+fi
+if [ "$TOOLCHAIN_CHANNEL" != "$EXPECTED_RUST" ]; then
+    echo "error: rust-toolchain.toml channel does not match pinned EXPECTED_RUST" >&2
+    echo "  pinned (build-rust.sh): $EXPECTED_RUST" >&2
+    echo "  channel ($TOOLCHAIN_FILE): $TOOLCHAIN_CHANNEL" >&2
+    echo "Fix: update both to the same version after reviewing the keep repo SHA pin." >&2
+    exit 1
+fi
+
+ACTUAL_RUST=$(cd "$RUST_PROJECT" && rustc --version | awk '{print $2}')
+if [ -z "$ACTUAL_RUST" ]; then
+    echo "error: failed to determine rustc version (empty output from 'rustc --version')." >&2
+    echo "Fix: ensure rustup/rustc is installed and on PATH." >&2
+    exit 1
+fi
+if [[ ! "$ACTUAL_RUST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: rustc version '$ACTUAL_RUST' is not a valid semver version." >&2
+    exit 1
+fi
+if [ "$ACTUAL_RUST" != "$EXPECTED_RUST" ]; then
+    echo "error: rustc version mismatch" >&2
+    echo "  expected: $EXPECTED_RUST" >&2
+    echo "  actual:   $ACTUAL_RUST" >&2
+    echo "Fix: run 'rustup install $EXPECTED_RUST' (rustup should auto-select via rust-toolchain.toml)." >&2
+    exit 1
+fi
+
+if ! command -v cargo-ndk >/dev/null 2>&1; then
+    echo "error: cargo-ndk not installed." >&2
+    echo "Fix: cargo install --locked cargo-ndk --version $CARGO_NDK_VERSION" >&2
+    exit 1
+fi
+VERSION_OUTPUT="$(cargo ndk --version 2>/dev/null || true)"
+ACTUAL_CARGO_NDK="$(sed -nE 's/^cargo-ndk[[:space:]]+v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"$VERSION_OUTPUT" | head -1)"
+if [ "$ACTUAL_CARGO_NDK" != "$CARGO_NDK_VERSION" ]; then
+    echo "error: cargo-ndk version mismatch" >&2
+    echo "  expected: $CARGO_NDK_VERSION" >&2
+    echo "  actual:   ${ACTUAL_CARGO_NDK:-<unparseable>}" >&2
+    echo "Fix: cargo install --locked cargo-ndk --version $CARGO_NDK_VERSION --force" >&2
+    exit 1
+fi
+
 echo "Building keep-mobile for Android..."
 
-if [ -n "$TARGETS" ]; then
+if [ -n "${TARGETS:-}" ]; then
     IFS=',' read -ra TARGETS <<< "$TARGETS"
 else
     TARGETS=(
@@ -25,7 +91,7 @@ done
 
 for target in "${TARGETS[@]}"; do
     echo "Building for $target..."
-    cargo ndk -t "$target" -P 33 -o "$JNILIBS_DIR" build --release
+    cargo ndk -t "$target" -P 33 -o "$JNILIBS_DIR" build --release --locked
 done
 
 rm -f "$JNILIBS_DIR"/*/libredb-*.so
