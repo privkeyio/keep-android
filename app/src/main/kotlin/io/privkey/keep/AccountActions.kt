@@ -308,9 +308,9 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
-                    success = seedWords != null
                     delivered = true
                     onResult(seedWords)
+                    success = seedWords != null
                 } catch (e: Exception) {
                     logAndToast("View seed words failed", "Failed to retrieve seed words", e)
                     if (!delivered) {
