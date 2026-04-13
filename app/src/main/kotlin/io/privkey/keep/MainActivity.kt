@@ -743,7 +743,9 @@ fun MainScreen(
                         if (success) {
                             seedWordsData.clear()
                             showSeedWordsScreen = false
-                        } else {
+                        } else if (showSeedWordsScreen) {
+                            // Only surface the toast while the sheet is still attached; ON_STOP
+                            // may have already torn it down and called onDismiss.
                             Toast.makeText(
                                 appContext,
                                 "Failed to confirm backup. Please try again.",
@@ -1018,6 +1020,7 @@ fun MainScreen(
                                 onDismiss = { success ->
                                     seedWordsLoading = false
                                     if (!success) {
+                                        seedWordsData.clear()
                                         showSeedWordsScreen = false
                                     }
                                 }
