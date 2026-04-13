@@ -15,8 +15,12 @@ tasks.register<Exec>("buildRust") {
 
     inputs.file("${rootDir}/build-rust.sh").withPathSensitivity(PathSensitivity.RELATIVE)
     if (keepRepo.exists()) {
-        inputs.dir("${keepRepo}/keep-mobile/src").withPathSensitivity(PathSensitivity.RELATIVE)
-        inputs.file("${keepRepo}/keep-mobile/Cargo.toml").withPathSensitivity(PathSensitivity.RELATIVE)
+        inputs.files(
+            fileTree(keepRepo) {
+                include("**/*.rs", "**/Cargo.toml", "**/Cargo.lock")
+                exclude("**/target/**", "**/.git/**")
+            }
+        ).withPathSensitivity(PathSensitivity.RELATIVE)
     }
     inputs.property("targets", System.getenv("TARGETS") ?: "")
     outputs.dir("${rootDir}/app/src/main/jniLibs")
