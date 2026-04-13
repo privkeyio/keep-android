@@ -276,6 +276,10 @@ internal class AccountActions(
         }
     }
 
+    // NOTE: The Rust FFI `keepMobile.getSeedWords` returns a Kotlin String, which lives on
+    // the JVM heap and cannot be zeroed. We minimize the reference's lifetime here (single
+    // local, handed directly to onResult, no intermediate copies), but a full mitigation
+    // requires changing the FFI to return a CharArray/ByteArray that Kotlin can wipe.
     fun viewSeedWords(
         account: AccountInfo,
         onResult: (String?) -> Unit,
@@ -285,33 +289,35 @@ internal class AccountActions(
             accountMutex.withLock {
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
-                var result: String? = null
                 var success = false
+                var delivered = false
                 try {
                     val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
                     if (activeNow != account.groupPubkeyHex) {
+                        delivered = true
                         onResult(null)
                         return@withLock
                     }
                     storage.setPendingCipher(requestId, authedCipher)
                     pendingSet = true
-                    withContext(Dispatchers.IO) {
+                    val seedWords = withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {
-                            result = keepMobile.getSeedWords(account.groupPubkeyHex)
+                            keepMobile.getSeedWords(account.groupPubkeyHex)
                         } finally {
                             storage.clearRequestIdContext()
                         }
                     }
-                    val toDeliver = result
-                    result = null
-                    onResult(toDeliver)
-                    success = toDeliver != null
+                    success = seedWords != null
+                    delivered = true
+                    onResult(seedWords)
                 } catch (e: Exception) {
                     logAndToast("View seed words failed", "Failed to retrieve seed words", e)
-                    onResult(null)
+                    if (!delivered) {
+                        delivered = true
+                        onResult(null)
+                    }
                 } finally {
-                    result = null
                     if (pendingSet) storage.clearPendingCipher(requestId)
                     onDismiss(success)
                 }
