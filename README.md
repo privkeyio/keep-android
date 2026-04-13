@@ -44,23 +44,20 @@ Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip04_encrypt`, `n
 
 # Building
 
+Requirements: Rust 1.85+, Android NDK r29, cargo-ndk. The keep workspace must be checked out alongside this repo (or point `KEEP_REPO` at it):
+
 ```bash
+git clone https://github.com/privkeyio/keep ../keep
 ./gradlew assembleDebug
 ```
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`
+Gradle invokes `build-rust.sh` automatically when Rust sources change, so you normally don't need to run it directly. APK output: `app/build/outputs/apk/debug/app-debug.apk`.
 
-# Development
-
-To rebuild the native libraries from source:
+To rebuild native libs and bindings out of band:
 
 ```bash
-# Requirements: Rust 1.85+, Android NDK r29, cargo-ndk
-
-# Clone keep workspace
-git clone https://github.com/privkeyio/keep ../keep
-
-# Rebuild native libs and bindings
+./gradlew buildRust
+# or, equivalently
 KEEP_REPO=../keep ./build-rust.sh
 ```
 

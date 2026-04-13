@@ -91,6 +91,8 @@ kotlin {
     }
 }
 
+tasks.named("preBuild") { dependsOn(rootProject.tasks.named("buildRust")) }
+
 dependencies {
     val roomVersion = "2.8.4"
 
