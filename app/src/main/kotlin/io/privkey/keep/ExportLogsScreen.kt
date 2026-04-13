@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
 import android.util.Log
@@ -106,16 +107,21 @@ fun ExportLogsScreen(
                 }
                 val timestamp = LocalDateTime.now()
                     .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-                val fileName = "keep-logs-$timestamp.txt"
+                val saveName = "keep-logs-$timestamp.txt"
                 when (action) {
                     ExportAction.Save -> {
                         pendingContent = content
-                        saveFileLauncher.launch(fileName)
+                        saveFileLauncher.launch(saveName)
                     }
                     ExportAction.Share -> {
                         val uri = withContext(NonCancellable + Dispatchers.IO) {
                             val dir = File(context.cacheDir, "logs").apply { mkdirs() }
-                            val file = File(dir, fileName)
+                            val pruneBefore = System.currentTimeMillis() - 10 * 60 * 1000L
+                            dir.listFiles()?.forEach { old ->
+                                if (old.lastModified() < pruneBefore) old.delete()
+                            }
+                            val uniqueName = "keep-logs-$timestamp-${System.nanoTime()}.txt"
+                            val file = File(dir, uniqueName)
                             file.writeText(content, Charsets.UTF_8)
                             FileProvider.getUriForFile(
                                 context,
@@ -128,15 +134,25 @@ fun ExportLogsScreen(
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share logs"))
-                        state = ExportLogsState.Idle
+                        val chooser = Intent.createChooser(sendIntent, "Share logs").apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        try {
+                            context.startActivity(chooser)
+                            state = ExportLogsState.Idle
+                        } catch (e: ActivityNotFoundException) {
+                            if (BuildConfig.DEBUG) Log.e("ExportLogs", "No share target", e)
+                            state = ExportLogsState.Error("No app available to share")
+                        }
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Export failed", e)
-                state = ExportLogsState.Error("Failed to collect logs")
+                state = ExportLogsState.Error(
+                    if (action == ExportAction.Share) "Failed to share logs" else "Failed to collect logs"
+                )
             }
         }
     }
@@ -199,7 +215,16 @@ fun ExportLogsScreen(
                             onClick = { runExport(ExportAction.Save) },
                             enabled = !isBusy,
                             modifier = Modifier.weight(1f)
-                        ) { Text("Save to File") }
+                        ) {
+                            if (isBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Text("Save to File")
+                        }
                         Button(
                             onClick = { runExport(ExportAction.Share) },
                             enabled = !isBusy,
@@ -255,8 +280,9 @@ private suspend fun buildExportContent(
         .withZone(ZoneId.systemDefault())
         .format(Instant.now())
 
-    val nip55AuditJson = permissionStore?.let { store ->
+    val nip55AuditResult = permissionStore?.let { store ->
         runCatching {
+            val totalCount = store.getAuditLogCount()
             val entries = store.getAuditLog(limit = 1000)
             val array = JSONArray()
             for (e in entries) {
@@ -268,11 +294,13 @@ private suspend fun buildExportContent(
                 obj.put("eventKind", e.eventKind ?: JSONObject.NULL)
                 obj.put("decision", e.decision)
                 obj.put("wasAutomatic", e.wasAutomatic)
+                obj.put("previousHash", e.previousHash ?: JSONObject.NULL)
+                obj.put("entryHash", e.entryHash)
                 array.put(obj)
             }
-            array.toString(2)
+            Triple(array.toString(2), entries.size, totalCount)
         }.getOrElse { e ->
-            "(export failed: ${e::class.simpleName})"
+            Triple("(export failed: ${e::class.simpleName})", 0, 0)
         }
     }
 
@@ -302,6 +330,14 @@ private suspend fun buildExportContent(
         }
         appendLine()
         appendLine("=== NIP-55 Audit Log ===")
-        appendLine(nip55AuditJson ?: "(unavailable)")
+        if (nip55AuditResult == null) {
+            appendLine("(unavailable)")
+        } else {
+            val (json, exported, total) = nip55AuditResult
+            if (total > exported) {
+                appendLine("(truncated to $exported of $total entries)")
+            }
+            appendLine(json)
+        }
     }
 }
