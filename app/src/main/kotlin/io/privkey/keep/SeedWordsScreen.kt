@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import java.util.Arrays
 
 @Composable
 internal fun SeedWordsScreen(
@@ -29,7 +30,6 @@ internal fun SeedWordsScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var showCopyWarning by remember { mutableStateOf(false) }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -94,41 +94,18 @@ internal fun SeedWordsScreen(
             return@Column
         }
 
-        val words = mnemonicData.words()
-        val halfSize = (words.size + 1) / 2
+        val wordArrays = remember(mnemonicData) { mnemonicData.wordsAsCharArrays() }
+        DisposableEffect(wordArrays) {
+            onDispose { wordArrays.forEach { Arrays.fill(it, '\u0000') } }
+        }
+        val halfSize = (wordArrays.size + 1) / 2
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SeedWordColumn(words, 0 until halfSize, Modifier.weight(1f))
-            SeedWordColumn(words, halfSize until words.size, Modifier.weight(1f))
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedButton(
-            onClick = { showCopyWarning = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Copy to clipboard")
-        }
-
-        if (showCopyWarning) {
-            AlertDialog(
-                onDismissRequest = { showCopyWarning = false },
-                title = { Text("Copy seed words?") },
-                text = { Text("Your seed words will be placed on the clipboard, where other apps may be able to read them. The clipboard will be cleared after 10 seconds.") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showCopyWarning = false
-                        copySensitiveText(context, mnemonicData.valueUnsafe())
-                    }) { Text("Copy") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showCopyWarning = false }) { Text("Cancel") }
-                }
-            )
+            SeedWordColumn(wordArrays, 0 until halfSize, Modifier.weight(1f))
+            SeedWordColumn(wordArrays, halfSize until wordArrays.size, Modifier.weight(1f))
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -167,7 +144,7 @@ internal fun SeedWordsScreen(
 }
 
 @Composable
-private fun SeedWordColumn(words: List<String>, range: IntRange, modifier: Modifier) {
+private fun SeedWordColumn(words: List<CharArray>, range: IntRange, modifier: Modifier) {
     Column(modifier = modifier) {
         for (i in range) {
             if (i >= words.size) break
@@ -186,8 +163,12 @@ private fun SeedWordColumn(words: List<String>, range: IntRange, modifier: Modif
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.width(28.dp)
                 )
+                // Compose Text requires a String/AnnotatedString; there is no sink that
+                // accepts CharArray. This constructs a per-word String that cannot be
+                // zeroed, but the lifetime is scoped to the composition and the underlying
+                // CharArray is wiped on dispose.
                 Text(
-                    text = words[i],
+                    text = String(words[i]),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )

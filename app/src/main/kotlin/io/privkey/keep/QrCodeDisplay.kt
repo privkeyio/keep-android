@@ -109,6 +109,28 @@ internal class SecureShareData(private val maxLength: Int) {
 
     fun valueUnsafe(): String = String(chars)
 
+    // Splits the stored chars into per-word CharArrays without ever constructing a full
+    // String over the sensitive data. Returned arrays are owned by the caller and should
+    // be wiped (Arrays.fill(..., '\u0000')) as soon as they are no longer needed.
+    fun wordsAsCharArrays(): List<CharArray> {
+        if (chars.isEmpty()) return emptyList()
+        val result = mutableListOf<CharArray>()
+        var start = -1
+        for (i in chars.indices) {
+            val isWs = chars[i].isWhitespace()
+            if (!isWs && start == -1) {
+                start = i
+            } else if (isWs && start != -1) {
+                result.add(chars.copyOfRange(start, i))
+                start = -1
+            }
+        }
+        if (start != -1) {
+            result.add(chars.copyOfRange(start, chars.size))
+        }
+        return result
+    }
+
     override fun toString(): String = "<redacted>"
 }
 
