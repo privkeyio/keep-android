@@ -308,6 +308,11 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
+                    if (seedWords == null) {
+                        coroutineScope.launch(Dispatchers.Main) {
+                            Toast.makeText(appContext, "No seed words available for this account", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     delivered = true
                     onResult(seedWords)
                     success = seedWords != null
@@ -389,6 +394,9 @@ internal class AccountActions(
                     storage.setPendingCipher(requestId, authedDecrypt)
                     pendingSet = true
                     storage.setPendingCipher(requestId, authedEncrypt)
+                    // The decrypt cipher was enqueued before the second biometric prompt; refresh
+                    // both entries so user idle time on that prompt cannot expire them mid-FFI.
+                    storage.refreshPendingCipher(requestId)
                     withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {
