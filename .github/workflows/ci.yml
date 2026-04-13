@@ -13,6 +13,7 @@ concurrency:
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
+  CARGO_NDK_VERSION: "4.1.2"
 
 jobs:
   build:
@@ -46,7 +47,7 @@ jobs:
       - name: Install cargo-ndk
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
-          tool: cargo-ndk
+          tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
         run: ./build-rust.sh
@@ -94,7 +95,7 @@ jobs:
       - name: Install cargo-ndk
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
-          tool: cargo-ndk
+          tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
         run: ./build-rust.sh

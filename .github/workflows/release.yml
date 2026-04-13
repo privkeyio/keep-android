@@ -33,13 +33,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: "1.85.0"
+          toolchain: "1.89.0"
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
-          tool: cargo-ndk
+          tool: cargo-ndk@4.1.2
 
       - name: Build native libraries
         run: ./build-rust.sh
