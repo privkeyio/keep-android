@@ -18,9 +18,9 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.SigningAuditLog
-import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedOutputStream
@@ -32,7 +32,7 @@ import java.time.format.DateTimeFormatter
 private sealed class ExportLogsState {
     data object Idle : ExportLogsState()
     data object Collecting : ExportLogsState()
-    data class Ready(val content: String) : ExportLogsState()
+    data object Ready : ExportLogsState()
     data object Saving : ExportLogsState()
     data class Error(val message: String) : ExportLogsState()
 }
@@ -49,7 +49,7 @@ fun ExportLogsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<ExportLogsState>(ExportLogsState.Idle) }
-    var pendingContent by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingContent by remember { mutableStateOf<String?>(null) }
 
     val saveFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
@@ -63,7 +63,7 @@ fun ExportLogsScreen(
         state = ExportLogsState.Saving
         scope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                withContext(NonCancellable + Dispatchers.IO) {
                     val outputStream = context.contentResolver.openOutputStream(uri)
                         ?: throw java.io.IOException("openOutputStream returned null")
                     BufferedOutputStream(outputStream).use { buffered ->
@@ -77,6 +77,7 @@ fun ExportLogsScreen(
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
+                pendingContent = null
                 state = ExportLogsState.Error("Failed to save logs")
             }
         }
@@ -117,6 +118,17 @@ fun ExportLogsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        "Warning: audit entries include caller display names and free-text " +
+                            "reasons supplied by third-party apps. These fields may contain " +
+                            "personal information or attacker-controlled content. Review the " +
+                            "file before sharing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     val isBusy = state is ExportLogsState.Collecting || state is ExportLogsState.Saving
@@ -135,7 +147,7 @@ fun ExportLogsScreen(
                                         )
                                     }
                                     pendingContent = content
-                                    state = ExportLogsState.Ready(content)
+                                    state = ExportLogsState.Ready
                                     val timestamp = LocalDateTime.now()
                                         .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
                                     saveFileLauncher.launch("keep-logs-$timestamp.txt")
