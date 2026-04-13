@@ -426,13 +426,17 @@ fun MainScreen(
                             .onFailure { if (it is CancellationException) throw it }
                             .getOrDefault(descriptorCount)
                     } else 0
-                    PollResult(h, s, a, k, dc)
+                    val db = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
+                        .onFailure { if (it is CancellationException) throw it }
+                        .getOrNull()
+                    PollResult(h, s, a, k, dc, db)
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
                 allAccounts = pollResult.allAccounts
                 activeAccountKey = pollResult.activeAccountKey
                 descriptorCount = pollResult.descriptorCount
+                activeDidBackup = pollResult.activeDidBackup
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(pollResult.activeAccountKey) }
                 delay(10_000)
@@ -739,6 +743,12 @@ fun MainScreen(
                         if (success) {
                             seedWordsData.clear()
                             showSeedWordsScreen = false
+                        } else {
+                            Toast.makeText(
+                                appContext,
+                                "Failed to confirm backup. Please try again.",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                 }
@@ -1504,7 +1514,8 @@ private data class PollResult(
     val shareInfo: ShareInfo?,
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
-    val descriptorCount: Int
+    val descriptorCount: Int,
+    val activeDidBackup: Boolean?
 )
 
 @Composable
