@@ -497,7 +497,10 @@ fun MainScreen(
             biometricAvailable = biometricAvailable,
             killSwitchEnabled = killSwitchEnabled,
             onKillSwitchToggle = handleKillSwitchToggle,
-            onExportLogs = { showExportLogs = true },
+            onExportLogs = {
+                showSecuritySettings = false
+                showExportLogs = true
+            },
             onDismiss = { showSecuritySettings = false }
         )
         return

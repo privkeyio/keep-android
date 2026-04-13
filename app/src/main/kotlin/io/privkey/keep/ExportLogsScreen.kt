@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.SigningAuditLog
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,12 +49,14 @@ fun ExportLogsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<ExportLogsState>(ExportLogsState.Idle) }
+    var pendingContent by rememberSaveable { mutableStateOf<String?>(null) }
 
     val saveFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
-        val ready = state as? ExportLogsState.Ready
-        if (ready == null || uri == null) {
+        val content = pendingContent
+        pendingContent = null
+        if (content == null || uri == null) {
             if (uri == null) state = ExportLogsState.Idle
             return@rememberLauncherForActivityResult
         }
@@ -63,12 +67,14 @@ fun ExportLogsScreen(
                     val outputStream = context.contentResolver.openOutputStream(uri)
                         ?: throw java.io.IOException("openOutputStream returned null")
                     BufferedOutputStream(outputStream).use { buffered ->
-                        buffered.write(ready.content.toByteArray(Charsets.UTF_8))
+                        buffered.write(content.toByteArray(Charsets.UTF_8))
                         buffered.flush()
                     }
                 }
                 Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
                 state = ExportLogsState.Idle
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
                 state = ExportLogsState.Error("Failed to save logs")
@@ -128,10 +134,13 @@ fun ExportLogsScreen(
                                             foregroundServiceEnabled = foregroundServiceEnabled
                                         )
                                     }
+                                    pendingContent = content
                                     state = ExportLogsState.Ready(content)
                                     val timestamp = LocalDateTime.now()
                                         .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
                                     saveFileLauncher.launch("keep-logs-$timestamp.txt")
+                                } catch (e: CancellationException) {
+                                    throw e
                                 } catch (e: Exception) {
                                     if (BuildConfig.DEBUG) Log.e("ExportLogs", "Collection failed", e)
                                     state = ExportLogsState.Error("Failed to collect logs")
