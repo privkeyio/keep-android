@@ -300,6 +300,7 @@ private suspend fun buildExportContent(
             }
             Triple(array.toString(2), entries.size, totalCount)
         }.getOrElse { e ->
+            if (e is CancellationException) throw e
             Triple("(export failed: ${e::class.simpleName})", 0, 0)
         }
     }
