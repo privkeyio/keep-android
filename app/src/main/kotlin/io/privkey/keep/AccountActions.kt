@@ -34,7 +34,8 @@ internal class AccountActions(
         val activeAccountKey: String?,
         val allAccounts: List<AccountInfo>,
         val relays: List<String>,
-        val profileRelays: List<String>
+        val profileRelays: List<String>,
+        val activeDidBackup: Boolean?
     )
 
     private val accountMutex = Mutex()
@@ -71,7 +72,10 @@ internal class AccountActions(
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
             val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
                 ?: EMPTY_RELAY_CONFIG
-            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays)
+            val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
+                .onFailure { Log.w("AccountActions", "getActiveShareMetadata failed: ${it::class.simpleName}") }
+                .getOrNull()
+            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
         }
         onStateChanged(result)
     }
@@ -271,6 +275,151 @@ internal class AccountActions(
             keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
         }
     }
+
+    // NOTE: The Rust FFI `keepMobile.getSeedWords` returns a Kotlin String, which lives on
+    // the JVM heap and cannot be zeroed. We minimize the reference's lifetime here (single
+    // local, handed directly to onResult, no intermediate copies), but a full mitigation
+    // requires changing the FFI to return a CharArray/ByteArray that Kotlin can wipe.
+    fun viewSeedWords(
+        account: AccountInfo,
+        onResult: (String?) -> Unit,
+        onDismiss: (Boolean) -> Unit
+    ) {
+        withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", { onDismiss(false) }) { authedCipher ->
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                var success = false
+                var delivered = false
+                try {
+                    val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+                    if (activeNow != account.groupPubkeyHex) {
+                        delivered = true
+                        onResult(null)
+                        return@withLock
+                    }
+                    storage.setPendingCipher(requestId, authedCipher)
+                    pendingSet = true
+                    val seedWords = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            keepMobile.getSeedWords(account.groupPubkeyHex)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    if (seedWords == null) {
+                        coroutineScope.launch(Dispatchers.Main) {
+                            Toast.makeText(appContext, "No seed words available for this account", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    delivered = true
+                    onResult(seedWords)
+                    success = seedWords != null
+                } catch (e: Exception) {
+                    logAndToast("View seed words failed", "Failed to retrieve seed words", e)
+                    if (!delivered) onResult(null)
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
+                    onDismiss(success)
+                }
+            }
+        }
+    }
+
+    fun markBackedUp(
+        account: AccountInfo,
+        onComplete: (Boolean) -> Unit
+    ) {
+        coroutineScope.launch {
+            val decryptCipher = withContext(Dispatchers.IO) {
+                runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
+            }
+            if (decryptCipher == null) {
+                onComplete(false)
+                return@launch
+            }
+            onBiometricRequest("Confirm Backup", "Authenticate to confirm backup", decryptCipher) { authedDecrypt ->
+                if (authedDecrypt == null) {
+                    onComplete(false)
+                    return@onBiometricRequest
+                }
+                requestEncryptCipherAndFinishBackup(account, authedDecrypt, onComplete)
+            }
+        }
+    }
+
+    private fun requestEncryptCipherAndFinishBackup(
+        account: AccountInfo,
+        authedDecrypt: Cipher,
+        onComplete: (Boolean) -> Unit
+    ) {
+        coroutineScope.launch {
+            val encryptCipher = accountMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    if (!shareExists(account.groupPubkeyHex)) null
+                    else runCatching { storage.getCipherForShareEncryption(account.groupPubkeyHex) }.getOrNull()
+                }
+            }
+            if (encryptCipher == null) {
+                onComplete(false)
+                return@launch
+            }
+            onBiometricRequest("Confirm Backup", "Authenticate again to save", encryptCipher) { authedEncrypt ->
+                if (authedEncrypt == null) {
+                    onComplete(false)
+                    return@onBiometricRequest
+                }
+                finishMarkBackedUp(account, authedDecrypt, authedEncrypt, onComplete)
+            }
+        }
+    }
+
+    private fun finishMarkBackedUp(
+        account: AccountInfo,
+        authedDecrypt: Cipher,
+        authedEncrypt: Cipher,
+        onComplete: (Boolean) -> Unit
+    ) {
+        coroutineScope.launch {
+            accountMutex.withLock {
+                val stillExists = withContext(Dispatchers.IO) { shareExists(account.groupPubkeyHex) }
+                if (!stillExists) {
+                    onComplete(false)
+                    return@withLock
+                }
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                try {
+                    storage.setPendingCipher(requestId, authedDecrypt)
+                    pendingSet = true
+                    storage.setPendingCipher(requestId, authedEncrypt)
+                    withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            keepMobile.markShareBackedUp(account.groupPubkeyHex)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    try {
+                        refreshAccountState()
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-mark refresh failed: ${e::class.simpleName}")
+                    }
+                    onComplete(true)
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "Mark backed up failed", e)
+                    onComplete(false)
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
+                }
+            }
+        }
+    }
+
+    private fun shareExists(groupPubkeyHex: String): Boolean =
+        storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == groupPubkeyHex }
 
     private fun executeImport(
         cipher: Cipher,

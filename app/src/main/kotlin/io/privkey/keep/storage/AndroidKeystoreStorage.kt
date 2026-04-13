@@ -44,6 +44,9 @@ class AndroidKeystoreStorage(
         private const val KEY_SHARE_THRESHOLD = "share_threshold"
         private const val KEY_SHARE_TOTAL = "share_total"
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
+        // Non-authoritative UI cache. The Rust-side metadata via keepMobile.getActiveShareMetadata()
+        // is the source of truth; this pref exists for fast reads and must not gate sensitive UI.
+        private const val KEY_SHARE_DID_BACKUP = "share_did_backup"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
@@ -54,10 +57,10 @@ class AndroidKeystoreStorage(
     private data class PendingCipherData(
         val cipher: Cipher,
         val creatingThreadId: Long,
-        val createdAtMs: Long
+        val createdAtMs: Long,
+        val onConsumed: (() -> Unit)?
     )
-    private val pendingCiphers = ConcurrentHashMap<String, PendingCipherData>()
-    private val cipherConsumedCallbacks = ConcurrentHashMap<String, () -> Unit>()
+    private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -204,35 +207,70 @@ class AndroidKeystoreStorage(
         val data = PendingCipherData(
             cipher = cipher,
             creatingThreadId = Thread.currentThread().id,
-            createdAtMs = SystemClock.elapsedRealtime()
+            createdAtMs = SystemClock.elapsedRealtime(),
+            onConsumed = onConsumed
         )
-        pendingCiphers[requestId] = data
-        if (onConsumed != null) {
-            cipherConsumedCallbacks[requestId] = onConsumed
+        while (true) {
+            // compute() atomically inserts a queue if absent, but a concurrent clearPendingCipher
+            // or cleanupExpiredCiphers may remove it before we take its lock. Re-check identity
+            // under the lock and retry if the map no longer points at our queue instance.
+            val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
+            val added = synchronized(queue) {
+                if (pendingCiphers[requestId] === queue) {
+                    queue.add(data)
+                    true
+                } else false
+            }
+            if (added) break
         }
     }
 
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
-        val expired = pendingCiphers.entries.filter { now - it.value.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
-        expired.forEach { entry ->
-            pendingCiphers.remove(entry.key)
-            cipherConsumedCallbacks.remove(entry.key)
+        pendingCiphers.entries.forEach { entry ->
+            synchronized(entry.value) {
+                // Drop only the stale entries, preserving fresh ones that may sit behind them.
+                entry.value.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+                if (entry.value.isEmpty()) {
+                    pendingCiphers.remove(entry.key, entry.value)
+                }
+            }
         }
     }
 
+    // Drops all pending ciphers and callbacks for the given requestId.
     fun clearPendingCipher(requestId: String) {
-        cipherConsumedCallbacks.remove(requestId)
-        pendingCiphers.remove(requestId)
+        val queue = pendingCiphers[requestId] ?: return
+        synchronized(queue) {
+            queue.clear()
+            pendingCiphers.remove(requestId, queue)
+        }
     }
 
+    // Consumes pending ciphers in FIFO order. Callers MUST setPendingCipher in the
+    // same order the Rust FFI consumes them (e.g. markShareBackedUp: decrypt then encrypt).
     fun consumePendingCipher(requestId: String): Cipher? {
-        val data = pendingCiphers.remove(requestId) ?: return null
-        val callback = cipherConsumedCallbacks.remove(requestId)
-        val isExpired = SystemClock.elapsedRealtime() - data.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
-        if (isExpired) return null
-        callback?.invoke()
-        return data.cipher
+        val queue = pendingCiphers[requestId] ?: return null
+        var poppedCipher: Cipher? = null
+        var callbackToFire: (() -> Unit)? = null
+        synchronized(queue) {
+            val now = SystemClock.elapsedRealtime()
+            // Strip stale entries before popping so a stale head does not mask fresh followers
+            // and stale tails do not linger past their expiry.
+            queue.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+            if (queue.isEmpty()) {
+                pendingCiphers.remove(requestId, queue)
+                return null
+            }
+            val popped = queue.removeFirst()
+            poppedCipher = popped.cipher
+            callbackToFire = popped.onConsumed
+            if (queue.isEmpty()) {
+                pendingCiphers.remove(requestId, queue)
+            }
+        }
+        callbackToFire?.invoke()
+        return poppedCipher
     }
 
     private val requestIdContext = ThreadLocal<String>()
@@ -272,6 +310,7 @@ class AndroidKeystoreStorage(
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
+            .putBoolean(KEY_SHARE_DID_BACKUP, metadata.didBackup)
             .commit()
         if (!saved) {
             throw KeepMobileException.StorageException("Failed to save share data")
@@ -329,7 +368,8 @@ class AndroidKeystoreStorage(
             identifier = identifier.toUShort(),
             threshold = threshold.toUShort(),
             totalShares = totalShares.toUShort(),
-            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP)
+            groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP),
+            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, false)
         )
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.e(TAG, "Failed to parse stored key metadata", e)
@@ -619,6 +659,7 @@ class AndroidKeystoreStorage(
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
             .putInt(KEY_SHARE_TOTAL, metadata.totalShares.toInt())
             .putString(KEY_SHARE_GROUP_PUBKEY, Base64.encodeToString(metadata.groupPubkey, Base64.NO_WRAP))
+            .putBoolean(KEY_SHARE_DID_BACKUP, metadata.didBackup)
             .commit()
         if (!saved) return
 
