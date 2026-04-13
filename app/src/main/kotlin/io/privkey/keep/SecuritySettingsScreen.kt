@@ -25,6 +25,7 @@ fun SecuritySettingsScreen(
     biometricAvailable: Boolean,
     killSwitchEnabled: Boolean,
     onKillSwitchToggle: (Boolean) -> Unit,
+    onExportLogs: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -76,6 +77,8 @@ fun SecuritySettingsScreen(
                 onToggle = onBiometricLockOnLaunchChanged,
                 biometricAvailable = biometricAvailable
             )
+
+            ExportLogsCard(onClick = onExportLogs)
 
             Spacer(modifier = Modifier.height(16.dp))
         }
