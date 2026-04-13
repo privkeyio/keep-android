@@ -44,10 +44,10 @@ Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip04_encrypt`, `n
 
 # Building
 
-Requires Rust 1.85+, Android NDK r29, and `cargo-ndk`.
+Requires Rust 1.89+, Android NDK r29, and `cargo-ndk`.
 
 ```bash
-git clone https://github.com/privkeyio/keep ../keep
+git clone https://github.com/privkeyio/keep keep
 ./gradlew assembleDebug
 ```
 
