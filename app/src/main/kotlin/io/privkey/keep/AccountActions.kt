@@ -394,9 +394,6 @@ internal class AccountActions(
                     storage.setPendingCipher(requestId, authedDecrypt)
                     pendingSet = true
                     storage.setPendingCipher(requestId, authedEncrypt)
-                    // The decrypt cipher was enqueued before the second biometric prompt; refresh
-                    // both entries so user idle time on that prompt cannot expire them mid-FFI.
-                    storage.refreshPendingCipher(requestId)
                     withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {

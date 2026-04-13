@@ -11,7 +11,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import android.app.Activity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.password
 import androidx.compose.ui.semantics.semantics
@@ -40,13 +39,8 @@ internal fun SeedWordsScreen(
     DisposableEffect(lifecycleOwner, mnemonicData) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                // Skip wipe across configuration changes (e.g. rotation): otherwise the user
-                // would be forced to re-authenticate to re-fetch the same mnemonic mid-display.
-                val isConfigChange = (context as? Activity)?.isChangingConfigurations == true
-                if (!isConfigChange) {
-                    mnemonicData?.clear()
-                    onDismiss()
-                }
+                mnemonicData?.clear()
+                onDismiss()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

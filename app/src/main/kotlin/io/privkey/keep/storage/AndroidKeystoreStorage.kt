@@ -225,20 +225,6 @@ class AndroidKeystoreStorage(
         }
     }
 
-    // Refreshes the createdAtMs of all pending ciphers for a requestId so chained operations
-    // (e.g. markShareBackedUp: decrypt cipher enqueued, then second biometric, then FFI call)
-    // do not race the expiry timeout while waiting on user interaction.
-    fun refreshPendingCipher(requestId: String) {
-        val queue = pendingCiphers[requestId] ?: return
-        val now = SystemClock.elapsedRealtime()
-        synchronized(queue) {
-            if (pendingCiphers[requestId] !== queue) return
-            val refreshed = queue.map { it.copy(createdAtMs = now) }
-            queue.clear()
-            queue.addAll(refreshed)
-        }
-    }
-
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
         pendingCiphers.entries.forEach { entry ->
