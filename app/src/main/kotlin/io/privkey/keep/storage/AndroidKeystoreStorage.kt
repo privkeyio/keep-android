@@ -44,6 +44,8 @@ class AndroidKeystoreStorage(
         private const val KEY_SHARE_THRESHOLD = "share_threshold"
         private const val KEY_SHARE_TOTAL = "share_total"
         private const val KEY_SHARE_GROUP_PUBKEY = "share_group_pubkey"
+        // Non-authoritative UI cache. The Rust-side metadata via keepMobile.getActiveShareMetadata()
+        // is the source of truth; this pref exists for fast reads and must not gate sensitive UI.
         private const val KEY_SHARE_DID_BACKUP = "share_did_backup"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
@@ -209,6 +211,9 @@ class AndroidKeystoreStorage(
             onConsumed = onConsumed
         )
         while (true) {
+            // compute() atomically inserts a queue if absent, but a concurrent clearPendingCipher
+            // or cleanupExpiredCiphers may remove it before we take its lock. Re-check identity
+            // under the lock and retry if the map no longer points at our queue instance.
             val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
             val added = synchronized(queue) {
                 if (pendingCiphers[requestId] === queue) {
@@ -220,13 +225,27 @@ class AndroidKeystoreStorage(
         }
     }
 
+    // Refreshes the createdAtMs of all pending ciphers for a requestId so chained operations
+    // (e.g. markShareBackedUp: decrypt cipher enqueued, then second biometric, then FFI call)
+    // do not race the expiry timeout while waiting on user interaction.
+    fun refreshPendingCipher(requestId: String) {
+        val queue = pendingCiphers[requestId] ?: return
+        val now = SystemClock.elapsedRealtime()
+        synchronized(queue) {
+            if (pendingCiphers[requestId] !== queue) return
+            val refreshed = queue.map { it.copy(createdAtMs = now) }
+            queue.clear()
+            queue.addAll(refreshed)
+        }
+    }
+
     private fun cleanupExpiredCiphers() {
         val now = SystemClock.elapsedRealtime()
         pendingCiphers.entries.forEach { entry ->
             synchronized(entry.value) {
-                val stale = entry.value.isEmpty() ||
-                    entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
-                if (stale) {
+                // Drop only the stale entries, preserving fresh ones that may sit behind them.
+                entry.value.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+                if (entry.value.isEmpty()) {
                     pendingCiphers.remove(entry.key, entry.value)
                 }
             }
@@ -249,18 +268,15 @@ class AndroidKeystoreStorage(
         var poppedCipher: Cipher? = null
         var callbackToFire: (() -> Unit)? = null
         synchronized(queue) {
+            val now = SystemClock.elapsedRealtime()
+            // Strip stale entries before popping so a stale head does not mask fresh followers
+            // and stale tails do not linger past their expiry.
+            queue.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
             if (queue.isEmpty()) {
                 pendingCiphers.remove(requestId, queue)
                 return null
             }
             val popped = queue.removeFirst()
-            val isExpired = SystemClock.elapsedRealtime() - popped.createdAtMs > PENDING_CIPHER_TIMEOUT_MS
-            if (isExpired) {
-                // Drain the whole queue on expiry: remaining entries are stale and should not be served later.
-                queue.clear()
-                pendingCiphers.remove(requestId, queue)
-                return null
-            }
             poppedCipher = popped.cipher
             callbackToFire = popped.onConsumed
             if (queue.isEmpty()) {
