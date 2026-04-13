@@ -55,10 +55,10 @@ class AndroidKeystoreStorage(
     private data class PendingCipherData(
         val cipher: Cipher,
         val creatingThreadId: Long,
-        val createdAtMs: Long
+        val createdAtMs: Long,
+        val onConsumed: (() -> Unit)?
     )
     private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
-    private val cipherConsumedCallbacks = ConcurrentHashMap<String, ArrayDeque<(() -> Unit)?>>()
 
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
@@ -205,23 +205,14 @@ class AndroidKeystoreStorage(
         val data = PendingCipherData(
             cipher = cipher,
             creatingThreadId = Thread.currentThread().id,
-            createdAtMs = SystemClock.elapsedRealtime()
+            createdAtMs = SystemClock.elapsedRealtime(),
+            onConsumed = onConsumed
         )
         while (true) {
             val queue = pendingCiphers.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
             val added = synchronized(queue) {
                 if (pendingCiphers[requestId] === queue) {
                     queue.add(data)
-                    true
-                } else false
-            }
-            if (added) break
-        }
-        while (true) {
-            val cbQueue = cipherConsumedCallbacks.compute(requestId) { _, existing -> existing ?: ArrayDeque() }!!
-            val added = synchronized(cbQueue) {
-                if (cipherConsumedCallbacks[requestId] === cbQueue) {
-                    cbQueue.add(onConsumed)
                     true
                 } else false
             }
@@ -235,10 +226,8 @@ class AndroidKeystoreStorage(
             synchronized(entry.value) {
                 val stale = entry.value.isEmpty() ||
                     entry.value.all { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
-                if (stale && pendingCiphers.remove(entry.key, entry.value)) {
-                    cipherConsumedCallbacks[entry.key]?.let { cbQueue ->
-                        cipherConsumedCallbacks.remove(entry.key, cbQueue)
-                    }
+                if (stale) {
+                    pendingCiphers.remove(entry.key, entry.value)
                 }
             }
         }
@@ -246,19 +235,10 @@ class AndroidKeystoreStorage(
 
     // Drops all pending ciphers and callbacks for the given requestId.
     fun clearPendingCipher(requestId: String) {
-        val queue = pendingCiphers[requestId]
-        if (queue != null) {
-            synchronized(queue) {
-                queue.clear()
-                pendingCiphers.remove(requestId, queue)
-            }
-        }
-        val cbQueue = cipherConsumedCallbacks[requestId]
-        if (cbQueue != null) {
-            synchronized(cbQueue) {
-                cbQueue.clear()
-                cipherConsumedCallbacks.remove(requestId, cbQueue)
-            }
+        val queue = pendingCiphers[requestId] ?: return
+        synchronized(queue) {
+            queue.clear()
+            pendingCiphers.remove(requestId, queue)
         }
     }
 
@@ -266,7 +246,6 @@ class AndroidKeystoreStorage(
     // same order the Rust FFI consumes them (e.g. markShareBackedUp: decrypt then encrypt).
     fun consumePendingCipher(requestId: String): Cipher? {
         val queue = pendingCiphers[requestId] ?: return null
-        val cbQueue = cipherConsumedCallbacks[requestId]
         var poppedCipher: Cipher? = null
         var callbackToFire: (() -> Unit)? = null
         synchronized(queue) {
@@ -280,21 +259,10 @@ class AndroidKeystoreStorage(
                 // Drain the whole queue on expiry: remaining entries are stale and should not be served later.
                 queue.clear()
                 pendingCiphers.remove(requestId, queue)
-                if (cbQueue != null) {
-                    synchronized(cbQueue) {
-                        cbQueue.clear()
-                        cipherConsumedCallbacks.remove(requestId, cbQueue)
-                    }
-                }
                 return null
             }
             poppedCipher = popped.cipher
-            if (cbQueue != null) {
-                synchronized(cbQueue) {
-                    if (cbQueue.isNotEmpty()) callbackToFire = cbQueue.removeFirst()
-                    if (cbQueue.isEmpty()) cipherConsumedCallbacks.remove(requestId, cbQueue)
-                }
-            }
+            callbackToFire = popped.onConsumed
             if (queue.isEmpty()) {
                 pendingCiphers.remove(requestId, queue)
             }
@@ -399,7 +367,7 @@ class AndroidKeystoreStorage(
             threshold = threshold.toUShort(),
             totalShares = totalShares.toUShort(),
             groupPubkey = Base64.decode(groupPubkeyB64, Base64.NO_WRAP),
-            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, true)
+            didBackup = sharePrefs.getBoolean(KEY_SHARE_DID_BACKUP, false)
         )
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.e(TAG, "Failed to parse stored key metadata", e)
