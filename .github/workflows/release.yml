@@ -5,9 +5,20 @@ on:
     tags:
       - "v*"
 
+permissions: {}
+
+env:
+  NDK_VERSION: "29.0.14206865"
+  CARGO_NDK_VERSION: "4.1.2"
+  RUST_VERSION: "1.89.0"
+  BUILD_TOOLS_VERSION: "36.0.0"
+
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -28,24 +39,24 @@ jobs:
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Install Android NDK
-        run: sdkmanager --install "ndk;29.0.14206865"
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: "1.89.0"
+          toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
-          tool: cargo-ndk@4.1.2
+          tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
         run: ./build-rust.sh
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/29.0.14206865
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           AWS_LC_SYS_CMAKE_BUILDER: "1"
 
       - name: Setup Gradle
@@ -54,7 +65,17 @@ jobs:
       - name: Decode keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > ${{ runner.temp }}/release.keystore
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "error: KEYSTORE_BASE64 secret is empty." >&2
+            exit 1
+          fi
+          KEYSTORE_OUT="${{ runner.temp }}/release.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_OUT"
+          if [ ! -s "$KEYSTORE_OUT" ]; then
+            echo "error: decoded keystore is empty; check KEYSTORE_BASE64 encoding." >&2
+            exit 1
+          fi
 
       - name: Build APK
         run: ./gradlew assembleRelease --no-daemon
@@ -65,7 +86,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Verify APK is signed
-        run: $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools/ | tail -1)/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
+        run: $ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
 
       - name: Rename APK
         run: mv app/build/outputs/apk/release/app-release.apk "keep-android-${{ github.ref_name }}.apk"
@@ -78,6 +99,7 @@ jobs:
   release:
     needs: [build]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

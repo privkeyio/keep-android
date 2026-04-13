@@ -6,8 +6,7 @@ plugins {
 
 val expectedJavaMajor = 17
 val runningJavaVersion = JavaVersion.current()
-if (!runningJavaVersion.isCompatibleWith(JavaVersion.VERSION_17) ||
-    runningJavaVersion.majorVersion.toInt() != expectedJavaMajor) {
+if (runningJavaVersion.majorVersion.toInt() != expectedJavaMajor) {
     throw GradleException(
         "JDK $expectedJavaMajor is required but Gradle is running on ${System.getProperty("java.version")} " +
         "(java.home=${System.getProperty("java.home")}). " +
@@ -16,10 +15,38 @@ if (!runningJavaVersion.isCompatibleWith(JavaVersion.VERSION_17) ||
 }
 
 val expectedNdkVersion = "29.0.14206865"
-val androidHome = System.getenv("ANDROID_HOME")
-    ?: System.getenv("ANDROID_SDK_ROOT")
-    ?: file("${System.getProperty("user.home")}/Android/Sdk").takeIf { it.exists() }?.absolutePath
-if (androidHome != null) {
+
+fun resolveAndroidSdkDir(): String? {
+    System.getenv("ANDROID_HOME")?.let { return it }
+    System.getenv("ANDROID_SDK_ROOT")?.let { return it }
+    val localProps = file("${rootDir}/local.properties")
+    if (localProps.exists()) {
+        val props = java.util.Properties()
+        localProps.inputStream().use { props.load(it) }
+        props.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+    return file("${System.getProperty("user.home")}/Android/Sdk").takeIf { it.exists() }?.absolutePath
+}
+
+gradle.taskGraph.whenReady {
+    val needsAndroidBuild = allTasks.any { task ->
+        val path = task.path.lowercase()
+        path.contains("assemble") || path.contains("bundle") ||
+            path.contains("compile") || path.contains("androidtest") ||
+            path.contains("buildrust") || path.contains("lint") ||
+            path.contains("test") && !path.endsWith(":tasks")
+    }
+    if (!needsAndroidBuild) return@whenReady
+
+    val androidHome = resolveAndroidSdkDir()
+    if (androidHome == null) {
+        logger.warn(
+            "Android SDK not found (ANDROID_HOME, ANDROID_SDK_ROOT, local.properties sdk.dir, " +
+            "and ~/Android/Sdk all unset/missing). Skipping NDK $expectedNdkVersion check; " +
+            "Android build tasks will likely fail."
+        )
+        return@whenReady
+    }
     val ndkDir = file("$androidHome/ndk/$expectedNdkVersion")
     if (!ndkDir.exists()) {
         throw GradleException(
