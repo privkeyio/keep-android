@@ -21,6 +21,7 @@ import io.privkey.keep.uniffi.SigningAuditLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -30,6 +31,7 @@ private sealed class ExportLogsState {
     data object Idle : ExportLogsState()
     data object Collecting : ExportLogsState()
     data class Ready(val content: String) : ExportLogsState()
+    data object Saving : ExportLogsState()
     data class Error(val message: String) : ExportLogsState()
 }
 
@@ -50,22 +52,30 @@ fun ExportLogsScreen(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
         val ready = state as? ExportLogsState.Ready
-        if (uri != null && ready != null) {
-            try {
-                val outputStream = context.contentResolver.openOutputStream(uri)
-                if (outputStream == null) {
-                    state = ExportLogsState.Error("Failed to save logs")
-                    return@rememberLauncherForActivityResult
-                }
-                outputStream.use { it.write(ready.content.toByteArray(Charsets.UTF_8)) }
-                Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
-                state = ExportLogsState.Idle
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
-                state = ExportLogsState.Error("Failed to save logs")
-            }
-        } else if (uri == null) {
+        if (ready == null) {
+            if (uri == null) state = ExportLogsState.Idle
+            return@rememberLauncherForActivityResult
+        }
+        if (uri == null) {
             state = ExportLogsState.Idle
+            return@rememberLauncherForActivityResult
+        }
+        state = ExportLogsState.Saving
+        try {
+            val outputStream = context.contentResolver.openOutputStream(uri)
+            if (outputStream == null) {
+                state = ExportLogsState.Error("Failed to save logs")
+                return@rememberLauncherForActivityResult
+            }
+            BufferedOutputStream(outputStream).use { buffered ->
+                buffered.write(ready.content.toByteArray(Charsets.UTF_8))
+                buffered.flush()
+            }
+            Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
+            state = ExportLogsState.Idle
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
+            state = ExportLogsState.Error("Failed to save logs")
         }
     }
 
@@ -94,8 +104,12 @@ fun ExportLogsScreen(
                     Text("Diagnostic Logs", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Collects app diagnostics and audit history into a plain text file. " +
-                            "No private keys, nsec, or seed words are included.",
+                        "Collects app diagnostics into a plain text file. Includes: device " +
+                            "manufacturer/model, Android version, app version and build type, " +
+                            "account count, foreground service and Tor/proxy configuration, and " +
+                            "signing audit history (caller package names, caller display names, " +
+                            "event kinds, and free-text reasons). Does not include private keys, " +
+                            "nsec, or seed words.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -125,7 +139,7 @@ fun ExportLogsScreen(
                                 }
                             }
                         },
-                        enabled = state !is ExportLogsState.Collecting,
+                        enabled = state is ExportLogsState.Idle || state is ExportLogsState.Error,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         if (state is ExportLogsState.Collecting) {
@@ -162,7 +176,11 @@ private fun buildExportContent(
     signingAuditLog: SigningAuditLog?,
     foregroundServiceEnabled: Boolean
 ): String {
-    val accountCount = runCatching { storage.listAllShares().size }.getOrDefault(-1)
+    val accountCountResult = runCatching { storage.listAllShares().size }
+    val accountCountDisplay = accountCountResult.fold(
+        onSuccess = { it.toString() },
+        onFailure = { "unavailable (${it::class.simpleName})" }
+    )
     val proxyConfig = runCatching { keepMobile.getProxyConfig() }.getOrNull()
     val torStatus = when {
         proxyConfig == null -> "unknown"
@@ -180,7 +198,7 @@ private fun buildExportContent(
         appendLine("Build type: ${BuildConfig.BUILD_TYPE}")
         appendLine("Android version: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
         appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
-        appendLine("Account count: $accountCount")
+        appendLine("Account count: $accountCountDisplay")
         appendLine("Foreground service: ${if (foregroundServiceEnabled) "enabled" else "disabled"}")
         appendLine("Tor/proxy: $torStatus")
     }
@@ -194,16 +212,13 @@ private fun buildExportContent(
             try {
                 appendLine(signingAuditLog.exportJson())
             } catch (e: Exception) {
-                appendLine("(export failed: ${e::class.simpleName})")
+                val sanitized = e.message
+                    ?.replace(Regex("[\\r\\n\\t]"), " ")
+                    ?.take(200)
+                appendLine("(export failed: ${e::class.simpleName}${if (sanitized.isNullOrBlank()) "" else ": $sanitized"})")
             }
         }
     }
 
-    val auditSection = buildString {
-        appendLine()
-        appendLine("=== Audit Log ===")
-        appendLine("(not configured on this build)")
-    }
-
-    return header + signingSection + auditSection
+    return header + signingSection
 }
