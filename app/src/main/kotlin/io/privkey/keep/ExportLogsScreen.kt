@@ -52,30 +52,27 @@ fun ExportLogsScreen(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
         val ready = state as? ExportLogsState.Ready
-        if (ready == null) {
+        if (ready == null || uri == null) {
             if (uri == null) state = ExportLogsState.Idle
             return@rememberLauncherForActivityResult
         }
-        if (uri == null) {
-            state = ExportLogsState.Idle
-            return@rememberLauncherForActivityResult
-        }
         state = ExportLogsState.Saving
-        try {
-            val outputStream = context.contentResolver.openOutputStream(uri)
-            if (outputStream == null) {
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val outputStream = context.contentResolver.openOutputStream(uri)
+                        ?: throw java.io.IOException("openOutputStream returned null")
+                    BufferedOutputStream(outputStream).use { buffered ->
+                        buffered.write(ready.content.toByteArray(Charsets.UTF_8))
+                        buffered.flush()
+                    }
+                }
+                Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
+                state = ExportLogsState.Idle
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
                 state = ExportLogsState.Error("Failed to save logs")
-                return@rememberLauncherForActivityResult
             }
-            BufferedOutputStream(outputStream).use { buffered ->
-                buffered.write(ready.content.toByteArray(Charsets.UTF_8))
-                buffered.flush()
-            }
-            Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
-            state = ExportLogsState.Idle
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
-            state = ExportLogsState.Error("Failed to save logs")
         }
     }
 
@@ -116,6 +113,8 @@ fun ExportLogsScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    val isBusy = state is ExportLogsState.Collecting || state is ExportLogsState.Saving
+
                     Button(
                         onClick = {
                             state = ExportLogsState.Collecting
@@ -139,10 +138,10 @@ fun ExportLogsScreen(
                                 }
                             }
                         },
-                        enabled = state is ExportLogsState.Idle || state is ExportLogsState.Error,
+                        enabled = !isBusy && state !is ExportLogsState.Ready,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (state is ExportLogsState.Collecting) {
+                        if (isBusy) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 strokeWidth = 2.dp,
@@ -176,8 +175,7 @@ private fun buildExportContent(
     signingAuditLog: SigningAuditLog?,
     foregroundServiceEnabled: Boolean
 ): String {
-    val accountCountResult = runCatching { storage.listAllShares().size }
-    val accountCountDisplay = accountCountResult.fold(
+    val accountCountDisplay = runCatching { storage.listAllShares().size }.fold(
         onSuccess = { it.toString() },
         onFailure = { "unavailable (${it::class.simpleName})" }
     )
@@ -191,7 +189,7 @@ private fun buildExportContent(
         .withZone(ZoneId.systemDefault())
         .format(Instant.now())
 
-    val header = buildString {
+    return buildString {
         appendLine("=== Keep Diagnostics ===")
         appendLine("Exported: $timestamp")
         appendLine("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
@@ -201,9 +199,6 @@ private fun buildExportContent(
         appendLine("Account count: $accountCountDisplay")
         appendLine("Foreground service: ${if (foregroundServiceEnabled) "enabled" else "disabled"}")
         appendLine("Tor/proxy: $torStatus")
-    }
-
-    val signingSection = buildString {
         appendLine()
         appendLine("=== Signing Audit Log ===")
         if (signingAuditLog == null) {
@@ -219,6 +214,4 @@ private fun buildExportContent(
             }
         }
     }
-
-    return header + signingSection
 }
