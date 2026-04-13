@@ -16,6 +16,7 @@ env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
   CARGO_NDK_VERSION: "4.1.2"
+  RUST_VERSION: "1.89.0"
 
 jobs:
   build:
@@ -40,8 +41,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Verify toolchain version pins are consistent
+        run: ./scripts/check-toolchain-pins.sh
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
       - name: Install Android NDK
-        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
@@ -92,8 +105,20 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Verify toolchain version pins are consistent
+        run: ./scripts/check-toolchain-pins.sh
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
       - name: Install Android NDK
-        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-linux-android
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2

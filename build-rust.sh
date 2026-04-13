@@ -39,7 +39,16 @@ if [ "$TOOLCHAIN_CHANNEL" != "$EXPECTED_RUST" ]; then
     exit 1
 fi
 
-ACTUAL_RUST=$(cd "$RUST_PROJECT" && rustc --version | awk '{print $2}')
+ACTUAL_RUST=$(cd "$RUST_PROJECT" && set -o pipefail && rustc --version | awk '{print $2}')
+if [ -z "$ACTUAL_RUST" ]; then
+    echo "error: failed to determine rustc version (empty output from 'rustc --version')." >&2
+    echo "Fix: ensure rustup/rustc is installed and on PATH." >&2
+    exit 1
+fi
+if [[ ! "$ACTUAL_RUST" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "error: rustc version '$ACTUAL_RUST' is not a valid semver version." >&2
+    exit 1
+fi
 if [ "$ACTUAL_RUST" != "$EXPECTED_RUST" ]; then
     echo "error: rustc version mismatch" >&2
     echo "  expected: $EXPECTED_RUST" >&2
@@ -54,7 +63,7 @@ if ! command -v cargo-ndk >/dev/null 2>&1; then
     exit 1
 fi
 VERSION_OUTPUT="$(cargo ndk --version 2>/dev/null || true)"
-ACTUAL_CARGO_NDK="$(echo "$VERSION_OUTPUT" | grep -E '^cargo-ndk ' | awk '{print $2}' || true)"
+ACTUAL_CARGO_NDK="$(echo "$VERSION_OUTPUT" | sed -nE 's/^cargo-ndk[[:space:]]+v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -1 || true)"
 if [ "$ACTUAL_CARGO_NDK" != "$CARGO_NDK_VERSION" ]; then
     echo "error: cargo-ndk version mismatch" >&2
     echo "  expected: $CARGO_NDK_VERSION" >&2

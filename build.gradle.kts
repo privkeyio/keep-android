@@ -5,15 +5,6 @@ plugins {
 }
 
 val expectedJavaMajor = 17
-val runningJavaVersion = JavaVersion.current()
-if (runningJavaVersion.majorVersion.toInt() != expectedJavaMajor) {
-    throw GradleException(
-        "JDK $expectedJavaMajor is required but Gradle is running on ${System.getProperty("java.version")} " +
-        "(java.home=${System.getProperty("java.home")}). " +
-        "Fix: set JAVA_HOME to a JDK $expectedJavaMajor install (e.g. Temurin 17) and re-run."
-    )
-}
-
 val expectedNdkVersion = "29.0.14206865"
 
 fun resolveAndroidSdkDir(): String? {
@@ -29,14 +20,27 @@ fun resolveAndroidSdkDir(): String? {
 }
 
 gradle.taskGraph.whenReady {
+    val buildTaskPatterns = listOf(
+        Regex("(^|:)(assemble|bundle|compile|lint|connectedCheck|buildRust)[A-Z0-9_].*"),
+        Regex("(^|:)(assemble|bundle|compile|lint|buildRust)$"),
+        Regex("(^|:)(test|check)[A-Z0-9_].*"),
+        Regex("(^|:)(test|check)$"),
+        Regex("(^|:).*AndroidTest([A-Z0-9_].*)?$"),
+        Regex("(^|:).*UnitTest([A-Z0-9_].*)?$")
+    )
     val needsAndroidBuild = allTasks.any { task ->
-        val path = task.path.lowercase()
-        path.contains("assemble") || path.contains("bundle") ||
-            path.contains("compile") || path.contains("androidtest") ||
-            path.contains("buildrust") || path.contains("lint") ||
-            path.contains("test") && !path.endsWith(":tasks")
+        buildTaskPatterns.any { it.containsMatchIn(task.path) }
     }
     if (!needsAndroidBuild) return@whenReady
+
+    val runningJavaVersion = JavaVersion.current()
+    if (runningJavaVersion.majorVersion.toInt() != expectedJavaMajor) {
+        throw GradleException(
+            "JDK $expectedJavaMajor is required but Gradle is running on ${System.getProperty("java.version")} " +
+            "(java.home=${System.getProperty("java.home")}). " +
+            "Fix: set JAVA_HOME to a JDK $expectedJavaMajor install (e.g. Temurin 17) and re-run."
+        )
+    }
 
     val androidHome = resolveAndroidSdkDir()
     if (androidHome == null) {
