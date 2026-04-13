@@ -21,12 +21,9 @@ fun resolveAndroidSdkDir(): String? {
 
 gradle.taskGraph.whenReady {
     val buildTaskPatterns = listOf(
-        Regex("(^|:)(assemble|bundle|compile|lint|connectedCheck|buildRust)[A-Z0-9_].*"),
-        Regex("(^|:)(assemble|bundle|compile|lint|buildRust)$"),
-        Regex("(^|:)(test|check)[A-Z0-9_].*"),
-        Regex("(^|:)(test|check)$"),
-        Regex("(^|:).*AndroidTest([A-Z0-9_].*)?$"),
-        Regex("(^|:).*UnitTest([A-Z0-9_].*)?$")
+        Regex("(^|:)(assemble|bundle|compile|lint|buildRust|test|check)([A-Z0-9_].*)?$"),
+        Regex("(^|:)connectedCheck[A-Z0-9_].*"),
+        Regex("(^|:).*(AndroidTest|UnitTest)([A-Z0-9_].*)?$")
     )
     val needsAndroidBuild = allTasks.any { task ->
         buildTaskPatterns.any { it.containsMatchIn(task.path) }

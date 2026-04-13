@@ -40,13 +40,13 @@ done
 BR_RUST=$(extract "$BUILD_RUST" 'EXPECTED_RUST="([0-9]+\.[0-9]+\.[0-9]+)"')
 BR_CARGO_NDK=$(extract "$BUILD_RUST" 'CARGO_NDK_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"')
 
-CI_RUST=$(extract "$CI_YML" 'RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-CI_NDK=$(extract "$CI_YML" 'NDK_VERSION: "([0-9.]+)"')
-CI_CARGO_NDK=$(extract "$CI_YML" 'CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
+CI_RUST=$(extract "$CI_YML" '^[[:space:]]+RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
+CI_NDK=$(extract "$CI_YML" '^[[:space:]]+NDK_VERSION: "([0-9.]+)"')
+CI_CARGO_NDK=$(extract "$CI_YML" '^[[:space:]]+CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
 
-REL_RUST=$(extract "$RELEASE_YML" 'RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-REL_NDK=$(extract "$RELEASE_YML" 'NDK_VERSION: "([0-9.]+)"')
-REL_CARGO_NDK=$(extract "$RELEASE_YML" 'CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
+REL_RUST=$(extract "$RELEASE_YML" '^[[:space:]]+RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
+REL_NDK=$(extract "$RELEASE_YML" '^[[:space:]]+NDK_VERSION: "([0-9.]+)"')
+REL_CARGO_NDK=$(extract "$RELEASE_YML" '^[[:space:]]+CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
 
 GRADLE_NDK=$(extract "$GRADLE_KTS" 'expectedNdkVersion = "([0-9.]+)"')
 

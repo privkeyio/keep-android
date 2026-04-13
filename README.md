@@ -44,7 +44,12 @@ Supported NIP-55 operations: `get_public_key`, `sign_event`, `nip04_encrypt`, `n
 
 # Building
 
-Requires Rust 1.89+, Android NDK r29, and `cargo-ndk`.
+Exact toolchain versions are required. The build fails fast on any mismatch.
+
+- Rust `1.89.0` (pinned in `keep/rust-toolchain.toml`, auto-selected by rustup)
+- Android NDK `29.0.14206865` (install via `sdkmanager "ndk;29.0.14206865"`)
+- `cargo-ndk` `4.1.2`: `cargo install --locked cargo-ndk --version 4.1.2`
+- JDK 17
 
 ```bash
 git clone https://github.com/privkeyio/keep keep
@@ -52,6 +57,8 @@ git clone https://github.com/privkeyio/keep keep
 ```
 
 APK output: `app/build/outputs/apk/debug/app-debug.apk`. Gradle rebuilds the Rust libraries automatically when sources change. Set `KEEP_REPO` if the `keep` checkout lives elsewhere.
+
+Run `scripts/check-toolchain-pins.sh` to verify pinned versions are consistent across build scripts and CI workflows.
 
 # Contributing
 
