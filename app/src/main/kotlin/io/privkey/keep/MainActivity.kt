@@ -311,6 +311,7 @@ fun MainScreen(
     var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
+    var showExportLogs by remember { mutableStateOf(false) }
     var showBackupRestore by remember { mutableStateOf(false) }
     var showRecoverNsec by remember { mutableStateOf(false) }
     var showCreateAccountScreen by remember { mutableStateOf(false) }
@@ -496,7 +497,23 @@ fun MainScreen(
             biometricAvailable = biometricAvailable,
             killSwitchEnabled = killSwitchEnabled,
             onKillSwitchToggle = handleKillSwitchToggle,
+            onExportLogs = {
+                showSecuritySettings = false
+                showExportLogs = true
+            },
             onDismiss = { showSecuritySettings = false }
+        )
+        return
+    }
+
+    if (showExportLogs) {
+        ExportLogsScreen(
+            keepMobile = keepMobile,
+            storage = storage,
+            signingAuditLog = signingAuditLog,
+            permissionStore = permissionStore,
+            foregroundServiceEnabled = foregroundServiceEnabled,
+            onDismiss = { showExportLogs = false }
         )
         return
     }
