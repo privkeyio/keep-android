@@ -109,5 +109,5 @@
     <string name="create_account_cipher_failed">Failed to initialize encryption</string>
 
     <!-- Mnemonic / seed word display -->
-    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>. </string>
+    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
 </resources>
