@@ -7,6 +7,16 @@ plugins {
 val expectedJavaMajor = 17
 val expectedNdkVersion = "29.0.14206865"
 
+fun validateSourceDateEpoch(sde: String): String {
+    if (!sde.matches(Regex("^[0-9]+$"))) {
+        throw GradleException(
+            "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
+            "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
+        )
+    }
+    return sde
+}
+
 fun resolveAndroidSdkDir(): String? {
     System.getenv("ANDROID_HOME")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
     System.getenv("ANDROID_SDK_ROOT")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
@@ -57,7 +67,7 @@ gradle.taskGraph.whenReady {
         )
     }
 
-    val releaseTaskPattern = Regex("(^|:)(assemble|bundle|package)[A-Z0-9_].*[Rr]elease([A-Z0-9_].*)?$")
+    val releaseTaskPattern = Regex("(^|:)(assemble|bundle|package)([A-Z0-9_].*)?Release([A-Z0-9_].*)?$")
     val buildingRelease = allTasks.any { task ->
         releaseTaskPattern.containsMatchIn(task.path)
     }
@@ -71,12 +81,7 @@ gradle.taskGraph.whenReady {
                 "before invoking Gradle."
             )
         }
-        if (!sde.matches(Regex("^[0-9]+$"))) {
-            throw GradleException(
-                "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
-                "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
-            )
-        }
+        validateSourceDateEpoch(sde)
     }
 }
 
@@ -152,13 +157,7 @@ tasks.register<Exec>("buildRust") {
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)
     System.getenv("SOURCE_DATE_EPOCH")?.takeIf { it.isNotBlank() }?.let { sde ->
-        if (!sde.matches(Regex("^[0-9]+$"))) {
-            throw GradleException(
-                "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
-                "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
-            )
-        }
-        environment("SOURCE_DATE_EPOCH", sde)
+        environment("SOURCE_DATE_EPOCH", validateSourceDateEpoch(sde))
     }
 
     inputs.file("${rootDir}/build-rust.sh").withPathSensitivity(PathSensitivity.RELATIVE)

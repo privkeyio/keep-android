@@ -21,6 +21,10 @@ ANDROID_EPOCH=""
 KEEP_EPOCH=""
 if git -C "$ANDROID_REPO" rev-parse --git-dir >/dev/null 2>&1; then
     ANDROID_EPOCH=$(git -C "$ANDROID_REPO" log -1 --pretty=%ct 2>/dev/null || true)
+    if [ -z "$ANDROID_EPOCH" ]; then
+        echo "error: failed to read HEAD commit time from ANDROID_REPO='$ANDROID_REPO'." >&2
+        exit 1
+    fi
 fi
 if [ -d "$KEEP_REPO" ]; then
     if ! git -C "$KEEP_REPO" rev-parse --git-dir >/dev/null 2>&1; then
