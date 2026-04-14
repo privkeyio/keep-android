@@ -118,9 +118,9 @@ building `assembleRelease` twice on the same runner and comparing the
 output APKs with `sha256sum`. The workflow:
 
 - Runs on `workflow_dispatch`, a weekly `schedule` (Mondays 06:00 UTC),
-  and on pull requests carrying the `reproducibility` label. It is
-  deliberately excluded from the default PR path because running two
-  release builds is expensive.
+  on `v*` tag pushes so every release is verified, and on pull requests
+  carrying the `reproducibility` label. It is deliberately excluded from
+  the default PR path because running two release builds is expensive.
 - Pins the same toolchain as `release.yml` (Rust, cargo-ndk, NDK,
   build-tools, JDK 17 Temurin) and derives `SOURCE_DATE_EPOCH` via
   `scripts/derive-sde.sh`.
