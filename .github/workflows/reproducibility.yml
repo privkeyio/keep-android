@@ -9,6 +9,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
@@ -49,7 +53,10 @@ jobs:
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Install Android NDK and build-tools
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}" "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+        env:
+          NDK_VERSION: ${{ env.NDK_VERSION }}
+          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
+        run: sdkmanager --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -64,6 +71,8 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Generate workflow-local release keystore
         run: |
@@ -88,7 +97,7 @@ jobs:
           ./build-rust.sh
           ./gradlew assembleRelease --no-daemon
           mkdir -p "${{ runner.temp }}/apks"
-          cp app/build/outputs/apk/release/app-release*.apk "${{ runner.temp }}/apks/build1.apk"
+          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build1.apk"
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
@@ -101,7 +110,7 @@ jobs:
           rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi
           ./build-rust.sh
           ./gradlew assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release*.apk "${{ runner.temp }}/apks/build2.apk"
+          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build2.apk"
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
