@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="wallet_descriptor_title">Wallet Descriptors</string>
+    <string name="wallet_descriptor_back">Back</string>
+    <string name="wallet_descriptor_new">New Descriptor</string>
+    <string name="wallet_descriptor_announce_recovery_keys">Announce Recovery Keys</string>
+    <string name="wallet_descriptor_realtime_unavailable">Real-time updates unavailable. Propose and list operations still work.</string>
+    <string name="wallet_descriptor_toast_load_failed">Failed to load descriptors</string>
+    <string name="wallet_descriptor_toast_reject_failed">Failed to reject contribution</string>
+    <string name="wallet_descriptor_toast_approve_failed">Failed to approve contribution</string>
+    <string name="wallet_descriptor_toast_propose_failed">Failed to propose descriptor</string>
+    <string name="wallet_descriptor_toast_copied">Copied to clipboard</string>
+    <string name="wallet_descriptor_toast_export_failed">Export failed</string>
+    <string name="wallet_descriptor_toast_delete_failed">Delete failed</string>
+    <string name="wallet_descriptor_toast_announce_failed">Failed to announce recovery keys</string>
+
+    <string name="wallet_descriptor_key_proof_title">Verify Key Control</string>
+    <string name="wallet_descriptor_key_proof_body">Approving this contribution will sign a verification message proving you control your key for this wallet descriptor.</string>
+    <string name="wallet_descriptor_key_proof_network">Network: <xliff:g id="network" example="bitcoin">%1$s</xliff:g></string>
+    <string name="wallet_descriptor_key_proof_tiers">Recovery tiers: <xliff:g id="count" example="2">%1$d</xliff:g></string>
+    <string name="wallet_descriptor_key_proof_required">This is required to complete the wallet setup.</string>
+    <string name="wallet_descriptor_key_proof_confirm">Approve &amp; Prove Key</string>
+    <string name="wallet_descriptor_key_proof_confirming">Approving...</string>
+    <string name="wallet_descriptor_cancel">Cancel</string>
+
+    <string name="wallet_descriptor_session_status">Session Status</string>
+    <string name="wallet_descriptor_session_proposed">Proposed \u2014 waiting for contributions</string>
+    <string name="wallet_descriptor_session_contribution_needed">Contribution needed</string>
+    <string name="wallet_descriptor_session_share_contributed">Share <xliff:g id="index" example="1">%1$d</xliff:g> contributed</string>
+    <string name="wallet_descriptor_session_contribution_sent">Contribution sent</string>
+    <string name="wallet_descriptor_session_complete">Descriptor complete</string>
+    <string name="wallet_descriptor_session_failed">Operation failed</string>
+    <string name="wallet_descriptor_session_failed_debug">Failed: <xliff:g id="error" example="boom">%1$s</xliff:g></string>
+    <string name="wallet_descriptor_session_external_debug">External: <xliff:g id="external" example="wpkh(...)">%1$s</xliff:g></string>
+
+    <string name="wallet_descriptor_pending_title">Pending Contributions</string>
+    <string name="wallet_descriptor_pending_tiers"><xliff:g id="count" example="2">%1$d</xliff:g> tier(s)</string>
+    <string name="wallet_descriptor_pending_proof_note">Approval includes key control proof</string>
+    <string name="wallet_descriptor_pending_reject">Reject</string>
+    <string name="wallet_descriptor_pending_approve">Approve</string>
+
+    <string name="wallet_descriptor_list_title">Descriptors (<xliff:g id="count" example="3">%1$d</xliff:g>)</string>
+    <string name="wallet_descriptor_list_empty">No wallet descriptors</string>
+    <string name="wallet_descriptor_row_export">Export</string>
+    <string name="wallet_descriptor_row_delete">Delete</string>
+
+    <string name="wallet_descriptor_propose_title">New Wallet Descriptor</string>
+    <string name="wallet_descriptor_propose_network_label">Network</string>
+    <string name="wallet_descriptor_propose_tier_label">Recovery Tier</string>
+    <string name="wallet_descriptor_propose_threshold_label">Threshold (1\u201315)</string>
+    <string name="wallet_descriptor_propose_required">Required</string>
+    <string name="wallet_descriptor_propose_threshold_range">Must be between 1 and 15</string>
+    <string name="wallet_descriptor_propose_timelock_label">Timelock months (1\u2013120)</string>
+    <string name="wallet_descriptor_propose_timelock_range">Must be between 1 and 120</string>
+    <string name="wallet_descriptor_propose_confirm">Propose</string>
+    <string name="wallet_descriptor_propose_confirming">Proposing...</string>
+
+    <string name="wallet_descriptor_export_title">Export Descriptor</string>
+    <string name="wallet_descriptor_export_exporting">Exporting...</string>
+    <string name="wallet_descriptor_export_choose">Choose export format:</string>
+    <string name="wallet_descriptor_export_sparrow">Sparrow</string>
+    <string name="wallet_descriptor_export_raw">Raw</string>
+
+    <string name="wallet_descriptor_delete_title">Delete Descriptor?</string>
+    <string name="wallet_descriptor_delete_body">This will permanently remove the wallet descriptor for <xliff:g id="pubkey" example="abcd1234">%1$s</xliff:g></string>
+    <string name="wallet_descriptor_delete_confirm">Delete</string>
+    <string name="wallet_descriptor_delete_deleting">Deleting...</string>
+
+    <string name="wallet_descriptor_announced_title">Announced Recovery Keys</string>
+    <string name="wallet_descriptor_announced_share">Share <xliff:g id="index" example="1">%1$d</xliff:g></string>
+    <string name="wallet_descriptor_announced_fingerprint">fp: <xliff:g id="fingerprint" example="a1b2c3d4">%1$s</xliff:g></string>
+
+    <string name="wallet_descriptor_announce_title">Announce Recovery Key</string>
+    <string name="wallet_descriptor_announce_xpub_label">Recovery xpub</string>
+    <string name="wallet_descriptor_announce_xpub_prefix_error">Must start with a valid xpub prefix</string>
+    <string name="wallet_descriptor_announce_fp_label">Fingerprint (8 hex chars)</string>
+    <string name="wallet_descriptor_announce_fp_error">Must be 8 hex characters</string>
+    <string name="wallet_descriptor_announce_label_label">Label (optional)</string>
+    <string name="wallet_descriptor_announce_label_placeholder">e.g. coldcard-backup</string>
+    <string name="wallet_descriptor_announce_confirm">Announce</string>
+    <string name="wallet_descriptor_announce_confirming">Announcing...</string>
+</resources>

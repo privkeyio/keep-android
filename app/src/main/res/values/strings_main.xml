@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- MainActivity -->
+    <string name="main_unlock_title">Unlock Keep</string>
+    <string name="main_unlock_subtitle">Authenticate to open app</string>
+    <string name="main_auth_failed">Authentication failed</string>
+    <string name="main_disable_kill_switch_title">Disable Kill Switch</string>
+    <string name="main_disable_kill_switch_subtitle">Authenticate to re-enable signing</string>
+    <string name="main_vault_backup_title">Vault Backup</string>
+    <string name="main_vault_backup_subtitle">Authenticate to access backup</string>
+    <string name="main_recover_nsec_title">Recover nsec</string>
+    <string name="main_recover_nsec_subtitle">Authenticate to export vault share</string>
+    <string name="main_export_share_title">Export Share</string>
+    <string name="main_export_share_subtitle">Authenticate to export share</string>
+    <string name="main_export_encrypted_key_title">Export Encrypted Key</string>
+    <string name="main_export_encrypted_key_subtitle">Authenticate to export encrypted key</string>
+    <string name="main_import_share_title">Import Share</string>
+    <string name="main_import_share_subtitle">Authenticate to store share securely</string>
+    <string name="main_import_nsec_title">Import nsec</string>
+    <string name="main_import_nsec_subtitle">Authenticate to store key securely</string>
+    <string name="main_create_account_title">Create Account</string>
+    <string name="main_create_account_subtitle">Authenticate to store key securely</string>
+    <string name="main_import_from_seed_words_title">Import from Seed Words</string>
+    <string name="main_import_from_seed_words_subtitle">Authenticate to store key securely</string>
+    <string name="main_confirm_backup_failed">Failed to confirm backup. Please try again.</string>
+    <string name="main_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="main_init_encryption_failed">Failed to initialize encryption</string>
+    <string name="main_init_app_failed">Failed to initialize</string>
+    <string name="main_connect_relays_title">Connect to Relays</string>
+    <string name="main_connect_relays_subtitle">Authenticate to connect</string>
+    <string name="main_home_title">Keep</string>
+    <string name="main_pending_count"><xliff:g id="count" example="3">%1$d</xliff:g> pending</string>
+    <string name="main_apps_title">Apps</string>
+    <string name="main_apps_no_share">Import a key to manage connected apps</string>
+    <string name="main_settings_title">Settings</string>
+    <string name="main_security_title">Security</string>
+    <string name="main_security_subtitle">PIN, biometrics, kill switch</string>
+    <string name="main_manage">Manage</string>
+    <string name="main_signing_history_title">Signing History</string>
+    <string name="main_signing_history_subtitle">View past signing requests and decisions</string>
+    <string name="main_view">View</string>
+    <string name="main_keys_title">Keys</string>
+    <string name="main_key_management">Key Management</string>
+    <string name="main_view_seed_words">View Seed Words</string>
+    <string name="main_export_share_button">Export Share</string>
+    <string name="main_export_ncryptsec">Export Encrypted (NIP-49)</string>
+    <string name="main_import_share_button">Import Share</string>
+    <string name="main_import_nsec_button">Import nsec</string>
+    <string name="main_recover_nsec_from_shares">Recover nsec from shares</string>
+    <string name="main_create_account_button">Create Account</string>
+    <string name="main_import_from_seed_words_button">Import from Seed Words</string>
+    <string name="main_backup_prompt_title">Back up your seed words</string>
+    <string name="main_backup_prompt_text">You haven\'t confirmed that you\'ve saved your seed words. Tap to view them and back up your account.</string>
+    <string name="main_kill_switch_dialog_title">Enable Kill Switch?</string>
+    <string name="main_kill_switch_dialog_text">This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.</string>
+    <string name="main_enable">Enable</string>
+    <string name="main_cancel">Cancel</string>
+    <string name="main_pin_mismatch_title">Certificate Pin Mismatch</string>
+    <string name="main_pin_mismatch_text">The certificate for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> has changed. This could indicate a security issue or a legitimate certificate rotation.</string>
+    <string name="main_clear_pin_and_retry">Clear Pin &amp; Retry</string>
+    <string name="main_dismiss">Dismiss</string>
+    <string name="main_database_size_label">Database: <xliff:g id="size" example="1.23">%1$s</xliff:g> MB</string>
+    <string name="main_cleanup_expired_data">Clean up expired data</string>
+    <string name="main_version_label">v<xliff:g id="version" example="1.2.3">%1$s</xliff:g></string>
+    <string name="main_source_code">Source code</string>
+    <string name="main_support_development">Support development</string>
+
+    <!-- AccountSwitcherSheet / account badges / account row -->
+    <string name="account_badge_nsec">nsec</string>
+    <string name="account_badge_frost_share">FROST Share</string>
+    <string name="account_sheet_title">Accounts</string>
+    <string name="account_create">Create Account</string>
+    <string name="account_import_seed_words">Import from Seed Words</string>
+    <string name="account_import_frost_share">Import FROST Share</string>
+    <string name="account_import_nsec">Import nsec</string>
+    <string name="account_delete_cannot_title">Cannot Delete Account</string>
+    <string name="account_delete_confirm_title">Delete Account?</string>
+    <string name="account_delete_only_text">You cannot delete your only account. Import another account first before removing this one.</string>
+    <string name="account_delete_nsec_text">This will permanently delete \"<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\" and its nsec key from this device.</string>
+    <string name="account_delete_frost_text">This will permanently delete \"<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\" and its FROST share from this device.</string>
+    <string name="account_delete_active_warning">This is your active account. You will need to switch to another account or import a new share.</string>
+    <string name="account_delete_button">Delete</string>
+    <string name="account_ok">OK</string>
+    <string name="account_cancel">Cancel</string>
+    <string name="account_rename_title">Rename Account</string>
+    <string name="account_rename_label">Account name</string>
+    <string name="account_save">Save</string>
+    <string name="account_row_active_cd">Active account</string>
+    <string name="account_row_share_summary">Share <xliff:g id="index" example="1">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g> \u00b7 Threshold <xliff:g id="threshold" example="2">%3$d</xliff:g></string>
+    <string name="account_npub_copied">npub copied</string>
+    <string name="account_npub_copy_failed">Failed to copy npub</string>
+    <string name="account_copy_npub_cd">Copy npub</string>
+    <string name="account_edit_name_cd">Edit name</string>
+    <string name="account_delete_cd">Delete</string>
+
+    <!-- AccountActions (non-composable; getString) -->
+    <string name="account_switch_title">Switch Account</string>
+    <string name="account_switch_subtitle">Authenticate to switch</string>
+    <string name="account_switch_failed">Failed to switch account</string>
+    <string name="account_delete_title">Delete Account</string>
+    <string name="account_delete_subtitle">Authenticate to delete account</string>
+    <string name="account_delete_failed">Failed to delete account</string>
+    <string name="account_delete_refresh_failed">Account deleted, but failed to refresh</string>
+    <string name="account_switch_remaining_subtitle">Authenticate to switch to remaining account</string>
+    <string name="account_rename_failed">Failed to rename account</string>
+    <string name="account_import_invalid_share">Invalid share format</string>
+    <string name="account_import_invalid_nsec">Invalid nsec format</string>
+    <string name="account_import_failed">Import failed. Please try again.</string>
+    <string name="account_view_seed_title">View Seed Words</string>
+    <string name="account_view_seed_subtitle">Authenticate to view seed words</string>
+    <string name="account_view_seed_none">No seed words available for this account</string>
+    <string name="account_view_seed_failed">Failed to retrieve seed words</string>
+    <string name="account_confirm_backup_title">Confirm Backup</string>
+    <string name="account_confirm_backup_subtitle">Authenticate to confirm backup</string>
+    <string name="account_confirm_backup_save_subtitle">Authenticate again to save</string>
+</resources>

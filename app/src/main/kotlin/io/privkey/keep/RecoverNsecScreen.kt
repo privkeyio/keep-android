@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,12 @@ fun RecoverNsecScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
+    val biometricUnavailableMessage = stringResource(R.string.recover_nsec_biometric_unavailable)
+    val noEncryptionKeyMessage = stringResource(R.string.recover_nsec_no_encryption_key)
+    val vaultExportFailedMessage = stringResource(R.string.recover_nsec_vault_export_failed)
+    val copiedToastMessage = stringResource(R.string.recover_nsec_copied)
+    val cooldownMessage = stringResource(R.string.recover_nsec_cooldown)
+    val invalidGroupPubkeyMessage = stringResource(R.string.recover_nsec_invalid_group_pubkey)
 
     val threshold = shareInfo?.threshold?.toInt() ?: 2
     val totalShares = shareInfo?.totalShares?.toInt() ?: 3
@@ -146,7 +153,7 @@ fun RecoverNsecScreen(
             },
             onDismiss = { showScanner = null },
             validator = ::isValidKshareFormat,
-            title = "Scan Share QR Code"
+            title = stringResource(R.string.recover_nsec_scan_title)
         )
         return
     }
@@ -160,7 +167,7 @@ fun RecoverNsecScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Recover nsec",
+            text = stringResource(R.string.recover_nsec_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -168,7 +175,7 @@ fun RecoverNsecScreen(
 
         if (groupPubkey != null) {
             Text(
-                text = "$threshold of $totalShares shares needed",
+                text = stringResource(R.string.recover_nsec_threshold, threshold, totalShares),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -181,9 +188,7 @@ fun RecoverNsecScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
         ) {
             Text(
-                text = "This recovers the full private key from threshold shares. " +
-                    "The key is a single point of failure \u2014 handle with extreme care. " +
-                    "It will not be saved.",
+                text = stringResource(R.string.recover_nsec_warning),
                 modifier = Modifier.padding(16.dp),
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodySmall
@@ -198,11 +203,11 @@ fun RecoverNsecScreen(
                     val cipher = try {
                         onGetCipher()
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
-                        recoveryState = RecoveryState.Error(e.message ?: "Biometric authentication is unavailable")
+                        recoveryState = RecoveryState.Error(e.message ?: biometricUnavailableMessage)
                         return@OutlinedButton
                     }
                     if (cipher == null) {
-                        recoveryState = RecoveryState.Error("No encryption key available")
+                        recoveryState = RecoveryState.Error(noEncryptionKeyMessage)
                         return@OutlinedButton
                     }
                     isPreFilling = true
@@ -227,7 +232,7 @@ fun RecoverNsecScreen(
                                 }
                             } catch (e: Exception) {
                                 if (BuildConfig.DEBUG) Log.e("RecoverNsec", "Vault export failed: ${e::class.simpleName}")
-                                recoveryState = RecoveryState.Error("Failed to export vault share")
+                                recoveryState = RecoveryState.Error(vaultExportFailedMessage)
                             } finally {
                                 isPreFilling = false
                             }
@@ -237,7 +242,7 @@ fun RecoverNsecScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = recoveryState !is RecoveryState.Recovering && !isPreFilling
             ) {
-                Text("Pre-fill from vault share")
+                Text(stringResource(R.string.recover_nsec_prefill_button))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -260,7 +265,8 @@ fun RecoverNsecScreen(
                 colors = cardColors
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    val shareLabel = if (isVault) "Share ${index + 1} (from vault)" else "Share ${index + 1}"
+                    val shareLabel = if (isVault) stringResource(R.string.recover_nsec_share_label_vault, index + 1)
+                        else stringResource(R.string.recover_nsec_share_label, index + 1)
                     val labelColor = if (isVault) MaterialTheme.colorScheme.onPrimaryContainer
                         else MaterialTheme.colorScheme.onSurface
 
@@ -280,8 +286,8 @@ fun RecoverNsecScreen(
                                 slots[index].dataDisplay = value
                             }
                         },
-                        label = { Text("Share Data") },
-                        placeholder = { Text("kshare1q...") },
+                        label = { Text(stringResource(R.string.recover_nsec_share_data_label)) },
+                        placeholder = { Text(stringResource(R.string.recover_nsec_share_data_placeholder)) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
                         maxLines = 3,
@@ -296,7 +302,7 @@ fun RecoverNsecScreen(
                             modifier = Modifier.fillMaxWidth(),
                             enabled = isInputEnabled
                         ) {
-                            Text("Scan QR Code")
+                            Text(stringResource(R.string.recover_nsec_scan_qr))
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -310,7 +316,7 @@ fun RecoverNsecScreen(
                                 slots[index].passphraseDisplay = value
                             }
                         },
-                        label = { Text("Passphrase") },
+                        label = { Text(stringResource(R.string.recover_nsec_passphrase_label)) },
                         modifier = Modifier.fillMaxWidth(),
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -327,7 +333,7 @@ fun RecoverNsecScreen(
                             },
                             enabled = isInputEnabled
                         ) {
-                            Text("Remove", color = MaterialTheme.colorScheme.error)
+                            Text(stringResource(R.string.recover_nsec_remove), color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -341,7 +347,7 @@ fun RecoverNsecScreen(
                 onClick = { slots.add(ShareSlot()) },
                 enabled = isInputEnabled
             ) {
-                Text("+ Add share input")
+                Text(stringResource(R.string.recover_nsec_add_share))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -369,7 +375,7 @@ fun RecoverNsecScreen(
                     onToggleVisibility = { nsecVisible = !nsecVisible },
                     onCopy = {
                         copySensitiveText(context, String(state.nsec))
-                        Toast.makeText(context, "nsec copied", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, copiedToastMessage, Toast.LENGTH_SHORT).show()
                     },
                     onClear = { clearAll() }
                 )
@@ -394,7 +400,7 @@ fun RecoverNsecScreen(
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Cancel")
+                Text(stringResource(R.string.recover_nsec_cancel))
             }
 
             if (recoveryState !is RecoveryState.Success) {
@@ -402,7 +408,7 @@ fun RecoverNsecScreen(
                     onClick = {
                         val now = System.currentTimeMillis()
                         if (now - lastAttemptTime < RECOVERY_COOLDOWN_MS) {
-                            recoveryState = RecoveryState.Error("Please wait before trying again")
+                            recoveryState = RecoveryState.Error(cooldownMessage)
                             return@Button
                         }
                         lastAttemptTime = now
@@ -414,7 +420,7 @@ fun RecoverNsecScreen(
 
                         val groupPk = if (groupPubkey != null) {
                             parseHexPubkey(groupPubkey) ?: run {
-                                recoveryState = RecoveryState.Error("Invalid group public key")
+                                recoveryState = RecoveryState.Error(invalidGroupPubkeyMessage)
                                 return@Button
                             }
                         } else {
@@ -432,7 +438,7 @@ fun RecoverNsecScreen(
                             } catch (e: Exception) {
                                 if (BuildConfig.DEBUG) Log.e("RecoverNsec", "Recovery failed: ${e::class.simpleName}")
                                 recoveryState = RecoveryState.Error(
-                                    mapRecoveryError(e.message ?: "Recovery failed")
+                                    mapRecoveryError(context, e.message ?: "")
                                 )
                             } finally {
                                 passphraseChars.forEach { Arrays.fill(it, '\u0000') }
@@ -442,7 +448,7 @@ fun RecoverNsecScreen(
                     modifier = Modifier.weight(1f),
                     enabled = canRecover
                 ) {
-                    Text("Recover")
+                    Text(stringResource(R.string.recover_nsec_recover))
                 }
             }
         }
@@ -451,7 +457,7 @@ fun RecoverNsecScreen(
             Spacer(modifier = Modifier.height(16.dp))
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Recovering key...")
+            Text(stringResource(R.string.recover_nsec_recovering))
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -473,7 +479,7 @@ private fun NsecResultCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Recovered nsec",
+                text = stringResource(R.string.recover_nsec_result_title),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -493,20 +499,20 @@ private fun NsecResultCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(onClick = onToggleVisibility) {
-                    Text(if (visible) "Hide" else "Reveal")
+                    Text(if (visible) stringResource(R.string.recover_nsec_hide) else stringResource(R.string.recover_nsec_reveal))
                 }
                 OutlinedButton(onClick = onCopy) {
-                    Text("Copy")
+                    Text(stringResource(R.string.recover_nsec_copy))
                 }
                 OutlinedButton(onClick = onClear) {
-                    Text("Clear")
+                    Text(stringResource(R.string.recover_nsec_clear))
                 }
             }
 
             if (autoClearSeconds > 0) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Auto-clears in ${autoClearSeconds}s \u2014 copy to a secure password manager",
+                    text = stringResource(R.string.recover_nsec_auto_clear, autoClearSeconds),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -556,12 +562,12 @@ private fun parseHexPubkey(hex: String?): ByteArray? {
     return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 }
 
-private fun mapRecoveryError(message: String): String = when {
-    message.contains("decrypt", ignoreCase = true) -> "Failed to decrypt share (wrong passphrase?)"
-    message.contains("Duplicate", ignoreCase = true) -> "Duplicate share \u2014 each share must be unique"
-    message.contains("same group", ignoreCase = true) -> "All shares must belong to the same group"
-    message.contains("match", ignoreCase = true) -> "Recovered key does not match expected group"
-    message.contains("format", ignoreCase = true) -> "Invalid share format"
-    message.contains("threshold", ignoreCase = true) -> "Not enough shares to recover"
-    else -> "Recovery failed"
+private fun mapRecoveryError(context: android.content.Context, message: String): String = when {
+    message.contains("decrypt", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_decrypt)
+    message.contains("Duplicate", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_duplicate)
+    message.contains("same group", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_same_group)
+    message.contains("match", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_match)
+    message.contains("format", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_format)
+    message.contains("threshold", ignoreCase = true) -> context.getString(R.string.recover_nsec_error_threshold)
+    else -> context.getString(R.string.recover_nsec_failed)
 }

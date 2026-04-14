@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -180,7 +181,7 @@ private fun QrDisplayContainer(
         )
 
         Text(
-            text = "Tap to copy",
+            text = stringResource(R.string.qr_code_tap_to_copy),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -275,7 +276,7 @@ fun AnimatedQrCodeDisplay(
         extraContent = {
             if (generationError) {
                 Text(
-                    text = "Some frames failed to generate",
+                    text = stringResource(R.string.qr_code_frames_failed),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -287,7 +288,7 @@ fun AnimatedQrCodeDisplay(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Frame ${currentFrame + 1} of ${bitmaps.size}",
+                    text = stringResource(R.string.qr_code_frame_progress, currentFrame + 1, bitmaps.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -436,10 +437,11 @@ internal fun setSecureScreen(context: Context, secure: Boolean) {
 @Composable
 internal fun NpubDisplay(npub: String) {
     val context = LocalContext.current
+    val copiedToastMessage = stringResource(R.string.qr_code_npub_copied)
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Your public key (npub)",
+                text = stringResource(R.string.qr_code_npub_label),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -454,10 +456,10 @@ internal fun NpubDisplay(npub: String) {
     OutlinedButton(
         onClick = {
             copyPublicText(context, npub)
-            Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, copiedToastMessage, Toast.LENGTH_SHORT).show()
         },
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Copy npub")
+        Text(stringResource(R.string.qr_code_copy_npub))
     }
 }

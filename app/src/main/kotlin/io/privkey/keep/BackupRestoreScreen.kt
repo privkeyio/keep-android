@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -90,15 +91,28 @@ fun BackupRestoreScreen(
         }
     }
 
+    val biometricUnavailableMsg = stringResource(R.string.backup_restore_biometric_unavailable)
+    val authUnavailableMsg = stringResource(R.string.backup_restore_auth_unavailable)
+    val saveFailedMsg = stringResource(R.string.backup_restore_save_failed)
+    val savedMsg = stringResource(R.string.backup_restore_saved)
+    val fileTooLargeMsg = stringResource(R.string.backup_restore_file_too_large, (MAX_BACKUP_FILE_SIZE / 1024 / 1024).toInt())
+    val readFailedMsg = stringResource(R.string.backup_restore_read_failed)
+    val backupFailedMsg = stringResource(R.string.backup_restore_backup_failed)
+    val verifyFailedMsg = stringResource(R.string.backup_restore_verify_failed)
+    val restoredToastMsg = stringResource(R.string.backup_restore_restored_toast)
+    val restoreFailedMsg = stringResource(R.string.backup_restore_failed)
+    val passphraseMinLengthMsg = stringResource(R.string.backup_restore_passphrase_min_length, minPassphraseLength)
+    val passphraseMismatchMsg = stringResource(R.string.backup_restore_passphrase_mismatch)
+
     fun requireBiometricAuth(onAuthed: (authedCipher: Cipher) -> Unit) {
         val cipher = try {
             onGetCipher()
         } catch (e: BiometricHelper.BiometricNotReadyException) {
-            Toast.makeText(context, e.message ?: "Biometric authentication is unavailable", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, e.message ?: biometricUnavailableMsg, Toast.LENGTH_LONG).show()
             return
         }
         if (cipher == null) {
-            Toast.makeText(context, "Authentication unavailable", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, authUnavailableMsg, Toast.LENGTH_SHORT).show()
             return
         }
         onBiometricAuth(cipher) { authedCipher ->
@@ -114,18 +128,18 @@ fun BackupRestoreScreen(
             try {
                 val outputStream = context.contentResolver.openOutputStream(uri)
                 if (outputStream == null) {
-                    backupState = BackupState.Error("Failed to save backup")
+                    backupState = BackupState.Error(saveFailedMsg)
                     return@rememberLauncherForActivityResult
                 }
                 outputStream.use { it.write(created.data) }
                 clearByteArray(created.data)
-                Toast.makeText(context, "Backup saved", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, savedMsg, Toast.LENGTH_SHORT).show()
                 backupState = BackupState.Idle
                 backupPassphrase = ""
                 backupPassphraseConfirm = ""
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("BackupRestore", "Failed to save backup", e)
-                backupState = BackupState.Error("Failed to save backup")
+                backupState = BackupState.Error(saveFailedMsg)
             }
         } else {
             (backupState as? BackupState.Created)?.let { clearByteArray(it.data) }
@@ -140,24 +154,24 @@ fun BackupRestoreScreen(
             try {
                 val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1
                 if (size > MAX_BACKUP_FILE_SIZE) {
-                    restoreState = RestoreState.Error("File too large (max ${MAX_BACKUP_FILE_SIZE / 1024 / 1024} MB)")
+                    restoreState = RestoreState.Error(fileTooLargeMsg)
                     return@rememberLauncherForActivityResult
                 }
                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 if (bytes == null) {
-                    restoreState = RestoreState.Error("Failed to read file")
+                    restoreState = RestoreState.Error(readFailedMsg)
                     return@rememberLauncherForActivityResult
                 }
                 if (bytes.size > MAX_BACKUP_FILE_SIZE) {
                     clearByteArray(bytes)
-                    restoreState = RestoreState.Error("File too large (max ${MAX_BACKUP_FILE_SIZE / 1024 / 1024} MB)")
+                    restoreState = RestoreState.Error(fileTooLargeMsg)
                     return@rememberLauncherForActivityResult
                 }
                 restoreState = RestoreState.FileSelected(bytes, uri.lastPathSegment ?: "backup")
                 restorePassphrase = ""
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("BackupRestore", "Failed to read file", e)
-                restoreState = RestoreState.Error("Failed to read file")
+                restoreState = RestoreState.Error(readFailedMsg)
             }
         }
     }
@@ -165,10 +179,10 @@ fun BackupRestoreScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Vault Backup") },
+                title = { Text(stringResource(R.string.backup_restore_top_title)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.backup_restore_back))
                     }
                 }
             )
@@ -182,14 +196,14 @@ fun BackupRestoreScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Create Backup", style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.backup_restore_create_title), style = MaterialTheme.typography.titleLarge)
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     OutlinedTextField(
                         value = backupPassphrase,
                         onValueChange = { backupPassphrase = it },
-                        label = { Text("Passphrase") },
+                        label = { Text(stringResource(R.string.backup_restore_passphrase_label)) },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -198,7 +212,7 @@ fun BackupRestoreScreen(
                     OutlinedTextField(
                         value = backupPassphraseConfirm,
                         onValueChange = { backupPassphraseConfirm = it },
-                        label = { Text("Confirm passphrase") },
+                        label = { Text(stringResource(R.string.backup_restore_confirm_passphrase_label)) },
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -206,9 +220,9 @@ fun BackupRestoreScreen(
 
                     val passphraseError = when {
                         backupPassphrase.isNotEmpty() && backupPassphrase.length < minPassphraseLength ->
-                            "Passphrase must be at least $minPassphraseLength characters"
+                            passphraseMinLengthMsg
                         backupPassphraseConfirm.isNotEmpty() && backupPassphrase != backupPassphraseConfirm ->
-                            "Passphrases do not match"
+                            passphraseMismatchMsg
                         else -> null
                     }
                     passphraseError?.let {
@@ -245,7 +259,7 @@ fun BackupRestoreScreen(
                                         saveFileLauncher.launch("keep-backup-$date.kbak")
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("BackupRestore", "Backup failed", e)
-                                        backupState = BackupState.Error("Backup failed")
+                                        backupState = BackupState.Error(backupFailedMsg)
                                     } finally {
                                         storage.clearPendingCipher(requestId)
                                         activeRequestIds.remove(requestId)
@@ -264,7 +278,7 @@ fun BackupRestoreScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                         }
-                        Text("Create Backup")
+                        Text(stringResource(R.string.backup_restore_create_button))
                     }
 
                     val backupError = backupState as? BackupState.Error
@@ -281,7 +295,7 @@ fun BackupRestoreScreen(
 
             HorizontalDivider()
 
-            Text("Restore Backup", style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.backup_restore_restore_title), style = MaterialTheme.typography.titleLarge)
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -289,7 +303,7 @@ fun BackupRestoreScreen(
                         onClick = { openFileLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Select Backup File")
+                        Text(stringResource(R.string.backup_restore_select_file))
                     }
 
                     when (val currentRestoreState = restoreState) {
@@ -311,14 +325,14 @@ fun BackupRestoreScreen(
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("BackupRestore", "Verification failed", e)
                                             clearByteArray(currentRestoreState.data)
-                                            restoreState = RestoreState.Error("Verification failed")
+                                            restoreState = RestoreState.Error(verifyFailedMsg)
                                         }
                                     }
                                 },
                                 enabled = restorePassphrase.length >= minPassphraseLength,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Verify")
+                                Text(stringResource(R.string.backup_restore_verify))
                             }
                         }
 
@@ -336,16 +350,16 @@ fun BackupRestoreScreen(
                                     containerColor = MaterialTheme.colorScheme.error
                                 )
                             ) {
-                                Text("Restore")
+                                Text(stringResource(R.string.backup_restore_restore_button))
                             }
                         }
 
                         is RestoreState.Verifying -> {
-                            RestoreProgressRow("Verifying...")
+                            RestoreProgressRow(stringResource(R.string.backup_restore_verifying))
                         }
 
                         is RestoreState.Restoring -> {
-                            RestoreProgressRow("Restoring...")
+                            RestoreProgressRow(stringResource(R.string.backup_restore_restoring))
                         }
 
                         is RestoreState.Restored -> {
@@ -353,7 +367,7 @@ fun BackupRestoreScreen(
                             BackupSummaryCard(currentRestoreState.info)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "Restore complete",
+                                stringResource(R.string.backup_restore_restore_complete),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -381,12 +395,9 @@ fun BackupRestoreScreen(
     if (verifiedState != null) {
         AlertDialog(
             onDismissRequest = { confirmingRestore = null },
-            title = { Text("Restore Backup?") },
+            title = { Text(stringResource(R.string.backup_restore_confirm_title)) },
             text = {
-                Text(
-                    "This will import all keys, shares, and settings from the backup." +
-                        " Existing data with the same keys will be overwritten."
-                )
+                Text(stringResource(R.string.backup_restore_confirm_message))
             },
             confirmButton = {
                 TextButton(
@@ -414,11 +425,11 @@ fun BackupRestoreScreen(
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Restored(info)
                                     restorePassphrase = ""
-                                    Toast.makeText(context, "Backup restored", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, restoredToastMsg, Toast.LENGTH_SHORT).show()
                                 } catch (e: Exception) {
                                     if (BuildConfig.DEBUG) Log.e("BackupRestore", "Restore failed", e)
                                     clearByteArray(verifiedState.data)
-                                    restoreState = RestoreState.Error("Restore failed")
+                                    restoreState = RestoreState.Error(restoreFailedMsg)
                                 } finally {
                                     storage.clearPendingCipher(requestId)
                                     activeRequestIds.remove(requestId)
@@ -427,12 +438,12 @@ fun BackupRestoreScreen(
                         }
                     }
                 ) {
-                    Text("Restore", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.backup_restore_restore_button), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmingRestore = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.backup_restore_cancel))
                 }
             }
         )
@@ -447,7 +458,7 @@ private fun RestoreFileInfo(
 ) {
     Spacer(modifier = Modifier.height(8.dp))
     Text(
-        "File: $fileName",
+        stringResource(R.string.backup_restore_file_prefix, fileName),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -455,7 +466,7 @@ private fun RestoreFileInfo(
     OutlinedTextField(
         value = passphrase,
         onValueChange = onPassphraseChange,
-        label = { Text("Backup passphrase") },
+        label = { Text(stringResource(R.string.backup_restore_backup_passphrase_label)) },
         visualTransformation = PasswordVisualTransformation(),
         singleLine = true,
         modifier = Modifier.fillMaxWidth()
@@ -484,12 +495,12 @@ private fun BackupSummaryCard(info: BackupInfo) {
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("Backup Summary", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.backup_restore_summary_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Keys: ${info.keyCount}", style = MaterialTheme.typography.bodySmall)
-            Text("Shares: ${info.shareCount}", style = MaterialTheme.typography.bodySmall)
-            Text("Descriptors: ${info.descriptorCount}", style = MaterialTheme.typography.bodySmall)
-            Text("Created: ${info.createdAt}", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.backup_restore_keys_count, info.keyCount.toInt()), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.backup_restore_shares_count, info.shareCount.toInt()), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.backup_restore_descriptors_count, info.descriptorCount.toInt()), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.backup_restore_created_at, info.createdAt), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

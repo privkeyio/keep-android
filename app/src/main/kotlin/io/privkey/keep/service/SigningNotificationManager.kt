@@ -101,7 +101,7 @@ class SigningNotificationManager(private val context: Context) {
         )
 
         val notification = buildNotification(
-            title = requestType.headerTitle(),
+            title = requestType.headerTitle(context),
             text = context.getString(R.string.notification_request_from, callerLabel),
             contentIntent = contentIntent,
             deleteIntent = deleteIntent,

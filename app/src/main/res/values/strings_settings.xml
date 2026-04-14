@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- PinSettingsCard -->
+    <string name="settings_pin_title">PIN Protection</string>
+    <string name="settings_pin_enabled">PIN is enabled</string>
+    <string name="settings_pin_disabled_subtitle">Secure app with PIN</string>
+    <string name="settings_pin_disable">Disable</string>
+    <string name="settings_pin_set_up">Set Up</string>
+    <string name="settings_pin_disable_dialog_title">Disable PIN?</string>
+    <string name="settings_pin_disable_dialog_text">Enter your current PIN to disable protection.</string>
+    <string name="settings_pin_current_label">Current PIN</string>
+    <string name="settings_pin_incorrect">Incorrect PIN</string>
+    <string name="settings_cancel">Cancel</string>
+
+    <!-- AutoStartCard -->
+    <string name="settings_auto_start_title">Auto-start</string>
+    <string name="settings_auto_start_subtitle">Reconnect relays on boot and network changes</string>
+
+    <!-- ForegroundServiceCard -->
+    <string name="settings_foreground_service_title">Foreground Service</string>
+    <string name="settings_foreground_service_subtitle">Keep relay connections alive persistently</string>
+
+    <!-- BiometricTimeoutCard -->
+    <string name="settings_biometric_reauth_title">Biometric Re-auth</string>
+    <string name="settings_biometric_reauth_subtitle">How often to require biometric authentication</string>
+
+    <!-- TorOrbotCard -->
+    <string name="settings_tor_title">Tor/Orbot setup</string>
+    <string name="settings_tor_subtitle">Connect through Tor with Orbot</string>
+    <string name="settings_tor_step_install">Install Orbot.</string>
+    <string name="settings_tor_step_start">Start Orbot.</string>
+    <string name="settings_tor_step_check_port">In Orbot, check the Socks port. The default uses 9050.</string>
+    <string name="settings_tor_step_change_port">If necessary change the port in Orbot.</string>
+    <string name="settings_tor_step_configure">Configure the Socks port below.</string>
+    <string name="settings_tor_step_activate">Press the Activate button to use Orbot as a proxy.</string>
+    <string name="settings_tor_step_format"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="step" example="Install Orbot.">%2$s</xliff:g></string>
+    <string name="settings_tor_socks_port_label">Socks Port</string>
+    <string name="settings_tor_socks_port_placeholder">9050</string>
+    <string name="settings_tor_proxy_active">Proxy active on port <xliff:g id="port" example="9050">%1$d</xliff:g></string>
+    <string name="settings_tor_deactivate">Deactivate</string>
+    <string name="settings_tor_activate">Activate</string>
+    <string name="settings_tor_port_range_error">Port must be 1-65535</string>
+
+    <!-- ExportLogsCard -->
+    <string name="settings_export_logs_title">Export &amp; Share Logs</string>
+    <string name="settings_export_logs_subtitle">Save diagnostics and audit history to a file</string>
+    <string name="settings_export_logs_action">Export</string>
+
+    <!-- BackupSettingsCard -->
+    <string name="settings_backup_title">Vault Backup</string>
+    <string name="settings_backup_subtitle">Create or restore encrypted backups</string>
+    <string name="settings_backup_action">Manage</string>
+
+    <!-- KillSwitchCard -->
+    <string name="settings_kill_switch_title">Kill Switch</string>
+    <string name="settings_kill_switch_active_title">Signing Disabled</string>
+    <string name="settings_kill_switch_active_subtitle">All signing requests blocked</string>
+
+    <!-- SecurityLevelBadge / SecurityLevelInfoContent -->
+    <string name="settings_security_level_label">Security: <xliff:g id="level" example="strongbox">%1$s</xliff:g></string>
+    <string name="settings_security_level_info_cd">Security level info</string>
+    <string name="settings_security_level_title">Security Level</string>
+    <string name="settings_security_protection_hardware">hardware security</string>
+    <string name="settings_security_protection_software">software encryption</string>
+    <string name="settings_security_protection_unknown">an unknown protection level</string>
+    <string name="settings_security_description_prefix">Your encryption keys are protected by </string>
+    <string name="settings_security_description_suffix">. This determines how securely your Nostr private keys are stored.</string>
+    <string name="settings_security_strongbox_title">StrongBox</string>
+    <string name="settings_security_strongbox_desc">Dedicated security chip (HSM). Highest protection - keys never leave secure hardware.</string>
+    <string name="settings_security_tee_title">Trusted Execution Environment</string>
+    <string name="settings_security_tee_desc">Secure area of main processor, isolated from regular OS.</string>
+    <string name="settings_security_software_title">Software</string>
+    <string name="settings_security_software_desc">Software-only protection. Less secure but still encrypted.</string>
+    <string name="settings_security_current_badge">CURRENT</string>
+
+    <!-- CertificatePinsCard -->
+    <string name="settings_cert_pins_title">Certificate Pins</string>
+    <string name="settings_cert_pins_clear_all">Clear All</string>
+    <string name="settings_cert_pins_empty">Pins are set on first connection to each relay</string>
+    <string name="settings_cert_pins_clear_cd">Clear pin</string>
+    <string name="settings_cert_pins_clear_dialog_title">Clear Pin?</string>
+    <string name="settings_cert_pins_clear_dialog_text">Remove the certificate pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>? A new pin will be set on next connection.</string>
+    <string name="settings_cert_pins_clear">Clear</string>
+    <string name="settings_cert_pins_clear_all_dialog_title">Clear All Pins?</string>
+    <string name="settings_cert_pins_clear_all_dialog_text">This will remove all stored certificate pins. New pins will be set on next connection.</string>
+
+    <!-- SecuritySettingsScreen -->
+    <string name="settings_security_screen_title">Security</string>
+    <string name="settings_back_cd">Back</string>
+    <string name="settings_biometric_on_launch_title">Biometric on Launch</string>
+    <string name="settings_biometric_on_launch_subtitle">Require biometric authentication when opening app</string>
+    <string name="settings_biometric_unavailable">Biometric hardware not available</string>
+</resources>

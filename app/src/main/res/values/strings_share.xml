@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- ExportLogsScreen -->
+    <string name="export_logs_title">Export &amp; Share Logs</string>
+    <string name="export_logs_back">Back</string>
+    <string name="export_logs_card_title">Diagnostic Logs</string>
+    <string name="export_logs_description">Collects app diagnostics into a plain text file. Includes: device manufacturer/model, Android version, app version and build type, account count, foreground service and Tor/proxy configuration, signing audit history (caller package names, caller display names, event kinds, and free-text reasons), and NIP-55 permission audit history. Does not include private keys, nsec, or seed words.</string>
+    <string name="export_logs_warning">Warning: audit entries include caller display names and free-text reasons supplied by third-party apps. These fields may contain personal information or attacker-controlled content. Review the file before sharing.</string>
+    <string name="export_logs_save_to_file">Save to File</string>
+    <string name="export_logs_share">Share</string>
+    <string name="export_logs_saved_toast">Logs saved</string>
+    <string name="export_logs_failed_save">Failed to save logs</string>
+    <string name="export_logs_share_chooser">Share logs</string>
+    <string name="export_logs_no_share_target">No app available to share</string>
+    <string name="export_logs_failed_share">Failed to share logs</string>
+    <string name="export_logs_failed_collect">Failed to collect logs</string>
+
+    <!-- ExportNcryptsecScreen -->
+    <string name="export_ncryptsec_title">Export Encrypted Key</string>
+    <string name="export_ncryptsec_info">This encrypts your private key using NIP-49 (ncryptsec). The result can be imported into any Nostr client that supports NIP-49.</string>
+    <string name="export_ncryptsec_password_label">Encryption Password</string>
+    <string name="export_ncryptsec_password_placeholder">Enter a password to encrypt</string>
+    <string name="export_ncryptsec_confirm_label">Confirm Password</string>
+    <string name="export_ncryptsec_confirm_placeholder">Re-enter password</string>
+    <string name="export_ncryptsec_passwords_mismatch">Passwords do not match</string>
+    <string name="export_ncryptsec_footer">This password encrypts your private key. You will need it to decrypt in another Nostr client.</string>
+    <string name="export_ncryptsec_cancel">Cancel</string>
+    <string name="export_ncryptsec_encrypt">Encrypt</string>
+    <string name="export_ncryptsec_min_length">Password must be at least %1$d characters</string>
+    <string name="export_ncryptsec_too_weak">Password is too weak. Add length, mixed case, numbers, or symbols.</string>
+    <string name="export_ncryptsec_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="export_ncryptsec_no_encryption_key">No encryption key available</string>
+    <string name="export_ncryptsec_export_failed">Export failed. Please try again.</string>
+    <string name="export_ncryptsec_auth_cancelled">Authentication cancelled</string>
+    <string name="export_ncryptsec_init_failed">Failed to initialize encryption</string>
+    <string name="export_ncryptsec_encrypting">Encrypting key\u2026</string>
+    <string name="export_ncryptsec_strength_weak">Weak</string>
+    <string name="export_ncryptsec_strength_fair">Fair</string>
+    <string name="export_ncryptsec_strength_good">Good</string>
+    <string name="export_ncryptsec_strength_strong">Strong</string>
+    <string name="export_ncryptsec_copied_toast">ncryptsec copied</string>
+    <string name="export_ncryptsec_danger">Anyone with this string and the password can access your private key. Do not share it publicly.</string>
+    <string name="export_ncryptsec_qr_label">NIP-49 Encrypted Key</string>
+    <string name="export_ncryptsec_copy_to_clipboard">Copy to Clipboard</string>
+    <string name="export_ncryptsec_clipboard_dialog_title">Copy to clipboard?</string>
+    <string name="export_ncryptsec_clipboard_dialog_text">Other apps on your device may be able to read clipboard contents. The QR code export is more secure.</string>
+    <string name="export_ncryptsec_copy_anyway">Copy anyway</string>
+    <string name="export_ncryptsec_done">Done</string>
+
+    <!-- ExportShareScreen -->
+    <string name="export_share_title">Export Share</string>
+    <string name="export_share_info">Store this export securely. Anyone with this backup and passphrase can access your signing key share.</string>
+    <string name="export_share_passphrase_label">Export Passphrase</string>
+    <string name="export_share_passphrase_placeholder">Enter a passphrase to encrypt</string>
+    <string name="export_share_confirm_label">Confirm Passphrase</string>
+    <string name="export_share_confirm_placeholder">Re-enter passphrase</string>
+    <string name="export_share_passphrases_mismatch">Passphrases do not match</string>
+    <string name="export_share_footer">This passphrase encrypts the exported share. You will need it to import the share on another device.</string>
+    <string name="export_share_cancel">Cancel</string>
+    <string name="export_share_export">Export</string>
+    <string name="export_share_min_length">Passphrase must be at least %1$d characters</string>
+    <string name="export_share_too_weak">Passphrase is too weak. Add length, mixed case, numbers, or symbols.</string>
+    <string name="export_share_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="export_share_no_encryption_key">No encryption key available</string>
+    <string name="export_share_too_large">Export too large for a single QR code and frame generation failed</string>
+    <string name="export_share_export_failed">Export failed. Please try again.</string>
+    <string name="export_share_auth_cancelled">Authentication cancelled</string>
+    <string name="export_share_init_failed">Failed to initialize encryption</string>
+    <string name="export_share_exporting">Exporting share\u2026</string>
+    <string name="export_share_strength_weak">Weak</string>
+    <string name="export_share_strength_fair">Fair</string>
+    <string name="export_share_strength_good">Good</string>
+    <string name="export_share_strength_strong">Strong</string>
+    <string name="export_share_copied_toast">Share data copied</string>
+    <string name="export_share_qr_label">FROST Share Export</string>
+    <string name="export_share_copy_to_clipboard">Copy to Clipboard</string>
+    <string name="export_share_clipboard_dialog_title">Copy to clipboard?</string>
+    <string name="export_share_clipboard_dialog_text">Other apps on your device may be able to read clipboard contents. The QR code export is more secure.</string>
+    <string name="export_share_copy_anyway">Copy anyway</string>
+    <string name="export_share_done">Done</string>
+
+    <!-- ImportShareScreen -->
+    <string name="import_share_title">Import FROST Share</string>
+    <string name="import_share_data_label">Share Data</string>
+    <string name="import_share_data_placeholder">kshare1q\u2026</string>
+    <string name="import_share_scan_qr">Scan QR Code</string>
+    <string name="import_share_passphrase_label">Passphrase</string>
+    <string name="import_share_name_label">Share Name</string>
+    <string name="import_share_default_name">Mobile Share</string>
+    <string name="import_share_success">Share \'<xliff:g id="name" example="Mobile">%1$s</xliff:g>\' imported successfully</string>
+    <string name="import_share_done">Done</string>
+    <string name="import_share_cancel">Cancel</string>
+    <string name="import_share_import">Import</string>
+    <string name="import_share_biometric_invalidated">Biometric key invalidated. Please re-enroll biometrics.</string>
+    <string name="import_share_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="import_share_init_failed">Failed to initialize encryption</string>
+    <string name="import_share_camera_permission_required">Camera permission required</string>
+    <string name="import_share_scanner_title">Scan FROST Share QR Code</string>
+    <string name="import_share_scanning_frame">Scanning frame <xliff:g id="current" example="1">%1$d</xliff:g> of <xliff:g id="total" example="5">%2$d</xliff:g></string>
+    <string name="import_share_scanner_cancel">Cancel</string>
+
+    <!-- ShareCards -->
+    <string name="share_cards_one_account">1 account</string>
+    <string name="share_cards_n_accounts"><xliff:g id="count" example="3">%1$d</xliff:g> accounts</string>
+    <string name="share_cards_switch">Switch</string>
+    <string name="share_cards_share_of">Share <xliff:g id="index" example="1">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g></string>
+    <string name="share_cards_threshold">Threshold: <xliff:g id="threshold" example="2">%1$d</xliff:g></string>
+    <string name="share_cards_group">Group: <xliff:g id="truncated" example="abcd\u2026wxyz">%1$s</xliff:g></string>
+    <string name="share_cards_tap_for_qr">Tap for QR code</string>
+    <string name="share_cards_no_key_stored">No key stored</string>
+    <string name="share_cards_create_account">Create Account</string>
+    <string name="share_cards_import_seed">Import from Seed Words</string>
+    <string name="share_cards_import_frost">Import FROST Share</string>
+    <string name="share_cards_import_nsec">Import nsec</string>
+
+    <!-- ShareDetailsScreen -->
+    <string name="share_details_share_of">Share <xliff:g id="index" example="1">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g></string>
+    <string name="share_details_threshold">Threshold: <xliff:g id="threshold" example="2">%1$d</xliff:g></string>
+    <string name="share_details_qr_label">Group Public Key (npub)</string>
+    <string name="share_details_npub_copied_toast">npub copied</string>
+    <string name="share_details_invalid_group_pubkey">Invalid group public key</string>
+    <string name="share_details_npub_header">npub</string>
+    <string name="share_details_npub_placeholder">---</string>
+    <string name="share_details_export_qr">Export Share as QR</string>
+    <string name="share_details_copy_npub">Copy npub</string>
+    <string name="share_details_back">Back</string>
+</resources>

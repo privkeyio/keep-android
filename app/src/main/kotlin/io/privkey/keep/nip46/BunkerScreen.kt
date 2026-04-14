@@ -12,12 +12,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.privkey.keep.MAX_BUNKER_RELAYS
 import io.privkey.keep.QrCodeDisplay
+import io.privkey.keep.R
 import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.isInternalHost
@@ -28,11 +30,15 @@ import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.truncateStr
 
-private fun validateRelayUrl(url: String, existingRelays: List<String>): String? = when {
-    url.length > 256 -> "URL too long"
-    !url.matches(RELAY_URL_REGEX) -> "Invalid relay URL"
-    existingRelays.size >= MAX_BUNKER_RELAYS -> "Maximum relays reached"
-    existingRelays.contains(url) -> "Relay already added"
+private enum class RelayValidationError {
+    TOO_LONG, INVALID, MAX_REACHED, DUPLICATE
+}
+
+private fun validateRelayUrl(url: String, existingRelays: List<String>): RelayValidationError? = when {
+    url.length > 256 -> RelayValidationError.TOO_LONG
+    !url.matches(RELAY_URL_REGEX) -> RelayValidationError.INVALID
+    existingRelays.size >= MAX_BUNKER_RELAYS -> RelayValidationError.MAX_REACHED
+    existingRelays.contains(url) -> RelayValidationError.DUPLICATE
     else -> null
 }
 
@@ -60,6 +66,13 @@ private fun normalizeRelayUrl(input: String): String {
     return if (stripped.startsWith("wss://")) stripped else "wss://$stripped"
 }
 
+private sealed class BunkerAddError(val exception: Exception) {
+    object MaxReached : BunkerAddError(Exception("max"))
+    object AlreadyAdded : BunkerAddError(Exception("added"))
+    object PrivateOnly : BunkerAddError(Exception("private"))
+    object NoValid : BunkerAddError(Exception("none"))
+}
+
 private suspend fun addBunkerRelays(
     bunkerRelays: List<String>,
     existingRelays: List<String>,
@@ -70,17 +83,16 @@ private suspend fun addBunkerRelays(
     }
     val remaining = MAX_BUNKER_RELAYS - existingRelays.size
 
-    if (remaining <= 0) return Result.failure(Exception("Maximum relays reached"))
+    if (remaining <= 0) return Result.failure(BunkerAddError.MaxReached.exception)
 
     val toAdd = safeRelays.take(remaining)
     if (toAdd.isEmpty()) {
-        val message = when {
-            bunkerRelays.all { existingRelays.contains(it) } -> "Relays already added"
-            validRelays.isNotEmpty() && safeRelays.isEmpty() ->
-                "Private/internal relay addresses are not allowed"
-            else -> "No valid relay URLs found in bunker URL"
+        val err: BunkerAddError = when {
+            bunkerRelays.all { existingRelays.contains(it) } -> BunkerAddError.AlreadyAdded
+            validRelays.isNotEmpty() && safeRelays.isEmpty() -> BunkerAddError.PrivateOnly
+            else -> BunkerAddError.NoValid
         }
-        return Result.failure(Exception(message))
+        return Result.failure(err.exception)
     }
 
     return Result.success(toAdd)
@@ -101,6 +113,15 @@ fun BunkerScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
+
+    val toastBunkerUrlCopied = stringResource(R.string.connections_bunker_url_copied)
+    val toastAddRelayFirst = stringResource(R.string.connections_bunker_toast_add_relay_first)
+    val toastSaveBunkerFailed = stringResource(R.string.connections_bunker_toast_save_bunker_failed)
+    val toastSaveRelayFailed = stringResource(R.string.connections_bunker_toast_save_relay_failed)
+    val toastClientRevoked = stringResource(R.string.connections_bunker_toast_client_revoked)
+    val toastRevokeFailed = stringResource(R.string.connections_bunker_toast_revoke_failed)
+    val toastAllClientsRevoked = stringResource(R.string.connections_bunker_toast_all_clients_revoked)
+    val toastRevokeAllFailed = stringResource(R.string.connections_bunker_toast_revoke_all_failed)
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -128,7 +149,7 @@ fun BunkerScreen(
                     keepMobile.saveRelayConfig(null, RelayConfigInfo(config.frostRelays, config.profileRelays, updated))
                 }
             }.onFailure {
-                Toast.makeText(context, "Failed to save relay config", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, toastSaveRelayFailed, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -142,7 +163,7 @@ fun BunkerScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "NIP-46 Bunker",
+            text = stringResource(R.string.connections_bunker_screen_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -155,9 +176,9 @@ fun BunkerScreen(
         if (bunkerUrl != null && bunkerStatus == BunkerStatus.RUNNING) {
             QrCodeDisplay(
                 data = bunkerUrl,
-                label = "Bunker URL",
+                label = stringResource(R.string.connections_bunker_qr_label),
                 onCopied = {
-                    Toast.makeText(context, "Bunker URL copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 }
             )
 
@@ -166,11 +187,11 @@ fun BunkerScreen(
             OutlinedButton(
                 onClick = {
                     copySensitiveText(context, bunkerUrl)
-                    Toast.makeText(context, "Bunker URL copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Copy Bunker URL")
+                Text(stringResource(R.string.connections_bunker_copy_button))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -181,7 +202,7 @@ fun BunkerScreen(
             canEnable = relays.isNotEmpty(),
             onToggle = { enabled ->
                 if (enabled && relays.isEmpty()) {
-                    Toast.makeText(context, "Add at least one relay first", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, toastAddRelayFirst, Toast.LENGTH_SHORT).show()
                     return@BunkerToggleCard
                 }
                 scope.launch {
@@ -193,7 +214,7 @@ fun BunkerScreen(
                     }.onSuccess {
                         onToggleBunker(enabled)
                     }.onFailure {
-                        Toast.makeText(context, "Failed to save bunker config", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, toastSaveBunkerFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -227,9 +248,9 @@ fun BunkerScreen(
                         }
                     }.onSuccess { updated ->
                         authorizedClients = updated.toSet()
-                        Toast.makeText(context, "Client revoked", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
-                        Toast.makeText(context, "Failed to revoke client", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
             },
@@ -242,7 +263,7 @@ fun BunkerScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Back")
+            Text(stringResource(R.string.connections_bunker_back))
         }
     }
 
@@ -267,9 +288,9 @@ fun BunkerScreen(
                         }
                     }.onSuccess {
                         authorizedClients = emptySet()
-                        Toast.makeText(context, "All clients revoked", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
-                        Toast.makeText(context, "Failed to revoke clients", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, toastRevokeAllFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
             },
@@ -289,6 +310,30 @@ private fun AddBunkerRelayDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
 
+    val errTooLong = stringResource(R.string.connections_bunker_relay_error_too_long)
+    val errInvalid = stringResource(R.string.connections_bunker_relay_error_invalid)
+    val errMax = stringResource(R.string.connections_bunker_relay_error_max)
+    val errDuplicate = stringResource(R.string.connections_bunker_relay_error_duplicate)
+    val errAllDuplicates = stringResource(R.string.connections_bunker_relay_error_all_duplicates)
+    val errPrivate = stringResource(R.string.connections_bunker_relay_error_private)
+    val errNoValid = stringResource(R.string.connections_bunker_relay_error_no_valid)
+    val errNoRelaysInUrl = stringResource(R.string.connections_bunker_add_dialog_no_relays_in_url)
+    val errInternalHost = stringResource(R.string.connections_bunker_add_dialog_internal_host)
+
+    fun validationErrorMessage(e: RelayValidationError): String = when (e) {
+        RelayValidationError.TOO_LONG -> errTooLong
+        RelayValidationError.INVALID -> errInvalid
+        RelayValidationError.MAX_REACHED -> errMax
+        RelayValidationError.DUPLICATE -> errDuplicate
+    }
+
+    fun addErrorMessage(throwable: Throwable): String = when (throwable.message) {
+        "max" -> errMax
+        "added" -> errAllDuplicates
+        "private" -> errPrivate
+        else -> errNoValid
+    }
+
     fun dismissDialog() {
         newRelayUrl = ""
         error = null
@@ -297,7 +342,7 @@ private fun AddBunkerRelayDialog(
 
     AlertDialog(
         onDismissRequest = ::dismissDialog,
-        title = { Text("Add Bunker Relay") },
+        title = { Text(stringResource(R.string.connections_bunker_add_dialog_title)) },
         text = {
             Column {
                 OutlinedTextField(
@@ -306,8 +351,8 @@ private fun AddBunkerRelayDialog(
                         newRelayUrl = it
                         error = null
                     },
-                    label = { Text("Relay URL") },
-                    placeholder = { Text("wss://relay.example.com or bunker://...") },
+                    label = { Text(stringResource(R.string.connections_bunker_add_dialog_label)) },
+                    placeholder = { Text(stringResource(R.string.connections_bunker_add_dialog_placeholder)) },
                     singleLine = true,
                     isError = error != null
                 )
@@ -336,18 +381,18 @@ private fun AddBunkerRelayDialog(
                                         onRelaysUpdated(relays + toAdd)
                                         dismissDialog()
                                     },
-                                    onFailure = { error = it.message }
+                                    onFailure = { error = addErrorMessage(it) }
                                 )
                                 isAdding = false
                             }
                         }
                         trimmed.startsWith("bunker://") ->
-                            error = "No relay URLs found in bunker URL"
+                            error = errNoRelaysInUrl
                         else -> {
                             val url = normalizeRelayUrl(trimmed)
                             val validationError = validateRelayUrl(url, relays)
                             if (validationError != null) {
-                                error = validationError
+                                error = validationErrorMessage(validationError)
                             } else {
                                 isAdding = true
                                 scope.launch {
@@ -355,7 +400,7 @@ private fun AddBunkerRelayDialog(
                                         isInternalHost(url)
                                     }
                                     if (isInternal) {
-                                        error = "Internal/private hosts are not allowed"
+                                        error = errInternalHost
                                     } else {
                                         onRelaysUpdated(relays + url)
                                         dismissDialog()
@@ -371,13 +416,13 @@ private fun AddBunkerRelayDialog(
                 if (isAdding) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Add")
+                    Text(stringResource(R.string.connections_bunker_add_dialog_add))
                 }
             }
         },
         dismissButton = {
             TextButton(onClick = ::dismissDialog) {
-                Text("Cancel")
+                Text(stringResource(R.string.connections_bunker_add_dialog_cancel))
             }
         }
     )
@@ -390,9 +435,9 @@ private fun RevokeAllClientsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Revoke All Clients") },
+        title = { Text(stringResource(R.string.connections_bunker_revoke_all_title)) },
         text = {
-            Text("This will disconnect all authorized clients. They will need to reconnect and be approved again.")
+            Text(stringResource(R.string.connections_bunker_revoke_all_text))
         },
         confirmButton = {
             TextButton(
@@ -404,12 +449,12 @@ private fun RevokeAllClientsDialog(
                     contentColor = MaterialTheme.colorScheme.error
                 )
             ) {
-                Text("Revoke All")
+                Text(stringResource(R.string.connections_bunker_revoke_all_confirm))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.connections_bunker_revoke_all_cancel))
             }
         }
     )
@@ -417,11 +462,15 @@ private fun RevokeAllClientsDialog(
 
 @Composable
 private fun StatusBadge(status: BunkerStatus) {
+    val running = stringResource(R.string.connections_bunker_status_running)
+    val starting = stringResource(R.string.connections_bunker_status_starting)
+    val errText = stringResource(R.string.connections_bunker_status_error)
+    val stopped = stringResource(R.string.connections_bunker_status_stopped)
     val (statusText, statusColor) = when (status) {
-        BunkerStatus.RUNNING -> "Running" to MaterialTheme.colorScheme.primary
-        BunkerStatus.STARTING -> "Starting..." to MaterialTheme.colorScheme.secondary
-        BunkerStatus.ERROR -> "Error" to MaterialTheme.colorScheme.error
-        BunkerStatus.STOPPED -> "Stopped" to MaterialTheme.colorScheme.onSurfaceVariant
+        BunkerStatus.RUNNING -> running to MaterialTheme.colorScheme.primary
+        BunkerStatus.STARTING -> starting to MaterialTheme.colorScheme.secondary
+        BunkerStatus.ERROR -> errText to MaterialTheme.colorScheme.error
+        BunkerStatus.STOPPED -> stopped to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(
         text = statusText,
@@ -443,9 +492,9 @@ private fun BunkerToggleCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Bunker Mode", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.connections_bunker_toggle_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Accept remote signing requests",
+                    stringResource(R.string.connections_bunker_toggle_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -473,14 +522,14 @@ private fun BunkerRelaysCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Bunker Relays", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.connections_bunker_relays_title), style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = onAddClick, enabled = !isEnabled) {
-                    Icon(Icons.Default.Add, contentDescription = "Add relay")
+                    Icon(Icons.Default.Add, contentDescription = stringResource(R.string.connections_bunker_relays_add_cd))
                 }
             }
             if (relays.isEmpty()) {
                 Text(
-                    "No relays configured",
+                    stringResource(R.string.connections_bunker_relays_none),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
@@ -504,7 +553,7 @@ private fun BunkerRelaysCard(
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Remove",
+                                contentDescription = stringResource(R.string.connections_bunker_relays_remove_cd),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -528,7 +577,7 @@ private fun AuthorizedClientsCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Authorized Clients", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.connections_bunker_clients_title), style = MaterialTheme.typography.titleMedium)
                 if (clients.isNotEmpty()) {
                     TextButton(
                         onClick = onRevokeAll,
@@ -536,20 +585,20 @@ private fun AuthorizedClientsCard(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("Revoke All", style = MaterialTheme.typography.labelSmall)
+                        Text(stringResource(R.string.connections_bunker_clients_revoke_all), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Clients that have been approved to connect",
+                stringResource(R.string.connections_bunker_clients_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(8.dp))
             if (clients.isEmpty()) {
                 Text(
-                    "No authorized clients",
+                    stringResource(R.string.connections_bunker_clients_none),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
@@ -572,7 +621,7 @@ private fun AuthorizedClientsCard(
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Revoke",
+                                contentDescription = stringResource(R.string.connections_bunker_client_revoke_cd),
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.error
                             )

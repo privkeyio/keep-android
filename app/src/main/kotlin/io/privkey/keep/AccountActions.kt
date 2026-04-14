@@ -113,7 +113,12 @@ internal class AccountActions(
     }
 
     fun switchAccount(account: AccountInfo, onDismiss: () -> Unit) {
-        withBiometricAuth(account.groupPubkeyHex, "Switch Account", "Authenticate to switch", onDismiss) { authedCipher ->
+        withBiometricAuth(
+            account.groupPubkeyHex,
+            appContext.getString(R.string.account_switch_title),
+            appContext.getString(R.string.account_switch_subtitle),
+            onDismiss
+        ) { authedCipher ->
             accountMutex.withLock {
                 try {
                     withContext(Dispatchers.IO) {
@@ -128,7 +133,7 @@ internal class AccountActions(
                     onAccountSwitched()
                     refreshAccountState()
                 } catch (e: Exception) {
-                    logAndToast("Switch failed", "Failed to switch account", e)
+                    logAndToast("Switch failed", appContext.getString(R.string.account_switch_failed), e)
                 } finally {
                     onDismiss()
                 }
@@ -137,7 +142,12 @@ internal class AccountActions(
     }
 
     fun deleteAccount(account: AccountInfo, onDismiss: () -> Unit) {
-        withBiometricAuth(account.groupPubkeyHex, "Delete Account", "Authenticate to delete account", onDismiss) {
+        withBiometricAuth(
+            account.groupPubkeyHex,
+            appContext.getString(R.string.account_delete_title),
+            appContext.getString(R.string.account_delete_subtitle),
+            onDismiss
+        ) {
             accountMutex.withLock {
                 val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
                 val wasActive = account.groupPubkeyHex == activeAccountKey
@@ -148,14 +158,14 @@ internal class AccountActions(
                             .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
                     }
                 } catch (e: Exception) {
-                    logAndToast("Delete failed", "Failed to delete account", e)
+                    logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)
                     onDismiss()
                     return@withLock
                 }
                 try {
                     postDeleteCleanup(wasActive, onDismiss)
                 } catch (e: Exception) {
-                    logAndToast("Post-delete refresh failed", "Account deleted, but failed to refresh", e)
+                    logAndToast("Post-delete refresh failed", appContext.getString(R.string.account_delete_refresh_failed), e)
                     onDismiss()
                 }
             }
@@ -187,7 +197,11 @@ internal class AccountActions(
             runCatching { storage.getCipherForShareDecryption(nextAccount.groupPubkeyHex) }.getOrNull()
         }
         if (switchCipher != null) {
-            onBiometricRequest("Switch Account", "Authenticate to switch to remaining account", switchCipher) { switchAuthed ->
+            onBiometricRequest(
+                appContext.getString(R.string.account_switch_title),
+                appContext.getString(R.string.account_switch_remaining_subtitle),
+                switchCipher
+            ) { switchAuthed ->
                 coroutineScope.launch {
                     accountMutex.withLock {
                         try {
@@ -224,7 +238,7 @@ internal class AccountActions(
                         storage.renameShare(account.groupPubkeyHex, newName)
                     }
                 } catch (e: Exception) {
-                    logAndToast("Rename failed", "Failed to rename account", e)
+                    logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), e)
                 } finally {
                     runCatching { refreshAccountState() }
                 }
@@ -241,7 +255,7 @@ internal class AccountActions(
     ) {
         onImportStateChanged(ImportState.Importing)
         if (!isValidKshareFormat(data)) {
-            onImportStateChanged(ImportState.Error("Invalid share format"))
+            onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_invalid_share)))
             return
         }
         executeImport(cipher, onImportStateChanged) { keepMobile.importShare(data, passphrase, name) }
@@ -255,7 +269,7 @@ internal class AccountActions(
     ) {
         onImportStateChanged(ImportState.Importing)
         val hexKey = nsecToHex(nsec) ?: run {
-            onImportStateChanged(ImportState.Error("Invalid nsec format"))
+            onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_invalid_nsec)))
             return
         }
         executeImport(cipher, onImportStateChanged) {
@@ -285,7 +299,12 @@ internal class AccountActions(
         onResult: (String?) -> Unit,
         onDismiss: (Boolean) -> Unit
     ) {
-        withBiometricAuth(account.groupPubkeyHex, "View Seed Words", "Authenticate to view seed words", { onDismiss(false) }) { authedCipher ->
+        withBiometricAuth(
+            account.groupPubkeyHex,
+            appContext.getString(R.string.account_view_seed_title),
+            appContext.getString(R.string.account_view_seed_subtitle),
+            { onDismiss(false) }
+        ) { authedCipher ->
             accountMutex.withLock {
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
@@ -310,14 +329,14 @@ internal class AccountActions(
                     }
                     if (seedWords == null) {
                         coroutineScope.launch(Dispatchers.Main) {
-                            Toast.makeText(appContext, "No seed words available for this account", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(appContext, appContext.getString(R.string.account_view_seed_none), Toast.LENGTH_SHORT).show()
                         }
                     }
                     delivered = true
                     onResult(seedWords)
                     success = seedWords != null
                 } catch (e: Exception) {
-                    logAndToast("View seed words failed", "Failed to retrieve seed words", e)
+                    logAndToast("View seed words failed", appContext.getString(R.string.account_view_seed_failed), e)
                     if (!delivered) onResult(null)
                 } finally {
                     if (pendingSet) storage.clearPendingCipher(requestId)
@@ -339,7 +358,11 @@ internal class AccountActions(
                 onComplete(false)
                 return@launch
             }
-            onBiometricRequest("Confirm Backup", "Authenticate to confirm backup", decryptCipher) { authedDecrypt ->
+            onBiometricRequest(
+                appContext.getString(R.string.account_confirm_backup_title),
+                appContext.getString(R.string.account_confirm_backup_subtitle),
+                decryptCipher
+            ) { authedDecrypt ->
                 if (authedDecrypt == null) {
                     onComplete(false)
                     return@onBiometricRequest
@@ -365,7 +388,11 @@ internal class AccountActions(
                 onComplete(false)
                 return@launch
             }
-            onBiometricRequest("Confirm Backup", "Authenticate again to save", encryptCipher) { authedEncrypt ->
+            onBiometricRequest(
+                appContext.getString(R.string.account_confirm_backup_title),
+                appContext.getString(R.string.account_confirm_backup_save_subtitle),
+                encryptCipher
+            ) { authedEncrypt ->
                 if (authedEncrypt == null) {
                     onComplete(false)
                     return@onBiometricRequest
@@ -449,7 +476,7 @@ internal class AccountActions(
                     }
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
-                    onImportStateChanged(ImportState.Error("Import failed. Please try again."))
+                    onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_failed)))
                 } finally {
                     if (pendingSet) storage.clearPendingCipher(importId)
                 }

@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- ConnectionCards: Relays card -->
+    <string name="connections_relays_title">Relays</string>
+    <string name="connections_relays_active_title">Active relays</string>
+    <string name="connections_relays_active_description">Manage the relays used for communication with external applications.</string>
+    <string name="connections_relays_none">No relays configured</string>
+    <string name="connections_relays_edit_button">Edit Relays</string>
+    <string name="connections_relays_profile_title">Default profile relays</string>
+    <string name="connections_relays_profile_description">Manage the relays used to fetch your profile data.</string>
+    <string name="connections_relays_profile_none">No profile relays configured</string>
+    <string name="connections_relays_profile_edit_button">Edit Profile Relays</string>
+    <string name="connections_relays_dialog_edit_title">Edit Relays</string>
+    <string name="connections_relays_dialog_edit_profile_title">Edit Profile Relays</string>
+    <string name="connections_relays_remove_cd">Remove</string>
+    <string name="connections_relays_url_label">Relay URL</string>
+    <string name="connections_relays_url_placeholder">wss://relay.example.com</string>
+    <string name="connections_relays_add_cd">Add relay</string>
+    <string name="connections_relays_error_wss_only">Only wss:// URLs are supported</string>
+    <string name="connections_relays_error_too_long">URL too long</string>
+    <string name="connections_relays_error_invalid">Invalid relay URL</string>
+    <string name="connections_relays_error_port">Port must be between 1 and 65535</string>
+    <string name="connections_relays_done">Done</string>
+
+    <!-- ConnectionCards: Connect card -->
+    <string name="connections_connect_connecting">Connecting...</string>
+    <string name="connections_connect_connected_to_relays">Connected to relays</string>
+    <string name="connections_connect_add_relays_first">Add relays first</string>
+    <string name="connections_connect_not_connected">Not connected</string>
+    <string name="connections_connect_title">Connection</string>
+    <string name="connections_connect_button_connected">Connected</string>
+    <string name="connections_connect_button_connect">Connect</string>
+
+    <!-- ConnectionCards: Connected apps / Peers / Bunker / Wallet / NIP-55 settings -->
+    <string name="connections_connected_apps_title">Connected Apps</string>
+    <string name="connections_connected_apps_manage">Manage</string>
+    <string name="connections_peers_title">Peers (<xliff:g id="count" example="3">%1$d</xliff:g>)</string>
+    <string name="connections_peers_none">No peers connected</string>
+    <string name="connections_peer_status_online">Online</string>
+    <string name="connections_peer_status_offline">Offline</string>
+    <string name="connections_peer_status_unknown">Unknown</string>
+    <string name="connections_peer_share">Share <xliff:g id="index" example="1">%1$s</xliff:g></string>
+    <string name="connections_bunker_status_running">Running</string>
+    <string name="connections_bunker_status_starting">Starting...</string>
+    <string name="connections_bunker_status_error">Error</string>
+    <string name="connections_bunker_status_configure">Configure</string>
+    <string name="connections_bunker_title">NIP-46 Bunker</string>
+    <string name="connections_bunker_subtitle">Remote signing for web/desktop clients</string>
+    <string name="connections_wallet_title">Wallet Descriptors</string>
+    <string name="connections_wallet_subtitle">Manage multisig wallet descriptors</string>
+    <string name="connections_wallet_count"><xliff:g id="count" example="3">%1$d</xliff:g></string>
+    <string name="connections_wallet_manage">Manage</string>
+    <string name="connections_nip55_settings_title">NIP-55 Settings</string>
+    <string name="connections_nip55_sign_policy">Sign Policy</string>
+    <string name="connections_nip55_permissions">Permissions</string>
+    <string name="connections_nip55_history">History</string>
+
+    <!-- BunkerScreen -->
+    <string name="connections_bunker_screen_title">NIP-46 Bunker</string>
+    <string name="connections_bunker_qr_label">Bunker URL</string>
+    <string name="connections_bunker_url_copied">Bunker URL copied</string>
+    <string name="connections_bunker_copy_button">Copy Bunker URL</string>
+    <string name="connections_bunker_back">Back</string>
+    <string name="connections_bunker_toggle_title">Bunker Mode</string>
+    <string name="connections_bunker_toggle_subtitle">Accept remote signing requests</string>
+    <string name="connections_bunker_toast_add_relay_first">Add at least one relay first</string>
+    <string name="connections_bunker_toast_save_bunker_failed">Failed to save bunker config</string>
+    <string name="connections_bunker_toast_save_relay_failed">Failed to save relay config</string>
+    <string name="connections_bunker_toast_client_revoked">Client revoked</string>
+    <string name="connections_bunker_toast_revoke_failed">Failed to revoke client</string>
+    <string name="connections_bunker_toast_all_clients_revoked">All clients revoked</string>
+    <string name="connections_bunker_toast_revoke_all_failed">Failed to revoke clients</string>
+    <string name="connections_bunker_relays_title">Bunker Relays</string>
+    <string name="connections_bunker_relays_add_cd">Add relay</string>
+    <string name="connections_bunker_relays_remove_cd">Remove</string>
+    <string name="connections_bunker_relays_none">No relays configured</string>
+    <string name="connections_bunker_add_dialog_title">Add Bunker Relay</string>
+    <string name="connections_bunker_add_dialog_label">Relay URL</string>
+    <string name="connections_bunker_add_dialog_placeholder">wss://relay.example.com or bunker://...</string>
+    <string name="connections_bunker_add_dialog_add">Add</string>
+    <string name="connections_bunker_add_dialog_cancel">Cancel</string>
+    <string name="connections_bunker_add_dialog_no_relays_in_url">No relay URLs found in bunker URL</string>
+    <string name="connections_bunker_add_dialog_internal_host">Internal/private hosts are not allowed</string>
+    <string name="connections_bunker_relay_error_too_long">URL too long</string>
+    <string name="connections_bunker_relay_error_invalid">Invalid relay URL</string>
+    <string name="connections_bunker_relay_error_max">Maximum relays reached</string>
+    <string name="connections_bunker_relay_error_duplicate">Relay already added</string>
+    <string name="connections_bunker_relay_error_all_duplicates">Relays already added</string>
+    <string name="connections_bunker_relay_error_private">Private/internal relay addresses are not allowed</string>
+    <string name="connections_bunker_relay_error_no_valid">No valid relay URLs found in bunker URL</string>
+    <string name="connections_bunker_revoke_all_title">Revoke All Clients</string>
+    <string name="connections_bunker_revoke_all_text">This will disconnect all authorized clients. They will need to reconnect and be approved again.</string>
+    <string name="connections_bunker_revoke_all_confirm">Revoke All</string>
+    <string name="connections_bunker_revoke_all_cancel">Cancel</string>
+    <string name="connections_bunker_status_stopped">Stopped</string>
+    <string name="connections_bunker_clients_title">Authorized Clients</string>
+    <string name="connections_bunker_clients_revoke_all">Revoke All</string>
+    <string name="connections_bunker_clients_description">Clients that have been approved to connect</string>
+    <string name="connections_bunker_clients_none">No authorized clients</string>
+    <string name="connections_bunker_client_revoke_cd">Revoke</string>
+
+    <!-- NostrConnectApprovalScreen -->
+    <string name="connections_nostrconnect_title">Connection Request</string>
+    <string name="connections_nostrconnect_from">from <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nostrconnect_description">This app wants to connect via NIP-46. Approving will authorize it to send signing requests.</string>
+    <string name="connections_nostrconnect_client_pubkey">Client Pubkey</string>
+    <string name="connections_nostrconnect_relays">Relays</string>
+    <string name="connections_nostrconnect_requested_permissions">Requested Permissions</string>
+    <string name="connections_nostrconnect_permission_with_kind"><xliff:g id="method" example="sign_event">%1$s</xliff:g> (kind <xliff:g id="kind" example="1">%2$s</xliff:g>)</string>
+    <string name="connections_nostrconnect_remember_permissions">Remember permissions</string>
+    <string name="connections_nostrconnect_reject">Reject</string>
+    <string name="connections_nostrconnect_connect">Connect</string>
+
+    <!-- Nip46ApprovalScreen -->
+    <string name="connections_nip46_title_connect">New Connection Request</string>
+    <string name="connections_nip46_title_request">NIP-46 Request</string>
+    <string name="connections_nip46_from">from <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nip46_connect_description">This app is requesting to connect. Approving will authorize it for future signing requests.</string>
+    <string name="connections_nip46_method">Method</string>
+    <string name="connections_nip46_event_kind">Event Kind</string>
+    <string name="connections_nip46_content">Content</string>
+    <string name="connections_nip46_app_public_key">App Public Key</string>
+    <string name="connections_nip46_remember_decision">Remember this decision</string>
+    <string name="connections_nip46_reject">Reject</string>
+    <string name="connections_nip46_authorize">Authorize</string>
+    <string name="connections_nip46_approve">Approve</string>
+
+    <!-- PermissionsManagementScreen -->
+    <string name="connections_permissions_title">App Permissions</string>
+    <string name="connections_permissions_subtitle">Manage NIP-55 permissions granted to apps</string>
+    <string name="connections_permissions_load_error">Failed to load permissions</string>
+    <string name="connections_permissions_refresh_error">Failed to refresh permissions</string>
+    <string name="connections_permissions_unknown_type">Unknown request type: <xliff:g id="type" example="sign">%1$s</xliff:g></string>
+    <string name="connections_permissions_update_error">Failed to update permission</string>
+    <string name="connections_permissions_revoke_error">Failed to revoke permissions</string>
+    <string name="connections_permissions_delete_error">Failed to delete permission</string>
+    <string name="connections_permissions_none">No permissions granted</string>
+    <string name="connections_permissions_back">Back</string>
+    <string name="connections_permissions_revoke_all_title">Revoke All Permissions</string>
+    <string name="connections_permissions_revoke_all_text">Revoke all permissions for <xliff:g id="package" example="com.example">%1$s</xliff:g>? This app will need to request permissions again.</string>
+    <string name="connections_permissions_revoke_all_confirm">Revoke All</string>
+    <string name="connections_permissions_cancel">Cancel</string>
+    <string name="connections_permissions_delete_title">Delete Permission</string>
+    <string name="connections_permissions_delete_text">Delete this <xliff:g id="type" example="sign_event">%1$s</xliff:g> permission for <xliff:g id="package" example="com.example">%2$s</xliff:g>?</string>
+    <string name="connections_permissions_delete_confirm">Delete</string>
+    <plurals name="connections_permissions_count">
+        <item quantity="one">%d permission</item>
+        <item quantity="other">%d permissions</item>
+    </plurals>
+    <string name="connections_permissions_rate">Rate: <xliff:g id="hour" example="1">%1$d</xliff:g>/h \u00b7 <xliff:g id="day" example="2">%2$d</xliff:g>/d \u00b7 <xliff:g id="week" example="3">%3$d</xliff:g>/w</string>
+    <string name="connections_permissions_revoke_all_header">Revoke All</string>
+    <string name="connections_permissions_expired">Expired</string>
+    <string name="connections_permissions_expires">Expires <xliff:g id="when" example="in 1 day">%1$s</xliff:g></string>
+    <string name="connections_permissions_permanent">Permanent</string>
+    <string name="connections_permissions_delete_cd">Delete permission</string>
+
+    <!-- AppPermissionsScreen -->
+    <string name="connections_app_nip46_client_label">NIP-46 Client</string>
+    <string name="connections_app_back_cd">Back</string>
+    <string name="connections_app_disconnect_client_title">Disconnect Client?</string>
+    <string name="connections_app_disconnect_app_title">Disconnect App?</string>
+    <string name="connections_app_disconnect_client_text">This will remove all saved permissions and revoke authorization for <xliff:g id="name" example="App">%1$s</xliff:g>. The client will need to reconnect.</string>
+    <string name="connections_app_disconnect_app_text">This will remove all saved permissions for <xliff:g id="name" example="App">%1$s</xliff:g>. The app will need to request permission again.</string>
+    <string name="connections_app_disconnect_confirm">Disconnect</string>
+    <string name="connections_app_cancel">Cancel</string>
+    <string name="connections_app_revoke_toast_error">Failed to revoke permissions</string>
+    <string name="connections_app_sign_policy_update_error">Failed to update sign policy</string>
+    <string name="connections_app_no_active_permissions">No active permissions</string>
+    <string name="connections_app_permissions_header">Permissions</string>
+    <string name="connections_app_permission_update_error">Failed to update permission</string>
+    <string name="connections_app_permission_revoke_error">Failed to revoke permission</string>
+    <string name="connections_app_disconnect_client_button">Disconnect Client</string>
+    <string name="connections_app_disconnect_app_button">Disconnect App</string>
+    <string name="connections_app_nip46_client_cd">NIP-46 Client</string>
+    <string name="connections_app_unverified_cd">Unverified</string>
+    <string name="connections_app_nip46_client_with_pubkey">NIP-46 Client (<xliff:g id="pubkey" example="abcd\u2026">%1$s</xliff:g>)</string>
+    <string name="connections_app_unverified_warning">Warning: App not installed or unverified</string>
+    <string name="connections_app_permission_expires">Expires: <xliff:g id="when" example="in 1 day">%1$s</xliff:g></string>
+    <string name="connections_app_permission_permanent">Permanent</string>
+    <string name="connections_app_permission_revoke_cd">Revoke</string>
+
+    <!-- ConnectedAppsScreen -->
+    <string name="connections_app_load_error_state">Failed to load connected apps</string>
+    <string name="connections_app_nip46_client_row_label">NIP-46 Client</string>
+    <string name="connections_app_nip46_row">NIP-46 (<xliff:g id="pubkey" example="abcd\u2026">%1$s</xliff:g>)</string>
+
+    <!-- SigningHistoryScreen -->
+    <string name="connections_history_title">Signing History</string>
+    <string name="connections_history_subtitle">View past signing requests and decisions</string>
+    <string name="connections_history_load_error">Failed to load signing history</string>
+    <string name="connections_history_load_apps_error">Failed to load apps</string>
+    <string name="connections_history_back">Back</string>
+    <string name="connections_history_all_apps">All apps</string>
+    <string name="connections_history_filter_label">Filter by app</string>
+    <string name="connections_history_none">No signing history</string>
+    <string name="connections_history_auto">Auto</string>
+    <string name="connections_history_allowed">Allowed</string>
+    <string name="connections_history_denied">Denied</string>
+    <string name="connections_history_chain_verified">Chain verified (<xliff:g id="count" example="5">%1$d</xliff:g> entries)</string>
+    <string name="connections_history_chain_partial">Verified (<xliff:g id="legacy" example="3">%1$d</xliff:g> legacy entries)</string>
+    <string name="connections_history_chain_truncated">Verified (older entries pruned)</string>
+    <string name="connections_history_chain_broken">Chain integrity issue detected</string>
+    <string name="connections_history_chain_tampered">Tampering detected in audit log</string>
+    <string name="connections_history_chain_verifying">Verifying...</string>
+    <string name="connections_history_type_connect">Connect</string>
+    <string name="connections_history_type_get_public_key">Get public key</string>
+    <string name="connections_history_type_sign_event">Sign event</string>
+    <string name="connections_history_type_nip04_encrypt">NIP-04 encrypt</string>
+    <string name="connections_history_type_nip04_decrypt">NIP-04 decrypt</string>
+    <string name="connections_history_type_nip44_encrypt">NIP-44 encrypt</string>
+    <string name="connections_history_type_nip44_decrypt">NIP-44 decrypt</string>
+    <string name="connections_history_type_disconnect">Disconnect</string>
+    <string name="connections_history_type_kill_switch">Kill switch</string>
+
+    <!-- Nip55ApprovalScreen -->
+    <string name="connections_nip55_type_get_public_key">Get Public Key</string>
+    <string name="connections_nip55_type_sign_event">Sign Event</string>
+    <string name="connections_nip55_type_nip44_encrypt">Encrypt (NIP-44)</string>
+    <string name="connections_nip55_type_nip44_decrypt">Decrypt (NIP-44)</string>
+    <string name="connections_nip55_type_nip04_encrypt">Encrypt (NIP-04)</string>
+    <string name="connections_nip55_type_nip04_decrypt">Decrypt (NIP-04)</string>
+    <string name="connections_nip55_type_decrypt_zap">Decrypt Zap Event</string>
+    <string name="connections_nip55_header_public_key">Public Key Request</string>
+    <string name="connections_nip55_header_signing">Signing Request</string>
+    <string name="connections_nip55_header_encryption">Encryption Request</string>
+    <string name="connections_nip55_header_decryption">Decryption Request</string>
+    <string name="connections_nip55_header_zap_decryption">Zap Decryption Request</string>
+    <string name="connections_nip55_remember_choice">Remember this choice</string>
+    <string name="connections_nip55_from_app">from <xliff:g id="name" example="com.example">%1$s</xliff:g></string>
+    <string name="connections_nip55_from_unknown">from unknown app</string>
+    <string name="connections_nip55_reject">Reject</string>
+    <string name="connections_nip55_approve">Approve</string>
+    <string name="connections_nip55_type_label">Type</string>
+    <string name="connections_nip55_recipient_label">Recipient</string>
+    <string name="connections_nip55_event_kind_label">Event Kind</string>
+    <string name="connections_nip55_content_label">Content</string>
+    <string name="connections_nip55_show_less">Show less</string>
+    <string name="connections_nip55_show_more">Show more</string>
+    <string name="connections_nip55_references">References</string>
+    <string name="connections_nip55_events_label">Events:</string>
+    <string name="connections_nip55_mentions_label">Mentions:</string>
+    <string name="connections_nip55_topics_label">Topics:</string>
+    <string name="connections_nip55_elevated_auth">Elevated authentication required</string>
+</resources>

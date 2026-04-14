@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="pin_setup_title">Set Up PIN</string>
+    <string name="pin_setup_back">Back</string>
+    <string name="pin_setup_enter_prompt">Enter a <xliff:g id="min" example="4">%1$d</xliff:g>-<xliff:g id="max" example="8">%2$d</xliff:g> digit PIN</string>
+    <string name="pin_setup_label_pin">PIN</string>
+    <string name="pin_setup_label_confirm_pin">Confirm PIN</string>
+    <string name="pin_setup_confirm_prompt">Confirm your PIN</string>
+    <string name="pin_setup_next">Next</string>
+    <string name="pin_setup_back_button">Back</string>
+    <string name="pin_setup_set_pin">Set PIN</string>
+    <string name="pin_setup_error_too_short">PIN must be at least <xliff:g id="min" example="4">%1$d</xliff:g> digits</string>
+    <string name="pin_setup_error_weak">PIN is too simple. Avoid patterns like 1234 or 0000.</string>
+    <string name="pin_setup_error_mismatch">PINs don\'t match</string>
+    <string name="pin_setup_error_failed">Failed to set PIN</string>
+
+    <string name="pin_unlock_app_title">Keep</string>
+    <string name="pin_unlock_prompt">Enter PIN to unlock</string>
+    <string name="pin_unlock_label_pin">PIN</string>
+    <string name="pin_unlock_button">Unlock</string>
+    <string name="pin_unlock_use_biometrics">Use Biometrics</string>
+    <string name="pin_unlock_biometric_required_title">Biometric verification required</string>
+    <string name="pin_unlock_biometric_required_body">Too many failed PIN attempts. Verify your identity with biometrics to continue.</string>
+    <string name="pin_unlock_locked_out_title">Locked out</string>
+    <string name="pin_unlock_locked_out_body">Try again in <xliff:g id="seconds" example="30">%1$d</xliff:g> seconds</string>
+    <string name="pin_unlock_error_too_many">Too many attempts. Try again later.</string>
+    <string name="pin_unlock_error_incorrect">Incorrect PIN. <xliff:g id="remaining" example="3">%1$d</xliff:g> attempts remaining.</string>
+
+    <string name="qr_code_tap_to_copy">Tap to copy</string>
+    <string name="qr_code_frames_failed">Some frames failed to generate</string>
+    <string name="qr_code_frame_progress">Frame <xliff:g id="current" example="1">%1$d</xliff:g> of <xliff:g id="total" example="5">%2$d</xliff:g></string>
+    <string name="qr_code_npub_label">Your public key (npub)</string>
+    <string name="qr_code_copy_npub">Copy npub</string>
+    <string name="qr_code_npub_copied">npub copied</string>
+</resources>

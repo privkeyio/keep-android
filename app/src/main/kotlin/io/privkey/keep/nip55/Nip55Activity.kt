@@ -403,7 +403,7 @@ class Nip55Activity : FragmentActivity() {
             biometricHelper.authenticateWithCrypto(
                 cipher = cipher,
                 title = "Approve Request",
-                subtitle = req.requestType.displayName()
+                subtitle = req.requestType.displayName(this)
             )
         }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
             .getOrNull()

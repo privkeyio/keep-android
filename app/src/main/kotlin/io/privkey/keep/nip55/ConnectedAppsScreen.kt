@@ -45,6 +45,7 @@ fun ConnectedAppsScreen(
     var connectedApps by remember { mutableStateOf<List<ConnectedAppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    val errLoad = stringResource(R.string.connections_app_load_error_state)
 
     LaunchedEffect(Unit) {
         try {
@@ -69,7 +70,7 @@ fun ConnectedAppsScreen(
             connectedApps = (nip55Apps + nip46Clients).sortedByDescending { it.lastUsedTime ?: 0L }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e("ConnectedApps", "Failed to load connected apps", e)
-            loadError = "Failed to load connected apps"
+            loadError = errLoad
         }
         isLoading = false
     }
@@ -175,7 +176,7 @@ private fun AppIconBox(
             ) {
                 Icon(
                     Icons.Default.Cloud,
-                    contentDescription = "NIP-46 Client",
+                    contentDescription = stringResource(R.string.connections_app_nip46_client_cd),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(32.dp)
                 )
@@ -210,12 +211,13 @@ private fun ConnectedAppItem(
     var appIcon by remember { mutableStateOf<Drawable?>(null) }
     var isVerified by remember { mutableStateOf(true) }
     val isNip46Client = app.packageName.startsWith("nip46:")
+    val nip46RowLabel = stringResource(R.string.connections_app_nip46_client_row_label)
 
     LaunchedEffect(app.packageName) {
         if (isNip46Client) {
             val pubkey = app.packageName.removePrefix("nip46:")
             val clientInfo = Nip46ClientStore.getClient(context, pubkey)
-            appLabel = clientInfo?.name ?: "NIP-46 Client"
+            appLabel = clientInfo?.name ?: nip46RowLabel
             appIcon = null
             isVerified = true
         } else {
@@ -262,7 +264,7 @@ private fun ConnectedAppItem(
                 if (isNip46Client) {
                     val pubkey = app.packageName.removePrefix("nip46:")
                     Text(
-                        text = "NIP-46 (${io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)})",
+                        text = stringResource(R.string.connections_app_nip46_row, io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )

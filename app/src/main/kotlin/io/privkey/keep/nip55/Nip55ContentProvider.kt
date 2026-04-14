@@ -405,7 +405,7 @@ class Nip55ContentProvider : ContentProvider() {
         val notification = NotificationCompat.Builder(ctx, BACKGROUND_SIGNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(ctx.getString(R.string.notification_background_signing_title))
-            .setContentText(ctx.getString(R.string.notification_background_signing_text, appLabel, requestType.headerTitle() + kindText))
+            .setContentText(ctx.getString(R.string.notification_background_signing_text, appLabel, requestType.headerTitle(ctx) + kindText))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .build()

@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
 
@@ -24,12 +25,13 @@ fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                if (accountCount == 1) "1 account" else "$accountCount accounts",
+                if (accountCount == 1) stringResource(R.string.share_cards_one_account)
+                else stringResource(R.string.share_cards_n_accounts, accountCount),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
             Text(
-                "Switch",
+                stringResource(R.string.share_cards_switch),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -52,18 +54,18 @@ fun ShareInfoCard(info: ShareInfo, onClick: () -> Unit) {
             AccountTypeBadge(isNsec = isNsec)
             Spacer(modifier = Modifier.height(8.dp))
             if (!isNsec) {
-                Text("Share ${info.shareIndex} of ${info.totalShares}")
-                Text("Threshold: ${info.threshold}")
+                Text(stringResource(R.string.share_cards_share_of, info.shareIndex.toInt(), info.totalShares.toInt()))
+                Text(stringResource(R.string.share_cards_threshold, info.threshold.toInt()))
                 Spacer(modifier = Modifier.height(8.dp))
             }
             Text(
-                "Group: ${io.privkey.keep.uniffi.truncateStr(info.groupPubkey, 8u, 6u)}",
+                stringResource(R.string.share_cards_group, io.privkey.keep.uniffi.truncateStr(info.groupPubkey, 8u, 6u)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Tap for QR code",
+                stringResource(R.string.share_cards_tap_for_qr),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -83,24 +85,24 @@ fun NoShareCard(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("No key stored")
+            Text(stringResource(R.string.share_cards_no_key_stored))
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = onCreateAccount, modifier = Modifier.fillMaxWidth()) {
-                Text("Create Account")
+                Text(stringResource(R.string.share_cards_create_account))
             }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = onRecoverMnemonic, modifier = Modifier.fillMaxWidth()) {
-                Text("Import from Seed Words")
+                Text(stringResource(R.string.share_cards_import_seed))
             }
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             Spacer(modifier = Modifier.height(4.dp))
             OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
-                Text("Import FROST Share")
+                Text(stringResource(R.string.share_cards_import_frost))
             }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = onImportNsec, modifier = Modifier.fillMaxWidth()) {
-                Text("Import nsec")
+                Text(stringResource(R.string.share_cards_import_nsec))
             }
         }
     }
