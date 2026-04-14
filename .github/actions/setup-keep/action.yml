@@ -1,0 +1,27 @@
+name: Setup keep checkout
+description: Reads the pinned keep SHA from keep.version, checks out privkeyio/keep at that SHA, and verifies the checkout matches.
+runs:
+  using: composite
+  steps:
+    - name: Read pinned keep SHA
+      id: keep_version
+      shell: bash
+      run: |
+        sha=$(tr -d '[:space:]' < keep.version)
+        [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid keep.version: $sha" >&2; exit 1; }
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+    - name: Checkout keep repo
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: privkeyio/keep
+        ref: ${{ steps.keep_version.outputs.sha }}
+        path: keep
+
+    - name: Verify keep checkout matches pinned SHA
+      shell: bash
+      env:
+        EXPECTED: ${{ steps.keep_version.outputs.sha }}
+      run: |
+        actual=$(git -C keep rev-parse HEAD)
+        [[ "$actual" == "$EXPECTED" ]] || { echo "keep checkout at $actual does not match pinned $EXPECTED" >&2; exit 1; }

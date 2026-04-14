@@ -60,9 +60,72 @@ gradle.taskGraph.whenReady {
 
 val keepRepo = file(System.getenv("KEEP_REPO") ?: "${rootDir}/keep")
 
+tasks.register("verifyKeepVersion") {
+    group = "verification"
+    description = "Verifies that the local keep checkout matches the pinned SHA in keep.version."
+    val keepVersionFile = file("${rootDir}/keep.version")
+    inputs.file(keepVersionFile).withPathSensitivity(PathSensitivity.RELATIVE)
+    doLast {
+        if (!keepVersionFile.exists()) {
+            throw GradleException("keep.version not found at ${keepVersionFile.absolutePath}.")
+        }
+        val pinnedSha = keepVersionFile.readText().trim()
+        if (!pinnedSha.matches(Regex("^[0-9a-f]{40}$"))) {
+            throw GradleException(
+                "keep.version at ${keepVersionFile.absolutePath} must be a 40-char lowercase hex SHA, got: '$pinnedSha'."
+            )
+        }
+        val keepPath = keepRepo.absolutePath
+        if (!keepRepo.isDirectory) {
+            throw GradleException(
+                "keep workspace not found at $keepPath. " +
+                "Fix: git clone https://github.com/privkeyio/keep.git $keepPath && " +
+                "git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        if (!file("$keepPath/.git").exists()) {
+            throw GradleException(
+                "keep workspace at $keepPath is not a git repository. " +
+                "Fix: rm -rf $keepPath && git clone https://github.com/privkeyio/keep.git $keepPath && " +
+                "git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        fun git(vararg args: String, onFailure: () -> String): String {
+            val proc = ProcessBuilder(listOf("git", "-C", keepPath) + args)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+            val output = proc.inputStream.bufferedReader().use { it.readText() }
+            if (proc.waitFor() != 0) {
+                throw GradleException(onFailure())
+            }
+            return output
+        }
+        val actualSha = git("rev-parse", "HEAD") {
+            "Failed to read HEAD of $keepPath. Fix: git -C $keepPath checkout $pinnedSha"
+        }.trim()
+        if (actualSha != pinnedSha) {
+            throw GradleException(
+                "keep checkout at $keepPath is at $actualSha but keep.version pins $pinnedSha. " +
+                "Fix: git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        val statusOutput = git("status", "--porcelain") {
+            "Failed to check worktree status of $keepPath. " +
+            "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
+        }
+        if (statusOutput.isNotBlank()) {
+            throw GradleException(
+                "keep checkout at $keepPath has a dirty worktree, which bypasses SHA pinning. " +
+                "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
+            )
+        }
+    }
+}
+
 tasks.register<Exec>("buildRust") {
     group = "rust"
     description = "Builds keep-mobile Rust native libraries and regenerates UniFFI Kotlin bindings."
+    dependsOn("verifyKeepVersion")
     workingDir = rootDir
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)
