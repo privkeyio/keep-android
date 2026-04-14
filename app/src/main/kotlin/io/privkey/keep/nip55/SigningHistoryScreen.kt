@@ -187,7 +187,7 @@ fun SigningHistoryScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(stringResource(R.string.connections_history_back))
+            Text(stringResource(R.string.back))
         }
     }
 }

@@ -134,7 +134,7 @@ fun ShareDetailsScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(stringResource(R.string.share_details_back))
+            Text(stringResource(R.string.back))
         }
     }
 }

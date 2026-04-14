@@ -263,7 +263,7 @@ fun BunkerScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(stringResource(R.string.connections_bunker_back))
+            Text(stringResource(R.string.back))
         }
     }
 

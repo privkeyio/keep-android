@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
@@ -25,8 +26,7 @@ fun AccountSelectorCard(accountCount: Int, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                if (accountCount == 1) stringResource(R.string.share_cards_one_account)
-                else stringResource(R.string.share_cards_n_accounts, accountCount),
+                pluralStringResource(R.plurals.share_cards_accounts, accountCount, accountCount),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )

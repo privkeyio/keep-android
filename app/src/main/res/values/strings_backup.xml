@@ -9,7 +9,6 @@
     <string name="backup_restore_file_too_large">File too large (max <xliff:g id="mb" example="10">%1$d</xliff:g> MB)</string>
     <string name="backup_restore_read_failed">Failed to read file</string>
     <string name="backup_restore_top_title">Vault Backup</string>
-    <string name="backup_restore_back">Back</string>
     <string name="backup_restore_create_title">Create Backup</string>
     <string name="backup_restore_passphrase_label">Passphrase</string>
     <string name="backup_restore_confirm_passphrase_label">Confirm passphrase</string>
@@ -77,7 +76,6 @@
 
     <!-- SeedWordsScreen -->
     <string name="seed_words_title">Seed Words</string>
-    <string name="seed_words_back">Back</string>
     <string name="seed_words_none_available">No seed words available for this account. Seed words are only available for accounts created from a mnemonic in this app.</string>
     <string name="seed_words_warning">Write down these words and store them safely. Anyone with these words can access your account.</string>
     <string name="seed_words_saved_button">I\'ve saved my seed words</string>

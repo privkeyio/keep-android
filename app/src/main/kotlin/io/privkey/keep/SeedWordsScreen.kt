@@ -50,7 +50,7 @@ internal fun SeedWordsScreen(
 
     BackHandler { onDismiss() }
 
-    val backLabel = stringResource(R.string.seed_words_back)
+    val backLabel = stringResource(R.string.back)
 
     Column(
         modifier = Modifier

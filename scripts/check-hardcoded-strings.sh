@@ -8,9 +8,6 @@
 # With no arguments, scans a built-in list of files that have been fully
 # externalized and must not regress. Other files in the tree are NOT scanned
 # by default (follow-up work).
-#
-# Allowlist: files or paths that are permitted to contain inline strings
-# (typically developer-only screens, debug tooling, non-localizable labels).
 set -euo pipefail
 
 # Require PCRE-capable grep (GNU grep -P). BSD grep on macOS does not support
@@ -29,6 +26,7 @@ DEFAULT_TARGETS=(
     "app/src/main/kotlin/io/privkey/keep/AccountActions.kt"
     "app/src/main/kotlin/io/privkey/keep/AccountSwitcherSheet.kt"
     "app/src/main/kotlin/io/privkey/keep/BackupRestoreScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/BiometricHelper.kt"
     "app/src/main/kotlin/io/privkey/keep/BiometricUnlockScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/ConnectionCards.kt"
     "app/src/main/kotlin/io/privkey/keep/CreateAccountScreen.kt"
@@ -37,6 +35,7 @@ DEFAULT_TARGETS=(
     "app/src/main/kotlin/io/privkey/keep/ExportShareScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/ImportNsecScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/ImportShareScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/KeepMobileApp.kt"
     "app/src/main/kotlin/io/privkey/keep/MainActivity.kt"
     "app/src/main/kotlin/io/privkey/keep/MnemonicRecoveryScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/PinSetupScreen.kt"
@@ -51,17 +50,20 @@ DEFAULT_TARGETS=(
     "app/src/main/kotlin/io/privkey/keep/ShareDetailsScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/descriptor/WalletDescriptorScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip46/BunkerScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/nip46/Nip46ApprovalActivity.kt"
     "app/src/main/kotlin/io/privkey/keep/nip46/Nip46ApprovalScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/nip46/Nip46UiComponents.kt"
+    "app/src/main/kotlin/io/privkey/keep/nip46/NostrConnectActivity.kt"
     "app/src/main/kotlin/io/privkey/keep/nip46/NostrConnectApprovalScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/AppPermissionsScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/ConnectedAppsScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/nip55/Nip55Activity.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/Nip55ApprovalScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/nip55/Nip55ContentProvider.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/PermissionsManagementScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/SigningHistoryScreen.kt"
+    "app/src/main/kotlin/io/privkey/keep/service/SigningNotificationManager.kt"
 )
-
-# Allowlisted path suffixes; a file is skipped if it ends with any entry.
-ALLOWLIST=()
 
 if [[ $# -gt 0 ]]; then
     TARGETS=("$@")
@@ -86,14 +88,6 @@ done
 
 violations=0
 
-is_allowed() {
-    local file="$1" allowed
-    for allowed in ${ALLOWLIST[@]+"${ALLOWLIST[@]}"}; do
-        [[ "$file" == */"$allowed" ]] && return 0
-    done
-    return 1
-}
-
 report_matches() {
     local label="$1"
     local rc="$2"
@@ -105,10 +99,6 @@ report_matches() {
     fi
     [[ -z "$output" ]] && return 0
     while IFS= read -r match; do
-        local file="${match%%:*}"
-        if is_allowed "$file"; then
-            continue
-        fi
         echo "[$label] $match"
         violations=$((violations + 1))
     done <<< "$output"
@@ -137,7 +127,8 @@ scan_multiline() {
 }
 
 # Text("...") positional literal (any start except empty, interpolation, or escape).
-scan 'Text\("[^"$\\]' 'Text-literal'
+# Whitespace-tolerant: allow optional whitespace after the opening paren.
+scan 'Text\([[:space:]]*"[^"$\\]' 'Text-literal'
 
 # Text(text = "...") named-argument form, may span multiple lines.
 scan_multiline '(?s)Text\(\s*text\s*=\s*"[A-Za-z]' 'Text-named'

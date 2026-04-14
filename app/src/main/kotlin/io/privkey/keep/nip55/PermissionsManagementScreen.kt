@@ -145,7 +145,7 @@ fun PermissionsManagementScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(R.string.connections_permissions_back))
+                Text(stringResource(R.string.back))
             }
         }
     }

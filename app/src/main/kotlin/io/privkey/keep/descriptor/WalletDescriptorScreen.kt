@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
@@ -377,7 +378,7 @@ fun WalletDescriptorScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.wallet_descriptor_back))
+            Text(stringResource(R.string.back))
         }
     }
 
@@ -634,7 +635,7 @@ private fun PendingContributionsCard(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            stringResource(R.string.wallet_descriptor_pending_tiers, proposal.tiers.size),
+                            pluralStringResource(R.plurals.wallet_descriptor_pending_tiers, proposal.tiers.size, proposal.tiers.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

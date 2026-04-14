@@ -62,7 +62,6 @@
     <string name="connections_bunker_qr_label">Bunker URL</string>
     <string name="connections_bunker_url_copied">Bunker URL copied</string>
     <string name="connections_bunker_copy_button">Copy Bunker URL</string>
-    <string name="connections_bunker_back">Back</string>
     <string name="connections_bunker_toggle_title">Bunker Mode</string>
     <string name="connections_bunker_toggle_subtitle">Accept remote signing requests</string>
     <string name="connections_bunker_toast_add_relay_first">Add at least one relay first</string>
@@ -137,7 +136,6 @@
     <string name="connections_permissions_revoke_error">Failed to revoke permissions</string>
     <string name="connections_permissions_delete_error">Failed to delete permission</string>
     <string name="connections_permissions_none">No permissions granted</string>
-    <string name="connections_permissions_back">Back</string>
     <string name="connections_permissions_revoke_all_title">Revoke All Permissions</string>
     <string name="connections_permissions_revoke_all_text">Revoke all permissions for <xliff:g id="package" example="com.example">%1$s</xliff:g>? This app will need to request permissions again.</string>
     <string name="connections_permissions_revoke_all_confirm">Revoke All</string>
@@ -175,7 +173,7 @@
     <string name="connections_app_disconnect_app_button">Disconnect App</string>
     <string name="connections_app_nip46_client_cd">NIP-46 Client</string>
     <string name="connections_app_unverified_cd">Unverified</string>
-    <string name="connections_app_nip46_client_with_pubkey">NIP-46 Client (<xliff:g id="pubkey" example="abcd\u2026">%1$s</xliff:g>)</string>
+    <string name="connections_app_nip46_client_with_pubkey">NIP-46 Client (<xliff:g id="pubkey" example="abcd&#x2026;">%1$s</xliff:g>)</string>
     <string name="connections_app_unverified_warning">Warning: App not installed or unverified</string>
     <string name="connections_app_permission_expires">Expires: <xliff:g id="when" example="in 1 day">%1$s</xliff:g></string>
     <string name="connections_app_permission_permanent">Permanent</string>
@@ -184,14 +182,13 @@
     <!-- ConnectedAppsScreen -->
     <string name="connections_app_load_error_state">Failed to load connected apps</string>
     <string name="connections_app_nip46_client_row_label">NIP-46 Client</string>
-    <string name="connections_app_nip46_row">NIP-46 (<xliff:g id="pubkey" example="abcd\u2026">%1$s</xliff:g>)</string>
+    <string name="connections_app_nip46_row">NIP-46 (<xliff:g id="pubkey" example="abcd&#x2026;">%1$s</xliff:g>)</string>
 
     <!-- SigningHistoryScreen -->
     <string name="connections_history_title">Signing History</string>
     <string name="connections_history_subtitle">View past signing requests and decisions</string>
     <string name="connections_history_load_error">Failed to load signing history</string>
     <string name="connections_history_load_apps_error">Failed to load apps</string>
-    <string name="connections_history_back">Back</string>
     <string name="connections_history_all_apps">All apps</string>
     <string name="connections_history_filter_label">Filter by app</string>
     <string name="connections_history_none">No signing history</string>
