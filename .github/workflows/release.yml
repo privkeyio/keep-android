@@ -54,10 +54,15 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android,x86_64-linux-android
 
+      # cache-targets: false keeps only the cargo registry cached so release
+      # builds always compile from a clean target/, preserving bit-for-bit
+      # reproducibility (commit 07445c8) if rust-cache ever regresses and
+      # restores stale fingerprints.
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
           workspaces: keep
+          cache-targets: "false"
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
