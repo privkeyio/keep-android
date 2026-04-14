@@ -323,7 +323,9 @@ private fun ConfirmStep(
     onBack: () -> Unit,
     importState: ImportState
 ) {
-    val context = LocalContext.current
+    val biometricInvalidatedMessage = stringResource(R.string.create_account_biometric_invalidated)
+    val biometricUnavailableMessage = stringResource(R.string.create_account_biometric_unavailable)
+    val cipherFailedMessage = stringResource(R.string.create_account_cipher_failed)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -389,13 +391,13 @@ private fun ConfirmStep(
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Biometric key invalidated: ${e::class.simpleName}")
-                        onError(context.getString(R.string.create_account_biometric_invalidated))
+                        onError(biometricInvalidatedMessage)
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Biometric not ready: ${e::class.simpleName}")
-                        onError(context.getString(R.string.create_account_biometric_unavailable))
+                        onError(biometricUnavailableMessage)
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to initialize cipher: ${e::class.simpleName}")
-                        onError(context.getString(R.string.create_account_cipher_failed))
+                        onError(cipherFailedMessage)
                     }
                 }
             )

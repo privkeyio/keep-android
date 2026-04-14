@@ -74,11 +74,24 @@ scan() {
     done < <(grep -EnH "$pattern" "${RESOLVED[@]}" 2>/dev/null || true)
 }
 
+scan_multiline() {
+    local pattern="$1"
+    local label="$2"
+    while IFS= read -r match; do
+        local file="${match%%:*}"
+        if is_allowed "$file"; then
+            continue
+        fi
+        echo "[$label] $match"
+        violations=$((violations + 1))
+    done < <(grep -PznH "$pattern" "${RESOLVED[@]}" 2>/dev/null | tr '\0' '\n' || true)
+}
+
 # 1. Text("...") or Text("..." positional literal — any alphabetic start.
 scan 'Text\("[[:alpha:]]' 'Text-literal'
 
-# 2. Text(text = "...") named-argument form.
-scan 'Text\(\s*text\s*=\s*"[[:alpha:]]' 'Text-named'
+# 2. Text(text = "...") named-argument form (may span multiple lines).
+scan_multiline '(?s)Text\(\s*text\s*=\s*"[A-Za-z]' 'Text-named'
 
 # 3. contentDescription = "..." literal.
 scan 'contentDescription\s*=\s*"[^"$]' 'contentDescription'
@@ -94,7 +107,7 @@ if [[ $violations -gt 0 ]]; then
     echo ""
     echo "ERROR: $violations hardcoded user-facing string(s) found in:"
     for f in "${RESOLVED[@]}"; do
-        echo "  - ${f#$ROOT/}"
+        echo "  - ${f#"$ROOT"/}"
     done
     echo "Move them to app/src/main/res/values/strings.xml and use"
     echo "stringResource(R.string.x) / pluralResource / context.getString instead."
