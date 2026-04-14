@@ -63,6 +63,7 @@ jobs:
         with:
           workspaces: keep
           cache-targets: "false"
+          cache-all-crates: "true"
 
       # Release outputs cache is keyed by github.sha so it only hits on re-runs
       # of the exact same tag commit. This preserves bit-for-bit reproducibility:
