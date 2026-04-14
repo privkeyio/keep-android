@@ -29,6 +29,13 @@ jobs:
       - name: Verify toolchain version pins are consistent
         run: ./scripts/check-toolchain-pins.sh
 
+      - name: Derive SOURCE_DATE_EPOCH
+        run: |
+          SDE="$(ANDROID_REPO="$GITHUB_WORKSPACE" KEEP_REPO="$GITHUB_WORKSPACE/keep" \
+            ./scripts/derive-sde.sh)"
+          echo "SOURCE_DATE_EPOCH=$SDE" >> "$GITHUB_ENV"
+          echo "Using SOURCE_DATE_EPOCH=$SDE"
+
       - name: Set up JDK 17
         uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
@@ -89,6 +96,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
 
       - name: Verify APK is signed
         run: |

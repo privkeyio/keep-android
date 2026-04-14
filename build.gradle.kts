@@ -129,6 +129,9 @@ tasks.register<Exec>("buildRust") {
     workingDir = rootDir
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)
+    System.getenv("SOURCE_DATE_EPOCH")?.takeIf { it.isNotBlank() }?.let {
+        environment("SOURCE_DATE_EPOCH", it)
+    }
 
     inputs.file("${rootDir}/build-rust.sh").withPathSensitivity(PathSensitivity.RELATIVE)
     if (keepRepo.exists()) {

@@ -25,6 +25,13 @@ android {
         }
     }
 
+    // Reproducible builds: strip non-reproducible Play dependency metadata blob
+    // (contains signing timestamps) from APK and bundle outputs.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     signingConfigs {
         create("release") {
             val ksFile = System.getenv("KEYSTORE_FILE")
@@ -75,6 +82,7 @@ android {
                 "/lib/mips/**",
                 "/lib/mips64/**",
             )
+            useLegacyPackaging = false
         }
     }
 

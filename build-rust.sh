@@ -2,9 +2,57 @@
 set -euo pipefail
 
 KEEP_REPO="${KEEP_REPO:-./keep}"
+if [ ! -d "$KEEP_REPO" ]; then
+    echo "error: KEEP_REPO path does not exist: $KEEP_REPO" >&2
+    exit 1
+fi
+KEEP_REPO="$(cd "$KEEP_REPO" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUST_PROJECT="$KEEP_REPO/keep-mobile"
 JNILIBS_DIR="$SCRIPT_DIR/app/src/main/jniLibs"
+
+# Reproducible-build environment. Callers may override SOURCE_DATE_EPOCH.
+export LC_ALL=C
+export TZ=UTC
+umask 022
+
+SOURCE_DATE_EPOCH="$(ANDROID_REPO="$SCRIPT_DIR" KEEP_REPO="$KEEP_REPO" \
+    "$SCRIPT_DIR/scripts/derive-sde.sh")"
+if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
+    echo "error: derived SOURCE_DATE_EPOCH='$SOURCE_DATE_EPOCH' is not a non-negative integer." >&2
+    exit 1
+fi
+export SOURCE_DATE_EPOCH
+echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+
+# Strip absolute paths from rustc debuginfo so two builders with different
+# CARGO_HOME / workspace locations produce byte-identical .so files.
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+REMAP_FLAGS=(
+    "--remap-path-prefix=$RUST_PROJECT=/build/keep-mobile"
+    "--remap-path-prefix=$KEEP_REPO=/build"
+    "--remap-path-prefix=$CARGO_HOME_DIR/registry=/cargo/registry"
+    "--remap-path-prefix=$CARGO_HOME_DIR/git=/cargo/git"
+    "--remap-path-prefix=$CARGO_HOME_DIR=/cargo"
+)
+# Use CARGO_ENCODED_RUSTFLAGS with 0x1f (ASCII unit separator) between flags so
+# whitespace in paths (e.g., $HOME containing spaces) can't split a flag mid-arg.
+ALL_FLAGS=()
+if [ -n "${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
+    # Preserve pre-encoded flags verbatim as a single pre-joined segment.
+    ALL_FLAGS+=("$CARGO_ENCODED_RUSTFLAGS")
+elif [ -n "${RUSTFLAGS:-}" ]; then
+    # Best-effort preservation of a pre-set RUSTFLAGS: split on whitespace.
+    # Callers with spaces in RUSTFLAGS values should set CARGO_ENCODED_RUSTFLAGS.
+    # shellcheck disable=SC2206
+    ALL_FLAGS+=($RUSTFLAGS)
+    unset RUSTFLAGS
+fi
+ALL_FLAGS+=("${REMAP_FLAGS[@]}")
+# Join with 0x1f.
+printf -v CARGO_ENCODED_RUSTFLAGS '%s\x1f' "${ALL_FLAGS[@]}"
+CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS%$'\x1f'}"
+export CARGO_ENCODED_RUSTFLAGS
 
 # Pinned toolchain versions. Keep in sync with CI workflows and rust-toolchain.toml.
 EXPECTED_RUST="1.89.0"
@@ -96,7 +144,7 @@ done
 
 rm -f "$JNILIBS_DIR"/*/libredb-*.so
 
-BINDING_LIB=$(find "$JNILIBS_DIR" -name "libkeep_mobile.so" | head -1)
+BINDING_LIB=$(find "$JNILIBS_DIR" -name "libkeep_mobile.so" | LC_ALL=C sort | head -1)
 echo "Generating Kotlin bindings from $BINDING_LIB..."
 cargo run --bin uniffi-bindgen generate \
     --library "$BINDING_LIB" \
