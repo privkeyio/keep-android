@@ -22,8 +22,17 @@ KEEP_EPOCH=""
 if git -C "$ANDROID_REPO" rev-parse --git-dir >/dev/null 2>&1; then
     ANDROID_EPOCH=$(git -C "$ANDROID_REPO" log -1 --pretty=%ct 2>/dev/null || true)
 fi
-if [ -d "$KEEP_REPO" ] && git -C "$KEEP_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+if [ -d "$KEEP_REPO" ]; then
+    if ! git -C "$KEEP_REPO" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "error: KEEP_REPO='$KEEP_REPO' exists but is not a git repository." >&2
+        echo "Fix: clone keep as a git repo, or set SOURCE_DATE_EPOCH explicitly." >&2
+        exit 1
+    fi
     KEEP_EPOCH=$(git -C "$KEEP_REPO" log -1 --pretty=%ct 2>/dev/null || true)
+    if [ -z "$KEEP_EPOCH" ]; then
+        echo "error: failed to read HEAD commit time from KEEP_REPO='$KEEP_REPO'." >&2
+        exit 1
+    fi
 fi
 
 for name in ANDROID_EPOCH KEEP_EPOCH; do

@@ -56,6 +56,28 @@ gradle.taskGraph.whenReady {
             "(or install via Android Studio SDK Manager)."
         )
     }
+
+    val releaseTaskPattern = Regex("(^|:)(assemble|bundle|package)[A-Z0-9_].*[Rr]elease([A-Z0-9_].*)?$")
+    val buildingRelease = allTasks.any { task ->
+        releaseTaskPattern.containsMatchIn(task.path)
+    }
+    if (buildingRelease) {
+        val sde = System.getenv("SOURCE_DATE_EPOCH")
+        if (sde.isNullOrBlank()) {
+            throw GradleException(
+                "SOURCE_DATE_EPOCH is not set. Release builds require it to be set in the " +
+                "Gradle JVM environment so AGP's packaging and signing use a deterministic " +
+                "timestamp. Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\" " +
+                "before invoking Gradle."
+            )
+        }
+        if (!sde.matches(Regex("^[0-9]+$"))) {
+            throw GradleException(
+                "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
+                "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
+            )
+        }
+    }
 }
 
 val keepRepo = file(System.getenv("KEEP_REPO") ?: "${rootDir}/keep")
@@ -129,8 +151,14 @@ tasks.register<Exec>("buildRust") {
     workingDir = rootDir
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)
-    System.getenv("SOURCE_DATE_EPOCH")?.takeIf { it.isNotBlank() }?.let {
-        environment("SOURCE_DATE_EPOCH", it)
+    System.getenv("SOURCE_DATE_EPOCH")?.takeIf { it.isNotBlank() }?.let { sde ->
+        if (!sde.matches(Regex("^[0-9]+$"))) {
+            throw GradleException(
+                "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
+                "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
+            )
+        }
+        environment("SOURCE_DATE_EPOCH", sde)
     }
 
     inputs.file("${rootDir}/build-rust.sh").withPathSensitivity(PathSensitivity.RELATIVE)

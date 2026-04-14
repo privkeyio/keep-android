@@ -42,11 +42,11 @@ if [ -n "${CARGO_ENCODED_RUSTFLAGS:-}" ]; then
     # Preserve pre-encoded flags verbatim as a single pre-joined segment.
     ALL_FLAGS+=("$CARGO_ENCODED_RUSTFLAGS")
 elif [ -n "${RUSTFLAGS:-}" ]; then
-    # Best-effort preservation of a pre-set RUSTFLAGS: split on whitespace.
-    # Callers with spaces in RUSTFLAGS values should set CARGO_ENCODED_RUSTFLAGS.
-    # shellcheck disable=SC2206
-    ALL_FLAGS+=($RUSTFLAGS)
-    unset RUSTFLAGS
+    echo "error: RUSTFLAGS is set but CARGO_ENCODED_RUSTFLAGS is not." >&2
+    echo "Word-splitting RUSTFLAGS would silently corrupt flags containing spaces." >&2
+    echo "Fix: re-encode your flags into CARGO_ENCODED_RUSTFLAGS using 0x1f (ASCII unit" >&2
+    echo "separator) between flags, then unset RUSTFLAGS before invoking this script." >&2
+    exit 1
 fi
 ALL_FLAGS+=("${REMAP_FLAGS[@]}")
 # Join with 0x1f.
