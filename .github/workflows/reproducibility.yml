@@ -1,0 +1,160 @@
+name: Reproducibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  NDK_VERSION: "29.0.14206865"
+  CARGO_NDK_VERSION: "4.1.2"
+  RUST_VERSION: "1.89.0"
+  BUILD_TOOLS_VERSION: "36.0.0"
+
+jobs:
+  verify:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'reproducibility')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup keep checkout
+        uses: ./.github/actions/setup-keep
+
+      - name: Verify toolchain version pins are consistent
+        run: ./scripts/check-toolchain-pins.sh
+
+      - name: Derive SOURCE_DATE_EPOCH
+        run: |
+          SDE="$(ANDROID_REPO="$GITHUB_WORKSPACE" KEEP_REPO="$GITHUB_WORKSPACE/keep" \
+            ./scripts/derive-sde.sh)"
+          [[ "$SDE" =~ ^[0-9]+$ ]] || { echo "invalid SOURCE_DATE_EPOCH: $SDE" >&2; exit 1; }
+          echo "SOURCE_DATE_EPOCH=$SDE" >> "$GITHUB_ENV"
+          echo "Using SOURCE_DATE_EPOCH=$SDE"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install Android NDK and build-tools
+        run: sdkmanager --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
+        with:
+          tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      # Throwaway keystore for determinism verification only - never replace with real signing key.
+      - name: Generate workflow-local release keystore
+        run: |
+          KEYSTORE_OUT="${{ runner.temp }}/repro.keystore"
+          keytool -genkeypair -v \
+            -keystore "$KEYSTORE_OUT" \
+            -storetype PKCS12 \
+            -storepass reproducible \
+            -keypass reproducible \
+            -alias repro \
+            -keyalg RSA -keysize 4096 -validity 36500 \
+            -dname "CN=keep-reproducibility, O=CI, C=US"
+          echo "KEYSTORE_FILE=$KEYSTORE_OUT" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=repro" >> "$GITHUB_ENV"
+
+      - name: Build APK (run 1)
+        run: |
+          ./gradlew clean --no-daemon
+          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
+          ./build-rust.sh
+          ./gradlew assembleRelease --no-daemon
+          mkdir -p "${{ runner.temp }}/apks"
+          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build1.apk"
+        env:
+          KEEP_REPO: ${{ github.workspace }}/keep
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          KEYSTORE_PASSWORD: reproducible
+          KEY_PASSWORD: reproducible
+
+      - name: Build APK (run 2)
+        run: |
+          ./gradlew clean --no-daemon
+          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
+          ./build-rust.sh
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build2.apk"
+        env:
+          KEEP_REPO: ${{ github.workspace }}/keep
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          KEYSTORE_PASSWORD: reproducible
+          KEY_PASSWORD: reproducible
+
+      - name: Compare APK checksums
+        id: compare
+        run: |
+          cd "${{ runner.temp }}/apks"
+          sha256sum build1.apk build2.apk | tee checksums.txt
+          H1=$(sha256sum build1.apk | awk '{print $1}')
+          H2=$(sha256sum build2.apk | awk '{print $1}')
+          if [ "$H1" != "$H2" ]; then
+            echo "mismatch=true" >> "$GITHUB_OUTPUT"
+            echo "::error::APK reproducibility check failed: $H1 != $H2"
+            exit 1
+          fi
+          echo "APKs are bit-for-bit identical: $H1"
+
+      - name: Install diffoscope
+        if: failure() && steps.compare.outputs.mismatch == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends diffoscope
+
+      - name: Run diffoscope
+        if: failure() && steps.compare.outputs.mismatch == 'true'
+        run: |
+          cd "${{ runner.temp }}/apks"
+          diffoscope --html diffoscope.html --text diffoscope.txt build1.apk build2.apk || true
+
+      - name: Upload diffoscope report
+        if: failure() && steps.compare.outputs.mismatch == 'true'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: diffoscope-report
+          path: |
+            ${{ runner.temp }}/apks/diffoscope.html
+            ${{ runner.temp }}/apks/diffoscope.txt
+            ${{ runner.temp }}/apks/checksums.txt
+            ${{ runner.temp }}/apks/build1.apk
+            ${{ runner.temp }}/apks/build2.apk
