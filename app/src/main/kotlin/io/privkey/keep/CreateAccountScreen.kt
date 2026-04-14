@@ -35,7 +35,8 @@ fun CreateAccountScreen(
 ) {
     var step by remember { mutableStateOf(CreateAccountStep.SETUP) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }
-    var keyName by remember { mutableStateOf("Mobile Key") }
+    val defaultKeyName = stringResource(R.string.create_account_default_key_name)
+    var keyName by remember { mutableStateOf(defaultKeyName) }
     var isGenerating by remember { mutableStateOf(true) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
@@ -300,7 +301,7 @@ private fun SeedWordColumn(words: List<String>, range: IntRange, modifier: Modif
                 value = words[i],
                 onValueChange = {},
                 readOnly = true,
-                prefix = { Text("${i + 1}. ") },
+                prefix = { Text(stringResource(R.string.mnemonic_word_number, i + 1)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
