@@ -7,6 +7,16 @@ plugins {
 val expectedJavaMajor = 17
 val expectedNdkVersion = "29.0.14206865"
 
+fun validateSourceDateEpoch(sde: String): String {
+    if (!sde.matches(Regex("^[0-9]+$"))) {
+        throw GradleException(
+            "SOURCE_DATE_EPOCH='$sde' is not a non-negative integer. " +
+            "Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\"."
+        )
+    }
+    return sde
+}
+
 fun resolveAndroidSdkDir(): String? {
     System.getenv("ANDROID_HOME")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
     System.getenv("ANDROID_SDK_ROOT")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
@@ -55,6 +65,23 @@ gradle.taskGraph.whenReady {
             "Fix: sdkmanager --install \"ndk;$expectedNdkVersion\" " +
             "(or install via Android Studio SDK Manager)."
         )
+    }
+
+    val releaseTaskPattern = Regex("(^|:)(assemble|bundle|package)([A-Z0-9_].*)?Release([A-Z0-9_].*)?$")
+    val buildingRelease = allTasks.any { task ->
+        releaseTaskPattern.containsMatchIn(task.path)
+    }
+    if (buildingRelease) {
+        val sde = System.getenv("SOURCE_DATE_EPOCH")
+        if (sde.isNullOrBlank()) {
+            throw GradleException(
+                "SOURCE_DATE_EPOCH is not set. Release builds require it to be set in the " +
+                "Gradle JVM environment so AGP's packaging and signing use a deterministic " +
+                "timestamp. Fix: export SOURCE_DATE_EPOCH=\"\$(./scripts/derive-sde.sh)\" " +
+                "before invoking Gradle."
+            )
+        }
+        validateSourceDateEpoch(sde)
     }
 }
 
@@ -129,6 +156,9 @@ tasks.register<Exec>("buildRust") {
     workingDir = rootDir
     commandLine("bash", "build-rust.sh")
     environment("KEEP_REPO", keepRepo.absolutePath)
+    System.getenv("SOURCE_DATE_EPOCH")?.takeIf { it.isNotBlank() }?.let { sde ->
+        environment("SOURCE_DATE_EPOCH", validateSourceDateEpoch(sde))
+    }
 
     inputs.file("${rootDir}/build-rust.sh").withPathSensitivity(PathSensitivity.RELATIVE)
     if (keepRepo.exists()) {
