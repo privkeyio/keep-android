@@ -13,6 +13,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import io.privkey.keep.uniffi.KeepMobile
@@ -41,7 +42,8 @@ fun MnemonicRecoveryScreen(
     val clipboardManager = LocalClipboardManager.current
     var wordCount by remember { mutableIntStateOf(12) }
     val words = remember { mutableStateListOf(*Array(12) { "" }) }
-    var keyName by remember { mutableStateOf("Mobile Key") }
+    val defaultKeyName = stringResource(R.string.create_account_default_key_name)
+    var keyName by remember { mutableStateOf(defaultKeyName) }
     var validationError by remember { mutableStateOf<String?>(null) }
     var pasteError by remember { mutableStateOf<String?>(null) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -32,7 +33,8 @@ fun ImportNsecScreen(
     val context = LocalContext.current
     val nsecData = remember { SecureShareData(MAX_NSEC_LENGTH) }
     var nsecDisplay by remember { mutableStateOf("") }
-    var keyName by remember { mutableStateOf("Mobile Key") }
+    val defaultKeyName = stringResource(R.string.create_account_default_key_name)
+    var keyName by remember { mutableStateOf(defaultKeyName) }
     var showScanner by remember { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
     var isNsecVisible by remember { mutableStateOf(false) }

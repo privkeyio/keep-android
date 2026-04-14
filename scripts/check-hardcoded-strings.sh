@@ -13,6 +13,13 @@
 # (typically developer-only screens, debug tooling, non-localizable labels).
 set -euo pipefail
 
+# Require PCRE-capable grep (GNU grep -P). BSD grep on macOS does not support
+# -P and would silently produce no output, masking violations.
+if ! echo test | grep -P test >/dev/null 2>&1; then
+    echo "Error: grep -P (PCRE) required. Install GNU grep (e.g. 'brew install grep' on macOS and use ggrep, or run in CI)." >&2
+    exit 2
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Default set of files that have been externalized. Add new files here as they
@@ -34,6 +41,13 @@ else
     TARGETS=("${DEFAULT_TARGETS[@]}")
 fi
 
+# Safe expansion for possibly-empty ALLOWLIST under `set -u` (bash < 4.4 compat).
+expand_allowlist() {
+    if [[ ${#ALLOWLIST[@]} -gt 0 ]]; then
+        printf '%s\n' "${ALLOWLIST[@]}"
+    fi
+}
+
 # Resolve to absolute paths rooted at repo root and verify they exist.
 RESOLVED=()
 for t in "${TARGETS[@]}"; do
@@ -53,11 +67,12 @@ violations=0
 
 is_allowed() {
     local file="$1"
-    for allowed in "${ALLOWLIST[@]}"; do
-        if [[ -n "$allowed" && "$file" == *"$allowed"* ]]; then
+    local allowed
+    while IFS= read -r allowed; do
+        if [[ -n "$allowed" && "$file" == */"$allowed" ]]; then
             return 0
         fi
-    done
+    done < <(expand_allowlist)
     return 1
 }
 
@@ -71,7 +86,7 @@ scan() {
         fi
         echo "[$label] $match"
         violations=$((violations + 1))
-    done < <(grep -EnH "$pattern" "${RESOLVED[@]}" 2>/dev/null || true)
+    done < <(grep -EnH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null || true)
 }
 
 scan_multiline() {
@@ -84,7 +99,7 @@ scan_multiline() {
         fi
         echo "[$label] $match"
         violations=$((violations + 1))
-    done < <(grep -PznH "$pattern" "${RESOLVED[@]}" 2>/dev/null | tr '\0' '\n' || true)
+    done < <(grep -PznH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null | tr '\0' '\n' || true)
 }
 
 # 1. Text("...") or Text("..." positional literal — any alphabetic start.
