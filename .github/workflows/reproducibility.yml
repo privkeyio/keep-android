@@ -40,6 +40,7 @@ jobs:
         run: |
           SDE="$(ANDROID_REPO="$GITHUB_WORKSPACE" KEEP_REPO="$GITHUB_WORKSPACE/keep" \
             ./scripts/derive-sde.sh)"
+          [[ "$SDE" =~ ^[0-9]+$ ]] || { echo "invalid SOURCE_DATE_EPOCH: $SDE" >&2; exit 1; }
           echo "SOURCE_DATE_EPOCH=$SDE" >> "$GITHUB_ENV"
           echo "Using SOURCE_DATE_EPOCH=$SDE"
 
@@ -71,6 +72,7 @@ jobs:
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
+      # Throwaway keystore for determinism verification only - never replace with real signing key.
       - name: Generate workflow-local release keystore
         run: |
           KEYSTORE_OUT="${{ runner.temp }}/repro.keystore"
@@ -83,14 +85,12 @@ jobs:
             -keyalg RSA -keysize 4096 -validity 36500 \
             -dname "CN=keep-reproducibility, O=CI, C=US"
           echo "KEYSTORE_FILE=$KEYSTORE_OUT" >> "$GITHUB_ENV"
-          echo "KEYSTORE_PASSWORD=reproducible" >> "$GITHUB_ENV"
           echo "KEY_ALIAS=repro" >> "$GITHUB_ENV"
-          echo "KEY_PASSWORD=reproducible" >> "$GITHUB_ENV"
 
       - name: Build APK (run 1)
         run: |
           ./gradlew clean --no-daemon
-          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi
+          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
           ./build-rust.sh
           ./gradlew assembleRelease --no-daemon
           mkdir -p "${{ runner.temp }}/apks"
@@ -100,11 +100,13 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          KEYSTORE_PASSWORD: reproducible
+          KEY_PASSWORD: reproducible
 
       - name: Build APK (run 2)
         run: |
           ./gradlew clean --no-daemon
-          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi
+          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
           ./build-rust.sh
           ./gradlew assembleRelease --no-daemon
           cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build2.apk"
@@ -113,6 +115,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           AWS_LC_SYS_CMAKE_BUILDER: "1"
           SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          KEYSTORE_PASSWORD: reproducible
+          KEY_PASSWORD: reproducible
 
       - name: Compare APK checksums
         id: compare

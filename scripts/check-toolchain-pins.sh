@@ -48,7 +48,7 @@ BR_RUST=$(extract "$BUILD_RUST" 'EXPECTED_RUST="([0-9]+\.[0-9]+\.[0-9]+)"')
 BR_CARGO_NDK=$(extract "$BUILD_RUST" 'CARGO_NDK_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"')
 
 SEMVER='[0-9]+\.[0-9]+\.[0-9]+'
-NDK_VER='[0-9.]+'
+NDK_VER='[0-9]+(\.[0-9]+)*'
 
 CI_RUST=$(yaml_env "$CI_YML" RUST_VERSION "$SEMVER")
 CI_NDK=$(yaml_env "$CI_YML" NDK_VERSION "$NDK_VER")

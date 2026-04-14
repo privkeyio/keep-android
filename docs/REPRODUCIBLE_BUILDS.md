@@ -129,7 +129,8 @@ output APKs with `sha256sum`. The workflow:
   so the release signing path is exercised without production secrets.
   The same keystore is reused for both builds within the job.
 - Between the two builds it runs `./gradlew clean` and removes
-  `app/src/main/jniLibs` plus the generated `uniffi` Kotlin bindings,
+  `app/src/main/jniLibs`, the generated `uniffi` Kotlin bindings, and
+  `keep/keep-mobile/target` so run 2 exercises a cold Rust rebuild,
   then re-invokes `./build-rust.sh` and `./gradlew assembleRelease`.
 - On mismatch it installs `diffoscope`, generates HTML + text reports,
   and uploads them along with both APKs as the `diffoscope-report`
