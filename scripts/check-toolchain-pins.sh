@@ -39,22 +39,30 @@ for f in "$BUILD_RUST" "$CI_YML" "$RELEASE_YML" "$REPRO_YML" "$GRADLE_KTS"; do
     [ -f "$f" ] || fail "missing file: $f"
 done
 
+yaml_env() {
+    # yaml_env <file> <KEY> <value-regex>
+    extract "$1" "^[[:space:]]+$2: \"($3)\""
+}
+
 BR_RUST=$(extract "$BUILD_RUST" 'EXPECTED_RUST="([0-9]+\.[0-9]+\.[0-9]+)"')
 BR_CARGO_NDK=$(extract "$BUILD_RUST" 'CARGO_NDK_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"')
 
-CI_RUST=$(extract "$CI_YML" '^[[:space:]]+RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-CI_NDK=$(extract "$CI_YML" '^[[:space:]]+NDK_VERSION: "([0-9.]+)"')
-CI_CARGO_NDK=$(extract "$CI_YML" '^[[:space:]]+CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
+SEMVER='[0-9]+\.[0-9]+\.[0-9]+'
+NDK_VER='[0-9.]+'
 
-REL_RUST=$(extract "$RELEASE_YML" '^[[:space:]]+RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-REL_NDK=$(extract "$RELEASE_YML" '^[[:space:]]+NDK_VERSION: "([0-9.]+)"')
-REL_CARGO_NDK=$(extract "$RELEASE_YML" '^[[:space:]]+CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-REL_BUILD_TOOLS=$(extract "$RELEASE_YML" '^[[:space:]]+BUILD_TOOLS_VERSION: "([0-9.]+)"')
+CI_RUST=$(yaml_env "$CI_YML" RUST_VERSION "$SEMVER")
+CI_NDK=$(yaml_env "$CI_YML" NDK_VERSION "$NDK_VER")
+CI_CARGO_NDK=$(yaml_env "$CI_YML" CARGO_NDK_VERSION "$SEMVER")
 
-REPRO_RUST=$(extract "$REPRO_YML" '^[[:space:]]+RUST_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-REPRO_NDK=$(extract "$REPRO_YML" '^[[:space:]]+NDK_VERSION: "([0-9.]+)"')
-REPRO_CARGO_NDK=$(extract "$REPRO_YML" '^[[:space:]]+CARGO_NDK_VERSION: "([0-9]+\.[0-9]+\.[0-9]+)"')
-REPRO_BUILD_TOOLS=$(extract "$REPRO_YML" '^[[:space:]]+BUILD_TOOLS_VERSION: "([0-9.]+)"')
+REL_RUST=$(yaml_env "$RELEASE_YML" RUST_VERSION "$SEMVER")
+REL_NDK=$(yaml_env "$RELEASE_YML" NDK_VERSION "$NDK_VER")
+REL_CARGO_NDK=$(yaml_env "$RELEASE_YML" CARGO_NDK_VERSION "$SEMVER")
+REL_BUILD_TOOLS=$(yaml_env "$RELEASE_YML" BUILD_TOOLS_VERSION "$NDK_VER")
+
+REPRO_RUST=$(yaml_env "$REPRO_YML" RUST_VERSION "$SEMVER")
+REPRO_NDK=$(yaml_env "$REPRO_YML" NDK_VERSION "$NDK_VER")
+REPRO_CARGO_NDK=$(yaml_env "$REPRO_YML" CARGO_NDK_VERSION "$SEMVER")
+REPRO_BUILD_TOOLS=$(yaml_env "$REPRO_YML" BUILD_TOOLS_VERSION "$NDK_VER")
 
 GRADLE_NDK=$(extract "$GRADLE_KTS" 'expectedNdkVersion = "([0-9.]+)"')
 GRADLE_JDK=$(extract "$GRADLE_KTS" 'expectedJavaMajor = ([0-9]+)')
