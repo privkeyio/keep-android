@@ -47,17 +47,12 @@ for name in ANDROID_EPOCH KEEP_EPOCH; do
     fi
 done
 
-if [ -n "$ANDROID_EPOCH" ] && [ -n "$KEEP_EPOCH" ]; then
-    if [ "$ANDROID_EPOCH" -gt "$KEEP_EPOCH" ]; then
-        printf '%s\n' "$ANDROID_EPOCH"
-    else
-        printf '%s\n' "$KEEP_EPOCH"
-    fi
-elif [ -n "$ANDROID_EPOCH" ]; then
-    printf '%s\n' "$ANDROID_EPOCH"
-elif [ -n "$KEEP_EPOCH" ]; then
-    printf '%s\n' "$KEEP_EPOCH"
-else
+if [ -z "$ANDROID_EPOCH" ] && [ -z "$KEEP_EPOCH" ]; then
     echo "error: SOURCE_DATE_EPOCH unset and neither repo has git history to derive it." >&2
     exit 1
+fi
+if [ "${ANDROID_EPOCH:-0}" -gt "${KEEP_EPOCH:-0}" ]; then
+    printf '%s\n' "$ANDROID_EPOCH"
+else
+    printf '%s\n' "$KEEP_EPOCH"
 fi
