@@ -61,9 +61,8 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
-          workspaces: keep
+          workspaces: keep/keep-mobile
           cache-targets: "false"
-          cache-all-crates: "true"
 
       # Release outputs cache is keyed by github.sha so it only hits on re-runs
       # of the exact same tag commit. This preserves bit-for-bit reproducibility:

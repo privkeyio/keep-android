@@ -52,13 +52,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android
 
-      # cache-all-crates keeps full source for transitive deps; aws-lc-sys's
-      # build.rs reads sibling files that Swatinem prunes by default.
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
-          workspaces: keep
-          cache-all-crates: "true"
+          workspaces: keep/keep-mobile
 
       # The uniffi path assumes uniffi-bindgen only writes into the
       # io/privkey/keep/uniffi package (see build-rust.sh). release.yml has an
@@ -132,8 +129,7 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
-          workspaces: keep
-          cache-all-crates: "true"
+          workspaces: keep/keep-mobile
 
       # See aarch64 job for rationale.
       - name: Cache Rust build outputs
