@@ -30,23 +30,14 @@ DEFAULT_TARGETS=(
     "app/src/main/kotlin/io/privkey/keep/CreateAccountScreen.kt"
 )
 
-# Allowlisted substrings (one per line). A match on any = the file is skipped.
-ALLOWLIST=(
-    # (none yet - add paths here with justification)
-)
+# Allowlisted path suffixes; a file is skipped if it ends with any entry.
+ALLOWLIST=()
 
 if [[ $# -gt 0 ]]; then
     TARGETS=("$@")
 else
     TARGETS=("${DEFAULT_TARGETS[@]}")
 fi
-
-# Safe expansion for possibly-empty ALLOWLIST under `set -u` (bash < 4.4 compat).
-expand_allowlist() {
-    if [[ ${#ALLOWLIST[@]} -gt 0 ]]; then
-        printf '%s\n' "${ALLOWLIST[@]}"
-    fi
-}
 
 # Resolve to absolute paths rooted at repo root and verify they exist.
 RESOLVED=()
@@ -66,56 +57,50 @@ done
 violations=0
 
 is_allowed() {
-    local file="$1"
-    local allowed
-    while IFS= read -r allowed; do
-        if [[ -n "$allowed" && "$file" == */"$allowed" ]]; then
-            return 0
-        fi
-    done < <(expand_allowlist)
+    local file="$1" allowed
+    for allowed in ${ALLOWLIST[@]+"${ALLOWLIST[@]}"}; do
+        [[ "$file" == */"$allowed" ]] && return 0
+    done
     return 1
 }
 
+report() {
+    local label="$1" match="$2"
+    local file="${match%%:*}"
+    if is_allowed "$file"; then
+        return
+    fi
+    echo "[$label] $match"
+    violations=$((violations + 1))
+}
+
 scan() {
-    local pattern="$1"
-    local label="$2"
+    local pattern="$1" label="$2" match
     while IFS= read -r match; do
-        local file="${match%%:*}"
-        if is_allowed "$file"; then
-            continue
-        fi
-        echo "[$label] $match"
-        violations=$((violations + 1))
+        report "$label" "$match"
     done < <(grep -EnH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null || true)
 }
 
 scan_multiline() {
-    local pattern="$1"
-    local label="$2"
+    local pattern="$1" label="$2" match
     while IFS= read -r match; do
-        local file="${match%%:*}"
-        if is_allowed "$file"; then
-            continue
-        fi
-        echo "[$label] $match"
-        violations=$((violations + 1))
+        report "$label" "$match"
     done < <(grep -PznH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null | tr '\0' '\n' || true)
 }
 
-# 1. Text("...") or Text("..." positional literal — any alphabetic start.
+# Text("...") positional literal starting with a letter.
 scan 'Text\("[[:alpha:]]' 'Text-literal'
 
-# 2. Text(text = "...") named-argument form (may span multiple lines).
+# Text(text = "...") named-argument form, may span multiple lines.
 scan_multiline '(?s)Text\(\s*text\s*=\s*"[A-Za-z]' 'Text-named'
 
-# 3. contentDescription = "..." literal.
+# contentDescription = "..." literal.
 scan 'contentDescription\s*=\s*"[^"$]' 'contentDescription'
 
-# 4. label = { Text("...") } — catch simple one-liners that start with
-#    a letter inside lambda braces.
+# label = { Text("...") } one-liner inside lambda braces.
 scan 'label\s*=\s*\{\s*Text\("[[:alpha:]]' 'label'
 
-# 5. placeholder = "..." (e.g. TextField placeholder) with letter start.
+# placeholder = "..." with letter start.
 scan 'placeholder\s*=\s*"[[:alpha:]]' 'placeholder'
 
 if [[ $violations -gt 0 ]]; then
