@@ -445,19 +445,19 @@ private fun TagsSummarySection(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
             val eventsPreview = eTags.take(2).joinToString(", ") { (id, relay) -> formatEventIdDisplay(id, relay) }
-            val suffix = if (eTags.size > 2) " +${eTags.size - 2} more" else ""
+            val suffix = if (eTags.size > 2) stringResource(R.string.connections_nip55_more_suffix, eTags.size - 2) else ""
             TagSummaryRow(stringResource(R.string.connections_nip55_events_label), "$eventsPreview$suffix")
         }
 
         if (otherPubkeys.isNotEmpty()) {
             val mentionsPreview = otherPubkeys.take(2).joinToString(", ") { formatPubkeyDisplay(it) }
-            val suffix = if (otherPubkeys.size > 2) " +${otherPubkeys.size - 2} more" else ""
+            val suffix = if (otherPubkeys.size > 2) stringResource(R.string.connections_nip55_more_suffix, otherPubkeys.size - 2) else ""
             TagSummaryRow(stringResource(R.string.connections_nip55_mentions_label), "$mentionsPreview$suffix")
         }
 
         if (tTags.isNotEmpty()) {
             val topicsPreview = tTags.take(3).joinToString(", ") { "#$it" }
-            val suffix = if (tTags.size > 3) " +${tTags.size - 3} more" else ""
+            val suffix = if (tTags.size > 3) stringResource(R.string.connections_nip55_more_suffix, tTags.size - 3) else ""
             TagSummaryRow(stringResource(R.string.connections_nip55_topics_label), "$topicsPreview$suffix")
         }
     }

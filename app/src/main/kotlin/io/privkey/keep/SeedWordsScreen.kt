@@ -50,6 +50,8 @@ internal fun SeedWordsScreen(
 
     BackHandler { onDismiss() }
 
+    val backLabel = stringResource(R.string.seed_words_back)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -72,7 +74,7 @@ internal fun SeedWordsScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(R.string.seed_words_back))
+                Text(backLabel)
             }
             return@Column
         }
@@ -90,7 +92,7 @@ internal fun SeedWordsScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(R.string.seed_words_back))
+                Text(backLabel)
             }
             return@Column
         }
@@ -131,14 +133,14 @@ internal fun SeedWordsScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(R.string.seed_words_back))
+                Text(backLabel)
             }
         } else {
             Button(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(R.string.seed_words_back))
+                Text(backLabel)
             }
         }
     }

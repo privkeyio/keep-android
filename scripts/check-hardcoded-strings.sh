@@ -125,13 +125,13 @@ scan 'Text\("[[:alpha:]]' 'Text-literal'
 scan_multiline '(?s)Text\(\s*text\s*=\s*"[A-Za-z]' 'Text-named'
 
 # contentDescription = "..." literal.
-scan 'contentDescription\s*=\s*"[^"$]' 'contentDescription'
+scan 'contentDescription[[:space:]]*=[[:space:]]*"[^"$]' 'contentDescription'
 
 # label = { Text("...") } one-liner inside lambda braces.
-scan 'label\s*=\s*\{\s*Text\("[[:alpha:]]' 'label'
+scan 'label[[:space:]]*=[[:space:]]*\{[[:space:]]*Text\("[[:alpha:]]' 'label'
 
 # placeholder = "..." with letter start.
-scan 'placeholder\s*=\s*"[[:alpha:]]' 'placeholder'
+scan 'placeholder[[:space:]]*=[[:space:]]*"[[:alpha:]]' 'placeholder'
 
 if [[ $violations -gt 0 ]]; then
     echo ""

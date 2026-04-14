@@ -242,6 +242,7 @@
     <string name="connections_nip55_events_label">Events:</string>
     <string name="connections_nip55_mentions_label">Mentions:</string>
     <string name="connections_nip55_topics_label">Topics:</string>
+    <string name="connections_nip55_more_suffix"> +<xliff:g id="count" example="3">%1$d</xliff:g> more</string>
     <string name="connections_nip55_elevated_auth">Elevated authentication required</string>
     <string name="connections_nip46_method_connect">Connect</string>
     <string name="connections_nip46_method_get_public_key">Get Public Key</string>
