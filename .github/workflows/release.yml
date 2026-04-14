@@ -54,12 +54,37 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android,x86_64-linux-android
 
+      # cache-targets: false keeps only the cargo registry cached so release
+      # builds always compile from a clean target/, preserving bit-for-bit
+      # reproducibility (commit 07445c8) if rust-cache ever regresses and
+      # restores stale fingerprints.
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          workspaces: keep/keep-mobile
+          cache-targets: "false"
+
+      # Release outputs cache is keyed by github.sha so it only hits on re-runs
+      # of the exact same tag commit. This preserves bit-for-bit reproducibility:
+      # any input change (including SOURCE_DATE_EPOCH derived from commit times)
+      # produces a new cache entry. Same inputs, same bytes.
+      - name: Cache Rust build outputs
+        id: cache-rust-outputs
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            app/src/main/jniLibs
+            app/src/main/kotlin/io/privkey/keep/uniffi
+          key: rust-outputs-release-${{ runner.os }}-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}-sha${{ github.sha }}
+
       - name: Install cargo-ndk
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         run: ./build-rust.sh
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
