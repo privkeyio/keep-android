@@ -90,30 +90,28 @@ tasks.register("verifyKeepVersion") {
                 "git -C $keepPath checkout $pinnedSha"
             )
         }
-        val process = ProcessBuilder("git", "-C", keepPath, "rev-parse", "HEAD")
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
-        val actualSha = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        if (process.waitFor() != 0) {
-            throw GradleException(
-                "Failed to read HEAD of $keepPath. " +
-                "Fix: git -C $keepPath checkout $pinnedSha"
-            )
+        fun git(vararg args: String, onFailure: () -> String): String {
+            val proc = ProcessBuilder(listOf("git", "-C", keepPath) + args)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+            val output = proc.inputStream.bufferedReader().use { it.readText() }
+            if (proc.waitFor() != 0) {
+                throw GradleException(onFailure())
+            }
+            return output
         }
+        val actualSha = git("rev-parse", "HEAD") {
+            "Failed to read HEAD of $keepPath. Fix: git -C $keepPath checkout $pinnedSha"
+        }.trim()
         if (actualSha != pinnedSha) {
             throw GradleException(
                 "keep checkout at $keepPath is at $actualSha but keep.version pins $pinnedSha. " +
                 "Fix: git -C $keepPath checkout $pinnedSha"
             )
         }
-        val statusProcess = ProcessBuilder("git", "-C", keepPath, "status", "--porcelain")
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
-        val statusOutput = statusProcess.inputStream.bufferedReader().use { it.readText() }
-        if (statusProcess.waitFor() != 0) {
-            throw GradleException(
-                "Failed to check worktree status of $keepPath."
-            )
+        val statusOutput = git("status", "--porcelain") {
+            "Failed to check worktree status of $keepPath. " +
+            "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
         }
         if (statusOutput.isNotBlank()) {
             throw GradleException(
