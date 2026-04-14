@@ -110,3 +110,27 @@ diffoscope /tmp/build1.apk /tmp/build2.apk
 
 None currently documented. If a verifier finds a diff, attach the
 `diffoscope` output to an issue.
+
+## Automated CI enforcement
+
+`.github/workflows/reproducibility.yml` guards against regressions by
+building `assembleRelease` twice on the same runner and comparing the
+output APKs with `sha256sum`. The workflow:
+
+- Runs on `workflow_dispatch`, a weekly `schedule` (Mondays 06:00 UTC),
+  and on pull requests carrying the `reproducibility` label. It is
+  deliberately excluded from the default PR path because running two
+  release builds is expensive.
+- Pins the same toolchain as `release.yml` (Rust, cargo-ndk, NDK,
+  build-tools, JDK 17 Temurin) and derives `SOURCE_DATE_EPOCH` via
+  `scripts/derive-sde.sh`.
+- Generates a workflow-local PKCS12 keystore with `keytool` and exports
+  `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`
+  so the release signing path is exercised without production secrets.
+  The same keystore is reused for both builds within the job.
+- Between the two builds it runs `./gradlew clean` and removes
+  `app/src/main/jniLibs` plus the generated `uniffi` Kotlin bindings,
+  then re-invokes `./build-rust.sh` and `./gradlew assembleRelease`.
+- On mismatch it installs `diffoscope`, generates HTML + text reports,
+  and uploads them along with both APKs as the `diffoscope-report`
+  workflow artifact. The job fails so the regression is visible.
