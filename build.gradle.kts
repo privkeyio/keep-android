@@ -65,7 +65,6 @@ tasks.register("verifyKeepVersion") {
     description = "Verifies that the local keep checkout matches the pinned SHA in keep.version."
     val keepVersionFile = file("${rootDir}/keep.version")
     inputs.file(keepVersionFile).withPathSensitivity(PathSensitivity.RELATIVE)
-    outputs.upToDateWhen { false }
     doLast {
         if (!keepVersionFile.exists()) {
             throw GradleException("keep.version not found at ${keepVersionFile.absolutePath}.")
@@ -84,6 +83,13 @@ tasks.register("verifyKeepVersion") {
                 "git -C $keepPath checkout $pinnedSha"
             )
         }
+        if (!file("$keepPath/.git").exists()) {
+            throw GradleException(
+                "keep workspace at $keepPath is not a git repository. " +
+                "Fix: rm -rf $keepPath && git clone https://github.com/privkeyio/keep.git $keepPath && " +
+                "git -C $keepPath checkout $pinnedSha"
+            )
+        }
         val process = ProcessBuilder("git", "-C", keepPath, "rev-parse", "HEAD")
             .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
@@ -98,6 +104,21 @@ tasks.register("verifyKeepVersion") {
             throw GradleException(
                 "keep checkout at $keepPath is at $actualSha but keep.version pins $pinnedSha. " +
                 "Fix: git -C $keepPath checkout $pinnedSha"
+            )
+        }
+        val statusProcess = ProcessBuilder("git", "-C", keepPath, "status", "--porcelain")
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+        val statusOutput = statusProcess.inputStream.bufferedReader().use { it.readText() }
+        if (statusProcess.waitFor() != 0) {
+            throw GradleException(
+                "Failed to check worktree status of $keepPath."
+            )
+        }
+        if (statusOutput.isNotBlank()) {
+            throw GradleException(
+                "keep checkout at $keepPath has a dirty worktree, which bypasses SHA pinning. " +
+                "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
             )
         }
     }
