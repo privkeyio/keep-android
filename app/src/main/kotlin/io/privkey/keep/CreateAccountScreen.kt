@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
 import io.privkey.keep.uniffi.KeepMobile
@@ -39,18 +40,18 @@ fun CreateAccountScreen(
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
-    var generateError by remember { mutableStateOf<String?>(null) }
+    var generateError by remember { mutableStateOf(false) }
     var generateTrigger by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(generateTrigger) {
         isGenerating = true
-        generateError = null
+        generateError = false
         try {
             val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
             mnemonicData.update(mnemonic)
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to generate mnemonic: ${e::class.simpleName}")
-            generateError = "Failed to generate seed words. Please try again."
+            generateError = true
         } finally {
             isGenerating = false
         }
@@ -100,7 +101,7 @@ fun CreateAccountScreen(
 @Composable
 private fun SetupStep(
     isGenerating: Boolean,
-    generateError: String?,
+    generateError: Boolean,
     keyName: String,
     onKeyNameChange: (String) -> Unit,
     isInputEnabled: Boolean,
@@ -117,15 +118,15 @@ private fun SetupStep(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Create Account",
+            text = stringResource(R.string.create_account_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (generateError != null) {
+        if (generateError) {
             StatusCard(
-                text = generateError,
+                text = stringResource(R.string.create_account_generate_error),
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -140,22 +141,22 @@ private fun SetupStep(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.common_cancel))
                 }
                 Button(
                     onClick = onRetry,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Retry")
+                    Text(stringResource(R.string.common_retry))
                 }
             }
         } else if (isGenerating) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Generating seed words...")
+            Text(stringResource(R.string.create_account_generating))
         } else {
             StatusCard(
-                text = "Seed words generated. Choose a name and continue to view them.",
+                text = stringResource(R.string.create_account_generated_hint),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -165,7 +166,7 @@ private fun SetupStep(
             OutlinedTextField(
                 value = keyName,
                 onValueChange = onKeyNameChange,
-                label = { Text("Key Name") },
+                label = { Text(stringResource(R.string.create_account_key_name_label)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 enabled = isInputEnabled
@@ -181,14 +182,14 @@ private fun SetupStep(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.common_cancel))
                 }
                 Button(
                     onClick = onNext,
                     modifier = Modifier.weight(1f),
                     enabled = keyName.isNotBlank()
                 ) {
-                    Text("Next")
+                    Text(stringResource(R.string.common_next))
                 }
             }
         }
@@ -219,7 +220,7 @@ private fun SeedWordsStep(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Seed Words",
+            text = stringResource(R.string.create_account_seed_words_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -241,22 +242,22 @@ private fun SeedWordsStep(
             onClick = { showCopyWarning = true },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Copy to clipboard")
+            Text(stringResource(R.string.create_account_copy_clipboard))
         }
 
         if (showCopyWarning) {
             AlertDialog(
                 onDismissRequest = { showCopyWarning = false },
-                title = { Text("Copy seed words?") },
-                text = { Text("Your seed words will be placed on the clipboard, where other apps may be able to read them. The clipboard will be cleared after 10 seconds.") },
+                title = { Text(stringResource(R.string.create_account_copy_dialog_title)) },
+                text = { Text(stringResource(R.string.create_account_copy_dialog_text)) },
                 confirmButton = {
                     TextButton(onClick = {
                         showCopyWarning = false
                         copySensitiveText(context, mnemonicData.valueUnsafe())
-                    }) { Text("Copy") }
+                    }) { Text(stringResource(R.string.common_copy)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showCopyWarning = false }) { Text("Cancel") }
+                    TextButton(onClick = { showCopyWarning = false }) { Text(stringResource(R.string.common_cancel)) }
                 }
             )
         }
@@ -264,7 +265,7 @@ private fun SeedWordsStep(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Write down these words and store them safely. Anyone with these words can access your account.",
+            text = stringResource(R.string.create_account_seed_warning),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error
         )
@@ -279,13 +280,13 @@ private fun SeedWordsStep(
                 onClick = onBack,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Back")
+                Text(stringResource(R.string.common_back))
             }
             Button(
                 onClick = onNext,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("I've saved my seed words")
+                Text(stringResource(R.string.create_account_saved_button))
             }
         }
     }
@@ -321,6 +322,7 @@ private fun ConfirmStep(
     onBack: () -> Unit,
     importState: ImportState
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -330,14 +332,14 @@ private fun ConfirmStep(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Create Account",
+            text = stringResource(R.string.create_account_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Confirm you've saved your seed words",
+            text = stringResource(R.string.create_account_confirm_prompt),
             style = MaterialTheme.typography.bodyLarge
         )
 
@@ -354,7 +356,7 @@ private fun ConfirmStep(
 
         if (importState is ImportState.Success) {
             StatusCard(
-                text = "Account '${importState.name}' created successfully",
+                text = stringResource(R.string.create_account_success, importState.name),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -386,13 +388,13 @@ private fun ConfirmStep(
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Biometric key invalidated: ${e::class.simpleName}")
-                        onError("Biometric key invalidated. Please re-enroll biometrics.")
+                        onError(context.getString(R.string.create_account_biometric_invalidated))
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Biometric not ready: ${e::class.simpleName}")
-                        onError("Biometric authentication is unavailable")
+                        onError(context.getString(R.string.create_account_biometric_unavailable))
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to initialize cipher: ${e::class.simpleName}")
-                        onError("Failed to initialize encryption")
+                        onError(context.getString(R.string.create_account_cipher_failed))
                     }
                 }
             )

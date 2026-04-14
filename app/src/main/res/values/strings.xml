@@ -74,4 +74,51 @@
     <string name="bunker_service_title">Keep Bunker</string>
     <string name="bunker_service_text_starting">Starting bunker...</string>
     <string name="bunker_service_text_active">Bunker active - accepting remote signing requests</string>
+
+    <!-- Common / shared -->
+    <string name="common_cancel">Cancel</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_next">Next</string>
+    <string name="common_back">Back</string>
+    <string name="common_copy">Copy</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_tap_to_copy">Tap to copy</string>
+    <string name="common_copied_npub">npub copied</string>
+    <string name="common_copy_npub">Copy npub</string>
+    <string name="common_your_npub_label">Your public key (npub)</string>
+    <string name="common_qr_frame_of">Frame %1$d of %2$d</string>
+    <string name="common_qr_frames_failed">Some frames failed to generate</string>
+
+    <!-- Biometric unlock -->
+    <string name="biometric_unlock_title">Keep</string>
+    <string name="biometric_unlock_prompt">Authenticate to unlock</string>
+    <string name="biometric_unlock_lockout">Too many attempts. Try again shortly.</string>
+    <string name="biometric_unlock_lockout_permanent">Biometric locked. Use device PIN/password to unlock, then try again.</string>
+    <string name="biometric_unlock_try_again">Try Again</string>
+
+    <!-- Create account -->
+    <string name="create_account_title">Create Account</string>
+    <string name="create_account_generating">Generating seed words...</string>
+    <string name="create_account_generate_error">Failed to generate seed words. Please try again.</string>
+    <string name="create_account_generated_hint">Seed words generated. Choose a name and continue to view them.</string>
+    <string name="create_account_key_name_label">Key Name</string>
+    <string name="create_account_seed_words_title">Seed Words</string>
+    <string name="create_account_copy_clipboard">Copy to clipboard</string>
+    <string name="create_account_copy_dialog_title">Copy seed words?</string>
+    <string name="create_account_copy_dialog_text">Your seed words will be placed on the clipboard, where other apps may be able to read them. The clipboard will be cleared after 10 seconds.</string>
+    <string name="create_account_seed_warning">Write down these words and store them safely. Anyone with these words can access your account.</string>
+    <string name="create_account_saved_button">I\'ve saved my seed words</string>
+    <string name="create_account_confirm_prompt">Confirm you\'ve saved your seed words</string>
+    <string name="create_account_success">Account \'%1$s\' created successfully</string>
+    <string name="create_account_biometric_invalidated">Biometric key invalidated. Please re-enroll biometrics.</string>
+    <string name="create_account_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="create_account_cipher_failed">Failed to initialize encryption</string>
+
+    <!-- Mnemonic recovery / import -->
+    <string name="mnemonic_recovery_title">Import from Seed Words</string>
+    <string name="mnemonic_recovery_12_words">12 words</string>
+    <string name="mnemonic_recovery_24_words">24 words</string>
+    <string name="mnemonic_recovery_word_count">%1$d of %2$d words entered</string>
+    <string name="mnemonic_recovery_paste_too_many">Pasted text has too many words (max 24)</string>
+    <string name="mnemonic_recovery_invalid">Invalid seed words. Please check and try again.</string>
 </resources>

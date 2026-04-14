@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -44,14 +45,14 @@ fun BiometricUnlockScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "Keep",
+                text = stringResource(R.string.biometric_unlock_title),
                 style = MaterialTheme.typography.headlineLarge
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Authenticate to unlock",
+                text = stringResource(R.string.biometric_unlock_prompt),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -62,9 +63,9 @@ fun BiometricUnlockScreen(
 
                 val errorMessage = when (result) {
                     BiometricHelper.AuthResult.LOCKOUT ->
-                        "Too many attempts. Try again shortly."
+                        stringResource(R.string.biometric_unlock_lockout)
                     BiometricHelper.AuthResult.LOCKOUT_PERMANENT ->
-                        "Biometric locked. Use device PIN/password to unlock, then try again."
+                        stringResource(R.string.biometric_unlock_lockout_permanent)
                     else -> null
                 }
 
@@ -78,7 +79,7 @@ fun BiometricUnlockScreen(
                 }
 
                 Button(onClick = { coroutineScope.launch { attemptAuth() } }) {
-                    Text("Try Again")
+                    Text(stringResource(R.string.biometric_unlock_try_again))
                 }
             }
         }
