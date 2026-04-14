@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,6 +35,7 @@ fun Nip46ApprovalScreen(
     onApprove: (duration: PermissionDuration, onComplete: (success: Boolean) -> Unit) -> Unit,
     onReject: () -> Unit
 ) {
+    val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
     var selectedDuration by remember { mutableStateOf(if (isConnectRequest) PermissionDuration.FOREVER else PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
@@ -93,7 +95,7 @@ fun Nip46ApprovalScreen(
 
                 if (eventKind != null) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Nip46DetailRow(stringResource(R.string.connections_nip46_event_kind), EventKind.displayName(eventKind))
+                    Nip46DetailRow(stringResource(R.string.connections_nip46_event_kind), EventKind.displayName(context, eventKind))
                 }
 
                 if (!sanitizedContent.isNullOrBlank()) {

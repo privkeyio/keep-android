@@ -45,7 +45,6 @@ import java.util.UUID
 import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
-private const val PIN_MISMATCH_ERROR = "Certificate pin mismatch"
 
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
@@ -108,7 +107,7 @@ class KeepMobileApp : Application() {
                 }
             })
         }.onFailure { e ->
-            initError = "Failed to initialize application"
+            initError = getString(R.string.keep_mobile_init_failed_error)
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
         }
     }
@@ -150,7 +149,7 @@ class KeepMobileApp : Application() {
             signingAuditLog = SigningAuditLog(storage)
         }.onFailure { e ->
             Log.e(TAG, "Failed to initialize SigningAuditLog: ${e::class.simpleName}")
-            initError = "Signing audit log unavailable"
+            initError = getString(R.string.keep_mobile_audit_log_unavailable_error)
         }
     }
 
@@ -264,11 +263,11 @@ class KeepMobileApp : Application() {
     }
 
     fun connectWithCipher(cipher: Cipher, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val mobile = keepMobile ?: return onError("KeepMobile not initialized")
-        val store = storage ?: return onError("Storage not available")
+        val mobile = keepMobile ?: return onError(getString(R.string.keep_mobile_not_initialized_error))
+        val store = storage ?: return onError(getString(R.string.keep_mobile_storage_unavailable_error))
 
         val relays = getActiveRelays()
-        if (relays.isEmpty()) return onError("No relays configured")
+        if (relays.isEmpty()) return onError(getString(R.string.keep_mobile_no_relays_error))
 
         connectionJob?.cancel()
         reconnectJob?.cancel()
@@ -294,7 +293,11 @@ class KeepMobileApp : Application() {
                     if (isCancellationException(e)) return@onFailure
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to connect: ${e::class.simpleName}")
                     pinMismatch = findPinMismatch(e)
-                    val errorMsg = if (pinMismatch != null) PIN_MISMATCH_ERROR else "Connection failed"
+                    val errorMsg = if (pinMismatch != null) {
+                        getString(R.string.certificate_pin_mismatch_error)
+                    } else {
+                        getString(R.string.connection_failed_error)
+                    }
                     withContext(Dispatchers.Main) { onError(errorMsg) }
                 }
         }

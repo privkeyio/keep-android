@@ -60,7 +60,7 @@ class NostrConnectActivity : FragmentActivity() {
         }
 
         if (killSwitchStore?.isEnabled() == true) {
-            Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -103,7 +103,7 @@ class NostrConnectActivity : FragmentActivity() {
         val keystoreStorage = storage
         if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
             if (killSwitchStore?.isEnabled() == true) {
-                Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             }
             onComplete(false)
             finish()
@@ -112,7 +112,7 @@ class NostrConnectActivity : FragmentActivity() {
 
         val status = biometricHelper.checkBiometricStatus()
         if (status != BiometricHelper.BiometricStatus.AVAILABLE) {
-            Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(status), Toast.LENGTH_LONG).show()
+            Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(this, status), Toast.LENGTH_LONG).show()
             onComplete(false)
             finish()
             return
@@ -124,7 +124,7 @@ class NostrConnectActivity : FragmentActivity() {
                 .getOrNull()
 
             if (cipher == null) {
-                Toast.makeText(this@NostrConnectActivity, "Failed to access stored keys", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@NostrConnectActivity, getString(io.privkey.keep.R.string.failed_to_access_stored_keys_toast), Toast.LENGTH_SHORT).show()
                 onComplete(false)
                 finish()
                 return@launch

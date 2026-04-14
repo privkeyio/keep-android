@@ -267,7 +267,7 @@ fun MainScreen(
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
-    val requireBiometricReady = { BiometricHelper.requireBiometricReady(biometricStatus) }
+    val requireBiometricReady = { BiometricHelper.requireBiometricReady(appContext, biometricStatus) }
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var allAccounts by remember { mutableStateOf<List<AccountInfo>>(emptyList()) }

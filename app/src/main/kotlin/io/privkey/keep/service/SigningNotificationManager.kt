@@ -89,7 +89,7 @@ class SigningNotificationManager(private val context: Context) {
             pendingRequestData[effectiveRequestId] = PendingRequestInfo(intentUri, requestId, callerPackage)
         }
 
-        val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: "Unknown app"
+        val callerLabel = callerPackage?.let { getAppLabel(it) ?: it } ?: context.getString(R.string.unknown_app)
 
         val contentIntent = createBroadcastIntent(ACTION_OPEN_SIGNING_REQUEST, effectiveRequestId, notificationId)
         val deleteIntent = createBroadcastIntent(ACTION_DISMISS_REQUEST, effectiveRequestId, notificationId + DISMISS_REQUEST_CODE_OFFSET)

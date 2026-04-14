@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -326,6 +327,7 @@ private fun PermissionCard(
 ) {
     val isExpired = permission.isExpired()
     val currentDecision = permission.permissionDecision
+    val context = LocalContext.current
     val containerColor = if (isExpired) {
         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
     } else {
@@ -368,7 +370,7 @@ private fun PermissionCard(
 
                     permission.eventKindOrNull?.let { kind ->
                         Text(
-                            text = EventKind.displayName(kind),
+                            text = EventKind.displayName(context, kind),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

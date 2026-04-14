@@ -473,6 +473,7 @@ private fun PermissionItem(
     errorMessage: String? = null
 ) {
     val currentDecision = permission.permissionDecision
+    val context = LocalContext.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -488,7 +489,7 @@ private fun PermissionItem(
                     )
                     permission.eventKindOrNull?.let { kind ->
                         Text(
-                            text = EventKind.displayName(kind),
+                            text = EventKind.displayName(context, kind),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

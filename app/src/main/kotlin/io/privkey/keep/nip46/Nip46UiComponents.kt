@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 
@@ -76,15 +77,16 @@ internal fun PermissionDurationSelector(
     }
 }
 
+@Composable
 internal fun formatNip46Method(method: String): String = when (method) {
-    "connect" -> "Connect"
-    "get_public_key" -> "Get Public Key"
-    "sign_event" -> "Sign Event"
-    "nip44_encrypt" -> "Encrypt (NIP-44)"
-    "nip44_decrypt" -> "Decrypt (NIP-44)"
-    "nip04_encrypt" -> "Encrypt (NIP-04)"
-    "nip04_decrypt" -> "Decrypt (NIP-04)"
-    "ping" -> "Ping"
+    "connect" -> stringResource(R.string.connections_nip46_method_connect)
+    "get_public_key" -> stringResource(R.string.connections_nip46_method_get_public_key)
+    "sign_event" -> stringResource(R.string.connections_nip46_method_sign_event)
+    "nip44_encrypt" -> stringResource(R.string.connections_nip46_method_nip44_encrypt)
+    "nip44_decrypt" -> stringResource(R.string.connections_nip46_method_nip44_decrypt)
+    "nip04_encrypt" -> stringResource(R.string.connections_nip46_method_nip04_encrypt)
+    "nip04_decrypt" -> stringResource(R.string.connections_nip46_method_nip04_decrypt)
+    "ping" -> stringResource(R.string.connections_nip46_method_ping)
     else -> method
 }
 

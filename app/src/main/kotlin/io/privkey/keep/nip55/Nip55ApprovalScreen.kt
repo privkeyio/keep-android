@@ -356,8 +356,9 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
 
 @Composable
 private fun EventPreviewSection(preview: EventPreview) {
+    val context = LocalContext.current
     Spacer(modifier = Modifier.height(12.dp))
-    DetailRow(stringResource(R.string.connections_nip55_event_kind_label), EventKind.displayName(preview.kind))
+    DetailRow(stringResource(R.string.connections_nip55_event_kind_label), EventKind.displayName(context, preview.kind))
 
     sensitiveKindWarning(preview.kind)?.let { warning ->
         Spacer(modifier = Modifier.height(8.dp))

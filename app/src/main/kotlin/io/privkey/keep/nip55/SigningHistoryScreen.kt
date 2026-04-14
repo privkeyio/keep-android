@@ -14,6 +14,7 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -288,6 +289,7 @@ private fun SigningHistoryLogsList(
 
 @Composable
 private fun AuditLogCard(log: SigningAuditEntry) {
+    val context = LocalContext.current
     val isAllowed = log.decision == SigningDecision.APPROVED
 
     val containerColor = if (isAllowed) {
@@ -332,7 +334,7 @@ private fun AuditLogCard(log: SigningAuditEntry) {
 
             log.eventKind?.let { kind ->
                 Text(
-                    text = EventKind.displayName(kind.toInt()),
+                    text = EventKind.displayName(context, kind.toInt()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
