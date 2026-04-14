@@ -42,9 +42,12 @@ by exporting it explicitly.
 packaging and signing steps read it from the Gradle process environment;
 `build.gradle.kts` only forwards it into the `buildRust` `Exec`
 subprocess, so an unset shell variable will produce a non-reproducible
-APK even if the Rust build was reproducible. Easiest recipe:
+APK even if the Rust build was reproducible. Easiest recipe (the
+example assumes the `keep` checkout is at `./keep`; set `KEEP_REPO` if
+it lives elsewhere):
 
 ```bash
+export KEEP_REPO=../keep
 export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
 ```
 
@@ -64,19 +67,22 @@ belt-and-suspenders rather than load-bearing for APK reproducibility.
 ## Local verification
 
 ```bash
+export KEEP_REPO=../keep
+export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
+
 # clean state
 ./gradlew clean
 rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi
 
 # build 1
-KEEP_REPO=../keep ./build-rust.sh
+./build-rust.sh
 ANDROID_HOME=/usr/lib/android-sdk ./gradlew assembleRelease
 cp app/build/outputs/apk/release/app-release*.apk /tmp/build1.apk
 
 # clean and re-build
 ./gradlew clean
 rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi
-KEEP_REPO=../keep ./build-rust.sh
+./build-rust.sh
 ANDROID_HOME=/usr/lib/android-sdk ./gradlew assembleRelease
 cp app/build/outputs/apk/release/app-release*.apk /tmp/build2.apk
 
