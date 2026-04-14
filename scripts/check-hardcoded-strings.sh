@@ -94,32 +94,50 @@ is_allowed() {
     return 1
 }
 
-report() {
-    local label="$1" match="$2"
-    local file="${match%%:*}"
-    if is_allowed "$file"; then
-        return
+report_matches() {
+    local label="$1"
+    local rc="$2"
+    local pattern="$3"
+    local output="$4"
+    if [[ $rc -ge 2 ]]; then
+        echo "ERROR: grep failed (rc=$rc) for pattern: $pattern" >&2
+        exit "$rc"
     fi
-    echo "[$label] $match"
-    violations=$((violations + 1))
+    [[ -z "$output" ]] && return 0
+    while IFS= read -r match; do
+        local file="${match%%:*}"
+        if is_allowed "$file"; then
+            continue
+        fi
+        echo "[$label] $match"
+        violations=$((violations + 1))
+    done <<< "$output"
 }
 
 scan() {
-    local pattern="$1" label="$2" match
-    while IFS= read -r match; do
-        report "$label" "$match"
-    done < <(grep -EnH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null || true)
+    local pattern="$1"
+    local label="$2"
+    local output rc
+    set +e
+    output="$(grep -EnH "$pattern" -- "${RESOLVED[@]}")"
+    rc=$?
+    set -e
+    report_matches "$label" "$rc" "$pattern" "$output"
 }
 
 scan_multiline() {
-    local pattern="$1" label="$2" match
-    while IFS= read -r match; do
-        report "$label" "$match"
-    done < <(grep -PznH -- "$pattern" "${RESOLVED[@]}" 2>/dev/null | tr '\0' '\n' || true)
+    local pattern="$1"
+    local label="$2"
+    local output rc
+    set +e
+    output="$(grep -PznH "$pattern" -- "${RESOLVED[@]}" | tr '\0\n' '\n ')"
+    rc=${PIPESTATUS[0]}
+    set -e
+    report_matches "$label" "$rc" "$pattern" "$output"
 }
 
-# Text("...") positional literal starting with a letter.
-scan 'Text\("[[:alpha:]]' 'Text-literal'
+# Text("...") positional literal (any start except empty, interpolation, or escape).
+scan 'Text\("[^"$\\]' 'Text-literal'
 
 # Text(text = "...") named-argument form, may span multiple lines.
 scan_multiline '(?s)Text\(\s*text\s*=\s*"[A-Za-z]' 'Text-named'

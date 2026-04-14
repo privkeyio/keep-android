@@ -281,7 +281,7 @@ private fun SeedWordsStep(
                 onClick = onBack,
                 modifier = Modifier.weight(1f)
             ) {
-                Text(stringResource(R.string.common_back))
+                Text(stringResource(R.string.back))
             }
             Button(
                 onClick = onNext,
