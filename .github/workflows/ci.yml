@@ -57,11 +57,9 @@ jobs:
         with:
           workspaces: keep
 
-      # Do NOT adopt this outputs cache in release.yml: signed release artifacts
-      # must be rebuilt from source to preserve bit-for-bit reproducibility
-      # (see commit 07445c8). release.yml has no cache-hit shortcut and always
-      # runs build-rust.sh. The uniffi path assumes uniffi-bindgen only writes
-      # into the io/privkey/keep/uniffi package (see build-rust.sh).
+      # The uniffi path assumes uniffi-bindgen only writes into the
+      # io/privkey/keep/uniffi package (see build-rust.sh). release.yml has an
+      # analogous cache keyed by github.sha for bit-for-bit reproducibility.
       - name: Cache Rust build outputs
         id: cache-rust-outputs
         uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
