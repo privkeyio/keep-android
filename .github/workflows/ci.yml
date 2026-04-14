@@ -55,14 +55,25 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
-          workspaces: keep/keep-mobile
+          workspaces: keep
+
+      - name: Cache Rust build outputs
+        id: cache-rust-outputs
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            app/src/main/jniLibs
+            app/src/main/kotlin/io/privkey/keep/uniffi
+          key: rust-outputs-${{ runner.os }}-aarch64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         run: ./build-rust.sh
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
@@ -115,14 +126,25 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
         with:
-          workspaces: keep/keep-mobile
+          workspaces: keep
+
+      - name: Cache Rust build outputs
+        id: cache-rust-outputs
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            app/src/main/jniLibs
+            app/src/main/kotlin/io/privkey/keep/uniffi
+          key: rust-outputs-${{ runner.os }}-x86_64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Build native libraries
+        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         run: ./build-rust.sh
         env:
           KEEP_REPO: ${{ github.workspace }}/keep
