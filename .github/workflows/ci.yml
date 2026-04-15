@@ -148,7 +148,6 @@ jobs:
           key: rust-outputs-${{ runner.os }}-x86_64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        if: steps.cache-rust-outputs.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cf39a74df4a72510be4e5b63348d61067f11e64a # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
@@ -175,6 +174,11 @@ jobs:
 
       - name: Run instrumented tests
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2
+        env:
+          KEEP_REPO: ${{ github.workspace }}/keep
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          TARGETS: x86_64-linux-android
+          AWS_LC_SYS_CMAKE_BUILDER: "1"
         with:
           api-level: 33
           arch: x86_64
