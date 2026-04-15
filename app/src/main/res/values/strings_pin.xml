@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+<resources tools:ignore="MissingTranslation" xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="pin_setup_title">Set Up PIN</string>
     <string name="pin_setup_enter_prompt">Enter a <xliff:g id="min" example="4">%1$d</xliff:g>-<xliff:g id="max" example="8">%2$d</xliff:g> digit PIN</string>
     <string name="pin_setup_label_pin">PIN</string>
