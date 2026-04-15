@@ -1,0 +1,16 @@
+Keep ist eine App zur FROST-Schwellenwertsignierung (Flexible Round-Optimized Schnorr Threshold Signatures) und ein dedizierter Nostr-Event-Signierer für Android. Mit Keep kannst du FROST-Schlüsselanteile auf deinem Handy aufbewahren und Nostr-Ereignisse signieren, ohne dass ein einzelnes Gerät jemals den vollständigen privaten Schlüssel hält.
+
+Keep implementiert das NIP-55-Android-Signer-Protokoll sowie die NIP-46-Fernsignierung, sodass jeder kompatible Nostr-Client Signaturen direkt anfordern kann.
+
+Funktionen:
+- FROST-Schwellenwertsignierung (2 von 3, 3 von 5 usw.)
+- NIP-55-Android-Signer-Protokoll
+- NIP-46-Fernsignierung (Bunker-Dienst)
+- Import und Export von FROST-Anteilen per QR-Code oder Text
+- Unterstützung mehrerer Konten
+- Signierberechtigungen und -richtlinien pro App
+- Biometrische und PIN-Authentifizierung
+- Hardware-gestützte Schlüsselablage (Android Keystore)
+- NIP-44-Ver- und Entschlüsselung
+- SOCKS-Proxy-Unterstützung (Tor)
+- Verschlüsseltes Backup und Wiederherstellen

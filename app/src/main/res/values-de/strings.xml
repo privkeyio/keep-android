@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="permission_duration_just_this_time">Nur dieses Mal</string>
+    <string name="permission_duration_one_minute">Für 1 Minute</string>
+    <string name="permission_duration_five_minutes">Für 5 Minuten</string>
+    <string name="permission_duration_ten_minutes">Für 10 Minuten</string>
+    <string name="permission_duration_one_hour">Für 1 Stunde</string>
+    <string name="permission_duration_one_day">Für 1 Tag</string>
+    <string name="permission_duration_forever">Immer</string>
+
+    <string name="permission_decision_allow">Erlauben</string>
+    <string name="permission_decision_deny">Ablehnen</string>
+    <string name="permission_decision_ask">Fragen</string>
+
+    <string name="app_expiry_five_minutes">5 Minuten</string>
+    <string name="app_expiry_one_hour">1 Stunde</string>
+    <string name="app_expiry_one_day">1 Tag</string>
+    <string name="app_expiry_one_week">1 Woche</string>
+    <string name="app_expiry_never">Nie</string>
+    <string name="app_expiry_label">Automatisch trennen nach</string>
+    <string name="app_expires_in">Läuft ab <xliff:g id="when" example="in 5 minutes">%1$s</xliff:g></string>
+
+    <string name="connected_apps">Verbundene Apps</string>
+    <string name="back">Zurück</string>
+    <string name="no_connected_apps">Keine verbundenen Apps</string>
+    <string name="connected_apps_description">Apps, die Signierberechtigungen anfordern, erscheinen hier</string>
+    <string name="connected_apps_load_error">Verbundene Apps konnten nicht geladen werden</string>
+    <string name="connected_app_unverified">Nicht verifiziert</string>
+    <string name="connected_app_last_used">Zuletzt verwendet: <xliff:g id="timestamp" example="2 hours ago">%1$s</xliff:g></string>
+    <string name="connected_app_not_installed">App nicht installiert</string>
+    <plurals name="connected_app_permission_count">
+        <item quantity="one">%d Berechtigung</item>
+        <item quantity="other">%d Berechtigungen</item>
+    </plurals>
+
+    <string name="sign_policy">Signierrichtlinie</string>
+    <string name="sign_policy_basic">Einfach</string>
+    <string name="sign_policy_basic_description">Anfragen mit gespeicherten Berechtigungen automatisch genehmigen. Neue Berechtigungen erfordern eine Genehmigung.</string>
+    <string name="sign_policy_manual">Manuell</string>
+    <string name="sign_policy_manual_description">Für jede Signieranfrage immer den Genehmigungsbildschirm anzeigen, unabhängig von gespeicherten Berechtigungen.</string>
+    <string name="sign_policy_auto">Automatisch</string>
+    <string name="sign_policy_auto_description">Alle Signieranfragen ohne Nachfrage automatisch genehmigen. WARNUNG: Dies ist die unsicherste Option und sollte nur verwendet werden, wenn du allen verbundenen Apps voll vertraust.</string>
+    <string name="sign_policy_app_override">App-Überschreibung</string>
+    <string name="sign_policy_use_global">Globale Einstellung verwenden</string>
+    <string name="sign_policy_global_setting">Globale Einstellung</string>
+
+    <string name="foreground_service_channel_name">Hintergrunddienst</string>
+    <string name="foreground_service_channel_description">Dauerhafte Benachrichtigung für Relay-Verbindungen</string>
+    <string name="foreground_service_text">Relay-Verbindungen aktiv</string>
+
+    <string name="notification_channel_signing_requests">Signieranfragen</string>
+    <string name="notification_channel_signing_requests_description">Benachrichtigungen für NIP-55-Signieranfragen</string>
+    <string name="notification_request_from">Anfrage von <xliff:g id="app_name" example="Damus">%1$s</xliff:g></string>
+    <string name="notification_signing_request_pending">Signieranfrage ausstehend</string>
+
+    <string name="notification_channel_background_signing">Hintergrundsignierung</string>
+    <string name="notification_channel_background_signing_description">Benachrichtigungen, wenn Apps Ereignisse im Hintergrund signieren</string>
+    <string name="notification_background_signing_title">Hintergrundsignierung</string>
+    <string name="notification_background_signing_text"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>: <xliff:g id="message" example="Signed event">%2$s</xliff:g></string>
+    <string name="notification_kind_suffix">" (Art "<xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
+
+    <string name="auto_signing_opt_in">AUTOMATISCHES Signieren aktivieren</string>
+    <string name="auto_signing_opt_in_description">Dieser App erlauben, Ereignisse ohne Nachfrage zu signieren</string>
+    <string name="auto_signing_cooling_off">Abkühlphase bis <xliff:g id="time" example="10:30 AM">%1$s</xliff:g></string>
+    <string name="auto_signing_usage_stats">Nutzung: <xliff:g id="hourly_used" example="3">%1$d</xliff:g>/<xliff:g id="hourly_limit" example="10">%2$d</xliff:g> pro Stunde, <xliff:g id="daily_used" example="12">%3$d</xliff:g>/<xliff:g id="daily_limit" example="100">%4$d</xliff:g> pro Tag</string>
+
+    <string name="nip55_unverified_caller_warning">Warnung: Die anfragende App kann nicht verifiziert werden. Nur genehmigen, wenn du diese Aktion selbst initiiert hast.</string>
+    <string name="nip55_first_use_warning">Erste Verbindung dieser App. Eine Genehmigung vertraut dieser App auch bei zukünftigen Anfragen.</string>
+    <string name="nip55_signature_fingerprint">Signatur: <xliff:g id="fingerprint" example="ab:cd:ef">%1$s</xliff:g></string>
+
+    <string name="bunker_service_channel_name">NIP-46-Bunker</string>
+    <string name="bunker_service_channel_description">Dauerhafte Benachrichtigung für den NIP-46-Bunker-Modus</string>
+    <string name="bunker_service_text_starting">Bunker wird gestartet...</string>
+    <string name="bunker_service_text_active">Bunker aktiv - nimmt entfernte Signieranfragen an</string>
+
+    <!-- Common / shared -->
+    <string name="common_cancel">Abbrechen</string>
+    <string name="common_retry">Wiederholen</string>
+    <string name="common_next">Weiter</string>
+    <string name="common_copy">Kopieren</string>
+
+    <!-- Biometric unlock -->
+    <string name="biometric_unlock_prompt">Zum Entsperren authentifizieren</string>
+    <string name="biometric_unlock_lockout">Zu viele Versuche. Versuche es in Kürze erneut.</string>
+    <string name="biometric_unlock_lockout_permanent">Biometrie gesperrt. Verwende die Geräte-PIN bzw. das Passwort zum Entsperren und versuche es erneut.</string>
+    <string name="biometric_unlock_try_again">Erneut versuchen</string>
+
+    <!-- Create account -->
+    <string name="create_account_title">Konto erstellen</string>
+    <string name="create_account_generating">Seed-Wörter werden generiert...</string>
+    <string name="create_account_generate_error">Seed-Wörter konnten nicht generiert werden. Bitte erneut versuchen.</string>
+    <string name="create_account_generated_hint">Seed-Wörter erzeugt. Wähle einen Namen und fahre fort, um sie anzuzeigen.</string>
+    <string name="create_account_key_name_label">Schlüsselname</string>
+    <string name="create_account_default_key_name">Mobiler Schlüssel</string>
+    <string name="create_account_seed_words_title">Seed-Wörter</string>
+    <string name="create_account_copy_clipboard">In Zwischenablage kopieren</string>
+    <string name="create_account_copy_dialog_title">Seed-Wörter kopieren?</string>
+    <string name="create_account_copy_dialog_text">Deine Seed-Wörter werden in die Zwischenablage gelegt, wo andere Apps sie möglicherweise lesen können. Die Zwischenablage wird nach 10 Sekunden geleert.</string>
+    <string name="create_account_seed_warning">Notiere dir diese Wörter und bewahre sie sicher auf. Jeder, der diese Wörter hat, kann auf dein Konto zugreifen.</string>
+    <string name="create_account_saved_button">Ich habe meine Seed-Wörter gesichert</string>
+    <string name="create_account_confirm_prompt">Bestätige, dass du deine Seed-Wörter gesichert hast</string>
+    <string name="create_account_success">Konto \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' erfolgreich erstellt</string>
+    <string name="create_account_biometric_invalidated">Biometrischer Schlüssel ungültig. Bitte Biometrie erneut einrichten.</string>
+    <string name="create_account_biometric_unavailable">Biometrische Authentifizierung nicht verfügbar</string>
+    <string name="create_account_cipher_failed">Verschlüsselung konnte nicht initialisiert werden</string>
+
+    <!-- Mnemonic / seed word display -->
+    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+</resources>

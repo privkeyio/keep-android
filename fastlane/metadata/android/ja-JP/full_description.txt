@@ -1,0 +1,16 @@
+KeepはAndroid向けのFROST(Flexible Round-Optimized Schnorr Threshold Signatures)閾値署名アプリであり、専用のNostrイベント署名アプリです。FROST鍵シェアを端末に保持し、単一の端末が完全な秘密鍵を保持することなくNostrイベントに署名できます。
+
+KeepはNIP-55 Android Signerプロトコルおよび NIP-46リモート署名を実装しているため、互換性のあるあらゆるNostrクライアントから直接署名を要求できます。
+
+主な機能:
+- FROST閾値署名(2-of-3、3-of-5 など)
+- NIP-55 Android Signerプロトコル
+- NIP-46リモート署名(バンカーサービス)
+- QRコードまたはテキストによるFROSTシェアのインポート・エクスポート
+- 複数アカウント対応
+- アプリごとの署名権限およびポリシー
+- 生体認証およびPIN認証
+- ハードウェアバックアップ鍵ストレージ(Android Keystore)
+- NIP-44暗号化・復号
+- SOCKSプロキシ対応(Tor)
+- 暗号化されたバックアップと復元

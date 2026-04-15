@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="permission_duration_just_this_time">Solo esta vez</string>
+    <string name="permission_duration_one_minute">Durante 1 minuto</string>
+    <string name="permission_duration_five_minutes">Durante 5 minutos</string>
+    <string name="permission_duration_ten_minutes">Durante 10 minutos</string>
+    <string name="permission_duration_one_hour">Durante 1 hora</string>
+    <string name="permission_duration_one_day">Durante 1 día</string>
+    <string name="permission_duration_forever">Siempre</string>
+
+    <string name="permission_decision_allow">Permitir</string>
+    <string name="permission_decision_deny">Denegar</string>
+    <string name="permission_decision_ask">Preguntar</string>
+
+    <string name="app_expiry_five_minutes">5 minutos</string>
+    <string name="app_expiry_one_hour">1 hora</string>
+    <string name="app_expiry_one_day">1 día</string>
+    <string name="app_expiry_one_week">1 semana</string>
+    <string name="app_expiry_never">Nunca</string>
+    <string name="app_expiry_label">Desconectar automáticamente después de</string>
+    <string name="app_expires_in">Expira <xliff:g id="when" example="in 5 minutes">%1$s</xliff:g></string>
+
+    <string name="connected_apps">Aplicaciones conectadas</string>
+    <string name="back">Atrás</string>
+    <string name="no_connected_apps">No hay aplicaciones conectadas</string>
+    <string name="connected_apps_description">Las aplicaciones que soliciten permisos de firma aparecerán aquí</string>
+    <string name="connected_apps_load_error">No se pudieron cargar las aplicaciones conectadas</string>
+    <string name="connected_app_unverified">No verificada</string>
+    <string name="connected_app_last_used">Último uso: <xliff:g id="timestamp" example="2 hours ago">%1$s</xliff:g></string>
+    <string name="connected_app_not_installed">Aplicación no instalada</string>
+    <plurals name="connected_app_permission_count">
+        <item quantity="one">%d permiso</item>
+        <item quantity="other">%d permisos</item>
+    </plurals>
+
+    <string name="sign_policy">Política de firma</string>
+    <string name="sign_policy_basic">Básica</string>
+    <string name="sign_policy_basic_description">Aprobar automáticamente las solicitudes con permisos guardados. Los nuevos permisos pedirán aprobación.</string>
+    <string name="sign_policy_manual">Manual</string>
+    <string name="sign_policy_manual_description">Mostrar siempre la pantalla de aprobación para cada solicitud de firma, sin importar los permisos guardados.</string>
+    <string name="sign_policy_auto">Automática</string>
+    <string name="sign_policy_auto_description">Aprobar automáticamente todas las solicitudes de firma sin preguntar. ADVERTENCIA: Es la opción menos segura y solo debería usarse si confías plenamente en todas las aplicaciones conectadas.</string>
+    <string name="sign_policy_app_override">Anulación por aplicación</string>
+    <string name="sign_policy_use_global">Usar ajuste global</string>
+    <string name="sign_policy_global_setting">Ajuste global</string>
+
+    <string name="foreground_service_channel_name">Servicio en segundo plano</string>
+    <string name="foreground_service_channel_description">Notificación persistente para las conexiones a relés</string>
+    <string name="foreground_service_text">Conexiones a relés activas</string>
+
+    <string name="notification_channel_signing_requests">Solicitudes de firma</string>
+    <string name="notification_channel_signing_requests_description">Notificaciones de solicitudes de firma NIP-55</string>
+    <string name="notification_request_from">Solicitud de <xliff:g id="app_name" example="Damus">%1$s</xliff:g></string>
+    <string name="notification_signing_request_pending">Solicitud de firma pendiente</string>
+
+    <string name="notification_channel_background_signing">Firma en segundo plano</string>
+    <string name="notification_channel_background_signing_description">Notificaciones cuando las aplicaciones firman eventos en segundo plano</string>
+    <string name="notification_background_signing_title">Firma en segundo plano</string>
+    <string name="notification_background_signing_text"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>: <xliff:g id="message" example="Signed event">%2$s</xliff:g></string>
+    <string name="notification_kind_suffix">" (tipo "<xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
+
+    <string name="auto_signing_opt_in">Activar la firma AUTOMÁTICA</string>
+    <string name="auto_signing_opt_in_description">Permitir que esta aplicación firme eventos sin preguntar</string>
+    <string name="auto_signing_cooling_off">Enfriándose hasta las <xliff:g id="time" example="10:30 AM">%1$s</xliff:g></string>
+    <string name="auto_signing_usage_stats">Uso: <xliff:g id="hourly_used" example="3">%1$d</xliff:g>/<xliff:g id="hourly_limit" example="10">%2$d</xliff:g> por hora, <xliff:g id="daily_used" example="12">%3$d</xliff:g>/<xliff:g id="daily_limit" example="100">%4$d</xliff:g> al día</string>
+
+    <string name="nip55_unverified_caller_warning">Advertencia: no se puede verificar la aplicación solicitante. Aprueba solo si tú iniciaste esta acción.</string>
+    <string name="nip55_first_use_warning">Primera conexión desde esta aplicación. Al aprobar, confiarás en ella para solicitudes futuras.</string>
+    <string name="nip55_signature_fingerprint">Firma: <xliff:g id="fingerprint" example="ab:cd:ef">%1$s</xliff:g></string>
+
+    <string name="bunker_service_channel_name">Bunker NIP-46</string>
+    <string name="bunker_service_channel_description">Notificación persistente para el modo bunker NIP-46</string>
+    <string name="bunker_service_text_starting">Iniciando bunker...</string>
+    <string name="bunker_service_text_active">Bunker activo - aceptando solicitudes de firma remota</string>
+
+    <!-- Common / shared -->
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_retry">Reintentar</string>
+    <string name="common_next">Siguiente</string>
+    <string name="common_copy">Copiar</string>
+
+    <!-- Biometric unlock -->
+    <string name="biometric_unlock_prompt">Autentícate para desbloquear</string>
+    <string name="biometric_unlock_lockout">Demasiados intentos. Inténtalo de nuevo en un momento.</string>
+    <string name="biometric_unlock_lockout_permanent">Biometría bloqueada. Usa el PIN o la contraseña del dispositivo para desbloquear y vuelve a intentarlo.</string>
+    <string name="biometric_unlock_try_again">Reintentar</string>
+
+    <!-- Create account -->
+    <string name="create_account_title">Crear cuenta</string>
+    <string name="create_account_generating">Generando palabras semilla...</string>
+    <string name="create_account_generate_error">No se pudieron generar las palabras semilla. Inténtalo de nuevo.</string>
+    <string name="create_account_generated_hint">Palabras semilla generadas. Elige un nombre y continúa para verlas.</string>
+    <string name="create_account_key_name_label">Nombre de la clave</string>
+    <string name="create_account_default_key_name">Clave móvil</string>
+    <string name="create_account_seed_words_title">Palabras semilla</string>
+    <string name="create_account_copy_clipboard">Copiar al portapapeles</string>
+    <string name="create_account_copy_dialog_title">¿Copiar las palabras semilla?</string>
+    <string name="create_account_copy_dialog_text">Tus palabras semilla se colocarán en el portapapeles, donde otras aplicaciones podrían leerlas. El portapapeles se borrará después de 10 segundos.</string>
+    <string name="create_account_seed_warning">Anota estas palabras y guárdalas en un lugar seguro. Cualquiera que las tenga podrá acceder a tu cuenta.</string>
+    <string name="create_account_saved_button">He guardado mis palabras semilla</string>
+    <string name="create_account_confirm_prompt">Confirma que has guardado tus palabras semilla</string>
+    <string name="create_account_success">Cuenta \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' creada correctamente</string>
+    <string name="create_account_biometric_invalidated">Clave biométrica invalidada. Vuelve a registrar tus datos biométricos.</string>
+    <string name="create_account_biometric_unavailable">La autenticación biométrica no está disponible</string>
+    <string name="create_account_cipher_failed">No se pudo inicializar el cifrado</string>
+
+    <!-- Mnemonic / seed word display -->
+    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+</resources>

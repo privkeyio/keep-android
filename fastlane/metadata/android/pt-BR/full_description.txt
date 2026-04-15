@@ -1,0 +1,16 @@
+Keep é um aplicativo de assinatura de limiar FROST (Flexible Round-Optimized Schnorr Threshold Signatures) e um assinador dedicado de eventos Nostr para Android. Ele permite manter partes de chave FROST no seu celular e assinar eventos Nostr sem que nenhum dispositivo detenha a chave privada completa.
+
+O Keep implementa o protocolo NIP-55 Android Signer e a assinatura remota NIP-46, para que qualquer cliente Nostr compatível possa solicitar assinaturas diretamente.
+
+Recursos:
+- Assinatura de limiar FROST (2 de 3, 3 de 5, etc.)
+- Protocolo NIP-55 Android Signer
+- Assinatura remota NIP-46 (serviço bunker)
+- Importação e exportação de partes FROST via QR code ou texto
+- Suporte a várias contas
+- Permissões e políticas de assinatura por aplicativo
+- Autenticação biométrica e por PIN
+- Armazenamento de chaves com suporte de hardware (Android Keystore)
+- Criptografia e descriptografia NIP-44
+- Suporte a proxy SOCKS (Tor)
+- Backup e restauração criptografados

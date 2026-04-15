@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="permission_duration_just_this_time">今回のみ</string>
+    <string name="permission_duration_one_minute">1分間</string>
+    <string name="permission_duration_five_minutes">5分間</string>
+    <string name="permission_duration_ten_minutes">10分間</string>
+    <string name="permission_duration_one_hour">1時間</string>
+    <string name="permission_duration_one_day">1日間</string>
+    <string name="permission_duration_forever">常に許可</string>
+
+    <string name="permission_decision_allow">許可</string>
+    <string name="permission_decision_deny">拒否</string>
+    <string name="permission_decision_ask">確認</string>
+
+    <string name="app_expiry_five_minutes">5分</string>
+    <string name="app_expiry_one_hour">1時間</string>
+    <string name="app_expiry_one_day">1日</string>
+    <string name="app_expiry_one_week">1週間</string>
+    <string name="app_expiry_never">なし</string>
+    <string name="app_expiry_label">この時間が経過したら自動的に切断</string>
+    <string name="app_expires_in"><xliff:g id="when" example="in 5 minutes">%1$s</xliff:g>に期限切れ</string>
+
+    <string name="connected_apps">接続中のアプリ</string>
+    <string name="back">戻る</string>
+    <string name="no_connected_apps">接続中のアプリはありません</string>
+    <string name="connected_apps_description">署名権限を要求したアプリがここに表示されます</string>
+    <string name="connected_apps_load_error">接続中のアプリを読み込めませんでした</string>
+    <string name="connected_app_unverified">未検証</string>
+    <string name="connected_app_last_used">最終使用: <xliff:g id="timestamp" example="2 hours ago">%1$s</xliff:g></string>
+    <string name="connected_app_not_installed">アプリがインストールされていません</string>
+    <plurals name="connected_app_permission_count">
+        <item quantity="other">%d件の権限</item>
+    </plurals>
+
+    <string name="sign_policy">署名ポリシー</string>
+    <string name="sign_policy_basic">基本</string>
+    <string name="sign_policy_basic_description">保存された権限のリクエストを自動承認します。新しい権限については承認を求めます。</string>
+    <string name="sign_policy_manual">手動</string>
+    <string name="sign_policy_manual_description">保存された権限に関わらず、すべての署名リクエストに対して承認画面を表示します。</string>
+    <string name="sign_policy_auto">自動</string>
+    <string name="sign_policy_auto_description">確認なしにすべての署名リクエストを自動承認します。警告: 最も安全性の低いオプションです。接続中のすべてのアプリを完全に信頼する場合のみ使用してください。</string>
+    <string name="sign_policy_app_override">アプリ個別設定</string>
+    <string name="sign_policy_use_global">グローバル設定を使用</string>
+    <string name="sign_policy_global_setting">グローバル設定</string>
+
+    <string name="foreground_service_channel_name">バックグラウンドサービス</string>
+    <string name="foreground_service_channel_description">リレー接続の常時通知</string>
+    <string name="foreground_service_text">リレー接続中</string>
+
+    <string name="notification_channel_signing_requests">署名リクエスト</string>
+    <string name="notification_channel_signing_requests_description">NIP-55署名リクエストの通知</string>
+    <string name="notification_request_from"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>からのリクエスト</string>
+    <string name="notification_signing_request_pending">署名リクエストを処理待ちです</string>
+
+    <string name="notification_channel_background_signing">バックグラウンド署名</string>
+    <string name="notification_channel_background_signing_description">アプリがバックグラウンドでイベントに署名した際の通知</string>
+    <string name="notification_background_signing_title">バックグラウンド署名</string>
+    <string name="notification_background_signing_text"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>: <xliff:g id="message" example="Signed event">%2$s</xliff:g></string>
+    <string name="notification_kind_suffix">" (種別 "<xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
+
+    <string name="auto_signing_opt_in">自動署名を有効にする</string>
+    <string name="auto_signing_opt_in_description">このアプリに確認なしで署名することを許可します</string>
+    <string name="auto_signing_cooling_off"><xliff:g id="time" example="10:30 AM">%1$s</xliff:g>まで休止中</string>
+    <string name="auto_signing_usage_stats">使用状況: 1時間 <xliff:g id="hourly_used" example="3">%1$d</xliff:g>/<xliff:g id="hourly_limit" example="10">%2$d</xliff:g>、1日 <xliff:g id="daily_used" example="12">%3$d</xliff:g>/<xliff:g id="daily_limit" example="100">%4$d</xliff:g></string>
+
+    <string name="nip55_unverified_caller_warning">警告: リクエスト元アプリを検証できません。自分で開始した操作の場合のみ承認してください。</string>
+    <string name="nip55_first_use_warning">このアプリからの初回接続です。承認すると、このアプリの今後のリクエストも信頼されます。</string>
+    <string name="nip55_signature_fingerprint">署名: <xliff:g id="fingerprint" example="ab:cd:ef">%1$s</xliff:g></string>
+
+    <string name="bunker_service_channel_name">NIP-46 バンカー</string>
+    <string name="bunker_service_channel_description">NIP-46バンカーモードの常時通知</string>
+    <string name="bunker_service_text_starting">バンカーを起動中...</string>
+    <string name="bunker_service_text_active">バンカー起動中 - リモート署名リクエストを受け付け中</string>
+
+    <!-- Common / shared -->
+    <string name="common_cancel">キャンセル</string>
+    <string name="common_retry">再試行</string>
+    <string name="common_next">次へ</string>
+    <string name="common_copy">コピー</string>
+
+    <!-- Biometric unlock -->
+    <string name="biometric_unlock_prompt">認証してロックを解除してください</string>
+    <string name="biometric_unlock_lockout">試行回数が多すぎます。しばらくしてから再試行してください。</string>
+    <string name="biometric_unlock_lockout_permanent">生体認証がロックされました。デバイスのPINまたはパスワードでロックを解除してから再試行してください。</string>
+    <string name="biometric_unlock_try_again">再試行</string>
+
+    <!-- Create account -->
+    <string name="create_account_title">アカウントを作成</string>
+    <string name="create_account_generating">シード単語を生成中...</string>
+    <string name="create_account_generate_error">シード単語を生成できませんでした。もう一度お試しください。</string>
+    <string name="create_account_generated_hint">シード単語を生成しました。名前を入力し、次へ進んで表示してください。</string>
+    <string name="create_account_key_name_label">鍵の名前</string>
+    <string name="create_account_default_key_name">モバイル鍵</string>
+    <string name="create_account_seed_words_title">シード単語</string>
+    <string name="create_account_copy_clipboard">クリップボードにコピー</string>
+    <string name="create_account_copy_dialog_title">シード単語をコピーしますか?</string>
+    <string name="create_account_copy_dialog_text">シード単語がクリップボードに置かれ、他のアプリから読み取れる可能性があります。クリップボードは10秒後にクリアされます。</string>
+    <string name="create_account_seed_warning">これらの単語を書き留め、安全に保管してください。これらの単語を知る人は誰でもアカウントにアクセスできます。</string>
+    <string name="create_account_saved_button">シード単語を保存しました</string>
+    <string name="create_account_confirm_prompt">シード単語を保存したことを確認してください</string>
+    <string name="create_account_success">アカウント \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' を作成しました</string>
+    <string name="create_account_biometric_invalidated">生体認証鍵が無効になりました。生体情報を再登録してください。</string>
+    <string name="create_account_biometric_unavailable">生体認証を利用できません</string>
+    <string name="create_account_cipher_failed">暗号化を初期化できませんでした</string>
+
+    <!-- Mnemonic / seed word display -->
+    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+</resources>

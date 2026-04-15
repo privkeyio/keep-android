@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <string name="app_name">Keep</string>
+    <string name="app_name" translatable="false">Keep</string>
     <string name="permission_duration_just_this_time">Just this time</string>
     <string name="permission_duration_one_minute">For 1 minute</string>
     <string name="permission_duration_five_minutes">For 5 minutes</string>
@@ -47,7 +47,7 @@
 
     <string name="foreground_service_channel_name">Background Service</string>
     <string name="foreground_service_channel_description">Persistent notification for relay connections</string>
-    <string name="foreground_service_title">Keep</string>
+    <string name="foreground_service_title" translatable="false">Keep</string>
     <string name="foreground_service_text">Relay connections active</string>
 
     <string name="notification_channel_signing_requests">Signing Requests</string>
@@ -72,7 +72,7 @@
 
     <string name="bunker_service_channel_name">NIP-46 Bunker</string>
     <string name="bunker_service_channel_description">Persistent notification for NIP-46 bunker mode</string>
-    <string name="bunker_service_title">Keep Bunker</string>
+    <string name="bunker_service_title" translatable="false">Keep Bunker</string>
     <string name="bunker_service_text_starting">Starting bunker...</string>
     <string name="bunker_service_text_active">Bunker active - accepting remote signing requests</string>
 
@@ -83,7 +83,7 @@
     <string name="common_copy">Copy</string>
 
     <!-- Biometric unlock -->
-    <string name="biometric_unlock_title">Keep</string>
+    <string name="biometric_unlock_title" translatable="false">Keep</string>
     <string name="biometric_unlock_prompt">Authenticate to unlock</string>
     <string name="biometric_unlock_lockout">Too many attempts. Try again shortly.</string>
     <string name="biometric_unlock_lockout_permanent">Biometric locked. Use device PIN/password to unlock, then try again.</string>

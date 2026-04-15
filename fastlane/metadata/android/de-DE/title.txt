@@ -1,0 +1,1 @@
+Keep: FROST-Nostr-Signierer

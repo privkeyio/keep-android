@@ -1,0 +1,16 @@
+Keep es una aplicación de firma de umbral FROST (Flexible Round-Optimized Schnorr Threshold Signatures) y un firmante dedicado de eventos Nostr para Android. Te permite guardar fragmentos de clave FROST en tu teléfono y firmar eventos Nostr sin que ningún dispositivo almacene nunca la clave privada completa.
+
+Keep implementa el protocolo NIP-55 Android Signer y la firma remota NIP-46, para que cualquier cliente Nostr compatible pueda solicitar firmas directamente.
+
+Características:
+- Firma de umbral FROST (2 de 3, 3 de 5, etc.)
+- Protocolo NIP-55 Android Signer
+- Firma remota NIP-46 (servicio bunker)
+- Importación y exportación de fragmentos FROST mediante código QR o texto
+- Soporte para varias cuentas
+- Permisos y políticas de firma por aplicación
+- Autenticación biométrica y por PIN
+- Almacenamiento de claves respaldado por hardware (Android Keystore)
+- Cifrado y descifrado NIP-44
+- Soporte de proxy SOCKS (Tor)
+- Copia de seguridad y restauración cifradas

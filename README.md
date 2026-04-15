@@ -64,6 +64,8 @@ Run `scripts/check-toolchain-pins.sh` to verify pinned versions are consistent a
 
 [GitHub issues](https://github.com/privkeyio/keep-android/issues) and [pull requests](https://github.com/privkeyio/keep-android/pulls) are welcome.
 
+Translations are also welcome. Seed locales (Portuguese (Brazil), Spanish, German, Japanese) live under `app/src/main/res/values-<lang>[-r<REGION>]/strings.xml`; store listings live under `fastlane/metadata/android/<locale>/`. Open an issue to request a new locale. Weblate integration is planned. `scripts/check-locale-drift.sh` fails CI if a locale is missing any translatable key from the default `values/strings.xml`.
+
 By contributing to this repository, you agree to license your work under the MIT license. Any work contributed where you are not the original author must contain its license header with the original author(s) and source.
 
 # License
