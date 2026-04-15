@@ -14,8 +14,11 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.SigningAuditEntry
 import io.privkey.keep.uniffi.SigningAuditLog
 import io.privkey.keep.uniffi.SigningDecision
@@ -47,6 +50,8 @@ fun SigningHistoryScreen(
     val listState = rememberLazyListState()
 
     var loadError by remember { mutableStateOf<String?>(null) }
+    val errLoadHistory = stringResource(R.string.connections_history_load_error)
+    val errLoadApps = stringResource(R.string.connections_history_load_apps_error)
 
     fun loadLogs(reset: Boolean = false) {
         coroutineScope.launch {
@@ -74,7 +79,7 @@ fun SigningHistoryScreen(
                 hasMore = newLogs.size == PAGE_SIZE
                 loadError = null
             }.onFailure {
-                loadError = "Failed to load signing history"
+                loadError = errLoadHistory
             }
 
             isLoading = false
@@ -97,7 +102,7 @@ fun SigningHistoryScreen(
                     chainStatus = permissionStore.verifyAuditChain()
                 }
             } catch (e: Exception) {
-                loadError = "Failed to load apps"
+                loadError = errLoadApps
             }
         }
     }
@@ -126,14 +131,14 @@ fun SigningHistoryScreen(
             .padding(24.dp)
     ) {
         Text(
-            text = "Signing History",
+            text = stringResource(R.string.connections_history_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "View past signing requests and decisions",
+            text = stringResource(R.string.connections_history_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -182,7 +187,7 @@ fun SigningHistoryScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Back")
+            Text(stringResource(R.string.back))
         }
     }
 }
@@ -201,10 +206,10 @@ private fun AppFilterDropdown(
         onExpandedChange = onExpandedChange
     ) {
         OutlinedTextField(
-            value = selectedApp ?: "All apps",
+            value = selectedApp ?: stringResource(R.string.connections_history_all_apps),
             onValueChange = {},
             readOnly = true,
-            label = { Text("Filter by app") },
+            label = { Text(stringResource(R.string.connections_history_filter_label)) },
             trailingIcon = {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -220,7 +225,7 @@ private fun AppFilterDropdown(
             onDismissRequest = { onExpandedChange(false) }
         ) {
             DropdownMenuItem(
-                text = { Text("All apps") },
+                text = { Text(stringResource(R.string.connections_history_all_apps)) },
                 onClick = { onAppSelected(null) }
             )
             availableApps.forEach { app ->
@@ -248,7 +253,7 @@ private fun SigningHistoryLogsList(
     } else if (logs.isEmpty()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
             Text(
-                text = "No signing history",
+                text = stringResource(R.string.connections_history_none),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -284,6 +289,7 @@ private fun SigningHistoryLogsList(
 
 @Composable
 private fun AuditLogCard(log: SigningAuditEntry) {
+    val context = LocalContext.current
     val isAllowed = log.decision == SigningDecision.APPROVED
 
     val containerColor = if (isAllowed) {
@@ -328,7 +334,7 @@ private fun AuditLogCard(log: SigningAuditEntry) {
 
             log.eventKind?.let { kind ->
                 Text(
-                    text = EventKind.displayName(kind.toInt()),
+                    text = EventKind.displayName(context, kind.toInt()),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -359,7 +365,7 @@ private fun DecisionBadge(
                 shape = MaterialTheme.shapes.small
             ) {
                 Text(
-                    text = "Auto",
+                    text = stringResource(R.string.connections_history_auto),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -372,7 +378,7 @@ private fun DecisionBadge(
             shape = MaterialTheme.shapes.small
         ) {
             Text(
-                text = if (isAllowed) "Allowed" else "Denied",
+                text = if (isAllowed) stringResource(R.string.connections_history_allowed) else stringResource(R.string.connections_history_denied),
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (isAllowed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onError
@@ -387,17 +393,17 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
     val icon = if (isError) Icons.Default.Warning else Icons.Default.CheckCircle
     val (statusText, statusColor) = when (status) {
         is ChainVerificationResult.Valid ->
-            "Chain verified ($entryCount entries)" to MaterialTheme.colorScheme.primary
+            stringResource(R.string.connections_history_chain_verified, entryCount) to MaterialTheme.colorScheme.primary
         is ChainVerificationResult.PartiallyVerified ->
-            "Verified (${status.legacyEntriesSkipped} legacy entries)" to MaterialTheme.colorScheme.tertiary
+            stringResource(R.string.connections_history_chain_partial, status.legacyEntriesSkipped) to MaterialTheme.colorScheme.tertiary
         is ChainVerificationResult.Truncated ->
-            "Verified (older entries pruned)" to MaterialTheme.colorScheme.tertiary
+            stringResource(R.string.connections_history_chain_truncated) to MaterialTheme.colorScheme.tertiary
         is ChainVerificationResult.Broken ->
-            "Chain integrity issue detected" to MaterialTheme.colorScheme.error
+            stringResource(R.string.connections_history_chain_broken) to MaterialTheme.colorScheme.error
         is ChainVerificationResult.Tampered ->
-            "Tampering detected in audit log" to MaterialTheme.colorScheme.error
+            stringResource(R.string.connections_history_chain_tampered) to MaterialTheme.colorScheme.error
         null ->
-            "Verifying..." to MaterialTheme.colorScheme.onSurfaceVariant
+            stringResource(R.string.connections_history_chain_verifying) to MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Row(
@@ -419,17 +425,18 @@ private fun ChainStatusIndicator(status: ChainVerificationResult?, entryCount: I
     }
 }
 
+@Composable
 private fun formatSigningRequestType(type: SigningRequestType): String =
     when (type) {
-        SigningRequestType.CONNECT -> "Connect"
-        SigningRequestType.GET_PUBLIC_KEY -> "Get public key"
-        SigningRequestType.SIGN_EVENT -> "Sign event"
-        SigningRequestType.NIP04_ENCRYPT -> "NIP-04 encrypt"
-        SigningRequestType.NIP04_DECRYPT -> "NIP-04 decrypt"
-        SigningRequestType.NIP44_ENCRYPT -> "NIP-44 encrypt"
-        SigningRequestType.NIP44_DECRYPT -> "NIP-44 decrypt"
-        SigningRequestType.DISCONNECT -> "Disconnect"
-        SigningRequestType.KILL_SWITCH -> "Kill switch"
+        SigningRequestType.CONNECT -> stringResource(R.string.connections_history_type_connect)
+        SigningRequestType.GET_PUBLIC_KEY -> stringResource(R.string.connections_history_type_get_public_key)
+        SigningRequestType.SIGN_EVENT -> stringResource(R.string.connections_history_type_sign_event)
+        SigningRequestType.NIP04_ENCRYPT -> stringResource(R.string.connections_history_type_nip04_encrypt)
+        SigningRequestType.NIP04_DECRYPT -> stringResource(R.string.connections_history_type_nip04_decrypt)
+        SigningRequestType.NIP44_ENCRYPT -> stringResource(R.string.connections_history_type_nip44_encrypt)
+        SigningRequestType.NIP44_DECRYPT -> stringResource(R.string.connections_history_type_nip44_decrypt)
+        SigningRequestType.DISCONNECT -> stringResource(R.string.connections_history_type_disconnect)
+        SigningRequestType.KILL_SWITCH -> stringResource(R.string.connections_history_type_kill_switch)
     }
 
 private fun Nip55AuditLog.toSigningAuditEntry(): SigningAuditEntry {

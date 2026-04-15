@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_name">Keep</string>
     <string name="permission_duration_just_this_time">Just this time</string>
     <string name="permission_duration_one_minute">For 1 minute</string>
@@ -19,7 +19,7 @@
     <string name="app_expiry_one_week">1 week</string>
     <string name="app_expiry_never">Never</string>
     <string name="app_expiry_label">Auto-disconnect after</string>
-    <string name="app_expires_in">Expires %1$s</string>
+    <string name="app_expires_in">Expires <xliff:g id="when" example="in 5 minutes">%1$s</xliff:g></string>
 
     <string name="connected_apps">Connected Apps</string>
     <string name="back">Back</string>
@@ -27,7 +27,7 @@
     <string name="connected_apps_description">Apps that request signing permissions will appear here</string>
     <string name="connected_apps_load_error">Failed to load connected apps</string>
     <string name="connected_app_unverified">Unverified</string>
-    <string name="connected_app_last_used">Last used: %1$s</string>
+    <string name="connected_app_last_used">Last used: <xliff:g id="timestamp" example="2 hours ago">%1$s</xliff:g></string>
     <string name="connected_app_not_installed">App not installed</string>
     <plurals name="connected_app_permission_count">
         <item quantity="one">%d permission</item>
@@ -52,26 +52,62 @@
 
     <string name="notification_channel_signing_requests">Signing Requests</string>
     <string name="notification_channel_signing_requests_description">Notifications for NIP-55 signing requests</string>
-    <string name="notification_request_from">Request from %1$s</string>
+    <string name="notification_request_from">Request from <xliff:g id="app_name" example="Damus">%1$s</xliff:g></string>
     <string name="notification_signing_request_pending">Signing request pending</string>
 
     <string name="notification_channel_background_signing">Background Signing</string>
     <string name="notification_channel_background_signing_description">Notifications when apps sign events in the background</string>
     <string name="notification_background_signing_title">Background Signing</string>
-    <string name="notification_background_signing_text">%1$s: %2$s</string>
+    <string name="notification_background_signing_text"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>: <xliff:g id="message" example="Signed event">%2$s</xliff:g></string>
+    <string name="notification_kind_suffix">" (kind "<xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
 
     <string name="auto_signing_opt_in">Enable AUTO signing</string>
     <string name="auto_signing_opt_in_description">Allow this app to sign events without prompts</string>
-    <string name="auto_signing_cooling_off">Cooling off until %1$s</string>
-    <string name="auto_signing_usage_stats">Usage: %1$d/%2$d hourly, %3$d/%4$d daily</string>
+    <string name="auto_signing_cooling_off">Cooling off until <xliff:g id="time" example="10:30 AM">%1$s</xliff:g></string>
+    <string name="auto_signing_usage_stats">Usage: <xliff:g id="hourly_used" example="3">%1$d</xliff:g>/<xliff:g id="hourly_limit" example="10">%2$d</xliff:g> hourly, <xliff:g id="daily_used" example="12">%3$d</xliff:g>/<xliff:g id="daily_limit" example="100">%4$d</xliff:g> daily</string>
 
     <string name="nip55_unverified_caller_warning">Warning: Unable to verify the requesting app. Only approve if you initiated this action.</string>
     <string name="nip55_first_use_warning">First connection from this app. Approving will trust this app for future requests.</string>
-    <string name="nip55_signature_fingerprint">Signature: %1$s</string>
+    <string name="nip55_signature_fingerprint">Signature: <xliff:g id="fingerprint" example="ab:cd:ef">%1$s</xliff:g></string>
 
     <string name="bunker_service_channel_name">NIP-46 Bunker</string>
     <string name="bunker_service_channel_description">Persistent notification for NIP-46 bunker mode</string>
     <string name="bunker_service_title">Keep Bunker</string>
     <string name="bunker_service_text_starting">Starting bunker...</string>
     <string name="bunker_service_text_active">Bunker active - accepting remote signing requests</string>
+
+    <!-- Common / shared -->
+    <string name="common_cancel">Cancel</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_next">Next</string>
+    <string name="common_copy">Copy</string>
+
+    <!-- Biometric unlock -->
+    <string name="biometric_unlock_title">Keep</string>
+    <string name="biometric_unlock_prompt">Authenticate to unlock</string>
+    <string name="biometric_unlock_lockout">Too many attempts. Try again shortly.</string>
+    <string name="biometric_unlock_lockout_permanent">Biometric locked. Use device PIN/password to unlock, then try again.</string>
+    <string name="biometric_unlock_try_again">Try Again</string>
+
+    <!-- Create account -->
+    <string name="create_account_title">Create Account</string>
+    <string name="create_account_generating">Generating seed words...</string>
+    <string name="create_account_generate_error">Failed to generate seed words. Please try again.</string>
+    <string name="create_account_generated_hint">Seed words generated. Choose a name and continue to view them.</string>
+    <string name="create_account_key_name_label">Key Name</string>
+    <string name="create_account_default_key_name">Mobile Key</string>
+    <string name="create_account_seed_words_title">Seed Words</string>
+    <string name="create_account_copy_clipboard">Copy to clipboard</string>
+    <string name="create_account_copy_dialog_title">Copy seed words?</string>
+    <string name="create_account_copy_dialog_text">Your seed words will be placed on the clipboard, where other apps may be able to read them. The clipboard will be cleared after 10 seconds.</string>
+    <string name="create_account_seed_warning">Write down these words and store them safely. Anyone with these words can access your account.</string>
+    <string name="create_account_saved_button">I\'ve saved my seed words</string>
+    <string name="create_account_confirm_prompt">Confirm you\'ve saved your seed words</string>
+    <string name="create_account_success">Account \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' created successfully</string>
+    <string name="create_account_biometric_invalidated">Biometric key invalidated. Please re-enroll biometrics.</string>
+    <string name="create_account_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="create_account_cipher_failed">Failed to initialize encryption</string>
+
+    <!-- Mnemonic / seed word display -->
+    <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
 </resources>

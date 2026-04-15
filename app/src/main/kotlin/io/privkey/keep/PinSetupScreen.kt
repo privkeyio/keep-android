@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -29,14 +30,18 @@ fun PinSetupScreen(
     var confirmPinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
+    val errTooShort = stringResource(R.string.pin_setup_error_too_short, PinStore.MIN_PIN_LENGTH)
+    val errWeak = stringResource(R.string.pin_setup_error_weak)
+    val errMismatch = stringResource(R.string.pin_setup_error_mismatch)
+    val errFailed = stringResource(R.string.pin_setup_error_failed)
 
     fun validateAndProceed(): Boolean {
         if (pinInput.length < PinStore.MIN_PIN_LENGTH) {
-            error = "PIN must be at least ${PinStore.MIN_PIN_LENGTH} digits"
+            error = errTooShort
             return false
         }
         if (pinStore.isWeakPin(pinInput)) {
-            error = "PIN is too simple. Avoid patterns like 1234 or 0000."
+            error = errWeak
             return false
         }
         step = SetupStep.CONFIRM_PIN
@@ -45,7 +50,7 @@ fun PinSetupScreen(
 
     fun confirmAndSetPin(): Boolean {
         if (confirmPinInput != pinInput) {
-            error = "PINs don't match"
+            error = errMismatch
             confirmPinInput = ""
             return false
         }
@@ -56,7 +61,7 @@ fun PinSetupScreen(
             onPinSet()
             return true
         }
-        error = "Failed to set PIN"
+        error = errFailed
         return false
     }
 
@@ -67,10 +72,10 @@ fun PinSetupScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Set Up PIN") },
+                title = { Text(stringResource(R.string.pin_setup_title)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -87,7 +92,11 @@ fun PinSetupScreen(
             when (step) {
                 SetupStep.ENTER_PIN -> {
                     Text(
-                        text = "Enter a ${PinStore.MIN_PIN_LENGTH}-${PinStore.MAX_PIN_LENGTH} digit PIN",
+                        text = stringResource(
+                            R.string.pin_setup_enter_prompt,
+                            PinStore.MIN_PIN_LENGTH,
+                            PinStore.MAX_PIN_LENGTH
+                        ),
                         style = MaterialTheme.typography.bodyLarge
                     )
 
@@ -101,7 +110,7 @@ fun PinSetupScreen(
                                 error = null
                             }
                         },
-                        label = { Text("PIN") },
+                        label = { Text(stringResource(R.string.pin_setup_label_pin)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
@@ -133,13 +142,13 @@ fun PinSetupScreen(
                         enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Next")
+                        Text(stringResource(R.string.pin_setup_next))
                     }
                 }
 
                 SetupStep.CONFIRM_PIN -> {
                     Text(
-                        text = "Confirm your PIN",
+                        text = stringResource(R.string.pin_setup_confirm_prompt),
                         style = MaterialTheme.typography.bodyLarge
                     )
 
@@ -153,7 +162,7 @@ fun PinSetupScreen(
                                 error = null
                             }
                         },
-                        label = { Text("Confirm PIN") },
+                        label = { Text(stringResource(R.string.pin_setup_label_confirm_pin)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
@@ -192,7 +201,7 @@ fun PinSetupScreen(
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Back")
+                            Text(stringResource(R.string.pin_setup_back_button))
                         }
 
                         Button(
@@ -200,7 +209,7 @@ fun PinSetupScreen(
                             enabled = confirmPinInput.length >= PinStore.MIN_PIN_LENGTH,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Set PIN")
+                            Text(stringResource(R.string.pin_setup_set_pin))
                         }
                     }
                 }

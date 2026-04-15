@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -62,11 +63,19 @@ private fun ErrorCard(message: String) {
     )
 }
 
-private enum class PassphraseStrength(val label: String) {
-    WEAK("Weak"),
-    FAIR("Fair"),
-    GOOD("Good"),
-    STRONG("Strong")
+private enum class PassphraseStrength {
+    WEAK,
+    FAIR,
+    GOOD,
+    STRONG
+}
+
+@Composable
+private fun PassphraseStrength.label(): String = when (this) {
+    PassphraseStrength.WEAK -> stringResource(R.string.export_share_strength_weak)
+    PassphraseStrength.FAIR -> stringResource(R.string.export_share_strength_fair)
+    PassphraseStrength.GOOD -> stringResource(R.string.export_share_strength_good)
+    PassphraseStrength.STRONG -> stringResource(R.string.export_share_strength_strong)
 }
 
 @Composable
@@ -109,7 +118,7 @@ private fun PassphraseStrengthIndicator(strength: PassphraseStrength) {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = strength.label,
+            text = strength.label(),
             style = MaterialTheme.typography.labelSmall,
             color = strength.color()
         )
@@ -134,7 +143,7 @@ private fun ExportInputForm(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
     ) {
         Text(
-            text = "Store this export securely. Anyone with this backup and passphrase can access your signing key share.",
+            text = stringResource(R.string.export_share_info),
             modifier = Modifier.padding(16.dp),
             color = MaterialTheme.colorScheme.onTertiaryContainer,
             style = MaterialTheme.typography.bodySmall
@@ -156,8 +165,8 @@ private fun ExportInputForm(
     OutlinedTextField(
         value = passphraseDisplay,
         onValueChange = onPassphraseChange,
-        label = { Text("Export Passphrase") },
-        placeholder = { Text("Enter a passphrase to encrypt") },
+        label = { Text(stringResource(R.string.export_share_passphrase_label)) },
+        placeholder = { Text(stringResource(R.string.export_share_passphrase_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -174,22 +183,22 @@ private fun ExportInputForm(
     OutlinedTextField(
         value = confirmPassphraseDisplay,
         onValueChange = onConfirmPassphraseChange,
-        label = { Text("Confirm Passphrase") },
-        placeholder = { Text("Re-enter passphrase") },
+        label = { Text(stringResource(R.string.export_share_confirm_label)) },
+        placeholder = { Text(stringResource(R.string.export_share_confirm_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         singleLine = true,
         isError = confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase),
         supportingText = if (confirmPassphrase.length > 0 && !passphrase.contentEquals(confirmPassphrase)) {
-            { Text("Passphrases do not match") }
+            { Text(stringResource(R.string.export_share_passphrases_mismatch)) }
         } else null
     )
 
     Spacer(modifier = Modifier.height(16.dp))
 
     Text(
-        text = "This passphrase encrypts the exported share. You will need it to import the share on another device.",
+        text = stringResource(R.string.export_share_footer),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -204,7 +213,7 @@ private fun ExportInputForm(
             onClick = onCancel,
             modifier = Modifier.weight(1f)
         ) {
-            Text("Cancel")
+            Text(stringResource(R.string.export_share_cancel))
         }
         Button(
             onClick = onExport,
@@ -213,7 +222,7 @@ private fun ExportInputForm(
                 passphrase.contentEquals(confirmPassphrase) &&
                 calculatePassphraseStrength(passphrase) != PassphraseStrength.WEAK
         ) {
-            Text("Export")
+            Text(stringResource(R.string.export_share_export))
         }
     }
 }
@@ -239,6 +248,15 @@ fun ExportShareScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var exportJob by remember { mutableStateOf<Job?>(null) }
     val sessionCanceled = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val minLengthMessage = stringResource(R.string.export_share_min_length, MIN_PASSPHRASE_LENGTH)
+    val passphrasesMismatchMessage = stringResource(R.string.export_share_passphrases_mismatch)
+    val tooWeakMessage = stringResource(R.string.export_share_too_weak)
+    val biometricUnavailableMessage = stringResource(R.string.export_share_biometric_unavailable)
+    val noEncryptionKeyMessage = stringResource(R.string.export_share_no_encryption_key)
+    val tooLargeMessage = stringResource(R.string.export_share_too_large)
+    val exportFailedMessage = stringResource(R.string.export_share_export_failed)
+    val authCancelledMessage = stringResource(R.string.export_share_auth_cancelled)
+    val initFailedMessage = stringResource(R.string.export_share_init_failed)
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
@@ -277,7 +295,7 @@ fun ExportShareScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Export Share",
+            text = stringResource(R.string.export_share_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -310,26 +328,26 @@ fun ExportShareScreen(
                     },
                     onExport = {
                         if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-                            exportState = ExportState.Error("Passphrase must be at least $MIN_PASSPHRASE_LENGTH characters")
+                            exportState = ExportState.Error(minLengthMessage)
                             return@ExportInputForm
                         }
                         if (!passphrase.contentEquals(confirmPassphrase)) {
-                            exportState = ExportState.Error("Passphrases do not match")
+                            exportState = ExportState.Error(passphrasesMismatchMessage)
                             return@ExportInputForm
                         }
                         if (calculatePassphraseStrength(passphrase) == PassphraseStrength.WEAK) {
-                            exportState = ExportState.Error("Passphrase is too weak. Add length, mixed case, numbers, or symbols.")
+                            exportState = ExportState.Error(tooWeakMessage)
                             return@ExportInputForm
                         }
                         cipherError = null
                         val cipher = try {
                             onGetCipher()
                         } catch (e: BiometricHelper.BiometricNotReadyException) {
-                            cipherError = e.message ?: "Biometric authentication is unavailable"
+                            cipherError = e.message ?: biometricUnavailableMessage
                             return@ExportInputForm
                         }
                         if (cipher == null) {
-                            cipherError = "No encryption key available"
+                            cipherError = noEncryptionKeyMessage
                             return@ExportInputForm
                         }
                         val passphraseChars = passphrase.toCharArray()
@@ -367,7 +385,7 @@ fun ExportShareScreen(
                                             } catch (e: Exception) {
                                                 if (BuildConfig.DEBUG) Log.w("ExportShare", "Frame generation failed: ${e::class.simpleName}")
                                                 if (data.length > MAX_SINGLE_QR_BYTES) {
-                                                    exportState = ExportState.Error("Export too large for a single QR code and frame generation failed")
+                                                    exportState = ExportState.Error(tooLargeMessage)
                                                     return@launch
                                                 }
                                                 listOf(data)
@@ -377,7 +395,7 @@ fun ExportShareScreen(
                                             throw e
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Export failed: ${e::class.simpleName}")
-                                            exportState = ExportState.Error("Export failed. Please try again.")
+                                            exportState = ExportState.Error(exportFailedMessage)
                                         }
                                     }.also { job ->
                                         job.invokeOnCompletion {
@@ -388,14 +406,14 @@ fun ExportShareScreen(
                                     }
                                 } else {
                                     clearChars()
-                                    exportState = ExportState.Error("Authentication cancelled")
-                                    Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
+                                    exportState = ExportState.Error(authCancelledMessage)
+                                    Toast.makeText(context, authCancelledMessage, Toast.LENGTH_SHORT).show()
                                 }
                             }
                         } catch (e: Exception) {
                             clearChars()
                             if (BuildConfig.DEBUG) Log.e("ExportShare", "Failed to init cipher: ${e::class.simpleName}")
-                            cipherError = "Failed to initialize encryption"
+                            cipherError = initFailedMessage
                         }
                     },
                     onCancel = {
@@ -411,7 +429,7 @@ fun ExportShareScreen(
             is ExportState.Exporting -> {
                 CircularProgressIndicator()
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Exporting share...")
+                Text(stringResource(R.string.export_share_exporting))
             }
 
             is ExportState.Success -> {
@@ -432,21 +450,23 @@ private fun ExportSuccessContent(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val showCopiedToast = { Toast.makeText(context, "Share data copied", Toast.LENGTH_SHORT).show() }
+    val copiedMessage = stringResource(R.string.export_share_copied_toast)
+    val qrLabel = stringResource(R.string.export_share_qr_label)
+    val showCopiedToast = { Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show() }
     val isAnimated = frames.size > 1
     var showClipboardWarning by remember { mutableStateOf(false) }
 
     if (isAnimated) {
         AnimatedQrCodeDisplay(
             frames = frames,
-            label = "FROST Share Export",
+            label = qrLabel,
             fullData = data,
             onCopied = showCopiedToast
         )
     } else {
         QrCodeDisplay(
             data = data,
-            label = "FROST Share Export",
+            label = qrLabel,
             onCopied = showCopiedToast
         )
     }
@@ -457,26 +477,26 @@ private fun ExportSuccessContent(
         onClick = { showClipboardWarning = true },
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Copy to Clipboard")
+        Text(stringResource(R.string.export_share_copy_to_clipboard))
     }
 
     if (showClipboardWarning) {
         AlertDialog(
             onDismissRequest = { showClipboardWarning = false },
-            title = { Text("Copy to clipboard?") },
-            text = { Text("Other apps on your device may be able to read clipboard contents. The QR code export is more secure.") },
+            title = { Text(stringResource(R.string.export_share_clipboard_dialog_title)) },
+            text = { Text(stringResource(R.string.export_share_clipboard_dialog_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     showClipboardWarning = false
                     copySensitiveText(context, data)
                     showCopiedToast()
                 }) {
-                    Text("Copy anyway")
+                    Text(stringResource(R.string.export_share_copy_anyway))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClipboardWarning = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.export_share_cancel))
                 }
             }
         )
@@ -488,7 +508,7 @@ private fun ExportSuccessContent(
         onClick = onDismiss,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Done")
+        Text(stringResource(R.string.export_share_done))
     }
 }
 

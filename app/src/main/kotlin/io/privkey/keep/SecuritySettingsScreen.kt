@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,10 +39,10 @@ fun SecuritySettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Security") },
+                title = { Text(stringResource(R.string.settings_security_screen_title)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.settings_back_cd))
                     }
                 }
             )
@@ -98,11 +99,11 @@ private fun BiometricLockOnLaunchCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Biometric on Launch", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_biometric_on_launch_title), style = MaterialTheme.typography.titleMedium)
                 val (subtitle, subtitleColor) = if (biometricAvailable) {
-                    "Require biometric authentication when opening app" to MaterialTheme.colorScheme.onSurfaceVariant
+                    stringResource(R.string.settings_biometric_on_launch_subtitle) to MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
-                    "Biometric hardware not available" to MaterialTheme.colorScheme.error
+                    stringResource(R.string.settings_biometric_unavailable) to MaterialTheme.colorScheme.error
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = subtitleColor)
             }

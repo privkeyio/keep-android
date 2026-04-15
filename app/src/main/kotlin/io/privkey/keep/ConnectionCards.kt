@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.PeerInfo
@@ -27,20 +28,20 @@ fun RelaysCard(
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Relays", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.connections_relays_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text("Active relays", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.connections_relays_active_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Manage the relays used for communication with external applications.",
+                stringResource(R.string.connections_relays_active_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(8.dp))
             if (relays.isEmpty()) {
                 Text(
-                    "No relays configured",
+                    stringResource(R.string.connections_relays_none),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -54,24 +55,24 @@ fun RelaysCard(
                 onClick = { showEditDialog = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Edit Relays")
+                Text(stringResource(R.string.connections_relays_edit_button))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Default profile relays", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.connections_relays_profile_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Manage the relays used to fetch your profile data.",
+                stringResource(R.string.connections_relays_profile_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(8.dp))
             if (profileRelays.isEmpty()) {
                 Text(
-                    "No profile relays configured",
+                    stringResource(R.string.connections_relays_profile_none),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -85,14 +86,14 @@ fun RelaysCard(
                 onClick = { showEditProfileDialog = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Edit Profile Relays")
+                Text(stringResource(R.string.connections_relays_profile_edit_button))
             }
         }
     }
 
     if (showEditDialog) {
         EditRelaysDialog(
-            title = "Edit Relays",
+            title = stringResource(R.string.connections_relays_dialog_edit_title),
             relays = relays,
             onAddRelay = onAddRelay,
             onRemoveRelay = onRemoveRelay,
@@ -102,7 +103,7 @@ fun RelaysCard(
 
     if (showEditProfileDialog) {
         EditRelaysDialog(
-            title = "Edit Profile Relays",
+            title = stringResource(R.string.connections_relays_dialog_edit_profile_title),
             relays = profileRelays,
             onAddRelay = onAddProfileRelay,
             onRemoveRelay = onRemoveProfileRelay,
@@ -132,6 +133,10 @@ private fun EditRelaysDialog(
 ) {
     var newRelayUrl by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val errWssOnly = stringResource(R.string.connections_relays_error_wss_only)
+    val errTooLong = stringResource(R.string.connections_relays_error_too_long)
+    val errInvalid = stringResource(R.string.connections_relays_error_invalid)
+    val errPort = stringResource(R.string.connections_relays_error_port)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -157,7 +162,7 @@ private fun EditRelaysDialog(
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Remove",
+                                contentDescription = stringResource(R.string.connections_relays_remove_cd),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -175,8 +180,8 @@ private fun EditRelaysDialog(
                             newRelayUrl = it
                             error = null
                         },
-                        label = { Text("Relay URL") },
-                        placeholder = { Text("wss://relay.example.com") },
+                        label = { Text(stringResource(R.string.connections_relays_url_label)) },
+                        placeholder = { Text(stringResource(R.string.connections_relays_url_placeholder)) },
                         singleLine = true,
                         isError = error != null,
                         modifier = Modifier.weight(1f)
@@ -184,16 +189,16 @@ private fun EditRelaysDialog(
                     IconButton(onClick = {
                         val raw = newRelayUrl.trim()
                         if (raw.contains("://") && !raw.startsWith("wss://")) {
-                            error = "Only wss:// URLs are supported"
+                            error = errWssOnly
                             return@IconButton
                         }
                         val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
                         when {
-                            url.length > 256 -> error = "URL too long"
-                            !url.matches(RELAY_URL_REGEX) -> error = "Invalid relay URL"
+                            url.length > 256 -> error = errTooLong
+                            !url.matches(RELAY_URL_REGEX) -> error = errInvalid
                             else -> {
                                 if (!isValidRelayPort(url)) {
-                                    error = "Port must be between 1 and 65535"
+                                    error = errPort
                                     return@IconButton
                                 }
                                 onAddRelay(url)
@@ -202,7 +207,7 @@ private fun EditRelaysDialog(
                             }
                         }
                     }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add relay")
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.connections_relays_add_cd))
                     }
                 }
                 error?.let {
@@ -216,7 +221,7 @@ private fun EditRelaysDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done")
+                Text(stringResource(R.string.connections_relays_done))
             }
         }
     )
@@ -231,12 +236,16 @@ fun ConnectCard(
     onConnect: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val connecting = stringResource(R.string.connections_connect_connecting)
+    val connectedToRelays = stringResource(R.string.connections_connect_connected_to_relays)
+    val addRelaysFirst = stringResource(R.string.connections_connect_add_relays_first)
+    val notConnected = stringResource(R.string.connections_connect_not_connected)
     val (statusText, statusColor) = when {
-        isConnecting -> "Connecting..." to colors.onSurfaceVariant
-        isConnected -> "Connected to relays" to colors.primary
+        isConnecting -> connecting to colors.onSurfaceVariant
+        isConnected -> connectedToRelays to colors.primary
         error != null -> error to colors.error
-        !relaysConfigured -> "Add relays first" to colors.onSurfaceVariant
-        else -> "Not connected" to colors.onSurfaceVariant
+        !relaysConfigured -> addRelaysFirst to colors.onSurfaceVariant
+        else -> notConnected to colors.onSurfaceVariant
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -247,7 +256,7 @@ fun ConnectCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Connection", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.connections_connect_title), style = MaterialTheme.typography.titleMedium)
                     Text(statusText, style = MaterialTheme.typography.bodySmall, color = statusColor)
                 }
                 Button(
@@ -260,7 +269,7 @@ fun ConnectCard(
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Text(if (isConnected) "Connected" else "Connect")
+                        Text(if (isConnected) stringResource(R.string.connections_connect_button_connected) else stringResource(R.string.connections_connect_button_connect))
                     }
                 }
             }
@@ -277,8 +286,8 @@ fun ConnectedAppsCard(onClick: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Connected Apps", style = MaterialTheme.typography.titleMedium)
-            Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.connections_connected_apps_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.connections_connected_apps_manage), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -287,10 +296,10 @@ fun ConnectedAppsCard(onClick: () -> Unit) {
 fun PeersCard(peers: List<PeerInfo>) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Peers (${peers.size})", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.connections_peers_title, peers.size), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             if (peers.isEmpty()) {
-                Text("No peers connected", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.connections_peers_none), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 peers.forEach { peer ->
                     PeerRow(peer)
@@ -303,16 +312,19 @@ fun PeersCard(peers: List<PeerInfo>) {
 @Composable
 private fun PeerRow(peer: PeerInfo) {
     val colors = MaterialTheme.colorScheme
+    val online = stringResource(R.string.connections_peer_status_online)
+    val offline = stringResource(R.string.connections_peer_status_offline)
+    val unknown = stringResource(R.string.connections_peer_status_unknown)
     val (statusText, statusColor) = when (peer.status) {
-        PeerStatus.ONLINE -> "Online" to colors.primary
-        PeerStatus.OFFLINE -> "Offline" to colors.onSurfaceVariant
-        PeerStatus.UNKNOWN -> "Unknown" to colors.onSurfaceVariant
+        PeerStatus.ONLINE -> online to colors.primary
+        PeerStatus.OFFLINE -> offline to colors.onSurfaceVariant
+        PeerStatus.UNKNOWN -> unknown to colors.onSurfaceVariant
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text("Share ${peer.shareIndex}")
+        Text(stringResource(R.string.connections_peer_share, peer.shareIndex.toString()))
         Text(statusText, color = statusColor)
     }
 }
@@ -321,11 +333,15 @@ private fun PeerRow(peer: PeerInfo) {
 @Composable
 fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val running = stringResource(R.string.connections_bunker_status_running)
+    val starting = stringResource(R.string.connections_bunker_status_starting)
+    val errorText = stringResource(R.string.connections_bunker_status_error)
+    val configure = stringResource(R.string.connections_bunker_status_configure)
     val (statusText, statusColor) = when (status) {
-        BunkerStatus.RUNNING -> "Running" to colors.primary
-        BunkerStatus.STARTING -> "Starting..." to colors.secondary
-        BunkerStatus.ERROR -> "Error" to colors.error
-        BunkerStatus.STOPPED -> "Configure" to colors.onSurfaceVariant
+        BunkerStatus.RUNNING -> running to colors.primary
+        BunkerStatus.STARTING -> starting to colors.secondary
+        BunkerStatus.ERROR -> errorText to colors.error
+        BunkerStatus.STOPPED -> configure to colors.onSurfaceVariant
     }
     Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(
@@ -334,9 +350,9 @@ fun BunkerCard(status: BunkerStatus, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("NIP-46 Bunker", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.connections_bunker_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Remote signing for web/desktop clients",
+                    stringResource(R.string.connections_bunker_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -356,15 +372,15 @@ fun WalletDescriptorCard(descriptorCount: Int, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Wallet Descriptors", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.connections_wallet_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Manage multisig wallet descriptors",
+                    stringResource(R.string.connections_wallet_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(
-                if (descriptorCount > 0) "$descriptorCount" else "Manage",
+                if (descriptorCount > 0) stringResource(R.string.connections_wallet_count, descriptorCount) else stringResource(R.string.connections_wallet_manage),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -380,13 +396,13 @@ fun Nip55SettingsCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("NIP-55 Settings", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.connections_nip55_settings_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
             OutlinedButton(
                 onClick = onSignPolicyClick,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Sign Policy")
+                Text(stringResource(R.string.connections_nip55_sign_policy))
             }
             Spacer(modifier = Modifier.height(8.dp))
             Row(
@@ -397,13 +413,13 @@ fun Nip55SettingsCard(
                     onClick = onPermissionsClick,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Permissions")
+                    Text(stringResource(R.string.connections_nip55_permissions))
                 }
                 OutlinedButton(
                     onClick = onHistoryClick,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("History")
+                    Text(stringResource(R.string.connections_nip55_history))
                 }
             }
         }

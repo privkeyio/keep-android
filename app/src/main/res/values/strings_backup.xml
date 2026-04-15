@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+
+    <!-- BackupRestoreScreen -->
+    <string name="backup_restore_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="backup_restore_auth_unavailable">Authentication unavailable</string>
+    <string name="backup_restore_save_failed">Failed to save backup</string>
+    <string name="backup_restore_saved">Backup saved</string>
+    <string name="backup_restore_file_too_large">File too large (max <xliff:g id="mb" example="10">%1$d</xliff:g> MB)</string>
+    <string name="backup_restore_read_failed">Failed to read file</string>
+    <string name="backup_restore_top_title">Vault Backup</string>
+    <string name="backup_restore_create_title">Create Backup</string>
+    <string name="backup_restore_passphrase_label">Passphrase</string>
+    <string name="backup_restore_confirm_passphrase_label">Confirm passphrase</string>
+    <string name="backup_restore_passphrase_min_length">Passphrase must be at least <xliff:g id="count" example="8">%1$d</xliff:g> characters</string>
+    <string name="backup_restore_passphrase_mismatch">Passphrases do not match</string>
+    <string name="backup_restore_create_button">Create Backup</string>
+    <string name="backup_restore_backup_failed">Backup failed</string>
+    <string name="backup_restore_restore_title">Restore Backup</string>
+    <string name="backup_restore_select_file">Select Backup File</string>
+    <string name="backup_restore_verify">Verify</string>
+    <string name="backup_restore_verify_failed">Verification failed</string>
+    <string name="backup_restore_restore_button">Restore</string>
+    <string name="backup_restore_verifying">Verifying\u2026</string>
+    <string name="backup_restore_restoring">Restoring\u2026</string>
+    <string name="backup_restore_restore_complete">Restore complete</string>
+    <string name="backup_restore_confirm_title">Restore Backup?</string>
+    <string name="backup_restore_confirm_message">This will import all keys, shares, and settings from the backup. Existing data with the same keys will be overwritten.</string>
+    <string name="backup_restore_cancel">Cancel</string>
+    <string name="backup_restore_restored_toast">Backup restored</string>
+    <string name="backup_restore_failed">Restore failed</string>
+    <string name="backup_restore_file_prefix">File: <xliff:g id="name" example="backup.kbak">%1$s</xliff:g></string>
+    <string name="backup_restore_backup_passphrase_label">Backup passphrase</string>
+    <string name="backup_restore_summary_title">Backup Summary</string>
+    <string name="backup_restore_keys_count">Keys: <xliff:g id="count" example="3">%1$d</xliff:g></string>
+    <string name="backup_restore_shares_count">Shares: <xliff:g id="count" example="3">%1$d</xliff:g></string>
+    <string name="backup_restore_descriptors_count">Descriptors: <xliff:g id="count" example="3">%1$d</xliff:g></string>
+    <string name="backup_restore_created_at">Created: <xliff:g id="timestamp" example="2024-01-01">%1$s</xliff:g></string>
+
+    <!-- RecoverNsecScreen -->
+    <string name="recover_nsec_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="recover_nsec_no_encryption_key">No encryption key available</string>
+    <string name="recover_nsec_vault_export_failed">Failed to export vault share</string>
+    <string name="recover_nsec_scan_title">Scan Share QR Code</string>
+    <string name="recover_nsec_title">Recover nsec</string>
+    <string name="recover_nsec_threshold"><xliff:g id="threshold" example="2">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g> shares needed</string>
+    <string name="recover_nsec_warning">This recovers the full private key from threshold shares. The key is a single point of failure \u2014 handle with extreme care. It will not be saved.</string>
+    <string name="recover_nsec_prefill_button">Pre-fill from vault share</string>
+    <string name="recover_nsec_share_label">Share <xliff:g id="index" example="1">%1$d</xliff:g></string>
+    <string name="recover_nsec_share_label_vault">Share <xliff:g id="index" example="1">%1$d</xliff:g> (from vault)</string>
+    <string name="recover_nsec_share_data_label">Share Data</string>
+    <string name="recover_nsec_share_data_placeholder">kshare1q\u2026</string>
+    <string name="recover_nsec_scan_qr">Scan QR Code</string>
+    <string name="recover_nsec_passphrase_label">Passphrase</string>
+    <string name="recover_nsec_remove">Remove</string>
+    <string name="recover_nsec_add_share">+ Add share input</string>
+    <string name="recover_nsec_copied">nsec copied</string>
+    <string name="recover_nsec_cancel">Cancel</string>
+    <string name="recover_nsec_cooldown">Please wait before trying again</string>
+    <string name="recover_nsec_invalid_group_pubkey">Invalid group public key</string>
+    <string name="recover_nsec_failed">Recovery failed</string>
+    <string name="recover_nsec_recover">Recover</string>
+    <string name="recover_nsec_recovering">Recovering key\u2026</string>
+    <string name="recover_nsec_result_title">Recovered nsec</string>
+    <string name="recover_nsec_hide">Hide</string>
+    <string name="recover_nsec_reveal">Reveal</string>
+    <string name="recover_nsec_copy">Copy</string>
+    <string name="recover_nsec_clear">Clear</string>
+    <string name="recover_nsec_auto_clear">Auto-clears in <xliff:g id="seconds" example="30">%1$d</xliff:g>s \u2014 copy to a secure password manager</string>
+    <string name="recover_nsec_error_decrypt">Failed to decrypt share (wrong passphrase?)</string>
+    <string name="recover_nsec_error_duplicate">Duplicate share \u2014 each share must be unique</string>
+    <string name="recover_nsec_error_same_group">All shares must belong to the same group</string>
+    <string name="recover_nsec_error_match">Recovered key does not match expected group</string>
+    <string name="recover_nsec_error_format">Invalid share format</string>
+    <string name="recover_nsec_error_threshold">Not enough shares to recover</string>
+
+    <!-- SeedWordsScreen -->
+    <string name="seed_words_title">Seed Words</string>
+    <string name="seed_words_none_available">No seed words available for this account. Seed words are only available for accounts created from a mnemonic in this app.</string>
+    <string name="seed_words_warning">Write down these words and store them safely. Anyone with these words can access your account.</string>
+    <string name="seed_words_saved_button">I\'ve saved my seed words</string>
+
+    <!-- MnemonicRecoveryScreen -->
+    <string name="mnemonic_recovery_paste_too_many">Pasted text has too many words (max 24)</string>
+    <string name="mnemonic_recovery_title">Import from Seed Words</string>
+    <string name="mnemonic_recovery_12_words">12 words</string>
+    <string name="mnemonic_recovery_24_words">24 words</string>
+    <string name="mnemonic_recovery_entered_count"><xliff:g id="filled" example="6">%1$d</xliff:g> of <xliff:g id="total" example="12">%2$d</xliff:g> words entered</string>
+    <string name="mnemonic_recovery_key_name_label">Key Name</string>
+    <string name="mnemonic_recovery_invalid_seed">Invalid seed words. Please check and try again.</string>
+    <string name="mnemonic_recovery_account_created">Account \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' created successfully</string>
+    <string name="mnemonic_recovery_biometric_invalidated">Biometric key invalidated. Please re-enroll biometrics.</string>
+    <string name="mnemonic_recovery_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="mnemonic_recovery_cipher_failed">Failed to initialize encryption</string>
+    <string name="mnemonic_recovery_word_prefix"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+
+    <!-- ImportNsecScreen -->
+    <string name="import_nsec_scan_too_long">Scanned code is too long</string>
+    <string name="import_nsec_scan_title">Scan nsec QR Code</string>
+    <string name="import_nsec_title">Import nsec</string>
+    <string name="import_nsec_label">nsec</string>
+    <string name="import_nsec_placeholder">nsec1\u2026</string>
+    <string name="import_nsec_hide">Hide nsec</string>
+    <string name="import_nsec_show">Show nsec</string>
+    <string name="import_nsec_scan_qr">Scan QR Code</string>
+    <string name="import_nsec_key_name_label">Key Name</string>
+    <string name="import_nsec_imported">Key \'<xliff:g id="name" example="Mobile Key">%1$s</xliff:g>\' imported successfully</string>
+    <string name="import_nsec_biometric_invalidated">Biometric key invalidated. Please re-enroll biometrics.</string>
+    <string name="import_nsec_biometric_unavailable">Biometric authentication is unavailable</string>
+    <string name="import_nsec_cipher_failed">Failed to initialize encryption</string>
+</resources>

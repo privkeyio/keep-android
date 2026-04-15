@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareMetadataInfo
 
@@ -46,7 +47,7 @@ fun AccountTypeBadge(isNsec: Boolean) {
             MaterialTheme.colorScheme.secondary
     ) {
         Text(
-            if (isNsec) "nsec" else "FROST Share",
+            if (isNsec) stringResource(R.string.account_badge_nsec) else stringResource(R.string.account_badge_frost_share),
             modifier = Modifier.padding(horizontal = 2.dp)
         )
     }
@@ -85,7 +86,7 @@ fun AccountSwitcherSheet(
                 .padding(bottom = 32.dp)
         ) {
             Text(
-                text = "Accounts",
+                text = stringResource(R.string.account_sheet_title),
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
             )
@@ -111,7 +112,7 @@ fun AccountSwitcherSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Text("Create Account")
+                Text(stringResource(R.string.account_create))
             }
 
             TextButton(
@@ -120,7 +121,7 @@ fun AccountSwitcherSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Text("Import from Seed Words")
+                Text(stringResource(R.string.account_import_seed_words))
             }
 
             TextButton(
@@ -129,7 +130,7 @@ fun AccountSwitcherSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Text("Import FROST Share")
+                Text(stringResource(R.string.account_import_frost_share))
             }
 
             TextButton(
@@ -138,7 +139,7 @@ fun AccountSwitcherSheet(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Text("Import nsec")
+                Text(stringResource(R.string.account_import_nsec))
             }
         }
     }
@@ -148,17 +149,27 @@ fun AccountSwitcherSheet(
         val isOnlyAccount = accounts.size == 1
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text(if (isOnlyAccount) "Cannot Delete Account" else "Delete Account?") },
+            title = {
+                Text(
+                    if (isOnlyAccount) stringResource(R.string.account_delete_cannot_title)
+                    else stringResource(R.string.account_delete_confirm_title)
+                )
+            },
             text = {
                 Column {
                     if (isOnlyAccount) {
-                        Text("You cannot delete your only account. Import another account first before removing this one.")
+                        Text(stringResource(R.string.account_delete_only_text))
                     } else {
-                        Text("This will permanently delete \"${target.name}\" and its ${if (target.isNsecKey) "nsec key" else "FROST share"} from this device.")
+                        Text(
+                            if (target.isNsecKey)
+                                stringResource(R.string.account_delete_nsec_text, target.name)
+                            else
+                                stringResource(R.string.account_delete_frost_text, target.name)
+                        )
                         if (isActive) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "This is your active account. You will need to switch to another account or import a new share.",
+                                stringResource(R.string.account_delete_active_warning),
                                 color = MaterialTheme.colorScheme.error
                             )
                         }
@@ -178,12 +189,15 @@ fun AccountSwitcherSheet(
                     } else {
                         MaterialTheme.colorScheme.error
                     }
-                    Text("Delete", color = color)
+                    Text(stringResource(R.string.account_delete_button), color = color)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
-                    Text(if (isOnlyAccount) "OK" else "Cancel")
+                    Text(
+                        if (isOnlyAccount) stringResource(R.string.account_ok)
+                        else stringResource(R.string.account_cancel)
+                    )
                 }
             }
         )
@@ -212,12 +226,12 @@ private fun RenameAccountDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Rename Account") },
+        title = { Text(stringResource(R.string.account_rename_title)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { if (it.length <= 64) name = it },
-                label = { Text("Account name") },
+                label = { Text(stringResource(R.string.account_rename_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -227,12 +241,12 @@ private fun RenameAccountDialog(
                 onClick = { onConfirm(trimmedName) },
                 enabled = trimmedName.isNotBlank() && trimmedName != currentName.trim()
             ) {
-                Text("Save")
+                Text(stringResource(R.string.account_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.account_cancel))
             }
         }
     )
@@ -248,6 +262,8 @@ private fun AccountRow(
 ) {
     val colors = MaterialTheme.colorScheme
     val context = LocalContext.current
+    val npubCopiedMessage = stringResource(R.string.account_npub_copied)
+    val npubCopyFailedMessage = stringResource(R.string.account_npub_copy_failed)
 
     Row(
         modifier = Modifier
@@ -259,7 +275,7 @@ private fun AccountRow(
         if (isActive) {
             Icon(
                 imageVector = Icons.Default.RadioButtonChecked,
-                contentDescription = "Active account",
+                contentDescription = stringResource(R.string.account_row_active_cd),
                 tint = colors.primary,
                 modifier = Modifier.size(24.dp)
             )
@@ -277,7 +293,12 @@ private fun AccountRow(
             Spacer(modifier = Modifier.height(2.dp))
             if (!account.isNsecKey) {
                 Text(
-                    text = "Share ${account.shareIndex} of ${account.totalShares} \u00b7 Threshold ${account.threshold}",
+                    text = stringResource(
+                        R.string.account_row_share_summary,
+                        account.shareIndex.toInt(),
+                        account.totalShares.toInt(),
+                        account.threshold.toInt()
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant
                 )
@@ -293,14 +314,14 @@ private fun AccountRow(
             val npub = hexToNpub(account.groupPubkeyHex)
             if (npub != null) {
                 copyPublicText(context, npub)
-                Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, npubCopiedMessage, Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "Failed to copy npub", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, npubCopyFailedMessage, Toast.LENGTH_SHORT).show()
             }
         }) {
             Icon(
                 Icons.Default.ContentCopy,
-                contentDescription = "Copy npub",
+                contentDescription = stringResource(R.string.account_copy_npub_cd),
                 tint = colors.onSurfaceVariant
             )
         }
@@ -308,7 +329,7 @@ private fun AccountRow(
         IconButton(onClick = onEdit) {
             Icon(
                 Icons.Default.Edit,
-                contentDescription = "Edit name",
+                contentDescription = stringResource(R.string.account_edit_name_cd),
                 tint = colors.onSurfaceVariant
             )
         }
@@ -316,7 +337,7 @@ private fun AccountRow(
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Default.Delete,
-                contentDescription = "Delete",
+                contentDescription = stringResource(R.string.account_delete_cd),
                 tint = colors.onSurfaceVariant
             )
         }

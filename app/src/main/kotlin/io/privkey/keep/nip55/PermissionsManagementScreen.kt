@@ -9,8 +9,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import kotlinx.coroutines.launch
 
 @Composable
@@ -27,6 +31,13 @@ fun PermissionsManagementScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    val errLoad = stringResource(R.string.connections_permissions_load_error)
+    val errRefresh = stringResource(R.string.connections_permissions_refresh_error)
+    val errUpdate = stringResource(R.string.connections_permissions_update_error)
+    val errRevoke = stringResource(R.string.connections_permissions_revoke_error)
+    val errDelete = stringResource(R.string.connections_permissions_delete_error)
+    val errUnknownTypeFormat = stringResource(R.string.connections_permissions_unknown_type)
+
     suspend fun loadPermissionsData() {
         val loadedPermissions = permissionStore.getAllPermissions()
         permissions = loadedPermissions
@@ -38,7 +49,7 @@ fun PermissionsManagementScreen(
         try {
             loadPermissionsData()
         } catch (e: Exception) {
-            loadError = "Failed to load permissions"
+            loadError = errLoad
         } finally {
             isLoading = false
         }
@@ -50,7 +61,7 @@ fun PermissionsManagementScreen(
                 loadPermissionsData()
                 loadError = null
             } catch (e: Exception) {
-                loadError = "Failed to refresh permissions"
+                loadError = errRefresh
             }
         }
     }
@@ -71,14 +82,14 @@ fun PermissionsManagementScreen(
                 .padding(24.dp)
         ) {
             Text(
-                text = "App Permissions",
+                text = stringResource(R.string.connections_permissions_title),
                 style = MaterialTheme.typography.headlineMedium
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Manage NIP-55 permissions granted to apps",
+                text = stringResource(R.string.connections_permissions_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -92,7 +103,7 @@ fun PermissionsManagementScreen(
             } else if (permissions.isEmpty()) {
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "No permissions granted",
+                        text = stringResource(R.string.connections_permissions_none),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -106,7 +117,7 @@ fun PermissionsManagementScreen(
                     onDecisionChange = { permission, newDecision ->
                         val requestType = findRequestType(permission.requestType)
                         if (requestType == null) {
-                            loadError = "Unknown request type: ${permission.requestType}"
+                            loadError = String.format(errUnknownTypeFormat, permission.requestType)
                             return@PermissionsGroupedList
                         }
                         coroutineScope.launch {
@@ -120,7 +131,7 @@ fun PermissionsManagementScreen(
                                 )
                                 refreshPermissions()
                             } catch (e: Exception) {
-                                loadError = "Failed to update permission"
+                                loadError = errUpdate
                             }
                         }
                     },
@@ -134,7 +145,7 @@ fun PermissionsManagementScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Back")
+                Text(stringResource(R.string.back))
             }
         }
     }
@@ -148,7 +159,7 @@ fun PermissionsManagementScreen(
                         permissionStore.revokeAllForApp(packageName)
                         refreshPermissions()
                     } catch (e: Exception) {
-                        loadError = "Failed to revoke permissions"
+                        loadError = errRevoke
                     }
                 }
                 showRevokeAllDialog = null
@@ -166,7 +177,7 @@ fun PermissionsManagementScreen(
                         permissionStore.deletePermission(permission.id)
                         refreshPermissions()
                     } catch (e: Exception) {
-                        loadError = "Failed to delete permission"
+                        loadError = errDelete
                     }
                 }
                 showDeleteDialog = null
@@ -184,16 +195,16 @@ private fun RevokeAllPermissionsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Revoke All Permissions") },
-        text = { Text("Revoke all permissions for $packageName? This app will need to request permissions again.") },
+        title = { Text(stringResource(R.string.connections_permissions_revoke_all_title)) },
+        text = { Text(stringResource(R.string.connections_permissions_revoke_all_text, packageName)) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Revoke All", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.connections_permissions_revoke_all_confirm), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.connections_permissions_cancel))
             }
         }
     )
@@ -207,18 +218,18 @@ private fun DeletePermissionDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete Permission") },
+        title = { Text(stringResource(R.string.connections_permissions_delete_title)) },
         text = {
-            Text("Delete this ${formatRequestType(permission.requestType)} permission for ${permission.callerPackage}?")
+            Text(stringResource(R.string.connections_permissions_delete_text, formatRequestType(permission.requestType), permission.callerPackage))
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.connections_permissions_delete_confirm), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.connections_permissions_cancel))
             }
         }
     )
@@ -287,14 +298,14 @@ private fun AppPermissionHeader(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "$permissionCount permission${if (permissionCount != 1) "s" else ""}",
+                text = pluralStringResource(R.plurals.connections_permissions_count, permissionCount, permissionCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             velocityUsage?.let { (hour, day, week) ->
                 if (hour > 0 || day > 0 || week > 0) {
                     Text(
-                        text = "Rate: $hour/h \u00b7 $day/d \u00b7 $week/w",
+                        text = stringResource(R.string.connections_permissions_rate, hour, day, week),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
@@ -303,7 +314,7 @@ private fun AppPermissionHeader(
             }
         }
         TextButton(onClick = onRevokeAll) {
-            Text("Revoke All", color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.connections_permissions_revoke_all_header), color = MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -316,6 +327,7 @@ private fun PermissionCard(
 ) {
     val isExpired = permission.isExpired()
     val currentDecision = permission.permissionDecision
+    val context = LocalContext.current
     val containerColor = if (isExpired) {
         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
     } else {
@@ -349,7 +361,7 @@ private fun PermissionCard(
                         if (isExpired) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Expired",
+                                text = stringResource(R.string.connections_permissions_expired),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.error
                             )
@@ -358,13 +370,13 @@ private fun PermissionCard(
 
                     permission.eventKindOrNull?.let { kind ->
                         Text(
-                            text = EventKind.displayName(kind),
+                            text = EventKind.displayName(context, kind),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    val expiryText = permission.expiresAt?.let { "Expires ${io.privkey.keep.uniffi.formatTimestampDetailed(it / 1000)}" } ?: "Permanent"
+                    val expiryText = permission.expiresAt?.let { stringResource(R.string.connections_permissions_expires, io.privkey.keep.uniffi.formatTimestampDetailed(it / 1000)) } ?: stringResource(R.string.connections_permissions_permanent)
                     Text(
                         text = expiryText,
                         style = MaterialTheme.typography.bodySmall,
@@ -375,7 +387,7 @@ private fun PermissionCard(
                 IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "Delete permission",
+                        contentDescription = stringResource(R.string.connections_permissions_delete_cd),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }

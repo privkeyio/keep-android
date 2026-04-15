@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.ShareInfo
 
@@ -24,6 +25,7 @@ fun ShareDetailsScreen(
         hexToNpub(shareInfo.groupPubkey) ?: ""
     }
     val isNpubValid = npub.isNotBlank()
+    val npubCopiedMessage = stringResource(R.string.share_details_npub_copied_toast)
 
     DisposableEffect(Unit) {
         setSecureScreen(context, true)
@@ -48,13 +50,13 @@ fun ShareDetailsScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Share ${shareInfo.shareIndex} of ${shareInfo.totalShares}",
+            text = stringResource(R.string.share_details_share_of, shareInfo.shareIndex.toInt(), shareInfo.totalShares.toInt()),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Text(
-            text = "Threshold: ${shareInfo.threshold}",
+            text = stringResource(R.string.share_details_threshold, shareInfo.threshold.toInt()),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -64,9 +66,9 @@ fun ShareDetailsScreen(
         if (isNpubValid) {
             QrCodeDisplay(
                 data = npub,
-                label = "Group Public Key (npub)",
+                label = stringResource(R.string.share_details_qr_label),
                 onCopied = {
-                    Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, npubCopiedMessage, Toast.LENGTH_SHORT).show()
                 }
             )
         } else {
@@ -77,7 +79,7 @@ fun ShareDetailsScreen(
                 )
             ) {
                 Text(
-                    text = "Invalid group public key",
+                    text = stringResource(R.string.share_details_invalid_group_pubkey),
                     modifier = Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
@@ -89,13 +91,13 @@ fun ShareDetailsScreen(
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "npub",
+                    text = stringResource(R.string.share_details_npub_header),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isNpubValid) io.privkey.keep.uniffi.truncateStr(npub, 12u, 8u) else "---",
+                    text = if (isNpubValid) io.privkey.keep.uniffi.truncateStr(npub, 12u, 8u) else stringResource(R.string.share_details_npub_placeholder),
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -108,7 +110,7 @@ fun ShareDetailsScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = isNpubValid
         ) {
-            Text("Export Share as QR")
+            Text(stringResource(R.string.share_details_export_qr))
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -117,13 +119,13 @@ fun ShareDetailsScreen(
             onClick = {
                 if (isNpubValid) {
                     copySensitiveText(context, npub)
-                    Toast.makeText(context, "npub copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, npubCopiedMessage, Toast.LENGTH_SHORT).show()
                 }
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = isNpubValid
         ) {
-            Text("Copy npub")
+            Text(stringResource(R.string.share_details_copy_npub))
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -132,7 +134,7 @@ fun ShareDetailsScreen(
             onClick = onDismiss,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Back")
+            Text(stringResource(R.string.back))
         }
     }
 }

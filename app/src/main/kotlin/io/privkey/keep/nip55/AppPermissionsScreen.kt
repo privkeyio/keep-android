@@ -57,6 +57,7 @@ fun AppPermissionsScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     var appSettings by remember { mutableStateOf<Nip55AppSettings?>(null) }
     var expiryDropdownExpanded by remember { mutableStateOf(false) }
+    val nip46ClientLabel = stringResource(R.string.connections_app_nip46_client_label)
 
     LaunchedEffect(packageName) {
         val isNip46 = packageName.startsWith("nip46:")
@@ -64,7 +65,7 @@ fun AppPermissionsScreen(
             if (isNip46) {
                 val pubkey = packageName.removePrefix("nip46:")
                 val clientInfo = Nip46ClientStore.getClient(context, pubkey)
-                val label = clientInfo?.name ?: "NIP-46 Client"
+                val label = clientInfo?.name ?: nip46ClientLabel
 
                 val permissions = runCatching { permissionStore.getPermissionsForCaller(packageName) }
                     .getOrDefault(emptyList())
@@ -118,7 +119,7 @@ fun AppPermissionsScreen(
                 title = { Text(appState.label ?: packageName) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.connections_app_back_cd))
                     }
                 }
             )
@@ -153,12 +154,13 @@ private fun RevokeAllPermissionsDialog(
 ) {
     val context = LocalContext.current
     val isNip46 = packageName.startsWith("nip46:")
-    val dialogTitle = if (isNip46) "Disconnect Client?" else "Disconnect App?"
+    val dialogTitle = if (isNip46) stringResource(R.string.connections_app_disconnect_client_title) else stringResource(R.string.connections_app_disconnect_app_title)
     val dialogText = if (isNip46) {
-        "This will remove all saved permissions and revoke authorization for ${appLabel ?: packageName}. The client will need to reconnect."
+        stringResource(R.string.connections_app_disconnect_client_text, appLabel ?: packageName)
     } else {
-        "This will remove all saved permissions for ${appLabel ?: packageName}. The app will need to request permission again."
+        stringResource(R.string.connections_app_disconnect_app_text, appLabel ?: packageName)
     }
+    val toastRevokeFailed = stringResource(R.string.connections_app_revoke_toast_error)
     AlertDialog(
         onDismissRequest = onDismissDialog,
         title = { Text(dialogTitle) },
@@ -180,18 +182,18 @@ private fun RevokeAllPermissionsDialog(
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("AppPermissions", "Revoke failed: ${e::class.simpleName}")
                             onDismissDialog()
-                            Toast.makeText(context, "Failed to revoke permissions", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
                 colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
             ) {
-                Text("Disconnect")
+                Text(stringResource(R.string.connections_app_disconnect_confirm))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismissDialog) {
-                Text("Cancel")
+                Text(stringResource(R.string.connections_app_cancel))
             }
         }
     )
@@ -214,6 +216,9 @@ private fun AppPermissionsListContent(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val toastSignPolicyError = stringResource(R.string.connections_app_sign_policy_update_error)
+    val errUpdatePermission = stringResource(R.string.connections_app_permission_update_error)
+    val toastRevokePermissionError = stringResource(R.string.connections_app_permission_revoke_error)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -266,7 +271,7 @@ private fun AppPermissionsListContent(
                                         onAppStateChange(appState.copy(signPolicyOverride = newOverride))
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
-                                        Toast.makeText(context, "Failed to update sign policy", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, toastSignPolicyError, Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -288,14 +293,14 @@ private fun AppPermissionsListContent(
         } else if (appState.permissions.isEmpty()) {
             item {
                 Text(
-                    "No active permissions",
+                    stringResource(R.string.connections_app_no_active_permissions),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         } else {
             item {
                 Text(
-                    "Permissions",
+                    stringResource(R.string.connections_app_permissions_header),
                     style = MaterialTheme.typography.titleMedium
                 )
             }
@@ -325,7 +330,7 @@ private fun AppPermissionsListContent(
                                 updateError = null
                             } catch (e: Exception) {
                                 if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update permission", e)
-                                updateError = "Failed to update permission"
+                                updateError = errUpdatePermission
                             }
                         }
                     },
@@ -343,7 +348,7 @@ private fun AppPermissionsListContent(
                                 if (newPermissions.isEmpty()) onDismiss()
                             } catch (e: Exception) {
                                 if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke permission", e)
-                                Toast.makeText(context, "Failed to revoke permission", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, toastRevokePermissionError, Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -358,7 +363,7 @@ private fun AppPermissionsListContent(
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
-                Text(if (packageName.startsWith("nip46:")) "Disconnect Client" else "Disconnect App")
+                Text(if (packageName.startsWith("nip46:")) stringResource(R.string.connections_app_disconnect_client_button) else stringResource(R.string.connections_app_disconnect_app_button))
             }
         }
     }
@@ -404,14 +409,14 @@ private fun AppHeaderCard(
                     if (isNip46Client) {
                         Icon(
                             Icons.Default.Cloud,
-                            contentDescription = "NIP-46 Client",
+                            contentDescription = stringResource(R.string.connections_app_nip46_client_cd),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(48.dp)
                         )
                     } else if (!isVerified) {
                         Icon(
                             Icons.Default.Warning,
-                            contentDescription = "Unverified",
+                            contentDescription = stringResource(R.string.connections_app_unverified_cd),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(48.dp)
                         )
@@ -429,7 +434,7 @@ private fun AppHeaderCard(
                 if (isNip46Client) {
                     val pubkey = packageName.removePrefix("nip46:")
                     Text(
-                        text = "NIP-46 Client (${io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)})",
+                        text = stringResource(R.string.connections_app_nip46_client_with_pubkey, io.privkey.keep.uniffi.truncateStr(pubkey, 8u, 6u)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -448,7 +453,7 @@ private fun AppHeaderCard(
                         )
                     ) {
                         Text(
-                            text = "Warning: App not installed or unverified",
+                            text = stringResource(R.string.connections_app_unverified_warning),
                             modifier = Modifier.padding(8.dp),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
@@ -468,6 +473,7 @@ private fun PermissionItem(
     errorMessage: String? = null
 ) {
     val currentDecision = permission.permissionDecision
+    val context = LocalContext.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -483,12 +489,12 @@ private fun PermissionItem(
                     )
                     permission.eventKindOrNull?.let { kind ->
                         Text(
-                            text = EventKind.displayName(kind),
+                            text = EventKind.displayName(context, kind),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    val expiryText = permission.expiresAt?.let { "Expires: ${formatExpiry(it)}" } ?: "Permanent"
+                    val expiryText = permission.expiresAt?.let { stringResource(R.string.connections_app_permission_expires, formatExpiry(it)) } ?: stringResource(R.string.connections_app_permission_permanent)
                     Text(
                         text = expiryText,
                         style = MaterialTheme.typography.bodySmall,
@@ -499,7 +505,7 @@ private fun PermissionItem(
                 IconButton(onClick = onRevoke) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "Revoke",
+                        contentDescription = stringResource(R.string.connections_app_permission_revoke_cd),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }

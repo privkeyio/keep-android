@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import io.privkey.keep.nip55.PermissionStore
@@ -60,6 +61,13 @@ fun ExportLogsScreen(
     var state by remember { mutableStateOf<ExportLogsState>(ExportLogsState.Idle) }
     var pendingContent by remember { mutableStateOf<String?>(null) }
 
+    val savedToastMessage = stringResource(R.string.export_logs_saved_toast)
+    val failedSaveMessage = stringResource(R.string.export_logs_failed_save)
+    val shareChooserTitle = stringResource(R.string.export_logs_share_chooser)
+    val noShareTargetMessage = stringResource(R.string.export_logs_no_share_target)
+    val failedShareMessage = stringResource(R.string.export_logs_failed_share)
+    val failedCollectMessage = stringResource(R.string.export_logs_failed_collect)
+
     val saveFileLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
@@ -81,13 +89,13 @@ fun ExportLogsScreen(
                         buffered.flush()
                     }
                 }
-                Toast.makeText(context, "Logs saved", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, savedToastMessage, Toast.LENGTH_SHORT).show()
                 state = ExportLogsState.Idle
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Failed to save logs", e)
-                state = ExportLogsState.Error("Failed to save logs")
+                state = ExportLogsState.Error(failedSaveMessage)
             }
         }
     }
@@ -134,7 +142,7 @@ fun ExportLogsScreen(
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                        val chooser = Intent.createChooser(sendIntent, "Share logs").apply {
+                        val chooser = Intent.createChooser(sendIntent, shareChooserTitle).apply {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         try {
@@ -142,7 +150,7 @@ fun ExportLogsScreen(
                             state = ExportLogsState.Idle
                         } catch (e: ActivityNotFoundException) {
                             if (BuildConfig.DEBUG) Log.e("ExportLogs", "No share target", e)
-                            state = ExportLogsState.Error("No app available to share")
+                            state = ExportLogsState.Error(noShareTargetMessage)
                         }
                     }
                 }
@@ -151,7 +159,8 @@ fun ExportLogsScreen(
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e("ExportLogs", "Export failed", e)
                 state = ExportLogsState.Error(
-                    if (action == ExportAction.Share) "Failed to share logs" else "Failed to collect logs"
+                    if (action == ExportAction.Share) failedShareMessage
+                    else failedCollectMessage
                 )
             }
         }
@@ -160,10 +169,10 @@ fun ExportLogsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Export & Share Logs") },
+                title = { Text(stringResource(R.string.export_logs_title)) },
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -179,15 +188,10 @@ fun ExportLogsScreen(
         ) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Diagnostic Logs", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.export_logs_card_title), style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Collects app diagnostics into a plain text file. Includes: device " +
-                            "manufacturer/model, Android version, app version and build type, " +
-                            "account count, foreground service and Tor/proxy configuration, " +
-                            "signing audit history (caller package names, caller display names, " +
-                            "event kinds, and free-text reasons), and NIP-55 permission audit " +
-                            "history. Does not include private keys, nsec, or seed words.",
+                        stringResource(R.string.export_logs_description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -195,10 +199,7 @@ fun ExportLogsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        "Warning: audit entries include caller display names and free-text " +
-                            "reasons supplied by third-party apps. These fields may contain " +
-                            "personal information or attacker-controlled content. Review the " +
-                            "file before sharing.",
+                        stringResource(R.string.export_logs_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary
                     )
@@ -223,7 +224,7 @@ fun ExportLogsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
-                            Text("Save to File")
+                            Text(stringResource(R.string.export_logs_save_to_file))
                         }
                         Button(
                             onClick = { runExport(ExportAction.Share) },
@@ -238,7 +239,7 @@ fun ExportLogsScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
-                            Text("Share")
+                            Text(stringResource(R.string.export_logs_share))
                         }
                     }
 

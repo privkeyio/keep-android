@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -158,8 +159,12 @@ fun ImportShareScreen(
     var shareDataDisplay by remember { mutableStateOf("") }
     val passphrase = remember { SecurePassphrase() }
     var passphraseDisplay by remember { mutableStateOf("") }
-    var shareName by remember { mutableStateOf("Mobile Share") }
+    val defaultShareName = stringResource(R.string.import_share_default_name)
+    var shareName by remember { mutableStateOf(defaultShareName) }
     var showScanner by remember { mutableStateOf(false) }
+    val biometricInvalidatedMessage = stringResource(R.string.import_share_biometric_invalidated)
+    val biometricUnavailableMessage = stringResource(R.string.import_share_biometric_unavailable)
+    val initFailedMessage = stringResource(R.string.import_share_init_failed)
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
 
@@ -209,7 +214,7 @@ fun ImportShareScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Import FROST Share",
+            text = stringResource(R.string.import_share_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -257,14 +262,14 @@ fun ImportShareScreen(
                 } catch (e: KeyPermanentlyInvalidatedException) {
                     clearChars()
                     if (BuildConfig.DEBUG) Log.e("ImportShare", "Biometric key invalidated during cipher init: ${e::class.simpleName}")
-                    onError("Biometric key invalidated. Please re-enroll biometrics.")
+                    onError(biometricInvalidatedMessage)
                 } catch (e: BiometricHelper.BiometricNotReadyException) {
                     clearChars()
-                    onError(e.message ?: "Biometric authentication is unavailable")
+                    onError(e.message ?: biometricUnavailableMessage)
                 } catch (e: Exception) {
                     clearChars()
                     if (BuildConfig.DEBUG) Log.e("ImportShare", "Failed to initialize cipher for biometric auth: ${e::class.simpleName}")
-                    onError("Failed to initialize encryption")
+                    onError(initFailedMessage)
                 }
             }
         )
@@ -285,8 +290,8 @@ private fun ImportShareInputFields(
     OutlinedTextField(
         value = shareDataDisplay,
         onValueChange = onShareDataChange,
-        label = { Text("Share Data") },
-        placeholder = { Text("kshare1q...") },
+        label = { Text(stringResource(R.string.import_share_data_label)) },
+        placeholder = { Text(stringResource(R.string.import_share_data_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         minLines = 3,
         maxLines = 5,
@@ -300,7 +305,7 @@ private fun ImportShareInputFields(
         modifier = Modifier.fillMaxWidth(),
         enabled = isInputEnabled
     ) {
-        Text("Scan QR Code")
+        Text(stringResource(R.string.import_share_scan_qr))
     }
 
     Spacer(modifier = Modifier.height(16.dp))
@@ -308,7 +313,7 @@ private fun ImportShareInputFields(
     OutlinedTextField(
         value = passphraseDisplay,
         onValueChange = onPassphraseChange,
-        label = { Text("Passphrase") },
+        label = { Text(stringResource(R.string.import_share_passphrase_label)) },
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -321,7 +326,7 @@ private fun ImportShareInputFields(
     OutlinedTextField(
         value = shareName,
         onValueChange = onShareNameChange,
-        label = { Text("Share Name") },
+        label = { Text(stringResource(R.string.import_share_name_label)) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         enabled = isInputEnabled
@@ -346,7 +351,7 @@ private fun ImportStatusAndActions(
 
     if (importState is ImportState.Success) {
         StatusCard(
-            text = "Share '${importState.name}' imported successfully",
+            text = stringResource(R.string.import_share_success, importState.name),
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         )
@@ -383,7 +388,7 @@ internal fun ImportButtons(
                 onClick = onDismiss,
                 modifier = Modifier.weight(1f)
             ) {
-                Text(if (importState is ImportState.Success) "Done" else "Cancel")
+                Text(stringResource(if (importState is ImportState.Success) R.string.import_share_done else R.string.import_share_cancel))
             }
             if (importState !is ImportState.Success) {
                 Button(
@@ -391,7 +396,7 @@ internal fun ImportButtons(
                     modifier = Modifier.weight(1f),
                     enabled = canImport
                 ) {
-                    Text("Import")
+                    Text(stringResource(R.string.import_share_import))
                 }
             }
         }
@@ -426,7 +431,7 @@ fun QrScannerScreen(
     onCodeScanned: (String) -> Unit,
     onDismiss: () -> Unit,
     validator: (String) -> Boolean = ::isValidKshareFormat,
-    title: String = "Scan FROST Share QR Code"
+    title: String = stringResource(R.string.import_share_scanner_title)
 ) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -449,7 +454,7 @@ fun QrScannerScreen(
 
     if (!hasCameraPermission) {
         Box(modifier = Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
-            Text("Camera permission required")
+            Text(stringResource(R.string.import_share_camera_permission_required))
         }
         return
     }
@@ -590,7 +595,7 @@ private fun ScannerOverlay(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Scanning frame $got of $total",
+                    text = stringResource(R.string.import_share_scanning_frame, got, total),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -598,7 +603,7 @@ private fun ScannerOverlay(
         }
 
         OutlinedButton(onClick = onDismiss) {
-            Text("Cancel")
+            Text(stringResource(R.string.import_share_scanner_cancel))
         }
     }
 }

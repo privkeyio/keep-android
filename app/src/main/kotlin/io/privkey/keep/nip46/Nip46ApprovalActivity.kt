@@ -120,7 +120,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val keystoreStorage = storage
         if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
             if (killSwitchStore?.isEnabled() == true) {
-                Toast.makeText(this, "Signing is disabled (kill switch is active)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             }
             respond(false, null)
             return
@@ -128,7 +128,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
         val status = biometricHelper.checkBiometricStatus()
         if (status != BiometricHelper.BiometricStatus.AVAILABLE) {
-            Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(status), Toast.LENGTH_LONG).show()
+            Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(this, status), Toast.LENGTH_LONG).show()
             respond(false, null)
             return
         }
@@ -139,7 +139,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
                 .getOrNull()
 
             if (cipher == null) {
-                Toast.makeText(this@Nip46ApprovalActivity, "Failed to access stored keys", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@Nip46ApprovalActivity, getString(io.privkey.keep.R.string.failed_to_access_stored_keys_toast), Toast.LENGTH_SHORT).show()
                 respond(false, null)
                 return@launch
             }

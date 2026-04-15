@@ -13,6 +13,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import io.privkey.keep.uniffi.KeepMobile
@@ -24,7 +25,6 @@ import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
 
 private const val MAX_MNEMONIC_LENGTH = 1024
-private const val PASTE_TOO_MANY_WORDS = "Pasted text has too many words (max 24)"
 
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,7 +41,8 @@ fun MnemonicRecoveryScreen(
     val clipboardManager = LocalClipboardManager.current
     var wordCount by remember { mutableIntStateOf(12) }
     val words = remember { mutableStateListOf(*Array(12) { "" }) }
-    var keyName by remember { mutableStateOf("Mobile Key") }
+    val defaultKeyName = stringResource(R.string.create_account_default_key_name)
+    var keyName by remember { mutableStateOf(defaultKeyName) }
     var validationError by remember { mutableStateOf<String?>(null) }
     var pasteError by remember { mutableStateOf<String?>(null) }
     val mnemonicData = remember { SecureShareData(MAX_MNEMONIC_LENGTH) }
@@ -50,6 +51,11 @@ fun MnemonicRecoveryScreen(
 
     val isInputEnabled = (importState is ImportState.Idle || importState is ImportState.Error) && !isValidating
     val focusRequesters = remember(wordCount) { List(wordCount) { FocusRequester() } }
+    val pasteTooManyMsg = stringResource(R.string.mnemonic_recovery_paste_too_many)
+    val invalidSeedMsg = stringResource(R.string.mnemonic_recovery_invalid_seed)
+    val biometricInvalidatedMsg = stringResource(R.string.mnemonic_recovery_biometric_invalidated)
+    val biometricUnavailableMsg = stringResource(R.string.mnemonic_recovery_biometric_unavailable)
+    val cipherFailedMsg = stringResource(R.string.mnemonic_recovery_cipher_failed)
 
     fun updateWordCount(newCount: Int) {
         wordCount = newCount
@@ -87,7 +93,7 @@ fun MnemonicRecoveryScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Import from Seed Words",
+            text = stringResource(R.string.mnemonic_recovery_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -97,13 +103,13 @@ fun MnemonicRecoveryScreen(
             FilterChip(
                 selected = wordCount == 12,
                 onClick = { updateWordCount(12) },
-                label = { Text("12 words") },
+                label = { Text(stringResource(R.string.mnemonic_recovery_12_words)) },
                 enabled = isInputEnabled
             )
             FilterChip(
                 selected = wordCount == 24,
                 onClick = { updateWordCount(24) },
-                label = { Text("24 words") },
+                label = { Text(stringResource(R.string.mnemonic_recovery_24_words)) },
                 enabled = isInputEnabled
             )
         }
@@ -111,7 +117,7 @@ fun MnemonicRecoveryScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "$filledCount of $wordCount words entered",
+            text = stringResource(R.string.mnemonic_recovery_entered_count, filledCount, wordCount),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -121,7 +127,7 @@ fun MnemonicRecoveryScreen(
         OutlinedTextField(
             value = keyName,
             onValueChange = { if (it.length <= 64) keyName = it },
-            label = { Text("Key Name") },
+            label = { Text(stringResource(R.string.mnemonic_recovery_key_name_label)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             enabled = isInputEnabled
@@ -144,7 +150,7 @@ fun MnemonicRecoveryScreen(
                 clipboardManager = clipboardManager,
                 onUpdateWordCount = ::updateWordCount,
                 onClearValidation = { validationError = null; pasteError = null },
-                onPasteRejected = { pasteError = PASTE_TOO_MANY_WORDS },
+                onPasteRejected = { pasteError = pasteTooManyMsg },
                 modifier = Modifier.weight(1f)
             )
             WordInputColumn(
@@ -156,7 +162,7 @@ fun MnemonicRecoveryScreen(
                 clipboardManager = clipboardManager,
                 onUpdateWordCount = ::updateWordCount,
                 onClearValidation = { validationError = null; pasteError = null },
-                onPasteRejected = { pasteError = PASTE_TOO_MANY_WORDS },
+                onPasteRejected = { pasteError = pasteTooManyMsg },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -192,7 +198,7 @@ fun MnemonicRecoveryScreen(
 
         if (importState is ImportState.Success) {
             StatusCard(
-                text = "Account '${importState.name}' created successfully",
+                text = stringResource(R.string.mnemonic_recovery_account_created, importState.name),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -226,7 +232,7 @@ fun MnemonicRecoveryScreen(
                             true
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
-                            validationError = "Invalid seed words. Please check and try again."
+                            validationError = invalidSeedMsg
                             false
                         } finally {
                             isValidating = false
@@ -243,13 +249,13 @@ fun MnemonicRecoveryScreen(
                             }
                         } catch (e: KeyPermanentlyInvalidatedException) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric key invalidated: ${e::class.simpleName}")
-                            onError("Biometric key invalidated. Please re-enroll biometrics.")
+                            onError(biometricInvalidatedMsg)
                         } catch (e: BiometricHelper.BiometricNotReadyException) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Biometric not ready: ${e::class.simpleName}")
-                            onError("Biometric authentication is unavailable")
+                            onError(biometricUnavailableMsg)
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Failed to initialize cipher: ${e::class.simpleName}")
-                            onError("Failed to initialize encryption")
+                            onError(cipherFailedMsg)
                         }
                     }
                 }
@@ -342,7 +348,7 @@ private fun WordInputField(
                 onValueChange(newValue)
                 if (newValue.contains(" ")) onNext()
             },
-            prefix = { Text("${index + 1}. ") },
+            prefix = { Text(stringResource(R.string.mnemonic_word_number, index + 1)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focusRequester),

@@ -386,7 +386,7 @@ class Nip55Activity : FragmentActivity() {
 
         val biometricStatus = biometricHelper.checkBiometricStatus()
         if (biometricStatus != BiometricHelper.BiometricStatus.AVAILABLE) {
-            finishWithError("biometric_not_ready", BiometricHelper.getBiometricNotReadyMessage(biometricStatus))
+            finishWithError("biometric_not_ready", BiometricHelper.getBiometricNotReadyMessage(this, biometricStatus))
             return false
         }
 
@@ -403,7 +403,7 @@ class Nip55Activity : FragmentActivity() {
             biometricHelper.authenticateWithCrypto(
                 cipher = cipher,
                 title = "Approve Request",
-                subtitle = req.requestType.displayName()
+                subtitle = req.requestType.displayName(this)
             )
         }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
             .getOrNull()
@@ -424,7 +424,7 @@ class Nip55Activity : FragmentActivity() {
 
         if (app.liveState != null) return null
 
-        BiometricHelper.requireBiometricReady(biometricHelper.checkBiometricStatus())
+        BiometricHelper.requireBiometricReady(this, biometricHelper.checkBiometricStatus())
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
             .getOrNull() ?: return "Failed to access stored keys"

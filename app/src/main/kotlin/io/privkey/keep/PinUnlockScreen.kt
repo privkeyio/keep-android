@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -34,6 +35,8 @@ fun PinUnlockScreen(
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val errTooMany = stringResource(R.string.pin_unlock_error_too_many)
+    val errIncorrectFormat = stringResource(R.string.pin_unlock_error_incorrect)
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -80,9 +83,9 @@ fun PinUnlockScreen(
 
         if (pinStore.isLockedOut()) {
             isLockedOut = true
-            error = "Too many attempts. Try again later."
+            error = errTooMany
         } else {
-            error = "Incorrect PIN. ${pinStore.getRemainingAttempts()} attempts remaining."
+            error = String.format(errIncorrectFormat, pinStore.getRemainingAttempts())
         }
     }
 
@@ -99,14 +102,14 @@ fun PinUnlockScreen(
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "Keep",
+                text = stringResource(R.string.pin_unlock_app_title),
                 style = MaterialTheme.typography.headlineLarge
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Enter PIN to unlock",
+                text = stringResource(R.string.pin_unlock_prompt),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -115,13 +118,13 @@ fun PinUnlockScreen(
 
             if (biometricResetRequired && onBiometricAuth != null && !isLockedOut) {
                 Text(
-                    text = "Biometric verification required",
+                    text = stringResource(R.string.pin_unlock_biometric_required_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Too many failed PIN attempts. Verify your identity with biometrics to continue.",
+                    text = stringResource(R.string.pin_unlock_biometric_required_body),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -142,18 +145,18 @@ fun PinUnlockScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Use Biometrics")
+                    Text(stringResource(R.string.pin_unlock_use_biometrics))
                 }
             } else if (isLockedOut) {
                 val seconds = (lockoutRemaining / 1000).toInt()
                 Text(
-                    text = "Locked out",
+                    text = stringResource(R.string.pin_unlock_locked_out_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Try again in $seconds seconds",
+                    text = stringResource(R.string.pin_unlock_locked_out_body, seconds),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -166,7 +169,7 @@ fun PinUnlockScreen(
                             error = null
                         }
                     },
-                    label = { Text("PIN") },
+                    label = { Text(stringResource(R.string.pin_unlock_label_pin)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
@@ -199,7 +202,7 @@ fun PinUnlockScreen(
                     enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Unlock")
+                    Text(stringResource(R.string.pin_unlock_button))
                 }
 
                 onBiometricAuth?.let { auth ->
@@ -213,7 +216,7 @@ fun PinUnlockScreen(
                             }
                         }
                     }) {
-                        Text("Use Biometrics")
+                        Text(stringResource(R.string.pin_unlock_use_biometrics))
                     }
                 }
             }

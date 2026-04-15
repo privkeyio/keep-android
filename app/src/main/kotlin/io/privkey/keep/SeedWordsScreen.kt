@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.password
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,8 @@ internal fun SeedWordsScreen(
 
     BackHandler { onDismiss() }
 
+    val backLabel = stringResource(R.string.back)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -58,7 +61,7 @@ internal fun SeedWordsScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Seed Words",
+            text = stringResource(R.string.seed_words_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -71,14 +74,14 @@ internal fun SeedWordsScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Back")
+                Text(backLabel)
             }
             return@Column
         }
 
         if (mnemonicData?.isNotBlank() != true) {
             StatusCard(
-                text = "No seed words available for this account. Seed words are only available for accounts created from a mnemonic in this app.",
+                text = stringResource(R.string.seed_words_none_available),
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             )
@@ -89,7 +92,7 @@ internal fun SeedWordsScreen(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Back")
+                Text(backLabel)
             }
             return@Column
         }
@@ -111,7 +114,7 @@ internal fun SeedWordsScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Write down these words and store them safely. Anyone with these words can access your account.",
+            text = stringResource(R.string.seed_words_warning),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.error
         )
@@ -123,21 +126,21 @@ internal fun SeedWordsScreen(
                 onClick = onConfirmBackedUp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("I've saved my seed words")
+                Text(stringResource(R.string.seed_words_saved_button))
             }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Back")
+                Text(backLabel)
             }
         } else {
             Button(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Back")
+                Text(backLabel)
             }
         }
     }

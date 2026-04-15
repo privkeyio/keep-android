@@ -11,7 +11,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.setSecureScreen
 import io.privkey.keep.uniffi.*
@@ -185,6 +188,14 @@ fun WalletDescriptorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val loadFailedMessage = stringResource(R.string.wallet_descriptor_toast_load_failed)
+    val proposeFailedMessage = stringResource(R.string.wallet_descriptor_toast_propose_failed)
+    val copiedMessage = stringResource(R.string.wallet_descriptor_toast_copied)
+    val exportFailedMessage = stringResource(R.string.wallet_descriptor_toast_export_failed)
+    val deleteFailedMessage = stringResource(R.string.wallet_descriptor_toast_delete_failed)
+    val announceFailedMessage = stringResource(R.string.wallet_descriptor_toast_announce_failed)
+    val rejectFailedMessage = stringResource(R.string.wallet_descriptor_toast_reject_failed)
+    val approveFailedMessage = stringResource(R.string.wallet_descriptor_toast_approve_failed)
     var descriptors by remember { mutableStateOf<List<WalletDescriptorInfo>>(emptyList()) }
     var showProposeDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf<WalletDescriptorInfo?>(null) }
@@ -209,7 +220,7 @@ fun WalletDescriptorScreen(
                 descriptors = it
             }.onFailure {
                 if (it is CancellationException) throw it
-                Toast.makeText(context, "Failed to load descriptors", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, loadFailedMessage, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -263,6 +274,7 @@ fun WalletDescriptorScreen(
     fun handleProposalAction(
         proposal: DescriptorProposal,
         action: String,
+        failureMessage: String,
         onSuccess: (() -> Unit)? = null,
         block: suspend (String) -> Unit
     ) {
@@ -278,7 +290,7 @@ fun WalletDescriptorScreen(
                 }.onFailure { e ->
                     if (e is CancellationException) throw e
                     if (BuildConfig.DEBUG) Log.w(TAG, "Failed to $action contribution: ${e.javaClass.simpleName}")
-                    Toast.makeText(context, "Failed to $action contribution", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, failureMessage, Toast.LENGTH_LONG).show()
                 }
             } finally {
                 inFlightSessions = inFlightSessions - proposal.sessionId
@@ -294,7 +306,7 @@ fun WalletDescriptorScreen(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Wallet Descriptors", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.wallet_descriptor_title), style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (!callbacksRegistered) {
@@ -305,7 +317,7 @@ fun WalletDescriptorScreen(
                 )
             ) {
                 Text(
-                    "Real-time updates unavailable. Propose and list operations still work.",
+                    stringResource(R.string.wallet_descriptor_realtime_unavailable),
                     modifier = Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     style = MaterialTheme.typography.bodySmall
@@ -323,7 +335,7 @@ fun WalletDescriptorScreen(
                 proposals = pendingProposals,
                 inFlightSessions = inFlightSessions,
                 onApprove = { showKeyProofDialog = it },
-                onReject = { handleProposalAction(it, "reject") { id ->
+                onReject = { handleProposalAction(it, "reject", rejectFailedMessage) { id ->
                     keepMobile.walletDescriptorCancel(id)
                 }}
             )
@@ -335,7 +347,7 @@ fun WalletDescriptorScreen(
             onClick = { showProposeDialog = true },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("New Descriptor")
+            Text(stringResource(R.string.wallet_descriptor_new))
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -347,7 +359,7 @@ fun WalletDescriptorScreen(
                 containerColor = MaterialTheme.colorScheme.secondary
             )
         ) {
-            Text("Announce Recovery Keys")
+            Text(stringResource(R.string.wallet_descriptor_announce_recovery_keys))
         }
 
         if (announcedXpubs.isNotEmpty()) {
@@ -366,7 +378,7 @@ fun WalletDescriptorScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-            Text("Back")
+            Text(stringResource(R.string.back))
         }
     }
 
@@ -387,7 +399,7 @@ fun WalletDescriptorScreen(
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             if (BuildConfig.DEBUG) Log.w(TAG, "Failed to propose descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Failed to propose descriptor", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, proposeFailedMessage, Toast.LENGTH_LONG).show()
                         }
                     } finally {
                         isProposing = false
@@ -412,13 +424,13 @@ fun WalletDescriptorScreen(
                                 keepMobile.walletDescriptorExport(descriptor.groupPubkey, format)
                             }
                             copySensitiveText(context, exported)
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
                         }.onSuccess {
                             showExportDialog = null
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             if (BuildConfig.DEBUG) Log.w(TAG, "Failed to export descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Export failed", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, exportFailedMessage, Toast.LENGTH_LONG).show()
                         }
                     } finally {
                         isExporting = false
@@ -448,7 +460,7 @@ fun WalletDescriptorScreen(
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             if (BuildConfig.DEBUG) Log.w(TAG, "Failed to delete descriptor: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Delete failed", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, deleteFailedMessage, Toast.LENGTH_LONG).show()
                         }
                     } finally {
                         isDeleting = false
@@ -478,7 +490,7 @@ fun WalletDescriptorScreen(
                         }.onFailure { e ->
                             if (e is CancellationException) throw e
                             if (BuildConfig.DEBUG) Log.w(TAG, "Failed to announce xpubs: ${e.javaClass.simpleName}")
-                            Toast.makeText(context, "Failed to announce recovery keys", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, announceFailedMessage, Toast.LENGTH_LONG).show()
                         }
                     } finally {
                         isAnnouncing = false
@@ -497,6 +509,7 @@ fun WalletDescriptorScreen(
                 handleProposalAction(
                     proposal,
                     "approve",
+                    approveFailedMessage,
                     onSuccess = {
                         DescriptorSessionManager.setContributed(proposal.sessionId)
                         showKeyProofDialog = null
@@ -519,27 +532,24 @@ private fun KeyProofConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Verify Key Control") },
+        title = { Text(stringResource(R.string.wallet_descriptor_key_proof_title)) },
         text = {
             Column {
-                Text(
-                    "Approving this contribution will sign a verification message " +
-                        "proving you control your key for this wallet descriptor."
-                )
+                Text(stringResource(R.string.wallet_descriptor_key_proof_body))
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "Network: ${proposal.network}",
+                    stringResource(R.string.wallet_descriptor_key_proof_network, proposal.network),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "Recovery tiers: ${proposal.tiers.size}",
+                    stringResource(R.string.wallet_descriptor_key_proof_tiers, proposal.tiers.size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    "This is required to complete the wallet setup.",
+                    stringResource(R.string.wallet_descriptor_key_proof_required),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.tertiary
                 )
@@ -547,12 +557,15 @@ private fun KeyProofConfirmDialog(
         },
         confirmButton = {
             Button(onClick = onConfirm, enabled = !isBusy) {
-                Text(if (isBusy) "Approving..." else "Approve & Prove Key")
+                Text(
+                    if (isBusy) stringResource(R.string.wallet_descriptor_key_proof_confirming)
+                    else stringResource(R.string.wallet_descriptor_key_proof_confirm)
+                )
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !isBusy) {
-                Text("Cancel")
+                Text(stringResource(R.string.wallet_descriptor_cancel))
             }
         }
     )
@@ -563,28 +576,34 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
     val (statusText, statusColor) = when (state) {
         is DescriptorSessionState.Idle -> return
         is DescriptorSessionState.Proposed ->
-            "Proposed — waiting for contributions" to MaterialTheme.colorScheme.primary
+            stringResource(R.string.wallet_descriptor_session_proposed) to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.ContributionNeeded ->
-            "Contribution needed" to MaterialTheme.colorScheme.tertiary
+            stringResource(R.string.wallet_descriptor_session_contribution_needed) to MaterialTheme.colorScheme.tertiary
         is DescriptorSessionState.Contributed ->
-            (if (state.shareIndex > 0u) "Share ${state.shareIndex} contributed" else "Contribution sent") to
+            (if (state.shareIndex > 0u)
+                stringResource(R.string.wallet_descriptor_session_share_contributed, state.shareIndex.toInt())
+            else
+                stringResource(R.string.wallet_descriptor_session_contribution_sent)) to
                 MaterialTheme.colorScheme.secondary
         is DescriptorSessionState.Complete ->
-            "Descriptor complete" to MaterialTheme.colorScheme.primary
+            stringResource(R.string.wallet_descriptor_session_complete) to MaterialTheme.colorScheme.primary
         is DescriptorSessionState.Failed ->
-            (if (BuildConfig.DEBUG) "Failed: ${truncateText(state.error, 80)}" else "Operation failed") to
+            (if (BuildConfig.DEBUG)
+                stringResource(R.string.wallet_descriptor_session_failed_debug, truncateText(state.error, 80))
+            else
+                stringResource(R.string.wallet_descriptor_session_failed)) to
                 MaterialTheme.colorScheme.error
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Session Status", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.wallet_descriptor_session_status), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(statusText, color = statusColor, style = MaterialTheme.typography.bodyMedium)
             if (BuildConfig.DEBUG && state is DescriptorSessionState.Complete) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "External: ${truncateText(state.externalDescriptor, 40)}",
+                    stringResource(R.string.wallet_descriptor_session_external_debug, truncateText(state.externalDescriptor, 40)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -602,7 +621,7 @@ private fun PendingContributionsCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Pending Contributions", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.wallet_descriptor_pending_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             proposals.forEachIndexed { index, proposal ->
                 Row(
@@ -616,12 +635,12 @@ private fun PendingContributionsCard(
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            "${proposal.tiers.size} tier(s)",
+                            pluralStringResource(R.plurals.wallet_descriptor_pending_tiers, proposal.tiers.size, proposal.tiers.size),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            "Approval includes key control proof",
+                            stringResource(R.string.wallet_descriptor_pending_proof_note),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
@@ -629,10 +648,10 @@ private fun PendingContributionsCard(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val busy = proposal.sessionId in inFlightSessions
                         OutlinedButton(onClick = { onReject(proposal) }, enabled = !busy) {
-                            Text("Reject")
+                            Text(stringResource(R.string.wallet_descriptor_pending_reject))
                         }
                         Button(onClick = { onApprove(proposal) }, enabled = !busy) {
-                            Text("Approve")
+                            Text(stringResource(R.string.wallet_descriptor_pending_approve))
                         }
                     }
                 }
@@ -652,11 +671,14 @@ private fun DescriptorListCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Descriptors (${descriptors.size})", style = MaterialTheme.typography.titleMedium)
+            Text(
+                stringResource(R.string.wallet_descriptor_list_title, descriptors.size),
+                style = MaterialTheme.typography.titleMedium
+            )
             Spacer(modifier = Modifier.height(8.dp))
             if (descriptors.isEmpty()) {
                 Text(
-                    "No wallet descriptors",
+                    stringResource(R.string.wallet_descriptor_list_empty),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
@@ -704,7 +726,7 @@ private fun DescriptorRow(
                 onClick = { onExport(descriptor) },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Export")
+                Text(stringResource(R.string.wallet_descriptor_row_export))
             }
             OutlinedButton(
                 onClick = { onDelete(descriptor) },
@@ -713,7 +735,7 @@ private fun DescriptorRow(
                     contentColor = MaterialTheme.colorScheme.error
                 )
             ) {
-                Text("Delete")
+                Text(stringResource(R.string.wallet_descriptor_row_delete))
             }
         }
     }
@@ -731,10 +753,10 @@ private fun ProposeDescriptorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Wallet Descriptor") },
+        title = { Text(stringResource(R.string.wallet_descriptor_propose_title)) },
         text = {
             Column {
-                Text("Network", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.wallet_descriptor_propose_network_label), style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(4.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("bitcoin", "testnet", "signet").forEach { net ->
@@ -746,33 +768,38 @@ private fun ProposeDescriptorDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Recovery Tier", style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.wallet_descriptor_propose_tier_label), style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 val thresholdError = threshold.isNotEmpty() && threshold.toUIntOrNull()?.let { it !in 1u..15u } == true
+                val thresholdLabel = stringResource(R.string.wallet_descriptor_propose_threshold_label)
+                val requiredText = stringResource(R.string.wallet_descriptor_propose_required)
+                val thresholdRangeText = stringResource(R.string.wallet_descriptor_propose_threshold_range)
                 OutlinedTextField(
                     value = threshold,
                     onValueChange = { threshold = it.filter { c -> c.isDigit() } },
-                    label = { Text("Threshold (1–15)") },
+                    label = { Text(thresholdLabel) },
                     isError = thresholdError || (threshold.isEmpty()),
                     supportingText = if (threshold.isEmpty()) {
-                        { Text("Required") }
+                        { Text(requiredText) }
                     } else if (thresholdError) {
-                        { Text("Must be between 1 and 15") }
+                        { Text(thresholdRangeText) }
                     } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 val timelockError = timelockMonths.isNotEmpty() && timelockMonths.toUIntOrNull()?.let { it !in 1u..120u } == true
+                val timelockLabel = stringResource(R.string.wallet_descriptor_propose_timelock_label)
+                val timelockRangeText = stringResource(R.string.wallet_descriptor_propose_timelock_range)
                 OutlinedTextField(
                     value = timelockMonths,
                     onValueChange = { timelockMonths = it.filter { c -> c.isDigit() } },
-                    label = { Text("Timelock months (1–120)") },
+                    label = { Text(timelockLabel) },
                     isError = timelockError || (timelockMonths.isEmpty()),
                     supportingText = if (timelockMonths.isEmpty()) {
-                        { Text("Required") }
+                        { Text(requiredText) }
                     } else if (timelockError) {
-                        { Text("Must be between 1 and 120") }
+                        { Text(timelockRangeText) }
                     } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -791,11 +818,14 @@ private fun ProposeDescriptorDialog(
                 },
                 enabled = valid && !isProposing
             ) {
-                Text(if (isProposing) "Proposing..." else "Propose")
+                Text(
+                    if (isProposing) stringResource(R.string.wallet_descriptor_propose_confirming)
+                    else stringResource(R.string.wallet_descriptor_propose_confirm)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.wallet_descriptor_cancel)) }
         }
     )
 }
@@ -809,7 +839,7 @@ private fun ExportDescriptorDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Export Descriptor") },
+        title = { Text(stringResource(R.string.wallet_descriptor_export_title)) },
         text = {
             Column {
                 Text(
@@ -818,17 +848,24 @@ private fun ExportDescriptorDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(if (isExporting) "Exporting..." else "Choose export format:")
+                Text(
+                    if (isExporting) stringResource(R.string.wallet_descriptor_export_exporting)
+                    else stringResource(R.string.wallet_descriptor_export_choose)
+                )
             }
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onExport(ExportFormat.SPARROW) }, enabled = !isExporting) { Text("Sparrow") }
-                TextButton(onClick = { onExport(ExportFormat.RAW) }, enabled = !isExporting) { Text("Raw") }
+                TextButton(onClick = { onExport(ExportFormat.SPARROW) }, enabled = !isExporting) {
+                    Text(stringResource(R.string.wallet_descriptor_export_sparrow))
+                }
+                TextButton(onClick = { onExport(ExportFormat.RAW) }, enabled = !isExporting) {
+                    Text(stringResource(R.string.wallet_descriptor_export_raw))
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.wallet_descriptor_cancel)) }
         }
     )
 }
@@ -842,9 +879,14 @@ private fun DeleteDescriptorDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete Descriptor?") },
+        title = { Text(stringResource(R.string.wallet_descriptor_delete_title)) },
         text = {
-            Text("This will permanently remove the wallet descriptor for ${truncateGroupPubkey(descriptor.groupPubkey)}")
+            Text(
+                stringResource(
+                    R.string.wallet_descriptor_delete_body,
+                    truncateGroupPubkey(descriptor.groupPubkey)
+                )
+            )
         },
         confirmButton = {
             TextButton(
@@ -854,11 +896,14 @@ private fun DeleteDescriptorDialog(
                     contentColor = MaterialTheme.colorScheme.error
                 )
             ) {
-                Text(if (isDeleting) "Deleting..." else "Delete")
+                Text(
+                    if (isDeleting) stringResource(R.string.wallet_descriptor_delete_deleting)
+                    else stringResource(R.string.wallet_descriptor_delete_confirm)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.wallet_descriptor_cancel)) }
         }
     )
 }
@@ -867,12 +912,12 @@ private fun DeleteDescriptorDialog(
 private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInfo>>) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Announced Recovery Keys", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.wallet_descriptor_announced_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             val sorted = announcedXpubs.entries.sortedBy { it.key }
             sorted.forEachIndexed { index, (shareIndex, xpubs) ->
                 Text(
-                    "Share $shareIndex",
+                    stringResource(R.string.wallet_descriptor_announced_share, shareIndex.toInt()),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -884,7 +929,7 @@ private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInf
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                "fp: ${xpub.fingerprint}",
+                                stringResource(R.string.wallet_descriptor_announced_fingerprint, xpub.fingerprint),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -921,19 +966,27 @@ private fun AnnounceXpubsDialog(
     val fpValid = fingerprint.matches(FP_REGEX)
     val fpError = fingerprint.isNotEmpty() && !fpValid
 
+    val xpubLabel = stringResource(R.string.wallet_descriptor_announce_xpub_label)
+    val requiredText = stringResource(R.string.wallet_descriptor_propose_required)
+    val xpubPrefixError = stringResource(R.string.wallet_descriptor_announce_xpub_prefix_error)
+    val fpLabel = stringResource(R.string.wallet_descriptor_announce_fp_label)
+    val fpErrorText = stringResource(R.string.wallet_descriptor_announce_fp_error)
+    val labelLabel = stringResource(R.string.wallet_descriptor_announce_label_label)
+    val labelPlaceholder = stringResource(R.string.wallet_descriptor_announce_label_placeholder)
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Announce Recovery Key") },
+        title = { Text(stringResource(R.string.wallet_descriptor_announce_title)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = xpub,
                     onValueChange = { xpub = it.take(200) },
-                    label = { Text("Recovery xpub") },
+                    label = { Text(xpubLabel) },
                     isError = trimmedXpub.isEmpty() || xpubFormatError,
                     supportingText = when {
-                        trimmedXpub.isEmpty() -> {{ Text("Required") }}
-                        xpubFormatError -> {{ Text("Must start with a valid xpub prefix") }}
+                        trimmedXpub.isEmpty() -> {{ Text(requiredText) }}
+                        xpubFormatError -> {{ Text(xpubPrefixError) }}
                         else -> null
                     },
                     singleLine = true,
@@ -943,11 +996,11 @@ private fun AnnounceXpubsDialog(
                 OutlinedTextField(
                     value = fingerprint,
                     onValueChange = { fingerprint = it.filter { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' }.take(8) },
-                    label = { Text("Fingerprint (8 hex chars)") },
+                    label = { Text(fpLabel) },
                     isError = fingerprint.isEmpty() || fpError,
                     supportingText = when {
-                        fingerprint.isEmpty() -> {{ Text("Required") }}
-                        fpError -> {{ Text("Must be 8 hex characters") }}
+                        fingerprint.isEmpty() -> {{ Text(requiredText) }}
+                        fpError -> {{ Text(fpErrorText) }}
                         else -> null
                     },
                     singleLine = true,
@@ -957,8 +1010,8 @@ private fun AnnounceXpubsDialog(
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it.filter { c -> !c.isISOControl() }.take(64) },
-                    label = { Text("Label (optional)") },
-                    placeholder = { Text("e.g. coldcard-backup") },
+                    label = { Text(labelLabel) },
+                    placeholder = { Text(labelPlaceholder) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -970,11 +1023,14 @@ private fun AnnounceXpubsDialog(
                 onClick = { onAnnounce(xpub.trim(), fingerprint, label) },
                 enabled = valid && !isAnnouncing
             ) {
-                Text(if (isAnnouncing) "Announcing..." else "Announce")
+                Text(
+                    if (isAnnouncing) stringResource(R.string.wallet_descriptor_announce_confirming)
+                    else stringResource(R.string.wallet_descriptor_announce_confirm)
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.wallet_descriptor_cancel)) }
         }
     )
 }

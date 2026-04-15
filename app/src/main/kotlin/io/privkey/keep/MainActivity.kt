@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -128,6 +129,8 @@ class MainActivity : FragmentActivity() {
                 ) {
                     val pinStoreForUnlock = pinStore?.takeIf { it.isPinEnabled() && !isPinUnlocked }
 
+                    val unlockTitle = stringResource(R.string.main_unlock_title)
+                    val unlockSubtitle = stringResource(R.string.main_unlock_subtitle)
                     if (pinStoreForUnlock != null) {
                         PinUnlockScreen(
                             pinStore = pinStoreForUnlock,
@@ -135,8 +138,8 @@ class MainActivity : FragmentActivity() {
                             onBiometricAuth = if (biometricAvailable) {
                                 {
                                     biometricHelper?.authenticate(
-                                        title = "Unlock Keep",
-                                        subtitle = "Authenticate to open app",
+                                        title = unlockTitle,
+                                        subtitle = unlockSubtitle,
                                         forcePrompt = true
                                     ) ?: false
                                 }
@@ -147,8 +150,8 @@ class MainActivity : FragmentActivity() {
                         BiometricUnlockScreen(
                             onAuthenticate = {
                                 biometricHelper?.authenticateWithResult(
-                                    title = "Unlock Keep",
-                                    subtitle = "Authenticate to open app",
+                                    title = unlockTitle,
+                                    subtitle = unlockSubtitle,
                                     forcePrompt = true
                                 ) ?: BiometricHelper.AuthResult.FAILED
                             },
@@ -197,7 +200,7 @@ class MainActivity : FragmentActivity() {
                                     } catch (e: Exception) {
                                         Toast.makeText(
                                             this@MainActivity,
-                                            "Authentication failed",
+                                            getString(R.string.main_auth_failed),
                                             Toast.LENGTH_SHORT
                                         ).show()
                                         callback(null)
@@ -206,8 +209,8 @@ class MainActivity : FragmentActivity() {
                             },
                             onBiometricAuth = {
                                 biometricHelper?.authenticate(
-                                    title = "Disable Kill Switch",
-                                    subtitle = "Authenticate to re-enable signing"
+                                    title = getString(R.string.main_disable_kill_switch_title),
+                                    subtitle = getString(R.string.main_disable_kill_switch_subtitle)
                                 ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
@@ -226,7 +229,7 @@ class MainActivity : FragmentActivity() {
                             onAccountSwitched = { app.onAccountSwitched() }
                         )
                     } else {
-                        ErrorScreen(app.getInitError() ?: "Failed to initialize")
+                        ErrorScreen(app.getInitError() ?: stringResource(R.string.main_init_app_failed))
                     }
                 }
             }
@@ -264,7 +267,7 @@ fun MainScreen(
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
-    val requireBiometricReady = { BiometricHelper.requireBiometricReady(biometricStatus) }
+    val requireBiometricReady = { BiometricHelper.requireBiometricReady(appContext, biometricStatus) }
     var hasShare by remember { mutableStateOf(keepMobile.hasShare()) }
     var shareInfo by remember { mutableStateOf(keepMobile.getShareInfo()) }
     var allAccounts by remember { mutableStateOf<List<AccountInfo>>(emptyList()) }
@@ -524,7 +527,12 @@ fun MainScreen(
             storage = storage,
             onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Vault Backup", "Authenticate to access backup", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_vault_backup_title),
+                    appContext.getString(R.string.main_vault_backup_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = { showBackupRestore = false }
         )
@@ -538,7 +546,12 @@ fun MainScreen(
             shareInfo = shareInfo,
             onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Recover nsec", "Authenticate to export vault share", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_recover_nsec_title),
+                    appContext.getString(R.string.main_recover_nsec_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = { showRecoverNsec = false }
         )
@@ -578,7 +591,12 @@ fun MainScreen(
             storage = storage,
             onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Export Share", "Authenticate to export share", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_export_share_title),
+                    appContext.getString(R.string.main_export_share_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = { showExportScreen = false }
         )
@@ -592,7 +610,12 @@ fun MainScreen(
             storage = storage,
             onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Export Encrypted Key", "Authenticate to export encrypted key", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_export_encrypted_key_title),
+                    appContext.getString(R.string.main_export_encrypted_key_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = { showExportNcryptsecScreen = false }
         )
@@ -692,7 +715,12 @@ fun MainScreen(
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Import Share", "Authenticate to store share securely", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_import_share_title),
+                    appContext.getString(R.string.main_import_share_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = {
                 showImportScreen = false
@@ -713,7 +741,12 @@ fun MainScreen(
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Import nsec", "Authenticate to store key securely", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_import_nsec_title),
+                    appContext.getString(R.string.main_import_nsec_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = {
                 showImportNsecScreen = false
@@ -735,7 +768,12 @@ fun MainScreen(
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Create Account", "Authenticate to store key securely", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_create_account_title),
+                    appContext.getString(R.string.main_create_account_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = {
                 showCreateAccountScreen = false
@@ -750,6 +788,7 @@ fun MainScreen(
         val activeAccount = remember(activeAccountKey, allAccounts) {
             activeAccountKey?.let { key -> allAccounts.firstOrNull { it.groupPubkeyHex == key } }
         }
+        val confirmBackupFailedMessage = stringResource(R.string.main_confirm_backup_failed)
         SeedWordsScreen(
             mnemonicData = seedWordsData,
             isLoading = seedWordsLoading,
@@ -766,7 +805,7 @@ fun MainScreen(
                             // may have already torn it down and called onDismiss.
                             Toast.makeText(
                                 appContext,
-                                "Failed to confirm backup. Please try again.",
+                                confirmBackupFailedMessage,
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -792,7 +831,12 @@ fun MainScreen(
                 storage.getCipherForEncryption()
             },
             onBiometricAuth = { cipher, callback ->
-                onBiometricRequest("Import from Seed Words", "Authenticate to store key securely", cipher, callback)
+                onBiometricRequest(
+                    appContext.getString(R.string.main_import_from_seed_words_title),
+                    appContext.getString(R.string.main_import_from_seed_words_subtitle),
+                    cipher,
+                    callback
+                )
             },
             onDismiss = {
                 showMnemonicRecoveryScreen = false
@@ -816,6 +860,11 @@ fun MainScreen(
             onDismiss = onDismissPinMismatch
         )
     }
+
+    val biometricUnavailableMessage = stringResource(R.string.main_biometric_unavailable)
+    val initEncryptionFailedMessage = stringResource(R.string.main_init_encryption_failed)
+    val connectRelaysTitle = stringResource(R.string.main_connect_relays_title)
+    val connectRelaysSubtitle = stringResource(R.string.main_connect_relays_subtitle)
 
     val navController = rememberNavController()
 
@@ -876,14 +925,14 @@ fun MainScreen(
                                     getShareAwareCipher(storage)
                                 }
                             } catch (e: BiometricHelper.BiometricNotReadyException) {
-                                Toast.makeText(appContext, e.message ?: "Biometric authentication is unavailable", Toast.LENGTH_LONG).show()
+                                Toast.makeText(appContext, e.message ?: biometricUnavailableMessage, Toast.LENGTH_LONG).show()
                                 return@launch
                             }
                             if (cipher == null) {
-                                Toast.makeText(appContext, "Failed to initialize encryption", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(appContext, initEncryptionFailedMessage, Toast.LENGTH_SHORT).show()
                                 return@launch
                             }
-                            onBiometricRequest("Connect to Relays", "Authenticate to connect", cipher) { authedCipher ->
+                            onBiometricRequest(connectRelaysTitle, connectRelaysSubtitle, cipher) { authedCipher ->
                                 authedCipher?.let { onConnect(it) { _, _ -> } }
                             }
                         }
@@ -1090,7 +1139,7 @@ private fun HomeTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Keep", style = MaterialTheme.typography.headlineLarge)
+        Text(text = stringResource(R.string.main_home_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(4.dp))
         SecurityLevelBadge(securityLevel)
         Spacer(modifier = Modifier.height(16.dp))
@@ -1132,7 +1181,7 @@ private fun HomeTab(
 
             if (pendingCount > 0) {
                 Spacer(modifier = Modifier.height(16.dp))
-                Badge { Text("$pendingCount pending") }
+                Badge { Text(stringResource(R.string.main_pending_count, pendingCount)) }
             }
         } else {
             NoShareCard(
@@ -1167,7 +1216,7 @@ private fun AppsTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Apps", style = MaterialTheme.typography.headlineLarge)
+        Text(text = stringResource(R.string.main_apps_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (hasShare) {
@@ -1198,7 +1247,7 @@ private fun AppsTab(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        "Import a key to manage connected apps",
+                        stringResource(R.string.main_apps_no_share),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1258,7 +1307,7 @@ private fun SettingsTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Settings", style = MaterialTheme.typography.headlineLarge)
+        Text(text = stringResource(R.string.main_settings_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (hasShare) {
@@ -1330,14 +1379,14 @@ private fun SecuritySettingsCard(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Security", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.main_security_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "PIN, biometrics, kill switch",
+                    stringResource(R.string.main_security_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.main_manage), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -1352,14 +1401,14 @@ private fun SigningHistoryCard(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Signing History", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.main_signing_history_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "View past signing requests and decisions",
+                    stringResource(R.string.main_signing_history_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text("View", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.main_view), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -1389,7 +1438,7 @@ private fun AccountTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = "Keys", style = MaterialTheme.typography.headlineLarge)
+        Text(text = stringResource(R.string.main_keys_title), style = MaterialTheme.typography.headlineLarge)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (hasShare && activeDidBackup == false) {
@@ -1415,20 +1464,20 @@ private fun AccountTab(
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Key Management", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.main_key_management), style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(
                         onClick = onViewSeedWords,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("View Seed Words")
+                        Text(stringResource(R.string.main_view_seed_words))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = onExportClick,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Export Share")
+                        Text(stringResource(R.string.main_export_share_button))
                     }
                     if (shareInfo.threshold == 1u.toUShort() && shareInfo.totalShares == 1u.toUShort()) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1436,7 +1485,7 @@ private fun AccountTab(
                             onClick = onExportNcryptsecClick,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Export Encrypted (NIP-49)")
+                            Text(stringResource(R.string.main_export_ncryptsec))
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1448,13 +1497,13 @@ private fun AccountTab(
                             onClick = onImport,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Import Share")
+                            Text(stringResource(R.string.main_import_share_button))
                         }
                         OutlinedButton(
                             onClick = onImportNsec,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Import nsec")
+                            Text(stringResource(R.string.main_import_nsec_button))
                         }
                     }
                     if (shareInfo.threshold >= 2u.toUShort()) {
@@ -1466,7 +1515,7 @@ private fun AccountTab(
                                 contentColor = MaterialTheme.colorScheme.error
                             )
                         ) {
-                            Text("Recover nsec from shares")
+                            Text(stringResource(R.string.main_recover_nsec_from_shares))
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1476,14 +1525,14 @@ private fun AccountTab(
                         onClick = onCreateAccount,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Create Account")
+                        Text(stringResource(R.string.main_create_account_button))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = onRecoverMnemonic,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Import from Seed Words")
+                        Text(stringResource(R.string.main_import_from_seed_words_button))
                     }
                 }
             }
@@ -1519,13 +1568,13 @@ private fun BackupPromptCard(onClick: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "Back up your seed words",
+                stringResource(R.string.main_backup_prompt_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "You haven't confirmed that you've saved your seed words. Tap to view them and back up your account.",
+                stringResource(R.string.main_backup_prompt_text),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -1549,13 +1598,13 @@ private fun KillSwitchConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Enable Kill Switch?") },
-        text = { Text("This will block all signing requests until you disable it. You will need biometric authentication to re-enable signing.") },
+        title = { Text(stringResource(R.string.main_kill_switch_dialog_title)) },
+        text = { Text(stringResource(R.string.main_kill_switch_dialog_text)) },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Enable") }
+            TextButton(onClick = onConfirm) { Text(stringResource(R.string.main_enable)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
         }
     )
 }
@@ -1568,15 +1617,15 @@ private fun PinMismatchDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Certificate Pin Mismatch") },
+        title = { Text(stringResource(R.string.main_pin_mismatch_title)) },
         text = {
-            Text("The certificate for $hostname has changed. This could indicate a security issue or a legitimate certificate rotation.")
+            Text(stringResource(R.string.main_pin_mismatch_text, hostname))
         },
         confirmButton = {
-            TextButton(onClick = onClearAndRetry) { Text("Clear Pin & Retry") }
+            TextButton(onClick = onClearAndRetry) { Text(stringResource(R.string.main_clear_pin_and_retry)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Dismiss") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_dismiss)) }
         }
     )
 }
@@ -1629,7 +1678,7 @@ private fun DatabaseManagementSection(
     onCleanup: () -> Unit
 ) {
     Text(
-        "Database: $databaseSizeMb MB",
+        stringResource(R.string.main_database_size_label, databaseSizeMb),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -1639,13 +1688,13 @@ private fun DatabaseManagementSection(
         onClick = onCleanup,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Clean up expired data")
+        Text(stringResource(R.string.main_cleanup_expired_data))
     }
 
     Spacer(modifier = Modifier.height(16.dp))
 
     Text(
-        "v${BuildConfig.VERSION_NAME}",
+        stringResource(R.string.main_version_label, BuildConfig.VERSION_NAME),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -1668,7 +1717,7 @@ private fun SettingsFooterLinks() {
                     )
                 )
             ) {
-                append("Source code")
+                append(stringResource(R.string.main_source_code))
             }
             append("  |  ")
             withLink(
@@ -1682,7 +1731,7 @@ private fun SettingsFooterLinks() {
                     )
                 )
             ) {
-                append("Support development")
+                append(stringResource(R.string.main_support_development))
             }
         },
         style = MaterialTheme.typography.bodySmall,

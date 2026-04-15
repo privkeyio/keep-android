@@ -8,6 +8,7 @@ import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -21,23 +22,27 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal fun Nip55RequestType.displayName(): String = when (this) {
-    Nip55RequestType.GET_PUBLIC_KEY -> "Get Public Key"
-    Nip55RequestType.SIGN_EVENT -> "Sign Event"
-    Nip55RequestType.NIP44_ENCRYPT -> "Encrypt (NIP-44)"
-    Nip55RequestType.NIP44_DECRYPT -> "Decrypt (NIP-44)"
-    Nip55RequestType.NIP04_ENCRYPT -> "Encrypt (NIP-04)"
-    Nip55RequestType.NIP04_DECRYPT -> "Decrypt (NIP-04)"
-    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Decrypt Zap Event"
-}
+internal fun Nip55RequestType.displayName(context: android.content.Context): String = context.getString(
+    when (this) {
+        Nip55RequestType.GET_PUBLIC_KEY -> R.string.connections_nip55_type_get_public_key
+        Nip55RequestType.SIGN_EVENT -> R.string.connections_nip55_type_sign_event
+        Nip55RequestType.NIP44_ENCRYPT -> R.string.connections_nip55_type_nip44_encrypt
+        Nip55RequestType.NIP44_DECRYPT -> R.string.connections_nip55_type_nip44_decrypt
+        Nip55RequestType.NIP04_ENCRYPT -> R.string.connections_nip55_type_nip04_encrypt
+        Nip55RequestType.NIP04_DECRYPT -> R.string.connections_nip55_type_nip04_decrypt
+        Nip55RequestType.DECRYPT_ZAP_EVENT -> R.string.connections_nip55_type_decrypt_zap
+    }
+)
 
-internal fun Nip55RequestType.headerTitle(): String = when (this) {
-    Nip55RequestType.GET_PUBLIC_KEY -> "Public Key Request"
-    Nip55RequestType.SIGN_EVENT -> "Signing Request"
-    Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> "Encryption Request"
-    Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> "Decryption Request"
-    Nip55RequestType.DECRYPT_ZAP_EVENT -> "Zap Decryption Request"
-}
+internal fun Nip55RequestType.headerTitle(context: android.content.Context): String = context.getString(
+    when (this) {
+        Nip55RequestType.GET_PUBLIC_KEY -> R.string.connections_nip55_header_public_key
+        Nip55RequestType.SIGN_EVENT -> R.string.connections_nip55_header_signing
+        Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> R.string.connections_nip55_header_encryption
+        Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> R.string.connections_nip55_header_decryption
+        Nip55RequestType.DECRYPT_ZAP_EVENT -> R.string.connections_nip55_header_zap_decryption
+    }
+)
 
 internal fun parseEventKind(content: String): Int? = runCatching {
     val json = JSONObject(content)
@@ -118,6 +123,7 @@ fun ApprovalScreen(
     onApprove: (PermissionDuration) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
+    val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
     val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
@@ -134,7 +140,7 @@ fun ApprovalScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = request.requestType.headerTitle(),
+            text = request.requestType.headerTitle(context),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -186,7 +192,7 @@ fun ApprovalScreen(
                     onClick = { onReject(effectiveDuration) },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Reject")
+                    Text(stringResource(R.string.connections_nip55_reject))
                 }
                 Button(
                     onClick = {
@@ -195,7 +201,7 @@ fun ApprovalScreen(
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Approve")
+                    Text(stringResource(R.string.connections_nip55_approve))
                 }
             }
         }
@@ -219,7 +225,7 @@ private fun DurationSelector(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Remember this choice",
+            text = stringResource(R.string.connections_nip55_remember_choice),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -257,7 +263,7 @@ private fun DurationSelector(
 
 @Composable
 private fun CallerLabel(callerPackage: String?, callerVerified: Boolean) {
-    val displayText = if (callerPackage != null) "from $callerPackage" else "from unknown app"
+    val displayText = if (callerPackage != null) stringResource(R.string.connections_nip55_from_app, callerPackage) else stringResource(R.string.connections_nip55_from_unknown)
     val isTrusted = callerPackage != null && callerVerified
     val textColor = if (isTrusted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
 
@@ -319,6 +325,7 @@ private fun WarningCard(
 @Composable
 private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: EventPreview?) {
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
 
     Card(
         modifier = Modifier
@@ -330,7 +337,7 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
                 .padding(16.dp)
                 .verticalScroll(scrollState)
         ) {
-            DetailRow("Type", request.requestType.displayName())
+            DetailRow(stringResource(R.string.connections_nip55_type_label), request.requestType.displayName(context))
 
             if (eventPreview != null) {
                 EventPreviewSection(eventPreview)
@@ -341,7 +348,7 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
 
             request.pubkey?.let { pk ->
                 Spacer(modifier = Modifier.height(12.dp))
-                DetailRow("Recipient", formatPubkeyDisplay(pk), MaterialTheme.typography.bodyMedium)
+                DetailRow(stringResource(R.string.connections_nip55_recipient_label), formatPubkeyDisplay(pk), MaterialTheme.typography.bodyMedium)
             }
         }
     }
@@ -349,8 +356,9 @@ private fun ColumnScope.RequestDetailsCard(request: Nip55Request, eventPreview: 
 
 @Composable
 private fun EventPreviewSection(preview: EventPreview) {
+    val context = LocalContext.current
     Spacer(modifier = Modifier.height(12.dp))
-    DetailRow("Event Kind", EventKind.displayName(preview.kind))
+    DetailRow(stringResource(R.string.connections_nip55_event_kind_label), EventKind.displayName(context, preview.kind))
 
     sensitiveKindWarning(preview.kind)?.let { warning ->
         Spacer(modifier = Modifier.height(8.dp))
@@ -375,7 +383,7 @@ private fun EventPreviewSection(preview: EventPreview) {
 
     if (preview.recipientPubkey != null) {
         Spacer(modifier = Modifier.height(12.dp))
-        DetailRow("Recipient", formatPubkeyDisplay(preview.recipientPubkey), MaterialTheme.typography.bodyMedium)
+        DetailRow(stringResource(R.string.connections_nip55_recipient_label), formatPubkeyDisplay(preview.recipientPubkey), MaterialTheme.typography.bodyMedium)
     }
 
     val otherPubkeys = preview.pTags.drop(1)
@@ -396,7 +404,7 @@ private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
     val displayText = if (expanded || !needsTruncation) content else "${content.take(maxLength)}..."
 
     Text(
-        text = "Content",
+        text = stringResource(R.string.connections_nip55_content_label),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -414,7 +422,7 @@ private fun ExpandableContentSection(content: String, maxLength: Int = 200) {
             modifier = Modifier.height(32.dp)
         ) {
             Text(
-                text = if (expanded) "Show less" else "Show more",
+                text = if (expanded) stringResource(R.string.connections_nip55_show_less) else stringResource(R.string.connections_nip55_show_more),
                 style = MaterialTheme.typography.labelMedium
             )
         }
@@ -428,7 +436,7 @@ private fun TagsSummarySection(
     tTags: List<String>
 ) {
     Text(
-        text = "References",
+        text = stringResource(R.string.connections_nip55_references),
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -437,20 +445,20 @@ private fun TagsSummarySection(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (eTags.isNotEmpty()) {
             val eventsPreview = eTags.take(2).joinToString(", ") { (id, relay) -> formatEventIdDisplay(id, relay) }
-            val suffix = if (eTags.size > 2) " +${eTags.size - 2} more" else ""
-            TagSummaryRow("Events:", "$eventsPreview$suffix")
+            val suffix = if (eTags.size > 2) stringResource(R.string.connections_nip55_more_suffix, eTags.size - 2) else ""
+            TagSummaryRow(stringResource(R.string.connections_nip55_events_label), "$eventsPreview$suffix")
         }
 
         if (otherPubkeys.isNotEmpty()) {
             val mentionsPreview = otherPubkeys.take(2).joinToString(", ") { formatPubkeyDisplay(it) }
-            val suffix = if (otherPubkeys.size > 2) " +${otherPubkeys.size - 2} more" else ""
-            TagSummaryRow("Mentions:", "$mentionsPreview$suffix")
+            val suffix = if (otherPubkeys.size > 2) stringResource(R.string.connections_nip55_more_suffix, otherPubkeys.size - 2) else ""
+            TagSummaryRow(stringResource(R.string.connections_nip55_mentions_label), "$mentionsPreview$suffix")
         }
 
         if (tTags.isNotEmpty()) {
             val topicsPreview = tTags.take(3).joinToString(", ") { "#$it" }
-            val suffix = if (tTags.size > 3) " +${tTags.size - 3} more" else ""
-            TagSummaryRow("Topics:", "$topicsPreview$suffix")
+            val suffix = if (tTags.size > 3) stringResource(R.string.connections_nip55_more_suffix, tTags.size - 3) else ""
+            TagSummaryRow(stringResource(R.string.connections_nip55_topics_label), "$topicsPreview$suffix")
         }
     }
 }
@@ -510,7 +518,7 @@ private fun RiskIndicator(risk: RiskAssessment) {
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
-                text = "Elevated authentication required",
+                text = stringResource(R.string.connections_nip55_elevated_auth),
                 style = MaterialTheme.typography.labelMedium,
                 color = contentColor
             )

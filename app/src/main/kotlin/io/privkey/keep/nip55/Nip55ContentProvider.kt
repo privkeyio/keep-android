@@ -401,11 +401,11 @@ class Nip55ContentProvider : ContentProvider() {
             callerPackage
         }
 
-        val kindText = eventKind?.let { " (kind $it)" } ?: ""
+        val kindText = eventKind?.let { ctx.getString(R.string.notification_kind_suffix, it) } ?: ""
         val notification = NotificationCompat.Builder(ctx, BACKGROUND_SIGNING_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(ctx.getString(R.string.notification_background_signing_title))
-            .setContentText(ctx.getString(R.string.notification_background_signing_text, appLabel, requestType.headerTitle() + kindText))
+            .setContentText(ctx.getString(R.string.notification_background_signing_text, appLabel, requestType.headerTitle(ctx) + kindText))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .build()

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="biometric_prompt_title">Authenticate</string>
+    <string name="biometric_prompt_subtitle">Confirm your identity</string>
+    <string name="biometric_prompt_negative_button">Cancel</string>
+    <string name="biometric_not_ready_not_enrolled">Please enroll a fingerprint or face in your device settings to use Keep</string>
+    <string name="biometric_not_ready_not_available">This device does not support biometric authentication required by Keep</string>
+    <string name="biometric_not_ready_error">Biometric authentication is currently unavailable</string>
+    <string name="kill_switch_active_toast">Signing is disabled (kill switch is active)</string>
+    <string name="failed_to_access_stored_keys_toast">Failed to access stored keys</string>
+    <string name="unknown_app">Unknown app</string>
+    <string name="keep_mobile_init_failed_error">Failed to initialize application</string>
+    <string name="keep_mobile_audit_log_unavailable_error">Signing audit log unavailable</string>
+    <string name="keep_mobile_not_initialized_error">KeepMobile not initialized</string>
+    <string name="keep_mobile_storage_unavailable_error">Storage not available</string>
+    <string name="keep_mobile_no_relays_error">No relays configured</string>
+    <string name="connection_failed_error">Connection failed</string>
+    <string name="certificate_pin_mismatch_error">Certificate pin mismatch</string>
+</resources>

@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -35,13 +36,13 @@ fun KillSwitchCard(enabled: Boolean, onToggle: (Boolean) -> Unit, toggleEnabled:
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (enabled) "Signing Disabled" else "Kill Switch",
+                    text = if (enabled) stringResource(R.string.settings_kill_switch_active_title) else stringResource(R.string.settings_kill_switch_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = contentColor
                 )
                 if (enabled) {
                     Text(
-                        text = "All signing requests blocked",
+                        text = stringResource(R.string.settings_kill_switch_active_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor
                     )
@@ -78,7 +79,7 @@ fun SecurityLevelBadge(securityLevel: String) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            text = "Security: $securityLevel",
+            text = stringResource(R.string.settings_security_level_label, securityLevel),
             style = MaterialTheme.typography.bodySmall,
             color = color
         )
@@ -88,7 +89,7 @@ fun SecurityLevelBadge(securityLevel: String) {
         ) {
             Icon(
                 imageVector = Icons.Filled.Info,
-                contentDescription = "Security level info",
+                contentDescription = stringResource(R.string.settings_security_level_info_cd),
                 modifier = Modifier.size(16.dp),
                 tint = color
             )
@@ -116,25 +117,28 @@ private fun SecurityLevelInfoContent(currentLevel: String) {
             .padding(bottom = 32.dp)
     ) {
         Text(
-            text = "Security Level",
+            text = stringResource(R.string.settings_security_level_title),
             style = MaterialTheme.typography.titleLarge
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         val protectionText = when (currentLevel) {
-            "strongbox", "tee" -> "hardware security"
-            "software" -> "software encryption"
-            else -> "an unknown protection level"
+            "strongbox", "tee" -> stringResource(R.string.settings_security_protection_hardware)
+            "software" -> stringResource(R.string.settings_security_protection_software)
+            else -> stringResource(R.string.settings_security_protection_unknown)
         }
+
+        val descPrefix = stringResource(R.string.settings_security_description_prefix)
+        val descSuffix = stringResource(R.string.settings_security_description_suffix)
 
         Text(
             text = buildAnnotatedString {
-                append("Your encryption keys are protected by ")
+                append(descPrefix)
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                     append(protectionText)
                 }
-                append(". This determines how securely your Nostr private keys are stored.")
+                append(descSuffix)
             },
             style = MaterialTheme.typography.bodyMedium,
             color = colors.onSurfaceVariant
@@ -144,22 +148,22 @@ private fun SecurityLevelInfoContent(currentLevel: String) {
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SecurityLevelItem(
-                title = "StrongBox",
-                description = "Dedicated security chip (HSM). Highest protection - keys never leave secure hardware.",
+                title = stringResource(R.string.settings_security_strongbox_title),
+                description = stringResource(R.string.settings_security_strongbox_desc),
                 isCurrent = currentLevel == "strongbox",
                 color = colors.primary
             )
 
             SecurityLevelItem(
-                title = "Trusted Execution Environment",
-                description = "Secure area of main processor, isolated from regular OS.",
+                title = stringResource(R.string.settings_security_tee_title),
+                description = stringResource(R.string.settings_security_tee_desc),
                 isCurrent = currentLevel == "tee",
                 color = colors.secondary
             )
 
             SecurityLevelItem(
-                title = "Software",
-                description = "Software-only protection. Less secure but still encrypted.",
+                title = stringResource(R.string.settings_security_software_title),
+                description = stringResource(R.string.settings_security_software_desc),
                 isCurrent = currentLevel == "software",
                 color = colors.error
             )
@@ -197,7 +201,7 @@ private fun SecurityLevelItem(
                     Spacer(modifier = Modifier.width(8.dp))
                     Badge(containerColor = color) {
                         Text(
-                            text = "CURRENT",
+                            text = stringResource(R.string.settings_security_current_badge),
                             modifier = Modifier.padding(horizontal = 2.dp)
                         )
                     }
@@ -229,16 +233,16 @@ fun CertificatePinsCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Certificate Pins", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_cert_pins_title), style = MaterialTheme.typography.titleMedium)
                 if (pins.isNotEmpty()) {
                     TextButton(onClick = { showClearAllDialog = true }) {
-                        Text("Clear All", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.settings_cert_pins_clear_all), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
             if (pins.isEmpty()) {
                 Text(
-                    "Pins are set on first connection to each relay",
+                    stringResource(R.string.settings_cert_pins_empty),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -268,7 +272,7 @@ fun CertificatePinsCard(
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Clear pin",
+                                contentDescription = stringResource(R.string.settings_cert_pins_clear_cd),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -281,19 +285,19 @@ fun CertificatePinsCard(
     pinToDelete?.let { hostname ->
         AlertDialog(
             onDismissRequest = { pinToDelete = null },
-            title = { Text("Clear Pin?") },
-            text = { Text("Remove the certificate pin for $hostname? A new pin will be set on next connection.") },
+            title = { Text(stringResource(R.string.settings_cert_pins_clear_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_cert_pins_clear_dialog_text, hostname)) },
             confirmButton = {
                 TextButton(onClick = {
                     onClearPin(hostname)
                     pinToDelete = null
                 }) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.settings_cert_pins_clear), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pinToDelete = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.settings_cancel))
                 }
             }
         )
@@ -302,19 +306,19 @@ fun CertificatePinsCard(
     if (showClearAllDialog) {
         AlertDialog(
             onDismissRequest = { showClearAllDialog = false },
-            title = { Text("Clear All Pins?") },
-            text = { Text("This will remove all stored certificate pins. New pins will be set on next connection.") },
+            title = { Text(stringResource(R.string.settings_cert_pins_clear_all_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_cert_pins_clear_all_dialog_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     onClearAllPins()
                     showClearAllDialog = false
                 }) {
-                    Text("Clear All", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.settings_cert_pins_clear_all), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearAllDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.settings_cancel))
                 }
             }
         )

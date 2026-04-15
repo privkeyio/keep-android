@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.content.Context
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -42,21 +43,22 @@ class BiometricHelper(
     }
 
     suspend fun authenticate(
-        title: String = "Authenticate",
-        subtitle: String = "Confirm your identity",
-        negativeButtonText: String = "Cancel",
+        title: String? = null,
+        subtitle: String? = null,
+        negativeButtonText: String? = null,
         forcePrompt: Boolean = false
     ): Boolean = authenticateWithResult(title, subtitle, negativeButtonText, forcePrompt) == AuthResult.SUCCESS
 
     suspend fun authenticateWithResult(
-        title: String = "Authenticate",
-        subtitle: String = "Confirm your identity",
-        negativeButtonText: String = "Cancel",
+        title: String? = null,
+        subtitle: String? = null,
+        negativeButtonText: String? = null,
         forcePrompt: Boolean = false
     ): AuthResult {
         if (!forcePrompt && timeoutStore?.requiresBiometric() == false) {
             return AuthResult.SUCCESS
         }
+        val promptInfo = resolvePromptInfo(title, subtitle, negativeButtonText)
         return suspendCoroutine { continuation ->
             val callback = object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -76,52 +78,54 @@ class BiometricHelper(
                 override fun onAuthenticationFailed() {}
             }
 
-            BiometricPrompt(activity, executor, callback)
-                .authenticate(buildPromptInfo(title, subtitle, negativeButtonText))
+            BiometricPrompt(activity, executor, callback).authenticate(promptInfo)
         }
     }
 
     suspend fun authenticateWithCrypto(
         cipher: Cipher,
-        title: String = "Authenticate",
-        subtitle: String = "Confirm your identity",
-        negativeButtonText: String = "Cancel"
-    ): Cipher? = suspendCoroutine { continuation ->
-        val callback = object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                timeoutStore?.recordAuthentication()
-                continuation.resume(result.cryptoObject?.cipher)
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
-                    errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                if (isCancellation) {
-                    continuation.resume(null)
-                } else {
-                    continuation.resumeWithException(
-                        BiometricException(errorCode, errString.toString())
-                    )
+        title: String? = null,
+        subtitle: String? = null,
+        negativeButtonText: String? = null
+    ): Cipher? {
+        val promptInfo = resolvePromptInfo(title, subtitle, negativeButtonText)
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    timeoutStore?.recordAuthentication()
+                    continuation.resume(result.cryptoObject?.cipher)
                 }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                    if (isCancellation) {
+                        continuation.resume(null)
+                    } else {
+                        continuation.resumeWithException(
+                            BiometricException(errorCode, errString.toString())
+                        )
+                    }
+                }
+
+                override fun onAuthenticationFailed() {}
             }
 
-            override fun onAuthenticationFailed() {}
+            BiometricPrompt(activity, executor, callback).authenticate(
+                promptInfo,
+                BiometricPrompt.CryptoObject(cipher)
+            )
         }
-
-        BiometricPrompt(activity, executor, callback).authenticate(
-            buildPromptInfo(title, subtitle, negativeButtonText),
-            BiometricPrompt.CryptoObject(cipher)
-        )
     }
 
-    private fun buildPromptInfo(
-        title: String,
-        subtitle: String,
-        negativeButtonText: String
+    private fun resolvePromptInfo(
+        title: String?,
+        subtitle: String?,
+        negativeButtonText: String?
     ): BiometricPrompt.PromptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle(title)
-        .setSubtitle(subtitle)
-        .setNegativeButtonText(negativeButtonText)
+        .setTitle(title ?: activity.getString(R.string.biometric_prompt_title))
+        .setSubtitle(subtitle ?: activity.getString(R.string.biometric_prompt_subtitle))
+        .setNegativeButtonText(negativeButtonText ?: activity.getString(R.string.biometric_prompt_negative_button))
         .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
         .build()
 
@@ -129,19 +133,19 @@ class BiometricHelper(
     class BiometricNotReadyException(message: String) : Exception(message)
 
     companion object {
-        fun getBiometricNotReadyMessage(status: BiometricStatus): String = when (status) {
+        fun getBiometricNotReadyMessage(context: Context, status: BiometricStatus): String = when (status) {
             BiometricStatus.AVAILABLE -> ""
             BiometricStatus.NOT_ENROLLED ->
-                "Please enroll a fingerprint or face in your device settings to use Keep"
+                context.getString(R.string.biometric_not_ready_not_enrolled)
             BiometricStatus.NOT_AVAILABLE ->
-                "This device does not support biometric authentication required by Keep"
+                context.getString(R.string.biometric_not_ready_not_available)
             BiometricStatus.ERROR ->
-                "Biometric authentication is currently unavailable"
+                context.getString(R.string.biometric_not_ready_error)
         }
 
-        fun requireBiometricReady(status: BiometricStatus) {
+        fun requireBiometricReady(context: Context, status: BiometricStatus) {
             if (status == BiometricStatus.AVAILABLE) return
-            throw BiometricNotReadyException(getBiometricNotReadyMessage(status))
+            throw BiometricNotReadyException(getBiometricNotReadyMessage(context, status))
         }
     }
 }

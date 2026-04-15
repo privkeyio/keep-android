@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -32,12 +33,17 @@ fun ImportNsecScreen(
     val context = LocalContext.current
     val nsecData = remember { SecureShareData(MAX_NSEC_LENGTH) }
     var nsecDisplay by remember { mutableStateOf("") }
-    var keyName by remember { mutableStateOf("Mobile Key") }
+    val defaultKeyName = stringResource(R.string.create_account_default_key_name)
+    var keyName by remember { mutableStateOf(defaultKeyName) }
     var showScanner by remember { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
     var isNsecVisible by remember { mutableStateOf(false) }
 
     val isInputEnabled = importState is ImportState.Idle || importState is ImportState.Error
+    val scanTooLongMsg = stringResource(R.string.import_nsec_scan_too_long)
+    val biometricInvalidatedMsg = stringResource(R.string.import_nsec_biometric_invalidated)
+    val biometricUnavailableMsg = stringResource(R.string.import_nsec_biometric_unavailable)
+    val cipherFailedMsg = stringResource(R.string.import_nsec_cipher_failed)
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -63,7 +69,7 @@ fun ImportNsecScreen(
             onCodeScanned = { code ->
                 showScanner = false
                 if (code.length > MAX_NSEC_LENGTH) {
-                    scanError = "Scanned code is too long"
+                    scanError = scanTooLongMsg
                 } else {
                     scanError = null
                     nsecData.update(code)
@@ -74,7 +80,7 @@ fun ImportNsecScreen(
                 showScanner = false
             },
             validator = ::isValidNsecFormat,
-            title = "Scan nsec QR Code"
+            title = stringResource(R.string.import_nsec_scan_title)
         )
         return
     }
@@ -88,7 +94,7 @@ fun ImportNsecScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Import nsec",
+            text = stringResource(R.string.import_nsec_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -103,8 +109,8 @@ fun ImportNsecScreen(
                     nsecDisplay = it
                 }
             },
-            label = { Text("nsec") },
-            placeholder = { Text("nsec1...") },
+            label = { Text(stringResource(R.string.import_nsec_label)) },
+            placeholder = { Text(stringResource(R.string.import_nsec_placeholder)) },
             modifier = Modifier.fillMaxWidth(),
             minLines = 2,
             maxLines = 3,
@@ -117,7 +123,7 @@ fun ImportNsecScreen(
                 ) {
                     Icon(
                         if (isNsecVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = if (isNsecVisible) "Hide nsec" else "Show nsec"
+                        contentDescription = if (isNsecVisible) stringResource(R.string.import_nsec_hide) else stringResource(R.string.import_nsec_show)
                     )
                 }
             }
@@ -130,7 +136,7 @@ fun ImportNsecScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = isInputEnabled
         ) {
-            Text("Scan QR Code")
+            Text(stringResource(R.string.import_nsec_scan_qr))
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -138,7 +144,7 @@ fun ImportNsecScreen(
         OutlinedTextField(
             value = keyName,
             onValueChange = { if (it.length <= 64) keyName = it },
-            label = { Text("Key Name") },
+            label = { Text(stringResource(R.string.import_nsec_key_name_label)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             enabled = isInputEnabled
@@ -167,7 +173,7 @@ fun ImportNsecScreen(
 
         if (importState is ImportState.Success) {
             StatusCard(
-                text = "Key '${importState.name}' imported successfully",
+                text = stringResource(R.string.import_nsec_imported, importState.name),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             )
@@ -191,12 +197,12 @@ fun ImportNsecScreen(
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
                         if (BuildConfig.DEBUG) Log.e("ImportNsec", "Biometric key invalidated: ${e::class.simpleName}")
-                        onError("Biometric key invalidated. Please re-enroll biometrics.")
+                        onError(biometricInvalidatedMsg)
                     } catch (e: BiometricHelper.BiometricNotReadyException) {
-                        onError(e.message ?: "Biometric authentication is unavailable")
+                        onError(e.message ?: biometricUnavailableMsg)
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("ImportNsec", "Failed to initialize cipher: ${e::class.simpleName}: ${e.message}", e)
-                        onError("Failed to initialize encryption")
+                        onError(cipherFailedMsg)
                     }
                 }
             )

@@ -7,8 +7,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.R
 import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.nip55.EventKind
 import io.privkey.keep.nip55.PermissionDuration
@@ -32,6 +35,7 @@ fun Nip46ApprovalScreen(
     onApprove: (duration: PermissionDuration, onComplete: (success: Boolean) -> Unit) -> Unit,
     onReject: () -> Unit
 ) {
+    val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
     var selectedDuration by remember { mutableStateOf(if (isConnectRequest) PermissionDuration.FOREVER else PermissionDuration.JUST_THIS_TIME) }
     var durationDropdownExpanded by remember { mutableStateOf(false) }
@@ -47,14 +51,14 @@ fun Nip46ApprovalScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = if (isConnectRequest) "New Connection Request" else "NIP-46 Request",
+            text = if (isConnectRequest) stringResource(R.string.connections_nip46_title_connect) else stringResource(R.string.connections_nip46_title_request),
             style = MaterialTheme.typography.headlineMedium
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "from $appName",
+            text = stringResource(R.string.connections_nip46_from, appName),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -67,7 +71,7 @@ fun Nip46ApprovalScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "This app is requesting to connect. Approving will authorize it for future signing requests.",
+                    text = stringResource(R.string.connections_nip46_connect_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.padding(12.dp)
@@ -87,17 +91,17 @@ fun Nip46ApprovalScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Nip46DetailRow("Method", formatNip46Method(method))
+                Nip46DetailRow(stringResource(R.string.connections_nip46_method), formatNip46Method(method))
 
                 if (eventKind != null) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Nip46DetailRow("Event Kind", EventKind.displayName(eventKind))
+                    Nip46DetailRow(stringResource(R.string.connections_nip46_event_kind), EventKind.displayName(context, eventKind))
                 }
 
                 if (!sanitizedContent.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Content",
+                        text = stringResource(R.string.connections_nip46_content),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -112,7 +116,7 @@ fun Nip46ApprovalScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "App Public Key",
+                    text = stringResource(R.string.connections_nip46_app_public_key),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -128,7 +132,7 @@ fun Nip46ApprovalScreen(
         if (!isConnectRequest) {
             Spacer(modifier = Modifier.height(16.dp))
             PermissionDurationSelector(
-                label = "Remember this decision",
+                label = stringResource(R.string.connections_nip46_remember_decision),
                 selectedDuration = selectedDuration,
                 expanded = durationDropdownExpanded,
                 onExpandedChange = { durationDropdownExpanded = it },
@@ -149,7 +153,7 @@ fun Nip46ApprovalScreen(
                     onClick = onReject,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Reject")
+                    Text(stringResource(R.string.connections_nip46_reject))
                 }
                 Button(
                     onClick = {
@@ -162,7 +166,7 @@ fun Nip46ApprovalScreen(
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (isConnectRequest) "Authorize" else "Approve")
+                    Text(if (isConnectRequest) stringResource(R.string.connections_nip46_authorize) else stringResource(R.string.connections_nip46_approve))
                 }
             }
         }

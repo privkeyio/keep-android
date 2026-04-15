@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -25,6 +26,7 @@ fun PinSettingsCard(
     var showDisableDialog by remember { mutableStateOf(false) }
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val incorrectPinMsg = stringResource(R.string.settings_pin_incorrect)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -33,20 +35,20 @@ fun PinSettingsCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("PIN Protection", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_pin_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (enabled) "PIN is enabled" else "Secure app with PIN",
+                    if (enabled) stringResource(R.string.settings_pin_enabled) else stringResource(R.string.settings_pin_disabled_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (enabled) {
                 TextButton(onClick = { showDisableDialog = true }) {
-                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.settings_pin_disable), color = MaterialTheme.colorScheme.error)
                 }
             } else {
                 TextButton(onClick = onSetupPin) {
-                    Text("Set Up")
+                    Text(stringResource(R.string.settings_pin_set_up))
                 }
             }
         }
@@ -59,10 +61,10 @@ fun PinSettingsCard(
                 pinInput = ""
                 error = null
             },
-            title = { Text("Disable PIN?") },
+            title = { Text(stringResource(R.string.settings_pin_disable_dialog_title)) },
             text = {
                 Column {
-                    Text("Enter your current PIN to disable protection.")
+                    Text(stringResource(R.string.settings_pin_disable_dialog_text))
                     Spacer(modifier = Modifier.height(16.dp))
                     OutlinedTextField(
                         value = pinInput,
@@ -72,7 +74,7 @@ fun PinSettingsCard(
                                 error = null
                             }
                         },
-                        label = { Text("Current PIN") },
+                        label = { Text(stringResource(R.string.settings_pin_current_label)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
@@ -103,14 +105,14 @@ fun PinSettingsCard(
                                 pinInput = ""
                                 error = null
                             } else {
-                                error = "Incorrect PIN"
+                                error = incorrectPinMsg
                                 pinInput = ""
                             }
                         }
                     },
                     enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
                 ) {
-                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.settings_pin_disable), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
@@ -119,7 +121,7 @@ fun PinSettingsCard(
                     pinInput = ""
                     error = null
                 }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.settings_cancel))
                 }
             }
         )
@@ -135,9 +137,9 @@ fun AutoStartCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Auto-start", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_auto_start_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Reconnect relays on boot and network changes",
+                    stringResource(R.string.settings_auto_start_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -156,9 +158,9 @@ fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Foreground Service", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_foreground_service_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Keep relay connections alive persistently",
+                    stringResource(R.string.settings_foreground_service_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -183,9 +185,9 @@ fun BiometricTimeoutCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Biometric Re-auth", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_biometric_reauth_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "How often to require biometric authentication",
+                    stringResource(R.string.settings_biometric_reauth_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -233,29 +235,30 @@ fun TorOrbotCard(
 ) {
     var portInput by remember(port) { mutableStateOf(port.toString()) }
     var error by remember { mutableStateOf<String?>(null) }
+    val portRangeError = stringResource(R.string.settings_tor_port_range_error)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Tor/Orbot setup", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_tor_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "Connect through Tor with Orbot",
+                stringResource(R.string.settings_tor_subtitle),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(12.dp))
 
             val steps = listOf(
-                "Install Orbot.",
-                "Start Orbot.",
-                "In Orbot, check the Socks port. The default uses 9050.",
-                "If necessary change the port in Orbot.",
-                "Configure the Socks port below.",
-                "Press the Activate button to use Orbot as a proxy."
+                stringResource(R.string.settings_tor_step_install),
+                stringResource(R.string.settings_tor_step_start),
+                stringResource(R.string.settings_tor_step_check_port),
+                stringResource(R.string.settings_tor_step_change_port),
+                stringResource(R.string.settings_tor_step_configure),
+                stringResource(R.string.settings_tor_step_activate)
             )
             steps.forEachIndexed { index, step ->
                 Text(
-                    "${index + 1}. $step",
+                    stringResource(R.string.settings_tor_step_format, index + 1, step),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -270,8 +273,8 @@ fun TorOrbotCard(
                         error = null
                     }
                 },
-                label = { Text("Socks Port") },
-                placeholder = { Text("9050") },
+                label = { Text(stringResource(R.string.settings_tor_socks_port_label)) },
+                placeholder = { Text(stringResource(R.string.settings_tor_socks_port_placeholder)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number
@@ -292,12 +295,12 @@ fun TorOrbotCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Proxy active on port $port",
+                        stringResource(R.string.settings_tor_proxy_active, port),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
                     OutlinedButton(onClick = onDeactivate) {
-                        Text("Deactivate")
+                        Text(stringResource(R.string.settings_tor_deactivate))
                     }
                 }
             } else {
@@ -305,14 +308,14 @@ fun TorOrbotCard(
                     onClick = {
                         val p = portInput.toIntOrNull()
                         if (p == null || p !in 1..65535) {
-                            error = "Port must be 1-65535"
+                            error = portRangeError
                         } else {
                             onActivate(p)
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Activate")
+                    Text(stringResource(R.string.settings_tor_activate))
                 }
             }
         }
@@ -329,14 +332,14 @@ fun ExportLogsCard(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Export & Share Logs", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_export_logs_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Save diagnostics and audit history to a file",
+                    stringResource(R.string.settings_export_logs_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text("Export", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_export_logs_action), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -351,14 +354,14 @@ fun BackupSettingsCard(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("Vault Backup", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Create or restore encrypted backups",
+                    stringResource(R.string.settings_backup_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text("Manage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_backup_action), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,14 @@ fun ExportNcryptsecScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     var exportJob by remember { mutableStateOf<Job?>(null) }
     val sessionCanceled = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val minLengthMessage = stringResource(R.string.export_ncryptsec_min_length, MIN_PASSWORD_LENGTH)
+    val passwordsMismatchMessage = stringResource(R.string.export_ncryptsec_passwords_mismatch)
+    val tooWeakMessage = stringResource(R.string.export_ncryptsec_too_weak)
+    val biometricUnavailableMessage = stringResource(R.string.export_ncryptsec_biometric_unavailable)
+    val noEncryptionKeyMessage = stringResource(R.string.export_ncryptsec_no_encryption_key)
+    val exportFailedMessage = stringResource(R.string.export_ncryptsec_export_failed)
+    val authCancelledMessage = stringResource(R.string.export_ncryptsec_auth_cancelled)
+    val initFailedMessage = stringResource(R.string.export_ncryptsec_init_failed)
 
     DisposableEffect(lifecycleOwner) {
         setSecureScreen(context, true)
@@ -107,7 +116,7 @@ fun ExportNcryptsecScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Export Encrypted Key",
+            text = stringResource(R.string.export_ncryptsec_title),
             style = MaterialTheme.typography.headlineMedium
         )
 
@@ -140,26 +149,26 @@ fun ExportNcryptsecScreen(
                     },
                     onExport = {
                         if (password.length < MIN_PASSWORD_LENGTH) {
-                            exportState = NcryptsecExportState.Error("Password must be at least $MIN_PASSWORD_LENGTH characters")
+                            exportState = NcryptsecExportState.Error(minLengthMessage)
                             return@NcryptsecInputForm
                         }
                         if (!password.contentEquals(confirmPassword)) {
-                            exportState = NcryptsecExportState.Error("Passwords do not match")
+                            exportState = NcryptsecExportState.Error(passwordsMismatchMessage)
                             return@NcryptsecInputForm
                         }
                         if (calculatePasswordStrength(password) == PasswordStrength.WEAK) {
-                            exportState = NcryptsecExportState.Error("Password is too weak. Add length, mixed case, numbers, or symbols.")
+                            exportState = NcryptsecExportState.Error(tooWeakMessage)
                             return@NcryptsecInputForm
                         }
                         cipherError = null
                         val cipher = try {
                             onGetCipher()
                         } catch (e: BiometricHelper.BiometricNotReadyException) {
-                            cipherError = e.message ?: "Biometric authentication is unavailable"
+                            cipherError = e.message ?: biometricUnavailableMessage
                             return@NcryptsecInputForm
                         }
                         if (cipher == null) {
-                            cipherError = "No encryption key available"
+                            cipherError = noEncryptionKeyMessage
                             return@NcryptsecInputForm
                         }
                         val passwordChars = password.toCharArray()
@@ -199,7 +208,7 @@ fun ExportNcryptsecScreen(
                                             throw e
                                         } catch (e: Exception) {
                                             if (BuildConfig.DEBUG) Log.e("ExportNcryptsec", "Export failed: ${e::class.simpleName}")
-                                            exportState = NcryptsecExportState.Error("Export failed. Please try again.")
+                                            exportState = NcryptsecExportState.Error(exportFailedMessage)
                                         }
                                     }.also { job ->
                                         job.invokeOnCompletion {
@@ -210,14 +219,14 @@ fun ExportNcryptsecScreen(
                                     }
                                 } else {
                                     clearChars()
-                                    exportState = NcryptsecExportState.Error("Authentication cancelled")
-                                    Toast.makeText(context, "Authentication cancelled", Toast.LENGTH_SHORT).show()
+                                    exportState = NcryptsecExportState.Error(authCancelledMessage)
+                                    Toast.makeText(context, authCancelledMessage, Toast.LENGTH_SHORT).show()
                                 }
                             }
                         } catch (e: Exception) {
                             clearChars()
                             if (BuildConfig.DEBUG) Log.e("ExportNcryptsec", "Failed to init cipher: ${e::class.simpleName}")
-                            cipherError = "Failed to initialize encryption"
+                            cipherError = initFailedMessage
                         }
                     },
                     onCancel = {
@@ -233,7 +242,7 @@ fun ExportNcryptsecScreen(
             is NcryptsecExportState.Encrypting -> {
                 CircularProgressIndicator()
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Encrypting key...")
+                Text(stringResource(R.string.export_ncryptsec_encrypting))
             }
 
             is NcryptsecExportState.Success -> {
@@ -246,11 +255,19 @@ fun ExportNcryptsecScreen(
     }
 }
 
-private enum class PasswordStrength(val label: String) {
-    WEAK("Weak"),
-    FAIR("Fair"),
-    GOOD("Good"),
-    STRONG("Strong")
+private enum class PasswordStrength {
+    WEAK,
+    FAIR,
+    GOOD,
+    STRONG
+}
+
+@Composable
+private fun PasswordStrength.label(): String = when (this) {
+    PasswordStrength.WEAK -> stringResource(R.string.export_ncryptsec_strength_weak)
+    PasswordStrength.FAIR -> stringResource(R.string.export_ncryptsec_strength_fair)
+    PasswordStrength.GOOD -> stringResource(R.string.export_ncryptsec_strength_good)
+    PasswordStrength.STRONG -> stringResource(R.string.export_ncryptsec_strength_strong)
 }
 
 @Composable
@@ -293,7 +310,7 @@ private fun PasswordStrengthIndicator(strength: PasswordStrength) {
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = strength.label,
+            text = strength.label(),
             style = MaterialTheme.typography.labelSmall,
             color = strength.color()
         )
@@ -327,7 +344,7 @@ private fun NcryptsecInputForm(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
     ) {
         Text(
-            text = "This encrypts your private key using NIP-49 (ncryptsec). The result can be imported into any Nostr client that supports NIP-49.",
+            text = stringResource(R.string.export_ncryptsec_info),
             modifier = Modifier.padding(16.dp),
             color = MaterialTheme.colorScheme.onTertiaryContainer,
             style = MaterialTheme.typography.bodySmall
@@ -349,8 +366,8 @@ private fun NcryptsecInputForm(
     OutlinedTextField(
         value = passwordDisplay,
         onValueChange = onPasswordChange,
-        label = { Text("Encryption Password") },
-        placeholder = { Text("Enter a password to encrypt") },
+        label = { Text(stringResource(R.string.export_ncryptsec_password_label)) },
+        placeholder = { Text(stringResource(R.string.export_ncryptsec_password_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -367,22 +384,22 @@ private fun NcryptsecInputForm(
     OutlinedTextField(
         value = confirmPasswordDisplay,
         onValueChange = onConfirmPasswordChange,
-        label = { Text("Confirm Password") },
-        placeholder = { Text("Re-enter password") },
+        label = { Text(stringResource(R.string.export_ncryptsec_confirm_label)) },
+        placeholder = { Text(stringResource(R.string.export_ncryptsec_confirm_placeholder)) },
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         singleLine = true,
         isError = confirmPassword.length > 0 && !password.contentEquals(confirmPassword),
         supportingText = if (confirmPassword.length > 0 && !password.contentEquals(confirmPassword)) {
-            { Text("Passwords do not match") }
+            { Text(stringResource(R.string.export_ncryptsec_passwords_mismatch)) }
         } else null
     )
 
     Spacer(modifier = Modifier.height(16.dp))
 
     Text(
-        text = "This password encrypts your private key. You will need it to decrypt in another Nostr client.",
+        text = stringResource(R.string.export_ncryptsec_footer),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -397,7 +414,7 @@ private fun NcryptsecInputForm(
             onClick = onCancel,
             modifier = Modifier.weight(1f)
         ) {
-            Text("Cancel")
+            Text(stringResource(R.string.export_ncryptsec_cancel))
         }
         Button(
             onClick = onExport,
@@ -406,7 +423,7 @@ private fun NcryptsecInputForm(
                 password.contentEquals(confirmPassword) &&
                 calculatePasswordStrength(password) != PasswordStrength.WEAK
         ) {
-            Text("Encrypt")
+            Text(stringResource(R.string.export_ncryptsec_encrypt))
         }
     }
 }
@@ -417,7 +434,8 @@ private fun NcryptsecSuccessContent(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val showCopiedToast = { Toast.makeText(context, "ncryptsec copied", Toast.LENGTH_SHORT).show() }
+    val copiedMessage = stringResource(R.string.export_ncryptsec_copied_toast)
+    val showCopiedToast = { Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show() }
     var showClipboardWarning by remember { mutableStateOf(false) }
 
     Card(
@@ -425,7 +443,7 @@ private fun NcryptsecSuccessContent(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
     ) {
         Text(
-            text = "Anyone with this string and the password can access your private key. Do not share it publicly.",
+            text = stringResource(R.string.export_ncryptsec_danger),
             modifier = Modifier.padding(16.dp),
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall
@@ -436,7 +454,7 @@ private fun NcryptsecSuccessContent(
 
     QrCodeDisplay(
         data = ncryptsec,
-        label = "NIP-49 Encrypted Key",
+        label = stringResource(R.string.export_ncryptsec_qr_label),
         onTapToCopy = { showClipboardWarning = true },
         onCopied = showCopiedToast
     )
@@ -447,26 +465,26 @@ private fun NcryptsecSuccessContent(
         onClick = { showClipboardWarning = true },
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Copy to Clipboard")
+        Text(stringResource(R.string.export_ncryptsec_copy_to_clipboard))
     }
 
     if (showClipboardWarning) {
         AlertDialog(
             onDismissRequest = { showClipboardWarning = false },
-            title = { Text("Copy to clipboard?") },
-            text = { Text("Other apps on your device may be able to read clipboard contents. The QR code export is more secure.") },
+            title = { Text(stringResource(R.string.export_ncryptsec_clipboard_dialog_title)) },
+            text = { Text(stringResource(R.string.export_ncryptsec_clipboard_dialog_text)) },
             confirmButton = {
                 TextButton(onClick = {
                     showClipboardWarning = false
                     copySensitiveText(context, ncryptsec)
                     showCopiedToast()
                 }) {
-                    Text("Copy anyway")
+                    Text(stringResource(R.string.export_ncryptsec_copy_anyway))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClipboardWarning = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.export_ncryptsec_cancel))
                 }
             }
         )
@@ -478,6 +496,6 @@ private fun NcryptsecSuccessContent(
         onClick = onDismiss,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Text("Done")
+        Text(stringResource(R.string.export_ncryptsec_done))
     }
 }
