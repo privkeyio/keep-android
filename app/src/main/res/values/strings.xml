@@ -59,7 +59,7 @@
     <string name="notification_channel_background_signing_description">Notifications when apps sign events in the background</string>
     <string name="notification_background_signing_title">Background Signing</string>
     <string name="notification_background_signing_text"><xliff:g id="app_name" example="Damus">%1$s</xliff:g>: <xliff:g id="message" example="Signed event">%2$s</xliff:g></string>
-    <string name="notification_kind_suffix"> (kind <xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
+    <string name="notification_kind_suffix">" (kind "<xliff:g id="kind" example="1">%1$d</xliff:g>)</string>
 
     <string name="auto_signing_opt_in">Enable AUTO signing</string>
     <string name="auto_signing_opt_in_description">Allow this app to sign events without prompts</string>

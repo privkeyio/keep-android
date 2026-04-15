@@ -58,9 +58,7 @@ class BiometricHelper(
         if (!forcePrompt && timeoutStore?.requiresBiometric() == false) {
             return AuthResult.SUCCESS
         }
-        val resolvedTitle = title ?: activity.getString(R.string.biometric_prompt_title)
-        val resolvedSubtitle = subtitle ?: activity.getString(R.string.biometric_prompt_subtitle)
-        val resolvedNegative = negativeButtonText ?: activity.getString(R.string.biometric_prompt_negative_button)
+        val promptInfo = resolvePromptInfo(title, subtitle, negativeButtonText)
         return suspendCoroutine { continuation ->
             val callback = object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -80,8 +78,7 @@ class BiometricHelper(
                 override fun onAuthenticationFailed() {}
             }
 
-            BiometricPrompt(activity, executor, callback)
-                .authenticate(buildPromptInfo(resolvedTitle, resolvedSubtitle, resolvedNegative))
+            BiometricPrompt(activity, executor, callback).authenticate(promptInfo)
         }
     }
 
@@ -91,9 +88,7 @@ class BiometricHelper(
         subtitle: String? = null,
         negativeButtonText: String? = null
     ): Cipher? {
-        val resolvedTitle = title ?: activity.getString(R.string.biometric_prompt_title)
-        val resolvedSubtitle = subtitle ?: activity.getString(R.string.biometric_prompt_subtitle)
-        val resolvedNegative = negativeButtonText ?: activity.getString(R.string.biometric_prompt_negative_button)
+        val promptInfo = resolvePromptInfo(title, subtitle, negativeButtonText)
         return suspendCoroutine { continuation ->
             val callback = object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -117,20 +112,20 @@ class BiometricHelper(
             }
 
             BiometricPrompt(activity, executor, callback).authenticate(
-                buildPromptInfo(resolvedTitle, resolvedSubtitle, resolvedNegative),
+                promptInfo,
                 BiometricPrompt.CryptoObject(cipher)
             )
         }
     }
 
-    private fun buildPromptInfo(
-        title: String,
-        subtitle: String,
-        negativeButtonText: String
+    private fun resolvePromptInfo(
+        title: String?,
+        subtitle: String?,
+        negativeButtonText: String?
     ): BiometricPrompt.PromptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle(title)
-        .setSubtitle(subtitle)
-        .setNegativeButtonText(negativeButtonText)
+        .setTitle(title ?: activity.getString(R.string.biometric_prompt_title))
+        .setSubtitle(subtitle ?: activity.getString(R.string.biometric_prompt_subtitle))
+        .setNegativeButtonText(negativeButtonText ?: activity.getString(R.string.biometric_prompt_negative_button))
         .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
         .build()
 
