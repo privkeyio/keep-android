@@ -32,7 +32,7 @@ from collections import Counter
 
 res_dir, default_file = sys.argv[1], sys.argv[2]
 
-LOCALE_RE = re.compile(r'^values-[a-z]{2,3}(-r[A-Z]{2})?$')
+LOCALE_RE = re.compile(r'^values-(?:[a-z]{2,3}(?:-r[A-Z]{2})?|b\+[A-Za-z0-9+]+)$')
 FORMAT_RE = re.compile(r'%(?:\d+\$)?[-+ 0#,(]*\d*(?:\.\d+)?[a-zA-Z]')
 
 def entry_specs(el):
@@ -74,10 +74,10 @@ def load_entries(path):
         if not name:
             continue
         allkeys.add((tag, name))
+        specs[(tag, name)] = entry_specs(el)
         if el.get('translatable', 'true').lower() == 'false':
             continue
         translatable.add((tag, name))
-        specs[(tag, name)] = entry_specs(el)
     return translatable, allkeys, specs
 
 default_translatable, _, default_specs = load_entries(default_file)

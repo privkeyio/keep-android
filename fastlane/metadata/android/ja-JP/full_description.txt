@@ -10,7 +10,7 @@ KeepはNIP-55 Android Signerプロトコルおよび NIP-46リモート署名を
 - 複数アカウント対応
 - アプリごとの署名権限およびポリシー
 - 生体認証およびPIN認証
-- ハードウェアバックアップ鍵ストレージ(Android Keystore)
+- ハードウェア保護された鍵ストレージ(Android Keystore)
 - NIP-44暗号化・復号
 - SOCKSプロキシ対応(Tor)
 - 暗号化されたバックアップと復元
