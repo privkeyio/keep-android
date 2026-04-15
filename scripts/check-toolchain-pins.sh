@@ -34,6 +34,7 @@ RELEASE_YML="$ROOT/.github/workflows/release.yml"
 REPRO_YML="$ROOT/.github/workflows/reproducibility.yml"
 GRADLE_KTS="$ROOT/build.gradle.kts"
 TOOLCHAIN_TOML="$ROOT/keep/rust-toolchain.toml"
+DOCKERFILE="$ROOT/Dockerfile.reproducible"
 
 for f in "$BUILD_RUST" "$CI_YML" "$RELEASE_YML" "$REPRO_YML" "$GRADLE_KTS"; do
     [ -f "$f" ] || fail "missing file: $f"
@@ -100,6 +101,33 @@ check_equal "cargo-ndk version"   "$BR_CARGO_NDK"  "$CI_CARGO_NDK"  "$REL_CARGO_
 check_equal "ndk version"         "$CI_NDK"        "$REL_NDK"       "$GRADLE_NDK"     "$REPRO_NDK"
 check_equal "jdk major version"   "$GRADLE_JDK"    "$CI_JDK"        "$REL_JDK"        "$REPRO_JDK"
 check_equal "build-tools version" "$REL_BUILD_TOOLS" "$REPRO_BUILD_TOOLS"
+
+# Cross-check Dockerfile.reproducible pins against the same sources of truth
+# so the container recipe cannot drift silently.
+if [ -f "$DOCKERFILE" ]; then
+    DOCKER_RUST=$(extract "$DOCKERFILE" 'ARG RUST_VERSION=('"$SEMVER"')')
+    DOCKER_CARGO_NDK=$(extract "$DOCKERFILE" 'ARG CARGO_NDK_VERSION=('"$SEMVER"')')
+    DOCKER_NDK=$(extract "$DOCKERFILE" 'ARG ANDROID_NDK_VERSION=('"$NDK_VER"')')
+    DOCKER_BUILD_TOOLS=$(extract "$DOCKERFILE" 'ARG ANDROID_BUILD_TOOLS_VERSION=('"$NDK_VER"')')
+    DOCKER_JDK_MAJOR=$(extract "$DOCKERFILE" 'ARG JDK_VERSION=([0-9]+)\.[0-9]+\.[0-9]+\+[0-9]+')
+    check_equal "Dockerfile rust version"        "$BR_RUST"        "$DOCKER_RUST"
+    check_equal "Dockerfile cargo-ndk version"   "$BR_CARGO_NDK"   "$DOCKER_CARGO_NDK"
+    check_equal "Dockerfile ndk version"         "$GRADLE_NDK"     "$DOCKER_NDK"
+    check_equal "Dockerfile build-tools version" "$REL_BUILD_TOOLS" "$DOCKER_BUILD_TOOLS"
+    check_equal "Dockerfile jdk major"           "$GRADLE_JDK"     "$DOCKER_JDK_MAJOR"
+else
+    echo "note: $DOCKERFILE not present; skipping container-recipe checks."
+fi
+
+# AGP / Kotlin compose / KSP plugin pins live only in build.gradle.kts. Verify
+# they are present and parseable so the doc table cannot reference something
+# the build no longer pins.
+AGP_VERSION=$(extract "$GRADLE_KTS" 'id\("com\.android\.application"\) version "('"$SEMVER"')"')
+KOTLIN_COMPOSE_VERSION=$(extract "$GRADLE_KTS" 'id\("org\.jetbrains\.kotlin\.plugin\.compose"\) version "('"$SEMVER"')"')
+KSP_VERSION=$(extract "$GRADLE_KTS" 'id\("com\.google\.devtools\.ksp"\) version "('"$SEMVER"')"')
+echo "ok: AGP version = $AGP_VERSION"
+echo "ok: Kotlin compose plugin = $KOTLIN_COMPOSE_VERSION"
+echo "ok: KSP version = $KSP_VERSION"
 
 if [ -f "$TOOLCHAIN_TOML" ]; then
     TOML_CHANNEL=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' "$TOOLCHAIN_TOML" | head -1)

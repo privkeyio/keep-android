@@ -1,0 +1,213 @@
+# SPDX-FileCopyrightText: © 2026 PrivKey LLC
+# SPDX-License-Identifier: MIT
+#
+# Reproducible Android build container for keep-android.
+#
+# Usage (see REPRODUCIBLE_BUILDS.md for the full recipe):
+#
+#   export KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
+#   export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
+#   DOCKER_BUILDKIT=1 docker build \
+#       --build-arg KEEP_SHA="$KEEP_SHA" \
+#       --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+#       --output type=local,dest=out \
+#       -f Dockerfile.reproducible .
+#
+# Output: ./out/app-release.apk  (unsigned; sign with your own key or compare
+# against the published APK with diffoscope — the payload is reproducible,
+# only the signing block necessarily differs).
+
+# Pinned base: Debian 12 (bookworm), slim variant. Digest pin keeps the base
+# layer byte-identical across rebuilds. Refresh the digest when upgrading via
+# `docker pull debian:bookworm-slim && docker inspect --format='{{index .RepoDigests 0}}' debian:bookworm-slim`.
+FROM debian@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG SOURCE_DATE_EPOCH
+ARG KEEP_SHA
+
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} \
+    LC_ALL=C \
+    TZ=UTC \
+    LANG=C.UTF-8 \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    ANDROID_NDK_HOME=/opt/android-sdk/ndk/29.0.14206865 \
+    JAVA_HOME=/opt/jdk-17 \
+    CARGO_HOME=/opt/cargo \
+    RUSTUP_HOME=/opt/rustup \
+    PATH=/opt/cargo/bin:/opt/jdk-17/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/36.0.0:${PATH}
+
+# Pinned toolchain versions. Cross-validated by scripts/check-toolchain-pins.sh.
+ARG JDK_VERSION=17.0.13+11
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
+ARG ANDROID_PLATFORM=android-36
+ARG ANDROID_NDK_VERSION=29.0.14206865
+ARG RUST_VERSION=1.89.0
+ARG RUSTUP_VERSION=1.28.2
+ARG CARGO_NDK_VERSION=4.1.2
+
+# SHA-256 checksums for bootstrap downloads. Updating any version above also
+# requires refreshing the matching hash here. Sources:
+#   JDK: Adoptium publishes .sha256.txt alongside each release artifact.
+#   cmdline-tools: sha256sum of the dl.google.com archive.
+#   rustup-init: https://static.rust-lang.org/rustup/archive/<ver>/<target>/rustup-init.sha256
+ARG JDK_X64_SHA256=8682892fc02965930b9022c066fa164dd6f458ef4a5dc262016aa28333b30f49
+ARG JDK_AARCH64_SHA256=0c17fa4f14c0d2cc9e9334f996fccdddc5da4459d768f3105c7ff0283c47bf62
+ARG ANDROID_CMDLINE_TOOLS_SHA256=2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258
+ARG RUSTUP_INIT_X64_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
+ARG RUSTUP_INIT_AARCH64_SHA256=e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c
+
+# System packages required to bootstrap the SDK and Rust builds.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip \
+        zip \
+        git \
+        bash \
+        coreutils \
+        tar \
+        xz-utils \
+        pkg-config \
+        cmake \
+        make \
+        gcc \
+        g++ \
+        libc6-dev \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# Temurin JDK 17. Pinned by version and SHA-256 (per arch).
+RUN mkdir -p /opt/jdk-17 \
+    && ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+         x86_64)  JDK_ARCH=x64;     JDK_SHA256="${JDK_X64_SHA256}"     ;; \
+         aarch64) JDK_ARCH=aarch64; JDK_SHA256="${JDK_AARCH64_SHA256}" ;; \
+         *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-${JDK_VERSION}/OpenJDK17U-jdk_${JDK_ARCH}_linux_hotspot_${JDK_VERSION/+/_}.tar.gz" \
+        -o /tmp/jdk.tar.gz \
+    && echo "${JDK_SHA256}  /tmp/jdk.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/jdk.tar.gz -C /opt/jdk-17 --strip-components=1 \
+    && rm /tmp/jdk.tar.gz \
+    && java -version
+
+# Android cmdline-tools + platform-tools + build-tools + platform + NDK (all pinned).
+RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
+        -o /tmp/cmdline-tools.zip \
+    && echo "${ANDROID_CMDLINE_TOOLS_SHA256}  /tmp/cmdline-tools.zip" | sha256sum -c - \
+    && unzip -q /tmp/cmdline-tools.zip -d "${ANDROID_HOME}/cmdline-tools" \
+    && mv "${ANDROID_HOME}/cmdline-tools/cmdline-tools" "${ANDROID_HOME}/cmdline-tools/latest" \
+    && rm /tmp/cmdline-tools.zip \
+    && yes | sdkmanager --licenses >/dev/null \
+    && sdkmanager --install \
+        "platform-tools" \
+        "platforms;${ANDROID_PLATFORM}" \
+        "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+        "ndk;${ANDROID_NDK_VERSION}"
+
+# Rust + Android targets + cargo-ndk (all pinned, --locked). rustup-init is
+# fetched as a pinned binary (by version and SHA-256), not via `curl | sh`, so
+# a compromise of sh.rustup.rs cannot inject a backdoored bootstrap.
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+         x86_64)  RUSTUP_TARGET=x86_64-unknown-linux-gnu;  RUSTUP_SHA256="${RUSTUP_INIT_X64_SHA256}"     ;; \
+         aarch64) RUSTUP_TARGET=aarch64-unknown-linux-gnu; RUSTUP_SHA256="${RUSTUP_INIT_AARCH64_SHA256}" ;; \
+         *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+       esac \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init" \
+        -o /tmp/rustup-init \
+    && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c - \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y \
+        --default-toolchain "${RUST_VERSION}" \
+        --profile minimal \
+        --no-modify-path \
+    && rm /tmp/rustup-init \
+    && rustup target add aarch64-linux-android x86_64-linux-android \
+    && cargo install --locked cargo-ndk --version "${CARGO_NDK_VERSION}" \
+    && rustc --version \
+    && cargo ndk --version
+
+# Drop privileges. All build steps from here run as a non-root user so that a
+# malicious cargo/Gradle dependency cannot tamper with the toolchain layers.
+RUN useradd --create-home --uid 1000 --shell /bin/bash builder \
+    && mkdir -p /build /out \
+    && chown -R builder:builder /opt/jdk-17 /opt/android-sdk /opt/cargo /opt/rustup /build /out
+USER builder
+
+WORKDIR /build
+
+# Bring the keep-android sources in. The host caller is responsible for
+# running this Dockerfile from a clean keep-android checkout at the release
+# tag. The shipped `.dockerignore` excludes a sibling ./keep and build
+# outputs so we always clone keep at the pinned SHA below.
+COPY --chown=builder:builder . /build/keep-android
+
+# Clone keep at the pinned SHA and verify.
+# Trust note: pinning by SHA defeats post-hoc tampering of the `keep` repo but
+# does NOT verify who authored that commit. Reproducers should verify the
+# keep-android release tag's GPG/SSH signature out of band (see
+# REPRODUCIBLE_BUILDS.md § 2).
+RUN if [ -z "$KEEP_SHA" ]; then \
+        KEEP_SHA="$(tr -d '[:space:]' < /build/keep-android/keep.version)"; \
+    fi \
+    && echo "$KEEP_SHA" | grep -Eq '^[0-9a-f]{40}$' \
+        || { echo "KEEP_SHA must be a 40-char lowercase hex SHA, got: '$KEEP_SHA'" >&2; exit 1; } \
+    && echo "Pinned keep SHA: $KEEP_SHA" \
+    && git clone https://github.com/privkeyio/keep.git /build/keep \
+    && git -C /build/keep checkout "$KEEP_SHA" \
+    && actual="$(git -C /build/keep rev-parse HEAD)" \
+    && [ "$actual" = "$KEEP_SHA" ] || { echo "keep checkout drift: $actual != $KEEP_SHA" >&2; exit 1; } \
+    && rm -rf /build/keep-android/keep \
+    && ln -s /build/keep /build/keep-android/keep
+
+# Build. SOURCE_DATE_EPOCH is passed through to both the Rust build (via
+# build-rust.sh) and Gradle's packaging/signing.
+WORKDIR /build/keep-android
+RUN set -eux; \
+    if [ -z "${SOURCE_DATE_EPOCH}" ] || [ "${SOURCE_DATE_EPOCH}" = "0" ]; then \
+        export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"; \
+    fi; \
+    echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"; \
+    export KEEP_REPO=/build/keep; \
+    export AWS_LC_SYS_CMAKE_BUILDER=1; \
+    ./scripts/check-toolchain-pins.sh; \
+    ./build-rust.sh; \
+    # ========================================================================
+    # THROWAWAY KEYSTORE — DO NOT SHIP APKS SIGNED WITH THIS KEY.
+    # ------------------------------------------------------------------------
+    # Generated per build for local reproducibility verification only. The
+    # resulting APK's payload is reproducible; only the signing block varies.
+    # Android installs are pinned to signing identity — accidentally shipping
+    # an APK signed with this publicly-known key means anyone can sign updates
+    # for your app. To match the official release bytes, mount a real keystore
+    # via --secret and pass KEYSTORE_FILE/PASSWORD/KEY_ALIAS/KEY_PASSWORD.
+    # ========================================================================
+    keytool -genkeypair -v \
+        -keystore /tmp/throwaway.keystore \
+        -storetype PKCS12 \
+        -storepass THROWAWAY_DO_NOT_SHIP \
+        -keypass THROWAWAY_DO_NOT_SHIP \
+        -alias THROWAWAY-DO-NOT-SHIP \
+        -keyalg RSA -keysize 4096 -validity 36500 \
+        -dname "CN=keep-reproducibility-THROWAWAY-DO-NOT-SHIP, O=local, C=US"; \
+    KEYSTORE_FILE=/tmp/throwaway.keystore \
+    KEYSTORE_PASSWORD=THROWAWAY_DO_NOT_SHIP \
+    KEY_ALIAS=THROWAWAY-DO-NOT-SHIP \
+    KEY_PASSWORD=THROWAWAY_DO_NOT_SHIP \
+    ./gradlew assembleRelease --no-daemon; \
+    mkdir -p /out; \
+    cp app/build/outputs/apk/release/app-release.apk /out/app-release.apk; \
+    sha256sum /out/app-release.apk
+
+# Export stage: extract just the APK using BuildKit's local output.
+#   docker build --output type=local,dest=out -f Dockerfile.reproducible .
+FROM scratch AS export
+COPY --from=builder /out/app-release.apk /app-release.apk
