@@ -30,6 +30,7 @@
     <string name="connected_app_not_installed">Aplicativo não instalado</string>
     <plurals name="connected_app_permission_count">
         <item quantity="one">%d permissão</item>
+        <item quantity="many">%d permissões</item>
         <item quantity="other">%d permissões</item>
     </plurals>
 
