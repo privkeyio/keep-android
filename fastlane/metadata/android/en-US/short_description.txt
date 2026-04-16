@@ -1,0 +1,1 @@
+FROST threshold signer and Nostr event signer for Android

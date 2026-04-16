@@ -1,0 +1,16 @@
+Keep is a FROST (Flexible Round-Optimized Schnorr Threshold Signatures) threshold signing app and dedicated Nostr event signer for Android. It lets you hold FROST key shares on your phone and sign Nostr events without any single device ever holding the full private key.
+
+Keep implements the NIP-55 Android Signer protocol and NIP-46 remote signing, so any compatible Nostr client can request signatures directly.
+
+Features:
+- FROST threshold signing (2-of-3, 3-of-5, etc.)
+- NIP-55 Android Signer protocol
+- NIP-46 remote signing (bunker service)
+- Import and export FROST shares via QR code or text
+- Multiple account support
+- Per-app signing permissions and policies
+- Biometric and PIN authentication
+- Hardware-backed key storage (Android Keystore)
+- NIP-44 encryption and decryption
+- SOCKS proxy support (Tor)
+- Encrypted backup and restore
