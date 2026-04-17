@@ -34,6 +34,7 @@ FROM --platform=linux/amd64 debian@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_DATE_EPOCH
 ARG KEEP_SHA
+ARG KEEP_REMOTE=https://github.com/privkeyio/keep.git
 
 # Optional keystore overrides. When KEYSTORE_FILE points at an existing file
 # inside the build context (e.g. a path copied in, or `/run/secrets/...`
@@ -86,6 +87,10 @@ ARG RUSTUP_INIT_X64_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c0
 ARG RUSTUP_INIT_AARCH64_SHA256=e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c
 ARG ANDROID_NDK_URL_BASENAME=android-ndk-r29-linux.zip
 ARG ANDROID_NDK_SHA256=4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf
+# cargo-ndk published .crate tarball from static.crates.io. Refresh this when
+# bumping CARGO_NDK_VERSION by running:
+#   curl -fsSL https://static.crates.io/crates/cargo-ndk/cargo-ndk-<ver>.crate | sha256sum
+ARG CARGO_NDK_SHA256=903cc87cda6ab7a2ff82a74065e1c2ae5baa869546b32eb4aacabcc6ed5a670f
 
 # System packages required to bootstrap the SDK and Rust builds.
 #
@@ -195,7 +200,14 @@ RUN ARCH="$(uname -m)" \
         --no-modify-path \
     && rm /tmp/rustup-init \
     && rustup target add aarch64-linux-android x86_64-linux-android \
-    && cargo install --locked cargo-ndk --version "${CARGO_NDK_VERSION}" \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://static.crates.io/crates/cargo-ndk/cargo-ndk-${CARGO_NDK_VERSION}.crate" \
+        -o /tmp/cargo-ndk.crate \
+    && echo "${CARGO_NDK_SHA256}  /tmp/cargo-ndk.crate" | sha256sum -c - \
+    && mkdir -p /tmp/cargo-ndk-src \
+    && tar -xzf /tmp/cargo-ndk.crate -C /tmp/cargo-ndk-src --strip-components=1 \
+    && cargo install --locked --path /tmp/cargo-ndk-src \
+    && rm -rf /tmp/cargo-ndk.crate /tmp/cargo-ndk-src \
     && rustc --version \
     && cargo ndk --version
 
@@ -219,13 +231,23 @@ COPY --chown=builder:builder . /build/keep-android
 # does NOT verify who authored that commit. Reproducers should verify the
 # keep-android release tag's GPG/SSH signature out of band (see
 # REPRODUCIBLE_BUILDS.md § 2).
+#
+# The symlink below (/build/keep-android/keep -> /build/keep) exists because
+# several tools fall back to "${rootDir}/keep" or "$ANDROID_REPO/keep" when
+# KEEP_REPO is not set in their process env: derive-sde.sh (invoked below
+# before KEEP_REPO is exported) and build.gradle.kts' verifyKeepVersion in
+# code paths that read keep/rust-toolchain.toml or resolve the Gradle
+# default. KEEP_REPO=/build/keep is still set as the authoritative value for
+# build-rust.sh and the Gradle assembleRelease invocation.
 RUN if [ -z "$KEEP_SHA" ]; then \
         KEEP_SHA="$(tr -d '[:space:]' < /build/keep-android/keep.version)"; \
     fi \
     && echo "$KEEP_SHA" | grep -Eq '^[0-9a-f]{40}$' \
         || { echo "KEEP_SHA must be a 40-char lowercase hex SHA, got: '$KEEP_SHA'" >&2; exit 1; } \
-    && echo "Pinned keep SHA: $KEEP_SHA" \
-    && git clone https://github.com/privkeyio/keep.git /build/keep \
+    && echo "${KEEP_REMOTE}" | grep -Eq '^https?://' \
+        || { echo "KEEP_REMOTE must be an http(s) URL, got: '${KEEP_REMOTE}'" >&2; exit 1; } \
+    && echo "Pinned keep SHA: $KEEP_SHA (from ${KEEP_REMOTE})" \
+    && git clone "${KEEP_REMOTE}" /build/keep \
     && git -C /build/keep checkout "$KEEP_SHA" \
     && actual="$(git -C /build/keep rev-parse HEAD)" \
     && [ "$actual" = "$KEEP_SHA" ] || { echo "keep checkout drift: $actual != $KEEP_SHA" >&2; exit 1; } \
