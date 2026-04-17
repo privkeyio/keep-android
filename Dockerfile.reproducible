@@ -26,6 +26,19 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_DATE_EPOCH
 ARG KEEP_SHA
 
+# Optional keystore overrides. When KEYSTORE_FILE points at an existing file
+# inside the build context (e.g. a path copied in, or `/run/secrets/...`
+# mounted via `docker build --secret`), the caller-provided keystore is used
+# instead of the throwaway keystore and the APK will match the official bytes.
+# WARNING: passing secrets as --build-arg leaves them in `docker history`.
+# Prefer `--secret` mounts for the keystore file; passwords should be read
+# from a mounted secret inside a wrapper entrypoint if strict hygiene is
+# required.
+ARG KEYSTORE_FILE
+ARG KEYSTORE_PASSWORD
+ARG KEY_ALIAS
+ARG KEY_PASSWORD
+
 # Pinned toolchain versions. Cross-validated by scripts/check-toolchain-pins.sh.
 ARG DEBIAN_SNAPSHOT=20250601T000000Z
 ARG JDK_VERSION=17.0.13+11
@@ -184,6 +197,17 @@ RUN if [ -z "$KEEP_SHA" ]; then \
 
 # Build. SOURCE_DATE_EPOCH is passed through to both the Rust build (via
 # build-rust.sh) and Gradle's packaging/signing.
+#
+# THROWAWAY KEYSTORE policy (applied below when no keystore is provided):
+# DO NOT SHIP APKS SIGNED WITH THIS KEY. The throwaway key is generated per
+# build for local reproducibility verification only. The resulting APK's
+# payload is reproducible; only the signing block varies. Android installs
+# are pinned to signing identity, so accidentally shipping an APK signed
+# with this publicly-known key means anyone can sign updates for your app.
+# To match the official release bytes, pass a real keystore into the build
+# (e.g. via `docker build --secret id=keystore,src=...` bind-mounted to a
+# known path) and set KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD
+# in the build environment before invoking docker build.
 WORKDIR /build/keep-android
 RUN set -eux; \
     if [ -z "${SOURCE_DATE_EPOCH}" ] || [ "${SOURCE_DATE_EPOCH}" = "0" ]; then \
@@ -192,30 +216,30 @@ RUN set -eux; \
     echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"; \
     export KEEP_REPO=/build/keep; \
     export AWS_LC_SYS_CMAKE_BUILDER=1; \
+    KEYSTORE_FILE="${KEYSTORE_FILE:-}"; \
+    KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"; \
+    KEY_ALIAS="${KEY_ALIAS:-}"; \
+    KEY_PASSWORD="${KEY_PASSWORD:-}"; \
     ./scripts/check-toolchain-pins.sh; \
     ./build-rust.sh; \
-    # ========================================================================
-    # THROWAWAY KEYSTORE — DO NOT SHIP APKS SIGNED WITH THIS KEY.
-    # ------------------------------------------------------------------------
-    # Generated per build for local reproducibility verification only. The
-    # resulting APK's payload is reproducible; only the signing block varies.
-    # Android installs are pinned to signing identity — accidentally shipping
-    # an APK signed with this publicly-known key means anyone can sign updates
-    # for your app. To match the official release bytes, mount a real keystore
-    # via --secret and pass KEYSTORE_FILE/PASSWORD/KEY_ALIAS/KEY_PASSWORD.
-    # ========================================================================
-    keytool -genkeypair -v \
-        -keystore /tmp/throwaway.keystore \
-        -storetype PKCS12 \
-        -storepass THROWAWAY_DO_NOT_SHIP \
-        -keypass THROWAWAY_DO_NOT_SHIP \
-        -alias THROWAWAY-DO-NOT-SHIP \
-        -keyalg RSA -keysize 4096 -validity 36500 \
-        -dname "CN=keep-reproducibility-THROWAWAY-DO-NOT-SHIP, O=local, C=US"; \
-    KEYSTORE_FILE=/tmp/throwaway.keystore \
-    KEYSTORE_PASSWORD=THROWAWAY_DO_NOT_SHIP \
-    KEY_ALIAS=THROWAWAY-DO-NOT-SHIP \
-    KEY_PASSWORD=THROWAWAY_DO_NOT_SHIP \
+    if [ -z "$KEYSTORE_FILE" ] || [ ! -f "$KEYSTORE_FILE" ]; then \
+        echo "No KEYSTORE_FILE provided; generating throwaway keystore (DO NOT SHIP)."; \
+        keytool -genkeypair -v \
+            -keystore /tmp/throwaway.keystore \
+            -storetype PKCS12 \
+            -storepass THROWAWAY_DO_NOT_SHIP \
+            -keypass THROWAWAY_DO_NOT_SHIP \
+            -alias THROWAWAY-DO-NOT-SHIP \
+            -keyalg RSA -keysize 4096 -validity 36500 \
+            -dname "CN=keep-reproducibility-THROWAWAY-DO-NOT-SHIP, O=local, C=US"; \
+        KEYSTORE_FILE=/tmp/throwaway.keystore; \
+        KEYSTORE_PASSWORD=THROWAWAY_DO_NOT_SHIP; \
+        KEY_ALIAS=THROWAWAY-DO-NOT-SHIP; \
+        KEY_PASSWORD=THROWAWAY_DO_NOT_SHIP; \
+    else \
+        echo "Using caller-provided KEYSTORE_FILE=$KEYSTORE_FILE"; \
+    fi; \
+    export KEYSTORE_FILE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; \
     ./gradlew assembleRelease --no-daemon; \
     mkdir -p /out; \
     cp app/build/outputs/apk/release/app-release.apk /out/app-release.apk; \
