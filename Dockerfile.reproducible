@@ -60,7 +60,7 @@ ARG RUST_VERSION=1.89.0
 ARG RUSTUP_VERSION=1.28.2
 ARG CARGO_NDK_VERSION=4.1.2
 
-ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} \
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-} \
     LC_ALL=C \
     TZ=UTC \
     LANG=C.UTF-8 \
@@ -269,7 +269,7 @@ RUN if [ -z "$KEEP_SHA" ]; then \
 # in the build environment before invoking docker build.
 WORKDIR /build/keep-android
 RUN set -eux; \
-    if [ -z "${SOURCE_DATE_EPOCH}" ] || [ "${SOURCE_DATE_EPOCH}" = "0" ]; then \
+    if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then \
         export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"; \
     fi; \
     echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"; \

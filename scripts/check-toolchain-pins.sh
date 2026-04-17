@@ -33,10 +33,11 @@ CI_YML="$ROOT/.github/workflows/ci.yml"
 RELEASE_YML="$ROOT/.github/workflows/release.yml"
 REPRO_YML="$ROOT/.github/workflows/reproducibility.yml"
 GRADLE_KTS="$ROOT/build.gradle.kts"
+APP_GRADLE_KTS="$ROOT/app/build.gradle.kts"
 TOOLCHAIN_TOML="$ROOT/keep/rust-toolchain.toml"
 DOCKERFILE="$ROOT/Dockerfile.reproducible"
 
-for f in "$BUILD_RUST" "$CI_YML" "$RELEASE_YML" "$REPRO_YML" "$GRADLE_KTS"; do
+for f in "$BUILD_RUST" "$CI_YML" "$RELEASE_YML" "$REPRO_YML" "$GRADLE_KTS" "$APP_GRADLE_KTS"; do
     [ -f "$f" ] || fail "missing file: $f"
 done
 
@@ -67,7 +68,6 @@ REPRO_BUILD_TOOLS=$(yaml_env "$REPRO_YML" BUILD_TOOLS_VERSION "$NDK_VER")
 
 GRADLE_NDK=$(extract "$GRADLE_KTS" 'expectedNdkVersion = "([0-9.]+)"')
 GRADLE_JDK=$(extract "$GRADLE_KTS" 'expectedJavaMajor = ([0-9]+)')
-GRADLE_COMPILE_SDK=$(extract "$ROOT/app/build.gradle.kts" 'compileSdk = ([0-9]+)')
 
 extract_unique() {
     # extract_unique <file> <regex with one capture group>: all matches must be equal
@@ -106,6 +106,7 @@ check_equal "build-tools version" "$REL_BUILD_TOOLS" "$REPRO_BUILD_TOOLS"
 # Cross-check Dockerfile.reproducible pins against the same sources of truth
 # so the container recipe cannot drift silently.
 if [ -f "$DOCKERFILE" ]; then
+    GRADLE_COMPILE_SDK=$(extract "$APP_GRADLE_KTS" 'compileSdk = ([0-9]+)')
     DOCKER_RUST=$(extract "$DOCKERFILE" 'ARG RUST_VERSION=('"$SEMVER"')')
     DOCKER_CARGO_NDK=$(extract "$DOCKERFILE" 'ARG CARGO_NDK_VERSION=('"$SEMVER"')')
     DOCKER_NDK=$(extract "$DOCKERFILE" 'ARG ANDROID_NDK_VERSION=('"$NDK_VER"')')
