@@ -39,6 +39,7 @@ files where they appear. Run it after any toolchain change. Do not substitute.
 |----------------------------|------------------------------------------|--------------------------------------------------|
 | Host OS (CI reference)     | Ubuntu 24.04                             | `.github/workflows/release.yml` (`runs-on`)      |
 | Container base             | Debian 12 bookworm-slim (digest-pinned)  | `Dockerfile.reproducible` (`FROM debian@sha256:...`) |
+| Debian APT snapshot        | snapshot.debian.org fixed timestamp      | `Dockerfile.reproducible` (`DEBIAN_SNAPSHOT`)    |
 | JDK                        | Temurin 17                               | `build.gradle.kts` (`expectedJavaMajor = 17`)    |
 | Android SDK build-tools    | 36.0.0                                   | `.github/workflows/release.yml` (`BUILD_TOOLS_VERSION`) |
 | Android `compileSdk`       | 36                                       | `app/build.gradle.kts`                           |

@@ -27,6 +27,7 @@ ARG SOURCE_DATE_EPOCH
 ARG KEEP_SHA
 
 # Pinned toolchain versions. Cross-validated by scripts/check-toolchain-pins.sh.
+ARG DEBIAN_SNAPSHOT=20250601T000000Z
 ARG JDK_VERSION=17.0.13+11
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
@@ -60,7 +61,20 @@ ARG RUSTUP_INIT_X64_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c0
 ARG RUSTUP_INIT_AARCH64_SHA256=e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c
 
 # System packages required to bootstrap the SDK and Rust builds.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# APT is pinned to a snapshot.debian.org timestamp so package versions cannot
+# drift between rebuilds. This is critical because `AWS_LC_SYS_CMAKE_BUILDER=1`
+# causes aws-lc-sys to compile native artifacts with the host cmake/gcc,
+# and any version change there would perturb the final APK's .so bytes.
+# Acquire::Check-Valid-Until=false is required because snapshot suites eventually
+# have stale Valid-Until stamps.
+RUN printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ bookworm main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/%s/ bookworm-security main\ndeb [check-valid-until=no] https://snapshot.debian.org/archive/debian/%s/ bookworm-updates main\n' \
+        "${DEBIAN_SNAPSHOT}" "${DEBIAN_SNAPSHOT}" "${DEBIAN_SNAPSHOT}" \
+        > /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\nAcquire::Retries "5";\n' \
+        > /etc/apt/apt.conf.d/99snapshot \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         unzip \
