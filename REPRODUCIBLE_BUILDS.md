@@ -214,12 +214,12 @@ and a `SHA256SUMS` file is attached).
 # 1. Confirm the checksum of the download.
 sha256sum -c SHA256SUMS
 
-# 2. Strip the signing block from the official APK (the payload is what is
-#    reproducible; the signature block is not, since it requires the release
-#    signing key).
-# For a byte-equal comparison, rebuild with the same key; otherwise use
-# diffoscope which highlights that only META-INF/*.SF, *.RSA, and the APK
-# signing block differ.
+# 2. Compare the official APK with your local build. The payload is what is
+#    reproducible; the signing block is not, since it requires the release
+#    signing key. diffoscope runs directly on the two APKs and highlights the
+#    signing-block differences inline — no manual stripping required.
+#    A plain `sha256sum` match is only expected when you rebuild with the same
+#    signing key as the release.
 
 sudo apt-get install -y diffoscope
 diffoscope --html diffoscope.html --text diffoscope.txt \

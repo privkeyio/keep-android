@@ -67,6 +67,7 @@ REPRO_BUILD_TOOLS=$(yaml_env "$REPRO_YML" BUILD_TOOLS_VERSION "$NDK_VER")
 
 GRADLE_NDK=$(extract "$GRADLE_KTS" 'expectedNdkVersion = "([0-9.]+)"')
 GRADLE_JDK=$(extract "$GRADLE_KTS" 'expectedJavaMajor = ([0-9]+)')
+GRADLE_COMPILE_SDK=$(extract "$ROOT/app/build.gradle.kts" 'compileSdk = ([0-9]+)')
 
 extract_unique() {
     # extract_unique <file> <regex with one capture group>: all matches must be equal
@@ -110,11 +111,13 @@ if [ -f "$DOCKERFILE" ]; then
     DOCKER_NDK=$(extract "$DOCKERFILE" 'ARG ANDROID_NDK_VERSION=('"$NDK_VER"')')
     DOCKER_BUILD_TOOLS=$(extract "$DOCKERFILE" 'ARG ANDROID_BUILD_TOOLS_VERSION=('"$NDK_VER"')')
     DOCKER_JDK_MAJOR=$(extract "$DOCKERFILE" 'ARG JDK_VERSION=([0-9]+)\.[0-9]+\.[0-9]+\+[0-9]+')
+    DOCKER_ANDROID_PLATFORM=$(extract "$DOCKERFILE" 'ARG ANDROID_PLATFORM=android-([0-9]+)')
     check_equal "Dockerfile rust version"        "$BR_RUST"        "$DOCKER_RUST"
     check_equal "Dockerfile cargo-ndk version"   "$BR_CARGO_NDK"   "$DOCKER_CARGO_NDK"
     check_equal "Dockerfile ndk version"         "$GRADLE_NDK"     "$DOCKER_NDK"
     check_equal "Dockerfile build-tools version" "$REL_BUILD_TOOLS" "$DOCKER_BUILD_TOOLS"
     check_equal "Dockerfile jdk major"           "$GRADLE_JDK"     "$DOCKER_JDK_MAJOR"
+    check_equal "Dockerfile android platform"    "$GRADLE_COMPILE_SDK" "$DOCKER_ANDROID_PLATFORM"
 else
     echo "note: $DOCKERFILE not present; skipping container-recipe checks."
 fi
