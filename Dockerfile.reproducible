@@ -161,20 +161,21 @@ RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
         "platforms;${ANDROID_PLATFORM}" \
         "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
 
-# Android NDK. Pinned by SHA-256 (primary) and SHA-1 (defense-in-depth; the
-# SHA-1 is what Google publishes in repository2-3.xml). The NDK is downloaded
-# directly from dl.google.com rather than via sdkmanager so a compromised
-# sdkmanager cannot substitute a different NDK tree; the zip's sha256 is
-# verified before extraction. The extracted path must match
-# ${ANDROID_NDK_HOME} so Gradle's NDK probing resolves it.
+# Android NDK. Pinned by SHA-256 and downloaded directly from dl.google.com
+# rather than via sdkmanager, so a compromised sdkmanager cannot substitute a
+# different NDK tree; the zip's sha256 is verified before extraction. The
+# extracted path must match ${ANDROID_NDK_HOME} so Gradle's NDK probing
+# resolves it.
 RUN mkdir -p "${ANDROID_HOME}/ndk" \
     && curl --proto '=https' --tlsv1.2 -fsSL \
         "https://dl.google.com/android/repository/${ANDROID_NDK_URL_BASENAME}" \
         -o /tmp/ndk.zip \
     && echo "${ANDROID_NDK_SHA256}  /tmp/ndk.zip" | sha256sum -c - \
     && unzip -q /tmp/ndk.zip -d /tmp/ndk-extract \
-    && NDK_INNER_DIR="$(find /tmp/ndk-extract -mindepth 1 -maxdepth 1 -type d | head -1)" \
-    && [ -n "$NDK_INNER_DIR" ] || { echo "NDK archive layout unexpected" >&2; exit 1; } \
+    && NDK_DIR_COUNT="$(find /tmp/ndk-extract -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" \
+    && [ "$NDK_DIR_COUNT" = "1" ] \
+        || { echo "NDK archive layout unexpected (expected 1 top-level dir, got $NDK_DIR_COUNT):" >&2; find /tmp/ndk-extract -mindepth 1 -maxdepth 1 >&2; exit 1; } \
+    && NDK_INNER_DIR="$(find /tmp/ndk-extract -mindepth 1 -maxdepth 1 -type d)" \
     && mv "$NDK_INNER_DIR" "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
     && rm -rf /tmp/ndk.zip /tmp/ndk-extract \
     && [ -x "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}/ndk-build" ] \
@@ -244,8 +245,8 @@ RUN if [ -z "$KEEP_SHA" ]; then \
     fi \
     && echo "$KEEP_SHA" | grep -Eq '^[0-9a-f]{40}$' \
         || { echo "KEEP_SHA must be a 40-char lowercase hex SHA, got: '$KEEP_SHA'" >&2; exit 1; } \
-    && echo "${KEEP_REMOTE}" | grep -Eq '^https?://' \
-        || { echo "KEEP_REMOTE must be an http(s) URL, got: '${KEEP_REMOTE}'" >&2; exit 1; } \
+    && echo "${KEEP_REMOTE}" | grep -Eq '^https://[^[:space:]]+$' \
+        || { echo "KEEP_REMOTE must be an https URL, got: '${KEEP_REMOTE}'" >&2; exit 1; } \
     && echo "Pinned keep SHA: $KEEP_SHA (from ${KEEP_REMOTE})" \
     && git clone "${KEEP_REMOTE}" /build/keep \
     && git -C /build/keep checkout "$KEEP_SHA" \
@@ -297,6 +298,14 @@ RUN set -eux; \
         KEY_PASSWORD=THROWAWAY_DO_NOT_SHIP; \
     else \
         echo "Using caller-provided KEYSTORE_FILE=$KEYSTORE_FILE"; \
+        missing=""; \
+        [ -n "$KEYSTORE_PASSWORD" ] || missing="$missing KEYSTORE_PASSWORD"; \
+        [ -n "$KEY_ALIAS" ]         || missing="$missing KEY_ALIAS"; \
+        [ -n "$KEY_PASSWORD" ]      || missing="$missing KEY_PASSWORD"; \
+        if [ -n "$missing" ]; then \
+            echo "KEYSTORE_FILE set but missing required var(s):$missing" >&2; \
+            exit 1; \
+        fi; \
     fi; \
     export KEYSTORE_FILE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; \
     ./gradlew assembleRelease --no-daemon; \

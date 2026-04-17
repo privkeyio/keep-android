@@ -138,8 +138,9 @@ export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
 ./build-rust.sh
 
 # Android release APK. Signing is optional for reproducibility verification;
-# without `KEYSTORE_FILE` set (or no `storeFile` resolved), Gradle falls back
-# to the debug signing key and still writes `app-release.apk`.
+# without a `KEYSTORE_FILE` the container build (Section 4) generates a
+# throwaway keystore per build and signs with it. For host builds, if no
+# `storeFile` is resolved, Gradle falls back to the debug signing key.
 ./gradlew assembleRelease --no-daemon
 ```
 
@@ -188,7 +189,29 @@ The container:
 3. Copies the keep-android sources in and clones `keep` at the pinned SHA.
 4. Runs `build-rust.sh` and `./gradlew assembleRelease` with
    `SOURCE_DATE_EPOCH` set.
-5. Exports the unsigned release APK to `./out/`.
+5. Exports the signed release APK to `./out/` (signed with a per-build
+   throwaway keystore unless a keystore is supplied; see § 4.1).
+
+### 4.1 Optional build-args
+
+- `KEEP_SHA` (default: read from `keep.version`): 40-char hex commit SHA of
+  the `keep` Rust workspace to check out. Overriding this reproduces against
+  a different pin than the shipped one and is for forensic use only.
+- `KEEP_REMOTE` (default: `https://github.com/privkeyio/keep.git`): the
+  remote to clone `keep` from. Only https URLs are accepted. Useful when
+  mirroring the source behind a restricted network.
+- `SOURCE_DATE_EPOCH` (default: derived by `scripts/derive-sde.sh` inside
+  the container): deterministic timestamp for the build. The literal value
+  `0` is accepted and honored verbatim (1970-01-01).
+- `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`: pass
+  a real keystore into the build to produce an APK whose signing block
+  matches the released bytes. Passing secrets via `--build-arg` leaves them
+  in `docker history`; prefer mounting a keystore file with
+  `docker build --secret id=keystore,src=/path/to/keystore.jks` and setting
+  `KEYSTORE_FILE=/run/secrets/keystore` via an entrypoint wrapper. When
+  `KEYSTORE_FILE` is set, all three of `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
+  and `KEY_PASSWORD` must also be provided or the build fails fast. Without
+  any of these, a throwaway keystore is generated and used (DO NOT SHIP).
 
 ## 5. Verify the Result
 
