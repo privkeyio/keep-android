@@ -276,15 +276,21 @@ verify that two builds of the same sources in the same environment produce
 identical bytes, which is exactly what `.github/workflows/reproducibility.yml`
 does weekly and on every release tag:
 
+Requires `KEEP_REPO` to be exported (see § 3.2); `"$KEEP_REPO/keep-mobile/target"`
+is removed explicitly so the sibling cargo target dir is purged even when
+`keep` is checked out outside this repo tree.
+
 ```bash
+: "${KEEP_REPO:?set KEEP_REPO to your keep checkout, e.g. export KEEP_REPO=\"\$PWD/../keep\"}"
+
 ./gradlew clean --no-daemon
-rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
+rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi "$KEEP_REPO/keep-mobile/target"
 ./build-rust.sh
 ./gradlew assembleRelease --no-daemon
 cp app/build/outputs/apk/release/app-release.apk /tmp/build1.apk
 
 ./gradlew clean --no-daemon
-rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
+rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi "$KEEP_REPO/keep-mobile/target"
 ./build-rust.sh
 ./gradlew assembleRelease --no-daemon
 cp app/build/outputs/apk/release/app-release.apk /tmp/build2.apk
