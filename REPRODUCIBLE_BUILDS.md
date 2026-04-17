@@ -137,10 +137,18 @@ export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
 # Native libs + UniFFI Kotlin bindings.
 ./build-rust.sh
 
-# Android release APK. Signing is optional for reproducibility verification;
-# without a `KEYSTORE_FILE` the container build (Section 4) generates a
-# throwaway keystore per build and signs with it. For host builds, if no
-# `storeFile` is resolved, Gradle falls back to the debug signing key.
+# Android release APK. Signing behavior differs between the host and
+# container paths:
+#   * Host build: if no `KEYSTORE_FILE` is exported and no `storeFile` is
+#     resolved by `app/build.gradle.kts`, Gradle falls back to the debug
+#     signing key and still writes `app-release.apk`.
+#   * Container build (Section 4): `Dockerfile.reproducible` intentionally
+#     generates a throwaway keystore per build when `KEYSTORE_FILE` is unset,
+#     so the APK is always release-signed. This enforces a deterministic
+#     signing path for reproducibility verification; the fallback-to-debug
+#     behavior of `app/build.gradle.kts` is therefore not exercised by the
+#     container. Pass `KEYSTORE_FILE`/`KEYSTORE_PASSWORD`/`KEY_ALIAS`/
+#     `KEY_PASSWORD` to sign with a real key inside the container.
 ./gradlew assembleRelease --no-daemon
 ```
 

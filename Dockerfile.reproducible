@@ -50,8 +50,12 @@ ARG KEY_ALIAS
 ARG KEY_PASSWORD
 
 # Pinned toolchain versions. Cross-validated by scripts/check-toolchain-pins.sh.
+# JDK_MAJOR must match the major of JDK_VERSION (first dot-component). It is
+# split out because ENV/install paths should stay stable across patch bumps of
+# JDK_VERSION (e.g. 17.0.13+11 -> 17.0.14+5 requires no path change).
 ARG DEBIAN_SNAPSHOT=20250601T000000Z
 ARG JDK_VERSION=17.0.13+11
+ARG JDK_MAJOR=17
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_BUILD_TOOLS_VERSION=36.0.0
 ARG ANDROID_PLATFORM=android-36
@@ -67,10 +71,10 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-} \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     ANDROID_NDK_HOME=/opt/android-sdk/ndk/${ANDROID_NDK_VERSION} \
-    JAVA_HOME=/opt/jdk-17 \
+    JAVA_HOME=/opt/jdk-${JDK_MAJOR} \
     CARGO_HOME=/opt/cargo \
     RUSTUP_HOME=/opt/rustup \
-    PATH=/opt/cargo/bin:/opt/jdk-17/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/${ANDROID_BUILD_TOOLS_VERSION}:${PATH}
+    PATH=/opt/cargo/bin:/opt/jdk-${JDK_MAJOR}/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/${ANDROID_BUILD_TOOLS_VERSION}:${PATH}
 
 # SHA-256 checksums for bootstrap downloads. Updating any version above also
 # requires refreshing the matching hash here. Sources:
@@ -125,19 +129,23 @@ RUN printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debia
         file \
     && rm -rf /var/lib/apt/lists/*
 
-# Temurin JDK 17. Pinned by version and SHA-256 (per arch).
-RUN mkdir -p /opt/jdk-17 \
+# Temurin JDK. Pinned by version and SHA-256 (per arch). The Adoptium archive
+# filename encodes the version with '+' replaced by '_', so compute that form
+# with POSIX tr instead of a bash-only ${var/+/_} expansion (Dockerfile RUN
+# runs under /bin/sh, which on Debian is dash and rejects bash substitutions).
+RUN mkdir -p "/opt/jdk-${JDK_MAJOR}" \
     && ARCH="$(uname -m)" \
     && case "$ARCH" in \
          x86_64)  JDK_ARCH=x64;     JDK_SHA256="${JDK_X64_SHA256}"     ;; \
          aarch64) JDK_ARCH=aarch64; JDK_SHA256="${JDK_AARCH64_SHA256}" ;; \
          *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
        esac \
+    && JDK_VERSION_FILE="$(echo "${JDK_VERSION}" | tr '+' '_')" \
     && curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-${JDK_VERSION}/OpenJDK17U-jdk_${JDK_ARCH}_linux_hotspot_${JDK_VERSION/+/_}.tar.gz" \
+        "https://github.com/adoptium/temurin${JDK_MAJOR}-binaries/releases/download/jdk-${JDK_VERSION}/OpenJDK${JDK_MAJOR}U-jdk_${JDK_ARCH}_linux_hotspot_${JDK_VERSION_FILE}.tar.gz" \
         -o /tmp/jdk.tar.gz \
     && echo "${JDK_SHA256}  /tmp/jdk.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/jdk.tar.gz -C /opt/jdk-17 --strip-components=1 \
+    && tar -xzf /tmp/jdk.tar.gz -C "/opt/jdk-${JDK_MAJOR}" --strip-components=1 \
     && rm /tmp/jdk.tar.gz \
     && java -version
 
@@ -216,7 +224,7 @@ RUN ARCH="$(uname -m)" \
 # malicious cargo/Gradle dependency cannot tamper with the toolchain layers.
 RUN useradd --create-home --uid 1000 --shell /bin/bash builder \
     && mkdir -p /build /out \
-    && chown -R builder:builder /opt/jdk-17 /opt/android-sdk /opt/cargo /opt/rustup /build /out
+    && chown -R builder:builder "/opt/jdk-${JDK_MAJOR}" /opt/android-sdk /opt/cargo /opt/rustup /build /out
 USER builder
 
 WORKDIR /build
@@ -311,7 +319,13 @@ RUN set -eux; \
     ./gradlew assembleRelease --no-daemon; \
     mkdir -p /out; \
     cp app/build/outputs/apk/release/app-release.apk /out/app-release.apk; \
-    sha256sum /out/app-release.apk
+    echo "SHA256 of signed APK (depends on signing key; differs per build when"; \
+    echo "using the throwaway keystore, since the RSA key is regenerated):"; \
+    sha256sum /out/app-release.apk; \
+    echo ""; \
+    echo "For reproducibility verification, compare APKs with diffoscope"; \
+    echo "(see REPRODUCIBLE_BUILDS.md § 5.2). A matching signed-APK sha256 is"; \
+    echo "only expected when the same KEYSTORE_FILE/PASSWORD/ALIAS is reused."
 
 # Export stage: extract just the APK using BuildKit's local output.
 #   docker build --output type=local,dest=out -f Dockerfile.reproducible .
