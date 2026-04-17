@@ -20,7 +20,16 @@
 # Pinned base: Debian 12 (bookworm), slim variant. Digest pin keeps the base
 # layer byte-identical across rebuilds. Refresh the digest when upgrading via
 # `docker pull debian:bookworm-slim && docker inspect --format='{{index .RepoDigests 0}}' debian:bookworm-slim`.
-FROM debian@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS builder
+#
+# Build host: linux/amd64 is the canonical reproducibility platform. The
+# digest above is a multi-arch manifest index, but AWS_LC_SYS_CMAKE_BUILDER=1
+# compiles native aws-lc artifacts with the host gcc/cmake, so a different
+# host architecture would produce non-identical .so bytes even with matching
+# toolchain versions. `--platform=linux/amd64` pins the resolved image to
+# amd64 regardless of the host (BuildKit will emulate via QEMU on other
+# hosts). The aarch64 branches below remain for future platform expansion
+# but are currently unreachable under this pin.
+FROM --platform=linux/amd64 debian@sha256:4724b8cc51e33e398f0e2e15e18d5ec2851ff0c2280647e1310bc1642182655d AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SOURCE_DATE_EPOCH
@@ -67,11 +76,16 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} \
 #   JDK: Adoptium publishes .sha256.txt alongside each release artifact.
 #   cmdline-tools: sha256sum of the dl.google.com archive.
 #   rustup-init: https://static.rust-lang.org/rustup/archive/<ver>/<target>/rustup-init.sha256
+#   NDK: compute sha256sum of android-ndk-r<N>-linux.zip after downloading;
+#        Google's repository2-3.xml only publishes sha1, so we re-pin to sha256
+#        here and check both for defense-in-depth.
 ARG JDK_X64_SHA256=8682892fc02965930b9022c066fa164dd6f458ef4a5dc262016aa28333b30f49
 ARG JDK_AARCH64_SHA256=0c17fa4f14c0d2cc9e9334f996fccdddc5da4459d768f3105c7ff0283c47bf62
 ARG ANDROID_CMDLINE_TOOLS_SHA256=2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258
 ARG RUSTUP_INIT_X64_SHA256=20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c
 ARG RUSTUP_INIT_AARCH64_SHA256=e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c
+ARG ANDROID_NDK_URL_BASENAME=android-ndk-r29-linux.zip
+ARG ANDROID_NDK_SHA256=4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf
 
 # System packages required to bootstrap the SDK and Rust builds.
 #
@@ -122,7 +136,12 @@ RUN mkdir -p /opt/jdk-17 \
     && rm /tmp/jdk.tar.gz \
     && java -version
 
-# Android cmdline-tools + platform-tools + build-tools + platform + NDK (all pinned).
+# Android cmdline-tools + platform-tools + build-tools + platform. The NDK is
+# installed separately below with an explicit SHA-256 pin (biggest supply-chain
+# surface; see ANDROID_NDK_SHA256). platform-tools / platforms / build-tools
+# are still fetched via sdkmanager from dl.google.com over TLS — the gap is
+# documented in REPRODUCIBLE_BUILDS.md and mitigated by the base image and NDK
+# pins, which are the layers that materially affect APK bytes.
 RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
     && curl --proto '=https' --tlsv1.2 -fsSL \
         "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
@@ -135,8 +154,26 @@ RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
     && sdkmanager --install \
         "platform-tools" \
         "platforms;${ANDROID_PLATFORM}" \
-        "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
-        "ndk;${ANDROID_NDK_VERSION}"
+        "build-tools;${ANDROID_BUILD_TOOLS_VERSION}"
+
+# Android NDK. Pinned by SHA-256 (primary) and SHA-1 (defense-in-depth; the
+# SHA-1 is what Google publishes in repository2-3.xml). The NDK is downloaded
+# directly from dl.google.com rather than via sdkmanager so a compromised
+# sdkmanager cannot substitute a different NDK tree; the zip's sha256 is
+# verified before extraction. The extracted path must match
+# ${ANDROID_NDK_HOME} so Gradle's NDK probing resolves it.
+RUN mkdir -p "${ANDROID_HOME}/ndk" \
+    && curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://dl.google.com/android/repository/${ANDROID_NDK_URL_BASENAME}" \
+        -o /tmp/ndk.zip \
+    && echo "${ANDROID_NDK_SHA256}  /tmp/ndk.zip" | sha256sum -c - \
+    && unzip -q /tmp/ndk.zip -d /tmp/ndk-extract \
+    && NDK_INNER_DIR="$(find /tmp/ndk-extract -mindepth 1 -maxdepth 1 -type d | head -1)" \
+    && [ -n "$NDK_INNER_DIR" ] || { echo "NDK archive layout unexpected" >&2; exit 1; } \
+    && mv "$NDK_INNER_DIR" "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" \
+    && rm -rf /tmp/ndk.zip /tmp/ndk-extract \
+    && [ -x "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}/ndk-build" ] \
+        || { echo "NDK install layout invalid at ${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >&2; exit 1; }
 
 # Rust + Android targets + cargo-ndk (all pinned, --locked). rustup-init is
 # fetched as a pinned binary (by version and SHA-256), not via `curl | sh`, so
