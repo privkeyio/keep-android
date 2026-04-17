@@ -1,0 +1,22 @@
+# Keep build context lean and reproducible. Notably:
+#   - exclude any sibling ./keep clone (Dockerfile.reproducible always clones
+#     keep at the pinned SHA itself).
+#   - exclude host-built artifacts so they cannot leak into the container.
+# .git/ is intentionally NOT excluded — scripts/derive-sde.sh needs it.
+
+keep/
+
+app/build/
+build/
+.gradle/
+
+app/src/main/jniLibs/
+app/src/main/kotlin/io/privkey/keep/uniffi/
+
+local.properties
+*.keystore
+*.jks
+
+.idea/
+*.iml
+out/
