@@ -1,3 +1,21 @@
+# ============================================================
+# Release dependency tree — reproducibility header
+# ============================================================
+# Captured:        2026-04-17
+# Branch:          Audit-dependency-tree
+# Command:         ANDROID_HOME=/usr/lib/android-sdk \
+#                  ./gradlew :app:dependencies \
+#                      --configuration releaseRuntimeClasspath
+# Gradle:          9.4.1
+# Android Gradle Plugin (AGP): 9.1.0  (from build.gradle.kts)
+# Kotlin:          2.3.0  (Gradle embedded)
+# Launcher JVM:    17.0.18 (Ubuntu 17.0.18+8-Ubuntu-124.04.1)
+# OS:              Linux 6.18.7-76061807-generic amd64
+# ============================================================
+# To reproduce, pin to the versions above (or newer-compatible)
+# and re-run the command. Diff against this file to detect any
+# change in the transitive closure.
+# ============================================================
 
 ------------------------------------------------------------
 Project ':app'

@@ -13,17 +13,17 @@ Audit of every transitive dependency in the `releaseRuntimeClasspath` configurat
 
 | Metric | Count |
 |---|---|
-| Unique `group:artifact` coordinates in release classpath | 176 |
-| Top-level `implementation(...)` declarations in `app/build.gradle.kts` | 17 |
-| Flagged as proprietary / non-OSS | 13 |
-| Must-replace before F-Droid | 13 (all pulled in by a single top-level dep) |
-| Known trackers (exodus-privacy list) | 0 confirmed (scan deferred — see Exodus section) |
+| Unique `group:artifact` coordinates in release classpath | 189 |
+| Top-level `implementation(...)` declarations in `app/build.gradle.kts` | 21 |
+| Flagged as proprietary / non-OSS | 17 |
+| Must-replace before F-Droid | 17 (all pulled in by a single top-level dep) |
+| Known trackers (exodus-privacy list) | not scanned (deferred — see Exodus section) |
 
 ### Headline finding
 
 The single declaration `implementation("com.google.mlkit:barcode-scanning:17.3.0")` in `app/build.gradle.kts` pulls the entire **proprietary Google stack** into the release APK:
 
-- `com.google.mlkit:*` (4 artifacts)
+- `com.google.mlkit:*` (5 artifacts)
 - `com.google.android.gms:play-services-*` (4 artifacts, including `play-services-mlkit-barcode-scanning`)
 - `com.google.firebase:firebase-*` (4 artifacts — `firebase-annotations`, `firebase-components`, `firebase-encoders`, `firebase-encoders-json`)
 - `com.google.android.datatransport:*` (3 artifacts — `transport-api`, `transport-backend-cct`, `transport-runtime`)
@@ -55,15 +55,15 @@ All of these are transitive dependencies of `com.google.mlkit:barcode-scanning:1
 | com.google.android.gms:play-services-basement | Google Play Services ToS | must-replace | Proprietary. |
 | com.google.android.gms:play-services-tasks | Google Play Services ToS | must-replace | Proprietary. |
 | com.google.android.odml:image | Google proprietary | must-replace | Proprietary. |
-| com.google.firebase:firebase-annotations | Apache-2.0 (but Firebase SDK ecosystem) | must-replace | Pulled by ML Kit runtime. |
-| com.google.firebase:firebase-components | Apache-2.0 | must-replace | Firebase DI container; not needed without ML Kit. |
-| com.google.firebase:firebase-encoders | Apache-2.0 | must-replace | JSON encoders for Firebase telemetry. |
-| com.google.firebase:firebase-encoders-json | Apache-2.0 | must-replace | Same. |
+| com.google.firebase:firebase-annotations | Apache-2.0 | must-replace | License is OSS, but the artifact exists solely to support the closed-source Play Services / ML Kit runtime (F-Droid anti-feature `NonFreeDep`). |
+| com.google.firebase:firebase-components | Apache-2.0 | must-replace | License is OSS; flagged because it is the Firebase DI container wiring closed-source Play Services components at runtime (anti-feature, not license). |
+| com.google.firebase:firebase-encoders | Apache-2.0 | must-replace | License is OSS; flagged as part of the Firebase/Play Services anti-feature surface (encoders used by the telemetry transport). |
+| com.google.firebase:firebase-encoders-json | Apache-2.0 | must-replace | Same as above. |
 | com.google.android.datatransport:transport-api | Apache-2.0 | must-replace | Google telemetry transport API. Historically exodus-flagged family. |
 | com.google.android.datatransport:transport-backend-cct | Apache-2.0 | must-replace | Phones home to Google CCT endpoint. |
 | com.google.android.datatransport:transport-runtime | Apache-2.0 | must-replace | Telemetry runtime. |
 
-Note: several Firebase/datatransport artifacts are technically Apache-2.0 licensed, but they exist to support the closed-source Play Services / ML Kit runtime and establish network connections to Google endpoints. IzzyOnDroid and F-Droid both treat them as non-free-network-dependencies.
+Note: several Firebase/datatransport artifacts are technically Apache-2.0 licensed. The reason they are flagged is not the license but the anti-feature: they exist to call into the closed-source Play Services / ML Kit runtime and (in the datatransport case) establish network connections to Google endpoints. F-Droid and IzzyOnDroid treat this as a `NonFreeDep` / non-free-network-dependency anti-feature regardless of the per-artifact license.
 
 ### OSS — keep, no action
 
@@ -100,15 +100,17 @@ None. IzzyOnDroid tolerates some proprietary blobs that F-Droid rejects, but all
 No release APK currently exists at `app/build/outputs/apk/` (tree not built for release). Once the ML-Kit removal work is done, build a release APK (`ANDROID_HOME=/usr/lib/android-sdk ./gradlew :app:assembleRelease`) and run:
 
 ```sh
-# Preferred: official CLI
-pipx install exodus-standalone
+# Preferred: official CLI from Exodus-Privacy (not on PyPI — install from git, pinned tag).
+# Verify the tag/commit against https://github.com/Exodus-Privacy/exodus-standalone/releases
+# before installing; pipx --force will re-pin on upgrade.
+pipx install --force git+https://github.com/Exodus-Privacy/exodus-standalone.git@v1.5.0
 exodus-standalone app/build/outputs/apk/release/app-release.apk
 
 # Or via the hosted scanner
 # Upload APK to https://reports.exodus-privacy.eu.org/en/analysis/submit/
 ```
 
-Expected outcome after removing `com.google.mlkit:barcode-scanning`: **zero trackers**. The current release classpath contains the `com.google.android.datatransport.*` family, which exodus historically flags (e.g., "Google Firelog"/"Google CrashLytics" signatures are in the same family and share infrastructure); the DataTransport runtime itself is classified as telemetry transport.
+Expected outcome after removing `com.google.mlkit:barcode-scanning`: **zero trackers**. The current release classpath contains the `com.google.android.datatransport.*` family, which the DataTransport project documents as a telemetry transport runtime; whether any specific signature in the Exodus tracker database ([exodus-privacy/etip](https://etip.exodus-privacy.eu.org/)) matches must be confirmed by the actual scan above and should not be assumed from this audit.
 
 ## Recommended follow-up issues
 
