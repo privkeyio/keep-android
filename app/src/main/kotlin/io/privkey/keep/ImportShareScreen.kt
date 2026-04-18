@@ -41,6 +41,7 @@ import com.google.zxing.common.HybridBinarizer
 import org.json.JSONObject
 import java.util.Arrays
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
@@ -58,9 +59,11 @@ private fun decodeQrFromImageProxy(
     val width = imageProxy.width
     val height = imageProxy.height
 
-    val data = ByteArray(rowStride * height)
+    val expected = rowStride * height
     buffer.rewind()
-    buffer.get(data, 0, minOf(data.size, buffer.remaining()))
+    if (buffer.remaining() < expected) return null
+    val data = ByteArray(expected)
+    buffer.get(data, 0, expected)
 
     val rotation = imageProxy.imageInfo.rotationDegrees
     val (rotated, rWidth, rHeight) = rotateLuminance(data, rowStride, width, height, rotation)
@@ -69,7 +72,8 @@ private fun decodeQrFromImageProxy(
         decodeLuminance(reader, rotated, rWidth, rHeight, rWidth)
     } catch (_: NotFoundException) {
         null
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        if (BuildConfig.DEBUG) Log.d("ImportShare", "QR decode failed: ${e::class.simpleName}")
         null
     }
 }
@@ -586,8 +590,11 @@ private fun CameraPreview(
 
         fun cleanupResources() {
             if (closed.compareAndSet(false, true)) {
-                runCatching { reader.reset() }
-                runCatching { executor.shutdownNow() }
+                runCatching {
+                    executor.shutdownNow()
+                    executor.awaitTermination(100, TimeUnit.MILLISECONDS)
+                    reader.reset()
+                }
             }
         }
 
