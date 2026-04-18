@@ -50,8 +50,8 @@ private const val MAX_ANIMATED_FRAMES = 100
 private const val MAX_FRAME_LENGTH = 4096
 
 private class LuminanceBuffers {
-    var raw: ByteArray = ByteArray(0)
-    var rotated: ByteArray = ByteArray(0)
+    private var raw: ByteArray = ByteArray(0)
+    private var rotated: ByteArray = ByteArray(0)
 
     fun rawBuffer(size: Int): ByteArray {
         if (raw.size < size) raw = ByteArray(size)
@@ -89,26 +89,17 @@ private fun decodeQrFromImageProxy(
     val rotated = rotateLuminance(data, rowStride, width, height, rotation, buffers) ?: return null
 
     return try {
-        decodeLuminance(reader, rotated.data, rotated.width, rotated.height, rotated.width)
+        val source = PlanarYUVLuminanceSource(
+            rotated.data, rotated.width, rotated.height,
+            0, 0, rotated.width, rotated.height, false
+        )
+        reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
     } catch (e: ReaderException) {
         null
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) Log.d("ImportShare", "QR decode failed: ${e::class.simpleName}")
         null
     }
-}
-
-private fun decodeLuminance(
-    reader: MultiFormatReader,
-    data: ByteArray,
-    width: Int,
-    height: Int,
-    rowStride: Int
-): String? {
-    if (width <= 0 || height <= 0) return null
-    val source = PlanarYUVLuminanceSource(data, rowStride, height, 0, 0, width, height, false)
-    val bitmap = BinaryBitmap(HybridBinarizer(source))
-    return reader.decodeWithState(bitmap).text
 }
 
 private data class RotatedLuminance(val data: ByteArray, val width: Int, val height: Int)
@@ -122,9 +113,7 @@ private fun rotateLuminance(
     buffers: LuminanceBuffers
 ): RotatedLuminance? {
     val needed = width * height
-    val lastRowStart = (height - 1) * rowStride
-    val requiredSource = lastRowStart + width
-    if (source.size < requiredSource) return null
+    if (source.size < (height - 1) * rowStride + width) return null
     return when (rotationDegrees) {
         90 -> {
             val out = buffers.rotatedBuffer(needed)
@@ -670,6 +659,7 @@ private fun CameraPreview(
                         scanned.compareAndSet(false, true)
 
                     mainExecutor.execute {
+                        if (closed.get()) return@execute
                         frameProgress = if (collecting) framesCollected to total else null
                         if (accepted && result != null) {
                             onCodeScanned(result)
@@ -689,8 +679,6 @@ private fun CameraPreview(
             }
 
             onDispose {
-                analysis.clearAnalyzer()
-                if (currentAnalysis.value === analysis) currentAnalysis.value = null
                 provider.unbindAll()
                 cleanupResources()
             }
