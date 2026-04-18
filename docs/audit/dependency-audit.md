@@ -118,7 +118,7 @@ Expected outcome after removing `com.google.mlkit:barcode-scanning`: **zero trac
    - Remove `implementation("com.google.mlkit:barcode-scanning:17.3.0")` from `app/build.gradle.kts`.
    - Refactor the CameraX barcode pipeline to feed frames through `com.google.zxing:core` (already a declared dependency) via a small `ImageAnalysis.Analyzer` that runs `MultiFormatReader` or QR-only `QRCodeReader`.
    - Verify scan performance on low-end arm64 devices.
-   - After merge, re-run this audit to confirm the 13 flagged artifacts are gone.
+   - After merge, re-run this audit to confirm the 17 flagged artifacts are gone.
 
 2. **Run exodus-privacy scan on the post-replacement release APK** (soft-blocks #246)
    - Gate release tagging on a clean exodus report (0 trackers).
