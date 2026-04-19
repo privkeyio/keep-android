@@ -661,7 +661,7 @@ private fun CameraPreview(
                     mainExecutor.execute {
                         if (closed.get()) return@execute
                         frameProgress = if (collecting) framesCollected to total else null
-                        if (accepted && result != null) {
+                        if (accepted) {
                             onCodeScanned(result)
                         }
                     }
