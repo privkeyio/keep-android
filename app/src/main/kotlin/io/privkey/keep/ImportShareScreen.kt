@@ -31,18 +31,135 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.ReaderException
+import com.google.zxing.common.HybridBinarizer
 import org.json.JSONObject
 import java.util.Arrays
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
 private const val MAX_SHARE_LENGTH = 8192
 private const val MAX_ANIMATED_FRAMES = 100
 private const val MAX_FRAME_LENGTH = 4096
+
+private class LuminanceBuffers {
+    private var raw: ByteArray = ByteArray(0)
+    private var rotated: ByteArray = ByteArray(0)
+
+    fun rawBuffer(size: Int): ByteArray {
+        if (raw.size < size) raw = ByteArray(size)
+        return raw
+    }
+
+    fun rotatedBuffer(size: Int): ByteArray {
+        if (rotated.size < size) rotated = ByteArray(size)
+        return rotated
+    }
+}
+
+private fun decodeQrFromImageProxy(
+    imageProxy: androidx.camera.core.ImageProxy,
+    reader: MultiFormatReader,
+    buffers: LuminanceBuffers
+): String? {
+    val plane = imageProxy.planes.firstOrNull() ?: return null
+    val buffer = plane.buffer
+    val rowStride = plane.rowStride
+    val width = imageProxy.width
+    val height = imageProxy.height
+
+    if (width <= 0 || height <= 0 || rowStride < width) return null
+
+    val expected = rowStride * (height - 1) + width
+    buffer.rewind()
+    val available = buffer.remaining()
+    if (available < expected) return null
+    val copyLen = minOf(available, rowStride * height)
+    val data = buffers.rawBuffer(copyLen)
+    buffer.get(data, 0, copyLen)
+
+    val rotation = imageProxy.imageInfo.rotationDegrees
+    val rotated = rotateLuminance(data, rowStride, width, height, rotation, buffers) ?: return null
+
+    return try {
+        val source = PlanarYUVLuminanceSource(
+            rotated.data, rotated.width, rotated.height,
+            0, 0, rotated.width, rotated.height, false
+        )
+        reader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+    } catch (e: ReaderException) {
+        null
+    } catch (e: Exception) {
+        if (BuildConfig.DEBUG) Log.d("ImportShare", "QR decode failed: ${e::class.simpleName}")
+        null
+    }
+}
+
+private data class RotatedLuminance(val data: ByteArray, val width: Int, val height: Int)
+
+private fun rotateLuminance(
+    source: ByteArray,
+    rowStride: Int,
+    width: Int,
+    height: Int,
+    rotationDegrees: Int,
+    buffers: LuminanceBuffers
+): RotatedLuminance? {
+    val needed = width * height
+    if (source.size < (height - 1) * rowStride + width) return null
+    return when (rotationDegrees) {
+        90 -> {
+            val out = buffers.rotatedBuffer(needed)
+            for (y in 0 until height) {
+                val rowBase = y * rowStride
+                val outBase = height - 1 - y
+                for (x in 0 until width) {
+                    out[x * height + outBase] = source[rowBase + x]
+                }
+            }
+            RotatedLuminance(out, height, width)
+        }
+        180 -> {
+            val out = buffers.rotatedBuffer(needed)
+            for (y in 0 until height) {
+                val rowBase = y * rowStride
+                val outRowBase = (height - 1 - y) * width
+                for (x in 0 until width) {
+                    out[outRowBase + (width - 1 - x)] = source[rowBase + x]
+                }
+            }
+            RotatedLuminance(out, width, height)
+        }
+        270 -> {
+            val out = buffers.rotatedBuffer(needed)
+            for (y in 0 until height) {
+                val rowBase = y * rowStride
+                for (x in 0 until width) {
+                    out[(width - 1 - x) * height + y] = source[rowBase + x]
+                }
+            }
+            RotatedLuminance(out, height, width)
+        }
+        else -> {
+            if (rowStride == width) {
+                RotatedLuminance(source, width, height)
+            } else {
+                val out = buffers.rotatedBuffer(needed)
+                for (y in 0 until height) {
+                    System.arraycopy(source, y * rowStride, out, y * width, width)
+                }
+                RotatedLuminance(out, width, height)
+            }
+        }
+    }
+}
 
 private fun isValidBech32Payload(prefix: String, data: String): Boolean {
     if (data.length > MAX_SHARE_LENGTH) return false
@@ -477,15 +594,26 @@ private fun CameraPreview(
     Box(modifier = Modifier.fillMaxSize()) {
         var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
         val previewView = remember { PreviewView(context) }
-        val scanner = remember { BarcodeScanning.getClient() }
+        val reader = remember {
+            MultiFormatReader().apply {
+                setHints(mapOf(DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE)))
+            }
+        }
+        val luminanceBuffers = remember { LuminanceBuffers() }
         val executor = remember { Executors.newSingleThreadExecutor() }
+        val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
         val scanned = remember { AtomicBoolean(false) }
         val closed = remember { AtomicBoolean(false) }
+        val currentAnalysis = remember { mutableStateOf<ImageAnalysis?>(null) }
 
         fun cleanupResources() {
             if (closed.compareAndSet(false, true)) {
-                runCatching { scanner.close() }
-                runCatching { executor.shutdownNow() }
+                runCatching {
+                    currentAnalysis.value?.clearAnalyzer()
+                    currentAnalysis.value = null
+                    executor.shutdownNow()
+                    executor.awaitTermination(100, TimeUnit.MILLISECONDS)
+                }
             }
         }
 
@@ -515,35 +643,31 @@ private fun CameraPreview(
                 .setResolutionSelector(resolutionSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
+            currentAnalysis.value = analysis
 
             analysis.setAnalyzer(executor) { imageProxy ->
-                val mediaImage = imageProxy.image
-                if (mediaImage == null) {
-                    imageProxy.close()
-                    return@setAnalyzer
-                }
-                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                scanner.process(image)
-                    .addOnSuccessListener { barcodes ->
-                        if (scanned.get()) return@addOnSuccessListener
-                        val rawValue = barcodes.firstOrNull { it.valueType == Barcode.TYPE_TEXT }?.rawValue
-                            ?: return@addOnSuccessListener
+                try {
+                    if (scanned.get()) return@setAnalyzer
+                    val rawValue = decodeQrFromImageProxy(imageProxy, reader, luminanceBuffers)
+                        ?: return@setAnalyzer
 
-                        val result = frameCollector.processQrContent(rawValue)
+                    val result = frameCollector.processQrContent(rawValue)
+                    val collecting = frameCollector.isCollecting
+                    val framesCollected = frameCollector.framesCollected
+                    val total = frameCollector.total
+                    val accepted = result != null && validator(result) &&
+                        scanned.compareAndSet(false, true)
 
-                        frameProgress = if (frameCollector.isCollecting) {
-                            frameCollector.framesCollected to frameCollector.total
-                        } else {
-                            null
-                        }
-
-                        if (result != null && validator(result)) {
-                            if (scanned.compareAndSet(false, true)) {
-                                onCodeScanned(result)
-                            }
+                    mainExecutor.execute {
+                        if (closed.get()) return@execute
+                        frameProgress = if (collecting) framesCollected to total else null
+                        if (accepted) {
+                            onCodeScanned(result)
                         }
                     }
-                    .addOnCompleteListener { imageProxy.close() }
+                } finally {
+                    imageProxy.close()
+                }
             }
 
             try {

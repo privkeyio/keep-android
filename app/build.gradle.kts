@@ -122,7 +122,6 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.14.1")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0")
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.camera:camera-camera2:1.6.0")
     implementation("androidx.camera:camera-lifecycle:1.6.0")
     implementation("androidx.camera:camera-view:1.6.0")
