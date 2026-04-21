@@ -19,8 +19,5 @@ app/src/main/kotlin/io/privkey/keep/uniffi/
 *.keystore
 *.jks
 
-# Zapstore
-zapstore.yaml
-
 # Symlinks
 /keep
