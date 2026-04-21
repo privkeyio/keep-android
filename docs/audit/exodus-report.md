@@ -14,7 +14,8 @@ Raw JSON: [`exodus-report.json`](exodus-report.json)
 | Field | Value |
 | --- | --- |
 | App | `io.privkey.keep` |
-| Version | 0.6.3 (code 11) |
+| Version scanned | 0.6.3 (code 11) |
+| Also applies to | 1.0.0 (code 12), version-bump only since scan |
 | APK SHA-256 | `c6bc53053325310efd726407c06d2c1f93721ed8b10492c3c05d227162eaf365` |
 | Scanner | `exodusprivacy/exodus-standalone` (Docker) |
 | Image digest | `sha256:a6531be9a6b666a8ffb6aec98b409cf6faf65536c5b9597e5b99195ca9422b88` |
@@ -43,3 +44,8 @@ This scan is the runtime confirmation of the static dependency audit
 audit established that `releaseRuntimeClasspath` contains zero artifacts
 from Google Play Services / ML Kit / Firebase / DataTransport. This scan
 confirms that property holds against the built APK.
+
+The v1.0.0 (code 12) release (commit 83a6735) differs from the scanned
+commit (806b0ad) only in `versionCode` / `versionName` in
+`app/build.gradle.kts`. Dependency graph is unchanged, so the scan
+result applies unchanged.
