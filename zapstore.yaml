@@ -2,13 +2,13 @@ repository: https://github.com/privkeyio/keep-android
 pubkey: npub16chg6ppwpr4pmkxz92v8jjqkztvhysdc2tl3kgx29xpay45l57wqpgvghv
 
 name: Keep
-summary: Secure software. Sovereign infrastructure. Security-first, open-source tools for Bitcoin, Lightning, and Nostr. FROST threshold and Nostr event signer for Android
+summary: FROST threshold signer and Nostr event signer for Android
 description: |
   **Keep is a FROST (Flexible Round-Optimized Schnorr Threshold Signatures) threshold signing app and dedicated Nostr event signer for Android.**
 
   It allows users to hold FROST key shares on their phone and sign Nostr events without any single device ever holding the full private key. Keep implements the NIP-55 Android Signer protocol and NIP-46 remote signing, so any compatible Nostr client can request signatures directly.
 
-  Like Amber, Keep serves as a dedicated Nostr event signer that keeps private key material segregated from client apps. Both implement NIP-55 and NIP-46 with per-app permissions, background signing, and multiple account support. Keep goes further by splitting keys into FROST threshold shares (2-of-3, 3-of-5, etc.) so that no single device ever holds the complete private key.
+  Keep keeps private key material segregated from client apps through NIP-55 and NIP-46, with per-app permissions, background signing, and multiple account support. It splits keys into FROST threshold shares (2-of-3, 3-of-5, etc.) so that no single device ever holds the complete private key.
 
   **Features:**
 
@@ -38,7 +38,7 @@ tags:
   - android
   - cryptography
   - freedom-tech
-  - E2EE
+  - e2ee
 license: MIT
 website: https://privkey.io
 
