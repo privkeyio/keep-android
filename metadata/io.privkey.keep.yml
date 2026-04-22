@@ -1,0 +1,62 @@
+Categories:
+  - Security
+License: MIT
+AuthorName: PrivKey LLC
+AuthorEmail: kyle@privkey.io
+WebSite: https://privkey.io
+SourceCode: https://github.com/privkeyio/keep-android
+IssueTracker: https://github.com/privkeyio/keep-android/issues
+Changelog: https://github.com/privkeyio/keep-android/releases
+
+AutoName: Keep
+
+Description: |-
+    Keep is a FROST (Flexible Round-Optimized Schnorr Threshold Signatures)
+    threshold signing app and dedicated Nostr event signer for Android. It lets
+    you hold FROST key shares on your phone and sign Nostr events without any
+    single device ever holding the full private key.
+
+    Keep implements the NIP-55 Android Signer protocol and NIP-46 remote
+    signing, so any compatible Nostr client can request signatures directly.
+
+    Features:
+
+    * FROST threshold signing (2-of-3, 3-of-5, etc.)
+    * NIP-55 Android Signer protocol
+    * NIP-46 remote signing (bunker service)
+    * Import and export FROST shares via QR code or text
+    * Multiple account support
+    * Per-app signing permissions and policies
+    * Biometric and PIN authentication
+    * Hardware-backed key storage (Android Keystore)
+    * NIP-44 encryption and decryption
+    * SOCKS proxy support (Tor)
+    * Encrypted backup and restore
+
+RepoType: git
+Repo: https://github.com/privkeyio/keep-android
+
+Binaries: https://github.com/privkeyio/keep-android/releases/download/v%v/keep-android-v%v.apk
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 12
+    commit: v1.0.0
+    sudo:
+      - apt-get update
+      - apt-get install -y docker.io
+      - service docker start
+    output: out/app-release.apk
+    build: |-
+      export KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
+      export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
+      DOCKER_BUILDKIT=1 docker build \
+          --build-arg KEEP_SHA="$KEEP_SHA" \
+          --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+          --output type=local,dest=out \
+          -f Dockerfile.reproducible .
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 1.0.0
+CurrentVersionCode: 12
