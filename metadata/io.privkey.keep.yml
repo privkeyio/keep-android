@@ -10,7 +10,6 @@ Changelog: https://github.com/privkeyio/keep-android/releases
 
 RepoType: git
 Repo: https://github.com/privkeyio/keep-android
-
 Binaries: https://github.com/privkeyio/keep-android/releases/download/v%v/keep-android-v%v.apk
 
 Builds:
@@ -19,28 +18,32 @@ Builds:
     commit: v1.0.0
     sudo:
       - apt-get update
-      - apt-get install -y --no-install-recommends pkg-config cmake make gcc g++ libc6-dev curl ca-certificates
-      - curl --proto '=https' --tlsv1.2 -fsSL https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init -o /tmp/rustup-init
-      - echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init" | sha256sum -c -
+      - apt-get install -y --no-install-recommends pkg-config cmake make gcc g++ libc6-dev
+        curl ca-certificates
+      - curl --proto '=https' --tlsv1.2 -fsSL https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init
+        -o /tmp/rustup-init
+      - echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init"
+        | sha256sum -c -
       - chmod +x /tmp/rustup-init
-      - /tmp/rustup-init -y --default-toolchain 1.89.0 --profile minimal --no-modify-path
-    ndk: r29
+      - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /tmp/rustup-init -y --default-toolchain
+        1.89.0 --profile minimal --no-modify-path
+      - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /opt/cargo/bin/rustup target
+        add aarch64-linux-android x86_64-linux-android
+      - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /opt/cargo/bin/cargo install
+        --locked --version 4.1.2 cargo-ndk
+      - chmod -R a+rX /opt/cargo /opt/rustup
+    output: app/build/outputs/apk/release/app-release.apk
     prebuild:
-      - export PATH="$HOME/.cargo/bin:$PATH"
-      - rustup target add aarch64-linux-android x86_64-linux-android
-      - cargo install --locked --version 4.1.2 cargo-ndk
       - KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
-      - git clone https://github.com/privkeyio/keep.git ../keep
-      - git -C ../keep checkout "$KEEP_SHA"
       - rm -rf keep
-      - ln -sfn ../keep keep
-      - export KEEP_REPO="$(pwd)/../keep"
-      - export AWS_LC_SYS_CMAKE_BUILDER=1
-      - export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
-      - ./build-rust.sh
-    gradle:
-      - yes
-    output: app/build/outputs/apk/release/app-release-unsigned.apk
+      - git clone https://github.com/privkeyio/keep.git keep
+      - git -C keep checkout "$KEEP_SHA"
+    build: "export CARGO_HOME=/opt/cargo\nexport RUSTUP_HOME=/opt/rustup\nexport PATH=/opt/cargo/bin:$PATH\n\
+      export AWS_LC_SYS_CMAKE_BUILDER=1\nexport SOURCE_DATE_EPOCH=\"$(./scripts/derive-sde.sh)\"\
+      \n./gradlew assembleRelease --no-daemon"
+    ndk: r29
+
+AllowedAPKSigningKeys: 3eb0e6f6f4e0962ebd717f84eea47428b73087b686c956633d6a9fcc4c854f50
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
