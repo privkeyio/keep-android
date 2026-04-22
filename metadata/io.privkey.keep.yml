@@ -8,31 +8,6 @@ SourceCode: https://github.com/privkeyio/keep-android
 IssueTracker: https://github.com/privkeyio/keep-android/issues
 Changelog: https://github.com/privkeyio/keep-android/releases
 
-AutoName: Keep
-
-Description: |-
-    Keep is a FROST (Flexible Round-Optimized Schnorr Threshold Signatures)
-    threshold signing app and dedicated Nostr event signer for Android. It lets
-    you hold FROST key shares on your phone and sign Nostr events without any
-    single device ever holding the full private key.
-
-    Keep implements the NIP-55 Android Signer protocol and NIP-46 remote
-    signing, so any compatible Nostr client can request signatures directly.
-
-    Features:
-
-    * FROST threshold signing (2-of-3, 3-of-5, etc.)
-    * NIP-55 Android Signer protocol
-    * NIP-46 remote signing (bunker service)
-    * Import and export FROST shares via QR code or text
-    * Multiple account support
-    * Per-app signing permissions and policies
-    * Biometric and PIN authentication
-    * Hardware-backed key storage (Android Keystore)
-    * NIP-44 encryption and decryption
-    * SOCKS proxy support (Tor)
-    * Encrypted backup and restore
-
 RepoType: git
 Repo: https://github.com/privkeyio/keep-android
 
@@ -44,17 +19,28 @@ Builds:
     commit: v1.0.0
     sudo:
       - apt-get update
-      - apt-get install -y docker.io
-      - service docker start
-    output: out/app-release.apk
-    build: |-
-      export KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
-      export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
-      DOCKER_BUILDKIT=1 docker build \
-          --build-arg KEEP_SHA="$KEEP_SHA" \
-          --build-arg SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
-          --output type=local,dest=out \
-          -f Dockerfile.reproducible .
+      - apt-get install -y --no-install-recommends pkg-config cmake make gcc g++ libc6-dev curl ca-certificates
+      - curl --proto '=https' --tlsv1.2 -fsSL https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init -o /tmp/rustup-init
+      - echo "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init" | sha256sum -c -
+      - chmod +x /tmp/rustup-init
+      - /tmp/rustup-init -y --default-toolchain 1.89.0 --profile minimal --no-modify-path
+    ndk: r29
+    prebuild:
+      - export PATH="$HOME/.cargo/bin:$PATH"
+      - rustup target add aarch64-linux-android x86_64-linux-android
+      - cargo install --locked --version 4.1.2 cargo-ndk
+      - KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
+      - git clone https://github.com/privkeyio/keep.git ../keep
+      - git -C ../keep checkout "$KEEP_SHA"
+      - rm -rf keep
+      - ln -sfn ../keep keep
+      - export KEEP_REPO="$(pwd)/../keep"
+      - export AWS_LC_SYS_CMAKE_BUILDER=1
+      - export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
+      - ./build-rust.sh
+    gradle:
+      - yes
+    output: app/build/outputs/apk/release/app-release-unsigned.apk
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
