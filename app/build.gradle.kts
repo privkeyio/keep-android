@@ -127,16 +127,17 @@ tasks.register("verifyNoProprietaryDeps") {
     group = "verification"
     description = "Fails if release classpaths contain proprietary Google coordinates."
     doLast {
-        val configNames = listOf("releaseRuntimeClasspath", "releaseCompileClasspath")
         val offenders = sortedMapOf<String, MutableSet<String>>()
         val visited = mutableSetOf<org.gradle.api.artifacts.component.ComponentIdentifier>()
+
+        fun String.isForbidden() = forbiddenDependencyGroups.any { this == it || startsWith("$it.") }
 
         fun walk(component: org.gradle.api.artifacts.result.ResolvedComponentResult, path: List<String>) {
             if (!visited.add(component.id)) return
             val id = component.moduleVersion
             val coord = id?.let { "${it.group}:${it.name}:${it.version}" } ?: component.id.displayName
             val nextPath = path + coord
-            if (id != null && forbiddenDependencyGroups.any { id.group == it || id.group.startsWith("$it.") }) {
+            if (id != null && id.group.isForbidden()) {
                 offenders.getOrPut(coord) { mutableSetOf() }.add(nextPath.joinToString(" -> "))
             }
             component.dependencies
@@ -144,9 +145,8 @@ tasks.register("verifyNoProprietaryDeps") {
                 .forEach { walk(it.selected, nextPath) }
         }
 
-        configNames.forEach { name ->
-            val root = configurations.getByName(name).incoming.resolutionResult.root
-            walk(root, emptyList())
+        listOf("releaseRuntimeClasspath", "releaseCompileClasspath").forEach { name ->
+            walk(configurations.getByName(name).incoming.resolutionResult.root, emptyList())
         }
 
         if (offenders.isNotEmpty()) {
