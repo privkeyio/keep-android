@@ -104,6 +104,41 @@ tasks.named("preBuild") {
     dependsOn(rootProject.tasks.named("buildRust"))
 }
 
+// F-Droid / IzzyOnDroid eligibility guard: fail the build if proprietary Google
+// coordinates reappear on the release runtime classpath. Extend this list if a
+// new proprietary group is identified; keeping it in one place keeps the policy
+// reviewable in a single diff. See issue #251 and PRs #244, #248.
+val forbiddenDependencyGroups = setOf(
+    "com.google.android.gms",
+    "com.google.firebase",
+    "com.google.android.datatransport",
+    "com.google.mlkit",
+    "com.google.android.odml",
+)
+
+tasks.register("verifyNoProprietaryDeps") {
+    group = "verification"
+    description = "Fails if releaseRuntimeClasspath contains proprietary Google coordinates."
+    doLast {
+        val offenders = configurations.getByName("releaseRuntimeClasspath")
+            .resolvedConfiguration.resolvedArtifacts
+            .map { it.moduleVersion.id }
+            .filter { it.group in forbiddenDependencyGroups }
+            .map { "${it.group}:${it.name}:${it.version}" }
+            .distinct()
+            .sorted()
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "Proprietary dependencies detected on releaseRuntimeClasspath " +
+                    "(breaks F-Droid / IzzyOnDroid eligibility):\n  " +
+                    offenders.joinToString("\n  ")
+            )
+        }
+    }
+}
+
+tasks.named("check") { dependsOn("verifyNoProprietaryDeps") }
+
 dependencies {
     val roomVersion = "2.8.4"
 

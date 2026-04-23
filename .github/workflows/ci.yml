@@ -97,6 +97,9 @@ jobs:
       - name: Build, test, and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
 
+      - name: Verify no proprietary dependencies on release classpath
+        run: ./gradlew :app:verifyNoProprietaryDeps --no-daemon
+
   instrumented-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
