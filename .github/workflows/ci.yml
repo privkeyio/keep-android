@@ -184,5 +184,6 @@ jobs:
         with:
           api-level: 33
           arch: x86_64
+          target: google_apis
           profile: pixel_6
           script: ./gradlew connectedDebugAndroidTest --no-daemon
