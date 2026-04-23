@@ -114,6 +114,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify no proprietary dependencies
+        run: ./gradlew :app:verifyNoProprietaryDeps --no-daemon
+
       - name: Build APK
         run: ./gradlew assembleRelease --no-daemon
         env:

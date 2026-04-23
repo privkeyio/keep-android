@@ -97,6 +97,9 @@ jobs:
       - name: Build, test, and lint
         run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
 
+      - name: Verify no proprietary dependencies on release classpath
+        run: ./gradlew :app:verifyNoProprietaryDeps --no-daemon
+
   instrumented-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -181,5 +184,6 @@ jobs:
         with:
           api-level: 33
           arch: x86_64
+          target: google_apis
           profile: pixel_6
           script: ./gradlew connectedDebugAndroidTest --no-daemon
