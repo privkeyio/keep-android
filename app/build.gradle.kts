@@ -113,18 +113,21 @@ val forbiddenDependencyGroups = setOf(
     "com.google.mlkit",
     "com.google.android.odml",
     "com.google.android.play",
-    "com.google.android.play.integrity",
     "com.google.android.recaptcha",
     "com.android.billingclient",
     "com.google.ar",
+    "com.google.android.libraries.places",
+    "com.google.maps.android",
+    "com.google.android.exoplayer",
+    "com.google.android.youtube",
+    "com.google.oauth-client",
 )
 
 tasks.register("verifyNoProprietaryDeps") {
     group = "verification"
-    description = "Fails if releaseRuntimeClasspath contains proprietary Google coordinates."
+    description = "Fails if release classpaths contain proprietary Google coordinates."
     doLast {
-        val root = configurations.getByName("releaseRuntimeClasspath")
-            .incoming.resolutionResult.root
+        val configNames = listOf("releaseRuntimeClasspath", "releaseCompileClasspath")
         val offenders = sortedMapOf<String, MutableSet<String>>()
         val visited = mutableSetOf<org.gradle.api.artifacts.component.ComponentIdentifier>()
 
@@ -133,30 +136,28 @@ tasks.register("verifyNoProprietaryDeps") {
             val id = component.moduleVersion
             val coord = id?.let { "${it.group}:${it.name}:${it.version}" } ?: component.id.displayName
             val nextPath = path + coord
-            if (id != null && id.group in forbiddenDependencyGroups) {
+            if (id != null && forbiddenDependencyGroups.any { id.group == it || id.group.startsWith("$it.") }) {
                 offenders.getOrPut(coord) { mutableSetOf() }.add(nextPath.joinToString(" -> "))
             }
             component.dependencies
                 .filterIsInstance<org.gradle.api.artifacts.result.ResolvedDependencyResult>()
                 .forEach { walk(it.selected, nextPath) }
         }
-        walk(root, emptyList())
+
+        configNames.forEach { name ->
+            val root = configurations.getByName(name).incoming.resolutionResult.root
+            walk(root, emptyList())
+        }
 
         if (offenders.isNotEmpty()) {
             val details = offenders.entries.joinToString("\n  ") { (coord, paths) ->
                 "$coord\n    via:\n      " + paths.sorted().joinToString("\n      ")
             }
             throw GradleException(
-                "Proprietary dependencies detected on releaseRuntimeClasspath " +
+                "Proprietary dependencies detected on release classpaths " +
                     "(breaks F-Droid / IzzyOnDroid eligibility):\n  " + details
             )
         }
-    }
-}
-
-listOf("assembleRelease", "bundleRelease").forEach { name ->
-    tasks.matching { it.name == name }.configureEach {
-        dependsOn("verifyNoProprietaryDeps")
     }
 }
 
