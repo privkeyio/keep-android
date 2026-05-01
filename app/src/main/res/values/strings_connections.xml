@@ -22,7 +22,7 @@
     <string name="connections_relays_error_too_long">URL too long</string>
     <string name="connections_relays_error_invalid">Invalid relay URL</string>
     <string name="connections_relays_error_port">Port must be between 1 and 65535</string>
-    <string name="connections_relays_error_unreachable">Could not resolve relay host or address is private</string>
+    <string name="connections_relays_error_unreachable">Relay host unreachable or private</string>
     <string name="connections_relays_done">Done</string>
 
     <!-- ConnectionCards: Connect card -->

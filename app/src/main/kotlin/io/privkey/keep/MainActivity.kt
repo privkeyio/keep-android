@@ -956,6 +956,13 @@ fun MainScreen(
             }
 
             composable(Route.Settings.route) {
+                val showUnreachableToast = {
+                    Toast.makeText(
+                        appContext,
+                        appContext.getString(R.string.connections_relays_error_unreachable),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
                 SettingsTab(
                     hasShare = hasShare,
                     relays = relays,
@@ -975,11 +982,7 @@ fun MainScreen(
                                     relays = updated
                                     onRelaysChanged(updated)
                                 } else {
-                                    Toast.makeText(
-                                        appContext,
-                                        appContext.getString(R.string.connections_relays_error_unreachable),
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    showUnreachableToast()
                                 }
                             }
                         }
@@ -998,11 +1001,7 @@ fun MainScreen(
                                     profileRelays = updated
                                     saveProfileRelays(updated)
                                 } else {
-                                    Toast.makeText(
-                                        appContext,
-                                        appContext.getString(R.string.connections_relays_error_unreachable),
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                    showUnreachableToast()
                                 }
                             }
                         }
