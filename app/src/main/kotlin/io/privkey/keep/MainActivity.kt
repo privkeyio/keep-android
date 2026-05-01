@@ -974,6 +974,12 @@ fun MainScreen(
                                     val updated = relays + relay
                                     relays = updated
                                     onRelaysChanged(updated)
+                                } else {
+                                    Toast.makeText(
+                                        appContext,
+                                        appContext.getString(R.string.connections_relays_error_unreachable),
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                             }
                         }
@@ -991,6 +997,12 @@ fun MainScreen(
                                     val updated = profileRelays + relay
                                     profileRelays = updated
                                     saveProfileRelays(updated)
+                                } else {
+                                    Toast.makeText(
+                                        appContext,
+                                        appContext.getString(R.string.connections_relays_error_unreachable),
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                             }
                         }
