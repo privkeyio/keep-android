@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -237,13 +238,13 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private fun showRelayHostCheckToast(context: android.content.Context, result: RelayHostCheck) {
+private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
     val resId = when (result) {
         RelayHostCheck.UNRESOLVABLE -> R.string.connections_relays_error_unreachable
         RelayHostCheck.INTERNAL -> R.string.connections_relays_error_private
         RelayHostCheck.REACHABLE -> return
     }
-    Toast.makeText(context, context.getString(resId), Toast.LENGTH_LONG).show()
+    Toast.makeText(context, resId, Toast.LENGTH_LONG).show()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

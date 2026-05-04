@@ -21,17 +21,18 @@ private fun parseHost(url: String): String? = runCatching {
     URI(url).host?.removeSurrounding("[", "]")
 }.getOrNull()
 
-private fun resolveAddresses(host: String): List<InetAddress>? {
-    if (host.equals("localhost", ignoreCase = true)) return null
-    return runCatching { InetAddress.getAllByName(host).toList() }.getOrNull()
-}
+private fun resolveAddresses(host: String): List<InetAddress>? =
+    runCatching { InetAddress.getAllByName(host).toList() }.getOrNull()
 
 internal fun checkRelayHost(url: String): RelayHostCheck {
-    val host = parseHost(url) ?: return RelayHostCheck.UNRESOLVABLE
+    val host = parseHost(url) ?: return RelayHostCheck.INTERNAL
+    if (host.equals("localhost", ignoreCase = true)) return RelayHostCheck.INTERNAL
     val addresses = resolveAddresses(host) ?: return RelayHostCheck.UNRESOLVABLE
-    if (addresses.isEmpty()) return RelayHostCheck.UNRESOLVABLE
-    if (addresses.any { isInternalAddress(it) }) return RelayHostCheck.INTERNAL
-    return RelayHostCheck.REACHABLE
+    return when {
+        addresses.isEmpty() -> RelayHostCheck.UNRESOLVABLE
+        addresses.any { isInternalAddress(it) } -> RelayHostCheck.INTERNAL
+        else -> RelayHostCheck.REACHABLE
+    }
 }
 
 internal fun isInternalHost(url: String): Boolean = checkRelayHost(url) != RelayHostCheck.REACHABLE
@@ -80,21 +81,14 @@ internal fun isInternalAddress(addr: InetAddress): Boolean {
         if ((bytes[0].toInt() and 0xFE) == 0xFC) return true
         val b0 = bytes[0].toInt() and 0xFF
         val b1 = bytes[1].toInt() and 0xFF
-        // 2002::/16 (6to4): embedded IPv4 in bytes 2..5
-        if (b0 == 0x20 && b1 == 0x02) {
-            val embedded = byteArrayOf(bytes[2], bytes[3], bytes[4], bytes[5])
-            val embeddedAddr = runCatching { InetAddress.getByAddress(embedded) }.getOrNull()
-            if (embeddedAddr != null && isInternalAddress(embeddedAddr)) return true
-        }
-        // 64:ff9b::/96 (NAT64 well-known)
         val b2 = bytes[2].toInt() and 0xFF
         val b3 = bytes[3].toInt() and 0xFF
+        // 2002::/16 (6to4): embedded IPv4 in bytes 2..5
+        if (b0 == 0x20 && b1 == 0x02 && embeddedIPv4IsInternal(bytes, 2)) return true
+        // 64:ff9b::/96 (NAT64 well-known)
         if (b0 == 0x00 && b1 == 0x64 && b2 == 0xFF && b3 == 0x9B &&
-            (4..11).all { bytes[it] == 0.toByte() }) {
-            val embedded = byteArrayOf(bytes[12], bytes[13], bytes[14], bytes[15])
-            val embeddedAddr = runCatching { InetAddress.getByAddress(embedded) }.getOrNull()
-            if (embeddedAddr != null && isInternalAddress(embeddedAddr)) return true
-        }
+            (4..11).all { bytes[it] == 0.toByte() } &&
+            embeddedIPv4IsInternal(bytes, 12)) return true
         // ::ffff:0:0/96 (IPv4-mapped) and ::/96 (IPv4-compatible, deprecated but treat as suspect)
         if ((0..9).all { bytes[it] == 0.toByte() }) {
             val isMapped = bytes[10] == 0xFF.toByte() && bytes[11] == 0xFF.toByte()
@@ -103,15 +97,19 @@ internal fun isInternalAddress(addr: InetAddress): Boolean {
                 val ipv4 = byteArrayOf(bytes[12], bytes[13], bytes[14], bytes[15])
                 val mappedAddr = runCatching { InetAddress.getByAddress(ipv4) }.getOrNull()
                 if (mappedAddr != null) {
-                    if (isCompat) {
-                        // Block ::/96 except the unspecified address itself and ::1 loopback
-                        // (already handled by isLoopback / isAnyLocal above). Treat the rest as reserved.
-                        return true
-                    }
+                    // Block ::/96 except the unspecified address itself and ::1 loopback
+                    // (already handled by isLoopback / isAnyLocal above). Treat the rest as reserved.
+                    if (isCompat) return true
                     if (isInternalAddress(mappedAddr)) return true
                 }
             }
         }
     }
     return false
+}
+
+private fun embeddedIPv4IsInternal(bytes: ByteArray, offset: Int): Boolean {
+    val ipv4 = byteArrayOf(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3])
+    val embeddedAddr = runCatching { InetAddress.getByAddress(ipv4) }.getOrNull() ?: return false
+    return isInternalAddress(embeddedAddr)
 }
