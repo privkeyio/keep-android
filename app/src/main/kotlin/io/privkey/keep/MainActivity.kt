@@ -237,6 +237,15 @@ class MainActivity : FragmentActivity() {
     }
 }
 
+private fun showRelayHostCheckToast(context: android.content.Context, result: RelayHostCheck) {
+    val resId = when (result) {
+        RelayHostCheck.UNRESOLVABLE -> R.string.connections_relays_error_unreachable
+        RelayHostCheck.INTERNAL -> R.string.connections_relays_error_private
+        RelayHostCheck.REACHABLE -> return
+    }
+    Toast.makeText(context, context.getString(resId), Toast.LENGTH_LONG).show()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -956,13 +965,6 @@ fun MainScreen(
             }
 
             composable(Route.Settings.route) {
-                val showUnreachableToast = {
-                    Toast.makeText(
-                        appContext,
-                        appContext.getString(R.string.connections_relays_error_unreachable),
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
                 SettingsTab(
                     hasShare = hasShare,
                     relays = relays,
@@ -976,13 +978,13 @@ fun MainScreen(
                     onAddRelay = { relay ->
                         if (!relays.contains(relay) && relays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
-                                if (!isInternal) {
+                                val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
+                                if (check == RelayHostCheck.REACHABLE) {
                                     val updated = relays + relay
                                     relays = updated
                                     onRelaysChanged(updated)
                                 } else {
-                                    showUnreachableToast()
+                                    showRelayHostCheckToast(appContext, check)
                                 }
                             }
                         }
@@ -995,13 +997,13 @@ fun MainScreen(
                     onAddProfileRelay = { relay ->
                         if (!profileRelays.contains(relay) && profileRelays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
-                                if (!isInternal) {
+                                val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
+                                if (check == RelayHostCheck.REACHABLE) {
                                     val updated = profileRelays + relay
                                     profileRelays = updated
                                     saveProfileRelays(updated)
                                 } else {
-                                    showUnreachableToast()
+                                    showRelayHostCheckToast(appContext, check)
                                 }
                             }
                         }
