@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -235,6 +236,15 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+}
+
+private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
+    val resId = when (result) {
+        RelayHostCheck.UNRESOLVABLE -> R.string.connections_relays_error_unreachable
+        RelayHostCheck.INTERNAL -> R.string.connections_relays_error_private
+        RelayHostCheck.REACHABLE -> return
+    }
+    Toast.makeText(context, resId, Toast.LENGTH_LONG).show()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -969,11 +979,13 @@ fun MainScreen(
                     onAddRelay = { relay ->
                         if (!relays.contains(relay) && relays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
-                                if (!isInternal) {
+                                val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
+                                if (check == RelayHostCheck.REACHABLE) {
                                     val updated = relays + relay
                                     relays = updated
                                     onRelaysChanged(updated)
+                                } else {
+                                    showRelayHostCheckToast(appContext, check)
                                 }
                             }
                         }
@@ -986,11 +998,13 @@ fun MainScreen(
                     onAddProfileRelay = { relay ->
                         if (!profileRelays.contains(relay) && profileRelays.size < 20) {
                             coroutineScope.launch {
-                                val isInternal = withContext(Dispatchers.IO) { isInternalHost(relay) }
-                                if (!isInternal) {
+                                val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
+                                if (check == RelayHostCheck.REACHABLE) {
                                     val updated = profileRelays + relay
                                     profileRelays = updated
                                     saveProfileRelays(updated)
+                                } else {
+                                    showRelayHostCheckToast(appContext, check)
                                 }
                             }
                         }
