@@ -337,6 +337,13 @@ class Nip55Activity : FragmentActivity() {
                     if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
                         store?.grantPermission(callerId, req.requestType, null, duration)
                     }
+                    if (duration == PermissionDuration.FOREVER && store != null) {
+                        Nip55RequestType.entries.forEach { type ->
+                            if (type != req.requestType) {
+                                store.grantPermission(callerId, type, null, duration)
+                            }
+                        }
+                    }
 
                     if (callerPendingFirstUse) {
                         val sigHash = callerSignatureHash
@@ -359,6 +366,13 @@ class Nip55Activity : FragmentActivity() {
                 withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
+                        if (req.requestType == Nip55RequestType.SIGN_EVENT) {
+                            val km = currentApp?.getKeepMobile()
+                            if (km != null) {
+                                runCatching { km.preApproveNostrEvent(req.content) }
+                                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${it.message}") }
+                            }
+                        }
                         runCatching { nip55Handler.handleRequest(req, callerId) }
                     } finally {
                         keystoreStorage?.clearRequestIdContext()
