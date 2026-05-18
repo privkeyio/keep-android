@@ -154,10 +154,8 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return errorCursor("Permission store is not available", null)
 
-        if (requestType == Nip55RequestType.SIGN_EVENT) {
-            val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
-            if (velocityCursor != null) return velocityCursor
-        }
+        val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
+        if (velocityCursor != null) return velocityCursor
 
         val policyCursor = evaluateAutoSignPolicy(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
@@ -345,8 +343,12 @@ class Nip55ContentProvider : ContentProvider() {
 
         val km = app.getKeepMobile()
         if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
-            runCatching { km.preApproveNostrEvent(content) }
-                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${it.message}") }
+            val preApprove = runCatching { km.preApproveNostrEvent(content) }
+            if (preApprove.isFailure) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
+                return rejectedCursor(id)
+            }
         }
 
         return runCatching { h.handleRequest(request, callerPackage) }

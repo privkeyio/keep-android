@@ -51,6 +51,8 @@ class Nip55Activity : FragmentActivity() {
     private var isNotificationOriginated: Boolean = false
     private var riskAssessment: RiskAssessment? = null
 
+    private class PreApproveFailedException : Exception()
+
     companion object {
         private const val TAG = "Nip55Activity"
         private val signingDispatcher = Dispatchers.Default.limitedParallelism(1)
@@ -332,45 +334,17 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                val permResult = runCatching {
-                    store?.grantPermission(callerId, req.requestType, eventKind, duration)
-                    if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
-                        store?.grantPermission(callerId, req.requestType, null, duration)
-                    }
-                    if (duration == PermissionDuration.FOREVER && store != null) {
-                        Nip55RequestType.entries.forEach { type ->
-                            if (type != req.requestType) {
-                                store.grantPermission(callerId, type, null, duration)
-                            }
-                        }
-                    }
-
-                    if (callerPendingFirstUse) {
-                        val sigHash = callerSignatureHash
-                        val verificationStore = callerVerificationStore
-                        if (sigHash != null && verificationStore != null) {
-                            verificationStore.trustPackage(callerId, sigHash)
-                            callerPendingFirstUse = false
-                            callerVerified = true
-                        } else {
-                            if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
-                        }
-                    }
-                }
-                if (permResult.isFailure) {
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
-                    finishWithError("request_failed")
-                    return@launch
-                }
-
-                withContext(signingDispatcher) {
+                val signResult = withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
                         if (req.requestType == Nip55RequestType.SIGN_EVENT) {
                             val km = currentApp?.getKeepMobile()
                             if (km != null) {
-                                runCatching { km.preApproveNostrEvent(req.content) }
-                                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${it.message}") }
+                                val preApprove = runCatching { km.preApproveNostrEvent(req.content) }
+                                if (preApprove.isFailure) {
+                                    if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
+                                    return@withContext Result.failure<Nip55Response>(PreApproveFailedException())
+                                }
                             }
                         }
                         runCatching { nip55Handler.handleRequest(req, callerId) }
@@ -378,11 +352,41 @@ class Nip55Activity : FragmentActivity() {
                         keystoreStorage?.clearRequestIdContext()
                     }
                 }
+
+                signResult
                     .onSuccess { response ->
+                        val permResult = runCatching {
+                            store?.grantPermission(callerId, req.requestType, eventKind, duration)
+                            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+                                store?.grantPermission(callerId, req.requestType, null, duration)
+                            }
+
+                            if (callerPendingFirstUse) {
+                                val sigHash = callerSignatureHash
+                                val verificationStore = callerVerificationStore
+                                if (sigHash != null && verificationStore != null) {
+                                    verificationStore.trustPackage(callerId, sigHash)
+                                    callerPendingFirstUse = false
+                                    callerVerified = true
+                                } else {
+                                    if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                                }
+                            }
+                        }
+                        if (permResult.isFailure) {
+                            if (BuildConfig.DEBUG) Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
+                            finishWithError("request_failed")
+                            return@onSuccess
+                        }
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)
                     }
                     .onFailure { e ->
+                        if (e is PreApproveFailedException) {
+                            store?.logOperation(callerId, req.requestType, eventKind, "preapprove_failed", wasAutomatic = false)
+                            finishWithError("preapprove_failed")
+                            return@onFailure
+                        }
                         if (BuildConfig.DEBUG) Log.e(TAG, "Request failed: ${e::class.simpleName}: ${e.message}")
                         finishWithError(mapExceptionToError(e))
                     }
@@ -473,6 +477,7 @@ class Nip55Activity : FragmentActivity() {
         "No share stored" -> "No key is stored in Keep"
         "Authentication failed" -> "Biometric authentication failed"
         "request_failed" -> "Request failed"
+        "preapprove_failed" -> "Request failed"
         "rate_limited" -> "Too many requests, please try again later"
         "not_initialized" -> "Keep is not connected to the network"
         "pubkey_mismatch" -> "Public key does not match the stored key"
