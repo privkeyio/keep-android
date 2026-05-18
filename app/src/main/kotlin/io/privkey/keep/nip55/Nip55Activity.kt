@@ -312,8 +312,8 @@ class Nip55Activity : FragmentActivity() {
         }
         val store = permissionStore
         val eventKind = req.eventKind()
-        val riskRequiresAuth = (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
-        val needsBiometric = riskRequiresAuth || req.requestType != Nip55RequestType.GET_PUBLIC_KEY
+        val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY ||
+            (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
 
         lifecycleScope.launch {
             val currentApp = application as? KeepMobileApp
@@ -337,14 +337,12 @@ class Nip55Activity : FragmentActivity() {
                 val signResult = withContext(signingDispatcher) {
                     requestId?.let { keystoreStorage?.setRequestIdContext(it) }
                     try {
-                        if (req.requestType == Nip55RequestType.SIGN_EVENT) {
-                            val km = currentApp?.getKeepMobile()
-                            if (km != null) {
-                                val preApprove = runCatching { km.preApproveNostrEvent(req.content) }
-                                if (preApprove.isFailure) {
-                                    if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
-                                    return@withContext Result.failure<Nip55Response>(PreApproveFailedException())
-                                }
+                        val km = currentApp?.getKeepMobile()
+                        if (req.requestType == Nip55RequestType.SIGN_EVENT && km != null) {
+                            val preApprove = runCatching { km.preApproveNostrEvent(req.content) }
+                            if (preApprove.isFailure) {
+                                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
+                                return@withContext Result.failure<Nip55Response>(PreApproveFailedException())
                             }
                         }
                         runCatching { nip55Handler.handleRequest(req, callerId) }
@@ -521,7 +519,7 @@ class Nip55Activity : FragmentActivity() {
                 return finishWithError("pubkey_verification_failed")
             }
             val groupPubkey = storage?.getShareMetadata()?.groupPubkey
-            if (groupPubkey == null || groupPubkey.isEmpty()) {
+            if (groupPubkey.isNullOrEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")
                 return finishWithError("pubkey_verification_failed")
             }

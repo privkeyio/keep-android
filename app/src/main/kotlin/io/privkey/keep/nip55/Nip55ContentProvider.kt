@@ -28,6 +28,7 @@ import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
 import io.privkey.keep.uniffi.SigningRequestContext
 import io.privkey.keep.uniffi.evaluateSignPolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -348,7 +349,15 @@ class Nip55ContentProvider : ContentProvider() {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
                 return errorCursor("Request failed", id)
             }
-            val preApprove = runWithTimeout { runCatching { km.preApproveNostrEvent(content) } }
+            val preApprove = runWithTimeout {
+                try {
+                    Result.success(km.preApproveNostrEvent(content))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Result.failure<Unit>(e)
+                }
+            }
             if (preApprove == null || preApprove.isFailure) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove?.exceptionOrNull()?.message ?: "timeout"}")
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
@@ -363,7 +372,7 @@ class Nip55ContentProvider : ContentProvider() {
                         throw IllegalStateException("Handler returned empty pubkey")
                     }
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
-                    if (groupPubkey == null || groupPubkey.isEmpty()) {
+                    if (groupPubkey.isNullOrEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")
                     }
                     val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
@@ -378,15 +387,15 @@ class Nip55ContentProvider : ContentProvider() {
                 }.onFailure { e ->
                     if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
-                val isSign = requestType == Nip55RequestType.SIGN_EVENT || requestType == Nip55RequestType.GET_PUBLIC_KEY
-                if (isSign) {
-                    MatrixCursor(SIGN_COLUMNS).apply {
-                        addRow(arrayOf(response.result, response.event, response.result))
-                    }
-                } else {
-                    MatrixCursor(ENCRYPT_COLUMNS).apply {
-                        addRow(arrayOf(response.result, response.result))
-                    }
+                when (requestType) {
+                    Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
+                        MatrixCursor(SIGN_COLUMNS).apply {
+                            addRow(arrayOf(response.result, response.event, response.result))
+                        }
+                    else ->
+                        MatrixCursor(ENCRYPT_COLUMNS).apply {
+                            addRow(arrayOf(response.result, response.result))
+                        }
                 }
             }
             .getOrElse { e ->
