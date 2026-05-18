@@ -376,7 +376,8 @@ class Nip55Activity : FragmentActivity() {
                         if (permResult.isFailure && BuildConfig.DEBUG) {
                             Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
                         }
-                        store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
+                        val auditAction = if (permResult.isFailure) "allow_grant_failed" else "allow"
+                        store?.logOperation(callerId, req.requestType, eventKind, auditAction, wasAutomatic = false)
                         finishWithResult(response)
                     }
                     .onFailure { e ->
