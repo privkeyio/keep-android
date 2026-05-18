@@ -373,10 +373,8 @@ class Nip55Activity : FragmentActivity() {
                                 }
                             }
                         }
-                        if (permResult.isFailure) {
-                            if (BuildConfig.DEBUG) Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
-                            finishWithError("request_failed")
-                            return@onSuccess
+                        if (permResult.isFailure && BuildConfig.DEBUG) {
+                            Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
                         }
                         store?.logOperation(callerId, req.requestType, eventKind, "allow", wasAutomatic = false)
                         finishWithResult(response)
