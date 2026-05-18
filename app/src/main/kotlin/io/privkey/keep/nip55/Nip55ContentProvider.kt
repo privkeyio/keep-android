@@ -344,11 +344,6 @@ class Nip55ContentProvider : ContentProvider() {
 
         val km = app.getKeepMobile()
         if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
-            if (app.liveState == null) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove skipped: node not initialized")
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
-                return errorCursor("Request failed", id)
-            }
             val preApprove = runWithTimeout {
                 try {
                     Result.success(km.preApproveNostrEvent(content))
