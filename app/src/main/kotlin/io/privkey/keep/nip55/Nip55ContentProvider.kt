@@ -28,6 +28,7 @@ import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
 import io.privkey.keep.uniffi.SigningRequestContext
 import io.privkey.keep.uniffi.evaluateSignPolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -341,6 +342,24 @@ class Nip55ContentProvider : ContentProvider() {
             permissions = null
         )
 
+        val km = app.getKeepMobile()
+        if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
+            val preApprove = runWithTimeout {
+                try {
+                    Result.success(km.preApproveNostrEvent(content))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Result.failure<Unit>(e)
+                }
+            }
+            if (preApprove == null || preApprove.isFailure) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove?.exceptionOrNull()?.message ?: "timeout"}")
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
+                return errorCursor("Request failed", id)
+            }
+        }
+
         return runCatching { h.handleRequest(request, callerPackage) }
             .mapCatching { response ->
                 if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
@@ -363,15 +382,15 @@ class Nip55ContentProvider : ContentProvider() {
                 }.onFailure { e ->
                     if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
                 }
-                val isSign = requestType == Nip55RequestType.SIGN_EVENT || requestType == Nip55RequestType.GET_PUBLIC_KEY
-                if (isSign) {
-                    MatrixCursor(SIGN_COLUMNS).apply {
-                        addRow(arrayOf(response.result, response.event, response.result))
-                    }
-                } else {
-                    MatrixCursor(ENCRYPT_COLUMNS).apply {
-                        addRow(arrayOf(response.result, response.result))
-                    }
+                when (requestType) {
+                    Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
+                        MatrixCursor(SIGN_COLUMNS).apply {
+                            addRow(arrayOf(response.result, response.event, response.result))
+                        }
+                    else ->
+                        MatrixCursor(ENCRYPT_COLUMNS).apply {
+                            addRow(arrayOf(response.result, response.result))
+                        }
                 }
             }
             .getOrElse { e ->
