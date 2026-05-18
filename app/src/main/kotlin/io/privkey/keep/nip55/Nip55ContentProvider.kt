@@ -372,7 +372,7 @@ class Nip55ContentProvider : ContentProvider() {
                         throw IllegalStateException("Handler returned empty pubkey")
                     }
                     val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
-                    if (groupPubkey.isNullOrEmpty()) {
+                    if (groupPubkey == null || groupPubkey.isEmpty()) {
                         throw IllegalStateException("Stored pubkey unavailable for verification")
                     }
                     val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }

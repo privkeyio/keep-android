@@ -519,7 +519,7 @@ class Nip55Activity : FragmentActivity() {
                 return finishWithError("pubkey_verification_failed")
             }
             val groupPubkey = storage?.getShareMetadata()?.groupPubkey
-            if (groupPubkey.isNullOrEmpty()) {
+            if (groupPubkey == null || groupPubkey.isEmpty()) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")
                 return finishWithError("pubkey_verification_failed")
             }
