@@ -919,12 +919,8 @@ fun MainScreen(
                     pendingRequests = appLiveState?.pendingRequests ?: emptyList(),
                     onApproveRequest = { id ->
                         coroutineScope.launch {
-                            val authed = if (biometricAvailable) {
-                                biometricHelper?.authenticate(
-                                    title = getString(R.string.cosign_request_label),
-                                    subtitle = getString(R.string.cosign_approve),
-                                    forcePrompt = true,
-                                ) ?: false
+                            val authed = if (biometricAvailable && onBiometricAuth != null) {
+                                onBiometricAuth.invoke()
                             } else {
                                 true
                             }
