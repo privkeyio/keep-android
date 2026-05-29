@@ -250,7 +250,9 @@ class KeepMobileApp : Application() {
             if (liveState != null && mobile.getShareInfo() != null) return
 
             val relays = getActiveRelays().ifEmpty {
-                listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
+                // coracle reliably delivers the ephemeral (kind 24242) events FROST
+                // coordination depends on; most public relays drop them.
+                listOf("wss://bucket.coracle.social")
             }
             val store = storage
             withContext(initDispatcher) {
