@@ -310,6 +310,10 @@ class KeepMobileApp : Application() {
     }
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
+        // Mirror the kill switch into the Rust core before connecting so the FROST
+        // co-signer honors it (pre_sign reads this), consistent with the
+        // NIP-55/NIP-46 paths after a cold start or upgrade.
+        runCatching { mobile.setKillSwitch(killSwitchStore?.isEnabled() == true) }
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")

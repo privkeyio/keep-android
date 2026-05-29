@@ -355,7 +355,10 @@ fun MainScreen(
                     appContext.getString(R.string.main_disable_kill_switch_subtitle),
                 ) ?: false
                 if (authenticated) {
-                    withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
+                    withContext(Dispatchers.IO) {
+                        killSwitchStore.setEnabled(false)
+                        runCatching { keepMobile.setKillSwitch(false) }
+                    }
                     killSwitchEnabled = false
                 }
             }
@@ -468,7 +471,10 @@ fun MainScreen(
         KillSwitchConfirmDialog(
             onConfirm = {
                 coroutineScope.launch {
-                    withContext(Dispatchers.IO) { killSwitchStore.setEnabled(true) }
+                    withContext(Dispatchers.IO) {
+                        killSwitchStore.setEnabled(true)
+                        runCatching { keepMobile.setKillSwitch(true) }
+                    }
                     killSwitchEnabled = true
                     showKillSwitchConfirmDialog = false
                 }
