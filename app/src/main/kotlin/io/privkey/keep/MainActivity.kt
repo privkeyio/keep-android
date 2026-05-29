@@ -918,8 +918,21 @@ fun MainScreen(
                     pendingCount = pendingCount,
                     pendingRequests = appLiveState?.pendingRequests ?: emptyList(),
                     onApproveRequest = { id ->
-                        coroutineScope.launch(Dispatchers.IO) {
-                            runCatching { keepMobile.approveRequest(id) }
+                        coroutineScope.launch {
+                            val authed = if (biometricAvailable) {
+                                biometricHelper?.authenticate(
+                                    title = getString(R.string.cosign_request_label),
+                                    subtitle = getString(R.string.cosign_approve),
+                                    forcePrompt = true,
+                                ) ?: false
+                            } else {
+                                true
+                            }
+                            if (authed) {
+                                withContext(Dispatchers.IO) {
+                                    runCatching { keepMobile.approveRequest(id) }
+                                }
+                            }
                         }
                     },
                     onRejectRequest = { id ->

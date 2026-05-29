@@ -117,4 +117,6 @@
     <!-- FROST co-sign request notification -->
     <string name="cosign_notification_title">Co-sign request</string>
     <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> co-sign requests</string>
+    <string name="cosign_confirm_approved">Co-signed</string>
+    <string name="cosign_confirm_rejected">Request rejected</string>
 </resources>
