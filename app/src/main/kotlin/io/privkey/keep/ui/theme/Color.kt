@@ -22,7 +22,7 @@ val KeepDarkColors = darkColorScheme(
     primaryContainer = KeepAccentSoft,
     onPrimaryContainer = Color(0xFF7EE0A0),
     secondary = KeepAccent,
-    onSecondary = Color(0xFFFFFFFF),
+    onSecondary = Color(0xFF06140C),
     secondaryContainer = KeepAccentSoft,
     onSecondaryContainer = Color(0xFF7EE0A0),
     tertiary = KeepWarn,
@@ -36,5 +36,5 @@ val KeepDarkColors = darkColorScheme(
     outline = KeepBorder,
     outlineVariant = Color(0xFF1F2630),
     error = KeepError,
-    onError = Color(0xFFFFFFFF),
+    onError = Color(0xFF2A0907),
 )

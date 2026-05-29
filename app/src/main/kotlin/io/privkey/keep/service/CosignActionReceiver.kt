@@ -3,6 +3,7 @@ package io.privkey.keep.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import io.privkey.keep.KeepMobileApp
 
 /**
@@ -22,15 +23,25 @@ class CosignActionReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val approved = action == CosignNotifier.ACTION_APPROVE
-                when (action) {
+                val result = when (action) {
                     CosignNotifier.ACTION_APPROVE -> runCatching { mobile.approveRequest(requestId) }
                     CosignNotifier.ACTION_REJECT -> runCatching { mobile.rejectRequest(requestId) }
                     else -> return@Thread
                 }
-                runCatching { CosignNotifier.confirm(appContext, approved) }
+                if (result.isSuccess) {
+                    runCatching { CosignNotifier.confirm(appContext, approved) }
+                } else {
+                    // Leave the original request notification up so the operator can
+                    // retry; do not signal a false "done".
+                    Log.w(TAG, "co-sign action failed", result.exceptionOrNull())
+                }
             } finally {
                 pending.finish()
             }
         }.start()
+    }
+
+    private companion object {
+        const val TAG = "CosignActionReceiver"
     }
 }

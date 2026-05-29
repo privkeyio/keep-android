@@ -210,10 +210,10 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
                             },
-                            onBiometricAuth = {
+                            onBiometricAuth = { title, subtitle ->
                                 biometricHelper?.authenticate(
-                                    title = getString(R.string.main_disable_kill_switch_title),
-                                    subtitle = getString(R.string.main_disable_kill_switch_subtitle)
+                                    title = title,
+                                    subtitle = subtitle
                                 ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
@@ -267,7 +267,7 @@ fun MainScreen(
     onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     biometricStatus: BiometricHelper.BiometricStatus = BiometricHelper.BiometricStatus.NOT_AVAILABLE,
-    onBiometricAuth: (suspend () -> Boolean)? = null,
+    onBiometricAuth: (suspend (title: String, subtitle: String) -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
     onBunkerServiceChanged: (Boolean) -> Unit = {},
@@ -350,7 +350,10 @@ fun MainScreen(
             showKillSwitchConfirmDialog = true
         } else {
             coroutineScope.launch {
-                val authenticated = onBiometricAuth?.invoke() ?: false
+                val authenticated = onBiometricAuth?.invoke(
+                    appContext.getString(R.string.main_disable_kill_switch_title),
+                    appContext.getString(R.string.main_disable_kill_switch_subtitle),
+                ) ?: false
                 if (authenticated) {
                     withContext(Dispatchers.IO) { killSwitchStore.setEnabled(false) }
                     killSwitchEnabled = false
@@ -920,7 +923,10 @@ fun MainScreen(
                     onApproveRequest = { id ->
                         coroutineScope.launch {
                             val authed = if (biometricAvailable && onBiometricAuth != null) {
-                                onBiometricAuth.invoke()
+                                onBiometricAuth.invoke(
+                                    appContext.getString(R.string.cosign_request_label),
+                                    appContext.getString(R.string.cosign_approve),
+                                )
                             } else {
                                 true
                             }
@@ -1205,9 +1211,7 @@ private fun HomeTab(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            req.metadata?.contentPreview?.takeIf { it.isNotBlank() }
-                                ?: req.messagePreview.takeIf { it.isNotBlank() }
-                                ?: req.messageType,
+                            req.describe(),
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(12.dp))

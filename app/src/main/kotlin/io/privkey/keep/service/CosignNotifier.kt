@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
+import io.privkey.keep.describe
 import io.privkey.keep.uniffi.SignRequest
 
 /**
@@ -68,12 +69,20 @@ object CosignNotifier {
         )
 
         val first = pending.first()
-        val body = describe(first)
+        val body = first.describe()
         val title = if (pending.size > 1) {
             context.getString(R.string.cosign_notification_title_multi, pending.size)
         } else {
             context.getString(R.string.cosign_notification_title)
         }
+
+        // Lock-screen version omits request details (kind, content, amounts,
+        // destinations); the full body only appears once the device is unlocked.
+        val publicVersion = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -81,8 +90,9 @@ object CosignNotifier {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
             .setContentIntent(contentIntent)
             .setFullScreenIntent(contentIntent, true)
             .setAutoCancel(true)
@@ -101,27 +111,6 @@ object CosignNotifier {
             .build()
 
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
-    }
-
-    /** A short, human-readable summary of what is being signed. */
-    private fun describe(req: SignRequest): String {
-        val m = req.metadata
-        val sats = m?.amountSats
-        if (sats != null) {
-            val dest = m.destination?.takeIf { it.isNotBlank() }
-            return if (dest != null) "$sats sats to $dest" else "$sats sats"
-        }
-        val content = m?.contentPreview?.takeIf { it.isNotBlank() }
-            ?: req.messagePreview.takeIf { it.isNotBlank() }
-        val kind = m?.eventKind
-        return buildString {
-            if (kind != null) append("kind $kind")
-            if (content != null) {
-                if (isNotEmpty()) append(" · ")
-                append(content)
-            }
-            if (isEmpty()) append(req.messageType)
-        }
     }
 
     /** Brief acknowledgement after the operator acts, so it feels confirmed. */
