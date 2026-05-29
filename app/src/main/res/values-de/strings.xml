@@ -106,4 +106,12 @@
 
     <!-- Mnemonic / seed word display -->
     <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+    <!-- FROST co-sign requests -->
+    <string name="cosign_request_label">Mitsignieren-Anfrage</string>
+    <string name="cosign_approve">Genehmigen</string>
+    <string name="cosign_reject">Ablehnen</string>
+    <string name="cosign_notification_title">Mitsignieren-Anfrage</string>
+    <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> Mitsignieren-Anfragen</string>
+    <string name="cosign_confirm_approved">Mitsigniert</string>
+    <string name="cosign_confirm_rejected">Anfrage abgelehnt</string>
 </resources>

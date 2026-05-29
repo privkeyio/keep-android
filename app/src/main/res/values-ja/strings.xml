@@ -105,4 +105,12 @@
 
     <!-- Mnemonic / seed word display -->
     <string name="mnemonic_word_number"><xliff:g id="index" example="1">%1$d</xliff:g>.\u0020</string>
+    <!-- FROST co-sign requests -->
+    <string name="cosign_request_label">共同署名リクエスト</string>
+    <string name="cosign_approve">承認</string>
+    <string name="cosign_reject">拒否</string>
+    <string name="cosign_notification_title">共同署名リクエスト</string>
+    <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> 件の共同署名リクエスト</string>
+    <string name="cosign_confirm_approved">共同署名しました</string>
+    <string name="cosign_confirm_rejected">リクエストを拒否しました</string>
 </resources>
