@@ -103,7 +103,13 @@ class KeepMobileApp : Application() {
             nip55Handler = Nip55Handler(newKeepMobile)
             newKeepMobile.setStateCallback(object : KeepStateCallback {
                 override fun onStateChanged(state: KeepLiveState) {
-                    mainHandler.post { liveState = state }
+                    mainHandler.post {
+                        liveState = state
+                        io.privkey.keep.service.CosignNotifier.update(
+                            applicationContext,
+                            state.pendingRequests,
+                        )
+                    }
                 }
             })
         }.onFailure { e ->

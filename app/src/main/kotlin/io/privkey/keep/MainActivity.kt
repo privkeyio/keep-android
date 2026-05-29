@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -914,6 +916,17 @@ fun MainScreen(
                     allAccounts = allAccounts,
                     peers = peers,
                     pendingCount = pendingCount,
+                    pendingRequests = appLiveState?.pendingRequests ?: emptyList(),
+                    onApproveRequest = { id ->
+                        coroutineScope.launch(Dispatchers.IO) {
+                            runCatching { keepMobile.approveRequest(id) }
+                        }
+                    },
+                    onRejectRequest = { id ->
+                        coroutineScope.launch(Dispatchers.IO) {
+                            runCatching { keepMobile.rejectRequest(id) }
+                        }
+                    },
                     isConnected = isConnected,
                     isConnecting = isConnecting,
                     connectionError = connectionError,
@@ -1129,6 +1142,9 @@ private fun HomeTab(
     allAccounts: List<AccountInfo>,
     peers: List<PeerInfo>,
     pendingCount: Int,
+    pendingRequests: List<SignRequest>,
+    onApproveRequest: (String) -> Unit,
+    onRejectRequest: (String) -> Unit,
     isConnected: Boolean,
     isConnecting: Boolean,
     connectionError: String?,
@@ -1153,10 +1169,52 @@ private fun HomeTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = stringResource(R.string.main_home_title), style = MaterialTheme.typography.headlineLarge)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter = painterResource(R.drawable.keep_crest),
+                contentDescription = null,
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = stringResource(R.string.main_home_title),
+                style = MaterialTheme.typography.headlineLarge
+            )
+        }
         Spacer(modifier = Modifier.height(4.dp))
         SecurityLevelBadge(securityLevel)
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Pending co-sign requests, surfaced at the top so they're seen and acted
+        // on immediately (not buried below the status cards).
+        if (pendingRequests.isNotEmpty()) {
+            pendingRequests.forEach { req ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            stringResource(R.string.cosign_request_label),
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            req.metadata?.contentPreview?.takeIf { it.isNotBlank() }
+                                ?: req.messagePreview.takeIf { it.isNotBlank() }
+                                ?: req.messageType,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { onApproveRequest(req.id) }) {
+                                Text(stringResource(R.string.cosign_approve))
+                            }
+                            OutlinedButton(onClick = { onRejectRequest(req.id) }) {
+                                Text(stringResource(R.string.cosign_reject))
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
 
         KillSwitchCard(
             enabled = killSwitchEnabled,
@@ -1192,11 +1250,6 @@ private fun HomeTab(
             Spacer(modifier = Modifier.height(16.dp))
 
             PeersCard(peers)
-
-            if (pendingCount > 0) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Badge { Text(stringResource(R.string.main_pending_count, pendingCount)) }
-            }
         } else {
             NoShareCard(
                 onImport = onImport,

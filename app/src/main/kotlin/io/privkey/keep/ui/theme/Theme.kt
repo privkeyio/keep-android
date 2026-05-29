@@ -9,7 +9,9 @@ import androidx.compose.ui.platform.LocalContext
 @Composable
 fun KeepAndroidTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    // Default to the Keep brand palette (dark + green, matching the StartOS Web
+    // Admin) rather than wallpaper-derived Material You, so the app is on-brand.
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -17,8 +19,7 @@ fun KeepAndroidTheme(
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> darkColorScheme()
-        else -> lightColorScheme()
+        else -> KeepDarkColors
     }
 
     MaterialTheme(
