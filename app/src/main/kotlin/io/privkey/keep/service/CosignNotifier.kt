@@ -1,5 +1,6 @@
 package io.privkey.keep.service
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -35,6 +36,7 @@ object CosignNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+    @SuppressLint("MissingPermission")
     fun update(context: Context, pending: List<SignRequest>) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(nm)
@@ -123,6 +125,7 @@ object CosignNotifier {
     }
 
     /** Brief acknowledgement after the operator acts, so it feels confirmed. */
+    @SuppressLint("MissingPermission")
     fun confirm(context: Context, approved: Boolean) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureChannel(nm)
