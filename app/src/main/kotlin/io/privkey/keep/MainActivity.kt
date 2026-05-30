@@ -51,7 +51,6 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -75,7 +74,6 @@ class MainActivity : FragmentActivity() {
         biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
-        val killSwitchStore = app.getKillSwitchStore()
         val signPolicyStore = app.getSignPolicyStore()
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
@@ -84,7 +82,7 @@ class MainActivity : FragmentActivity() {
         val permissionStore = app.getPermissionStore()
 
         val allDependenciesAvailable = listOf(
-            keepMobile, storage, killSwitchStore, signPolicyStore,
+            keepMobile, storage, signPolicyStore,
             autoStartStore, foregroundServiceStore, pinStore, biometricTimeoutStore,
             permissionStore
         ).all { it != null }
@@ -163,7 +161,6 @@ class MainActivity : FragmentActivity() {
                     } else if (allDependenciesAvailable) {
                         val safeKeepMobile = keepMobile ?: return@Surface
                         val safeStorage = storage ?: return@Surface
-                        val safeKillSwitchStore = killSwitchStore ?: return@Surface
                         val safeSignPolicyStore = signPolicyStore ?: return@Surface
                         val safeAutoStartStore = autoStartStore ?: return@Surface
                         val safeForegroundServiceStore = foregroundServiceStore ?: return@Surface
@@ -173,7 +170,6 @@ class MainActivity : FragmentActivity() {
                         MainScreen(
                             keepMobile = safeKeepMobile,
                             storage = safeStorage,
-                            killSwitchStore = safeKillSwitchStore,
                             signPolicyStore = safeSignPolicyStore,
                             autoStartStore = safeAutoStartStore,
                             foregroundServiceStore = safeForegroundServiceStore,
@@ -254,7 +250,6 @@ private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
 fun MainScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
-    killSwitchStore: KillSwitchStore,
     signPolicyStore: SignPolicyStore,
     autoStartStore: AutoStartStore,
     foregroundServiceStore: ForegroundServiceStore,
@@ -296,7 +291,7 @@ fun MainScreen(
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
-    var killSwitchEnabled by remember { mutableStateOf(killSwitchStore.isEnabled()) }
+    var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
 
     val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
@@ -355,11 +350,10 @@ fun MainScreen(
                     appContext.getString(R.string.main_disable_kill_switch_subtitle),
                 ) ?: false
                 if (authenticated) {
-                    withContext(Dispatchers.IO) {
-                        killSwitchStore.setEnabled(false)
-                        runCatching { keepMobile.setKillSwitch(false) }
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.setKillSwitch(false) }.isSuccess
                     }
-                    killSwitchEnabled = false
+                    if (updated) killSwitchEnabled = false
                 }
             }
         }
@@ -471,11 +465,18 @@ fun MainScreen(
         KillSwitchConfirmDialog(
             onConfirm = {
                 coroutineScope.launch {
-                    withContext(Dispatchers.IO) {
-                        killSwitchStore.setEnabled(true)
-                        runCatching { keepMobile.setKillSwitch(true) }
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.setKillSwitch(true) }.isSuccess
                     }
-                    killSwitchEnabled = true
+                    if (updated) {
+                        killSwitchEnabled = true
+                    } else {
+                        Toast.makeText(
+                            appContext,
+                            appContext.getString(R.string.main_enable_kill_switch_failed),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                     showKillSwitchConfirmDialog = false
                 }
             },

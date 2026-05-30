@@ -114,7 +114,7 @@ class Nip55ContentProvider : ContentProvider() {
             return errorCursor("Request denied", null)
         }
 
-        if (currentApp.getKillSwitchStore()?.isEnabled() == true) {
+        if (currentApp.isSigningKilled()) {
             return errorCursor("Signing is disabled (kill switch is active)", null)
         }
         if (currentApp.getPinStore()?.requiresAuthentication() == true) {

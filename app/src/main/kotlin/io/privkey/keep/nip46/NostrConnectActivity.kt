@@ -20,7 +20,6 @@ import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.isInternalHost
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.nip55.PermissionDuration
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.Dispatchers
@@ -30,8 +29,8 @@ import kotlinx.coroutines.withContext
 class NostrConnectActivity : FragmentActivity() {
 
     private lateinit var biometricHelper: BiometricHelper
+    private val keepApp: KeepMobileApp? get() = application as? KeepMobileApp
     private var storage: AndroidKeystoreStorage? = null
-    private var killSwitchStore: KillSwitchStore? = null
     private var connectRequest: NostrConnectRequest? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,9 +40,7 @@ class NostrConnectActivity : FragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE
         )
         biometricHelper = BiometricHelper(this)
-        val app = application as? KeepMobileApp
-        storage = app?.getStorage()
-        killSwitchStore = app?.getKillSwitchStore()
+        storage = keepApp?.getStorage()
 
         val uri = intent?.data
         if (uri == null) {
@@ -59,7 +56,7 @@ class NostrConnectActivity : FragmentActivity() {
             return
         }
 
-        if (killSwitchStore?.isEnabled() == true) {
+        if (keepApp?.isSigningKilled() == true) {
             Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             finish()
             return
@@ -101,8 +98,9 @@ class NostrConnectActivity : FragmentActivity() {
         }
 
         val keystoreStorage = storage
-        if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
-            if (killSwitchStore?.isEnabled() == true) {
+        val killed = keepApp?.isSigningKilled() == true
+        if (keystoreStorage == null || killed) {
+            if (killed) {
                 Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             }
             onComplete(false)
