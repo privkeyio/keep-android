@@ -19,6 +19,8 @@ import javax.crypto.Cipher
 
 private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), emptyList())
 
+internal const val MAX_ACCOUNT_NAME_LENGTH = 64
+
 internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
@@ -231,15 +233,91 @@ internal class AccountActions(
     }
 
     fun renameAccount(account: AccountInfo, newName: String) {
+        val trimmedName = newName.trim()
+        if (trimmedName.isBlank() || trimmedName.length > MAX_ACCOUNT_NAME_LENGTH) {
+            logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalArgumentException("invalid name"))
+            return
+        }
+        coroutineScope.launch {
+            val decryptCipher = withContext(Dispatchers.IO) {
+                runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
+            }
+            if (decryptCipher == null) {
+                logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalStateException("no cipher"))
+                return@launch
+            }
+            onBiometricRequest(
+                appContext.getString(R.string.account_rename_title),
+                appContext.getString(R.string.account_rename_subtitle),
+                decryptCipher
+            ) { authedDecrypt ->
+                if (authedDecrypt == null) return@onBiometricRequest
+                requestEncryptCipherAndFinishRename(account, trimmedName, authedDecrypt)
+            }
+        }
+    }
+
+    private fun requestEncryptCipherAndFinishRename(
+        account: AccountInfo,
+        newName: String,
+        authedDecrypt: Cipher
+    ) {
+        coroutineScope.launch {
+            val encryptCipher = accountMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    if (!shareExists(account.groupPubkeyHex)) null
+                    else runCatching { storage.getCipherForShareEncryption(account.groupPubkeyHex) }.getOrNull()
+                }
+            }
+            if (encryptCipher == null) {
+                logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalStateException("no cipher"))
+                return@launch
+            }
+            onBiometricRequest(
+                appContext.getString(R.string.account_rename_title),
+                appContext.getString(R.string.account_rename_save_subtitle),
+                encryptCipher
+            ) { authedEncrypt ->
+                if (authedEncrypt == null) return@onBiometricRequest
+                finishRename(account, newName, authedDecrypt, authedEncrypt)
+            }
+        }
+    }
+
+    private fun finishRename(
+        account: AccountInfo,
+        newName: String,
+        authedDecrypt: Cipher,
+        authedEncrypt: Cipher
+    ) {
         coroutineScope.launch {
             accountMutex.withLock {
+                val stillExists = withContext(Dispatchers.IO) { shareExists(account.groupPubkeyHex) }
+                if (!stillExists) {
+                    logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalStateException("share removed"))
+                    return@withLock
+                }
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
                 try {
+                    storage.setPendingCipher(requestId, authedDecrypt)
+                    pendingSet = true
+                    storage.setPendingCipher(requestId, authedEncrypt)
                     withContext(Dispatchers.IO) {
-                        storage.renameShare(account.groupPubkeyHex, newName)
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            keepMobile.renameShare(account.groupPubkeyHex, newName)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    coroutineScope.launch(Dispatchers.Main) {
+                        Toast.makeText(appContext, appContext.getString(R.string.account_rename_success), Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
                     logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), e)
                 } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
                     runCatching { refreshAccountState() }
                 }
             }
