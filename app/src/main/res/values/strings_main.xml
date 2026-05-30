@@ -105,6 +105,7 @@
     <string name="account_delete_refresh_failed">Account deleted, but failed to refresh</string>
     <string name="account_switch_remaining_subtitle">Authenticate to switch to remaining account</string>
     <string name="account_rename_failed">Failed to rename account</string>
+    <string name="account_rename_success">Account renamed</string>
     <string name="account_import_invalid_share">Invalid share format</string>
     <string name="account_import_invalid_nsec">Invalid nsec format</string>
     <string name="account_import_failed">Import failed. Please try again.</string>

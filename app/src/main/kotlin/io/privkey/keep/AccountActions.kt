@@ -231,6 +231,11 @@ internal class AccountActions(
     }
 
     fun renameAccount(account: AccountInfo, newName: String) {
+        val trimmedName = newName.trim()
+        if (trimmedName.isBlank() || trimmedName.length > 64) {
+            logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalArgumentException("invalid name"))
+            return
+        }
         coroutineScope.launch {
             val decryptCipher = withContext(Dispatchers.IO) {
                 runCatching { storage.getCipherForShareDecryption(account.groupPubkeyHex) }.getOrNull()
@@ -245,7 +250,7 @@ internal class AccountActions(
                 decryptCipher
             ) { authedDecrypt ->
                 if (authedDecrypt == null) return@onBiometricRequest
-                requestEncryptCipherAndFinishRename(account, newName, authedDecrypt)
+                requestEncryptCipherAndFinishRename(account, trimmedName, authedDecrypt)
             }
         }
     }
@@ -303,6 +308,9 @@ internal class AccountActions(
                         } finally {
                             storage.clearRequestIdContext()
                         }
+                    }
+                    coroutineScope.launch(Dispatchers.Main) {
+                        Toast.makeText(appContext, appContext.getString(R.string.account_rename_success), Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
                     logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), e)
