@@ -76,6 +76,9 @@ class KeepMobileApp : Application() {
     @Volatile
     private var pinMismatch: PinMismatchInfo? = null
 
+    @Volatile
+    private var killSwitchMigrationFailed: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         initializeKeepMobile()
@@ -187,6 +190,7 @@ class KeepMobileApp : Application() {
     fun getStorage(): AndroidKeystoreStorage? = storage
 
     fun isSigningKilled(): Boolean {
+        if (killSwitchMigrationFailed) return true
         val mobile = getKeepMobile() ?: return true
         return runCatching { mobile.getKillSwitch() }.getOrDefault(true)
     }
@@ -195,6 +199,8 @@ class KeepMobileApp : Application() {
     // exactly once, at startup before any signing gate or FROST round can run, so a
     // previously engaged kill switch survives an upgrade. Failure to read or write
     // leaves the store un-migrated so it retries; it never marks migrated on failure.
+    // On failure the session fails closed: the core kill switch is engaged so signing
+    // cannot resume, because the legacy state could not be confirmed disengaged.
     private fun migrateKillSwitch(mobile: KeepMobile) {
         val store = killSwitchStore ?: return
         runCatching {
@@ -205,6 +211,9 @@ class KeepMobileApp : Application() {
             store.markMigrated()
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Kill switch migration failed: ${e::class.simpleName}", e)
+            if (runCatching { mobile.setKillSwitch(true) }.isFailure) {
+                killSwitchMigrationFailed = true
+            }
         }
     }
 

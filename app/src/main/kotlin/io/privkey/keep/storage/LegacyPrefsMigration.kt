@@ -9,6 +9,9 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.privkey.keep.BuildConfig
 
+class LegacyPrefsUnavailableException(prefsName: String) :
+    Exception("Legacy prefs unavailable or unreadable: $prefsName")
+
 object LegacyPrefsMigration {
 
     private const val MIGRATION_MARKER_SUFFIX = "_migrated_v1"
@@ -113,22 +116,17 @@ object LegacyPrefsMigration {
             return safeDefault
         }
 
-        try {
-            val legacyPrefs = openLegacyPrefs(context, prefsName)
-            if (legacyPrefs != null && legacyPrefs.contains(key)) {
-                val legacyValue = legacyPrefs.getBoolean(key, safeDefault)
-                if (newPrefs.edit().putBoolean(key, legacyValue).commit()) {
-                    markerPrefs.edit().putBoolean(migrationMarker, true).apply()
-                    return legacyValue
-                }
-            } else {
+        val legacyPrefs = openLegacyPrefs(context, prefsName)
+            ?: throw LegacyPrefsUnavailableException(prefsName)
+        if (legacyPrefs.contains(key)) {
+            val legacyValue = legacyPrefs.getBoolean(key, safeDefault)
+            if (newPrefs.edit().putBoolean(key, legacyValue).commit()) {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
+                return legacyValue
             }
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
-            markerPrefs.edit().putBoolean(migrationMarker, true).apply()
+            throw LegacyPrefsUnavailableException(prefsName)
         }
-
+        markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         return safeDefault
     }
 
