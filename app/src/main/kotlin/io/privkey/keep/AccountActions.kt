@@ -19,6 +19,8 @@ import javax.crypto.Cipher
 
 private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), emptyList())
 
+internal const val MAX_ACCOUNT_NAME_LENGTH = 64
+
 internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
@@ -232,7 +234,7 @@ internal class AccountActions(
 
     fun renameAccount(account: AccountInfo, newName: String) {
         val trimmedName = newName.trim()
-        if (trimmedName.isBlank() || trimmedName.length > 64) {
+        if (trimmedName.isBlank() || trimmedName.length > MAX_ACCOUNT_NAME_LENGTH) {
             logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalArgumentException("invalid name"))
             return
         }

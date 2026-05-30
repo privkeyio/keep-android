@@ -230,7 +230,7 @@ private fun RenameAccountDialog(
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { if (it.length <= 64) name = it },
+                onValueChange = { if (it.length <= MAX_ACCOUNT_NAME_LENGTH) name = it },
                 label = { Text(stringResource(R.string.account_rename_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
