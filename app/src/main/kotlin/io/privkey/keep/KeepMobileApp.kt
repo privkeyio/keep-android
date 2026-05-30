@@ -192,7 +192,9 @@ class KeepMobileApp : Application() {
     fun isSigningKilled(): Boolean {
         if (killSwitchMigrationFailed) return true
         val mobile = getKeepMobile() ?: return true
-        return runCatching { mobile.getKillSwitch() }.getOrDefault(true)
+        return runCatching { mobile.getKillSwitch() }
+            .onFailure { Log.e(TAG, "Kill switch read failed, failing closed: ${it::class.simpleName}") }
+            .getOrDefault(true)
     }
 
     // Transfer the legacy SharedPreferences kill-switch state into the Rust core
@@ -203,8 +205,10 @@ class KeepMobileApp : Application() {
     // cannot resume, because the legacy state could not be confirmed disengaged.
     private fun migrateKillSwitch(mobile: KeepMobile) {
         val store = killSwitchStore ?: return
+        val migrated = runCatching { store.hasMigrated() }
+        if (migrated.getOrNull() == true) return
         runCatching {
-            if (store.hasMigrated()) return
+            migrated.getOrThrow()
             if (store.legacyEnabled()) {
                 mobile.setKillSwitch(true)
             }

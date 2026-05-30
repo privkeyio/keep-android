@@ -468,7 +468,15 @@ fun MainScreen(
                     val updated = withContext(Dispatchers.IO) {
                         runCatching { keepMobile.setKillSwitch(true) }.isSuccess
                     }
-                    if (updated) killSwitchEnabled = true
+                    if (updated) {
+                        killSwitchEnabled = true
+                    } else {
+                        Toast.makeText(
+                            appContext,
+                            appContext.getString(R.string.main_enable_kill_switch_failed),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                     showKillSwitchConfirmDialog = false
                 }
             },

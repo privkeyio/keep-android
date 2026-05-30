@@ -6,6 +6,7 @@
     <string name="main_auth_failed">Authentication failed</string>
     <string name="main_disable_kill_switch_title">Disable Kill Switch</string>
     <string name="main_disable_kill_switch_subtitle">Authenticate to re-enable signing</string>
+    <string name="main_enable_kill_switch_failed">Failed to enable kill switch. Please try again.</string>
     <string name="main_vault_backup_title">Vault Backup</string>
     <string name="main_vault_backup_subtitle">Authenticate to access backup</string>
     <string name="main_recover_nsec_title">Recover nsec</string>
