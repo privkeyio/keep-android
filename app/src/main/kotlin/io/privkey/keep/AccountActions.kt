@@ -286,7 +286,10 @@ internal class AccountActions(
         coroutineScope.launch {
             accountMutex.withLock {
                 val stillExists = withContext(Dispatchers.IO) { shareExists(account.groupPubkeyHex) }
-                if (!stillExists) return@withLock
+                if (!stillExists) {
+                    logAndToast("Rename failed", appContext.getString(R.string.account_rename_failed), IllegalStateException("share removed"))
+                    return@withLock
+                }
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
                 try {
