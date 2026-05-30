@@ -83,6 +83,8 @@
     <string name="account_ok">OK</string>
     <string name="account_cancel">Cancel</string>
     <string name="account_rename_title">Rename Account</string>
+    <string name="account_rename_subtitle">Authenticate to rename account</string>
+    <string name="account_rename_save_subtitle">Authenticate again to save</string>
     <string name="account_rename_label">Account name</string>
     <string name="account_save">Save</string>
     <string name="account_row_active_cd">Active account</string>
