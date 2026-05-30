@@ -98,8 +98,9 @@ class NostrConnectActivity : FragmentActivity() {
         }
 
         val keystoreStorage = storage
-        if (keystoreStorage == null || keepApp?.isSigningKilled() == true) {
-            if (keepApp?.isSigningKilled() == true) {
+        val killed = keepApp?.isSigningKilled() == true
+        if (keystoreStorage == null || killed) {
+            if (killed) {
                 Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             }
             onComplete(false)

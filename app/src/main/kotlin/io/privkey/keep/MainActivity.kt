@@ -291,7 +291,7 @@ fun MainScreen(
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
-    var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(false)) }
+    var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
 
     val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
@@ -350,10 +350,10 @@ fun MainScreen(
                     appContext.getString(R.string.main_disable_kill_switch_subtitle),
                 ) ?: false
                 if (authenticated) {
-                    withContext(Dispatchers.IO) {
-                        runCatching { keepMobile.setKillSwitch(false) }
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.setKillSwitch(false) }.isSuccess
                     }
-                    killSwitchEnabled = false
+                    if (updated) killSwitchEnabled = false
                 }
             }
         }
@@ -465,10 +465,10 @@ fun MainScreen(
         KillSwitchConfirmDialog(
             onConfirm = {
                 coroutineScope.launch {
-                    withContext(Dispatchers.IO) {
-                        runCatching { keepMobile.setKillSwitch(true) }
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.setKillSwitch(true) }.isSuccess
                     }
-                    killSwitchEnabled = true
+                    if (updated) killSwitchEnabled = true
                     showKillSwitchConfirmDialog = false
                 }
             },

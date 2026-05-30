@@ -19,6 +19,6 @@ class KillSwitchStore(private val context: Context) {
     )
 
     fun markMigrated() {
-        prefs.edit().putBoolean(KEY_MIGRATED, true).commit()
+        prefs.edit().putBoolean(KEY_MIGRATED, true).remove(KEY_ENABLED).commit()
     }
 }

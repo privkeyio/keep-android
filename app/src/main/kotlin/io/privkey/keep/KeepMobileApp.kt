@@ -100,6 +100,7 @@ class KeepMobileApp : Application() {
             pinStore = PinStore(this)
             biometricTimeoutStore = BiometricTimeoutStore(this)
             keepMobile = newKeepMobile
+            migrateKillSwitch(newKeepMobile)
             nip55Handler = Nip55Handler(newKeepMobile)
             newKeepMobile.setStateCallback(object : KeepStateCallback {
                 override fun onStateChanged(state: KeepLiveState) {
@@ -190,13 +191,21 @@ class KeepMobileApp : Application() {
         return runCatching { mobile.getKillSwitch() }.getOrDefault(true)
     }
 
+    // Transfer the legacy SharedPreferences kill-switch state into the Rust core
+    // exactly once, at startup before any signing gate or FROST round can run, so a
+    // previously engaged kill switch survives an upgrade. Failure to read or write
+    // leaves the store un-migrated so it retries; it never marks migrated on failure.
     private fun migrateKillSwitch(mobile: KeepMobile) {
         val store = killSwitchStore ?: return
-        if (store.hasMigrated()) return
-        if (store.legacyEnabled()) {
-            runCatching { mobile.setKillSwitch(true) }.onFailure { return }
+        runCatching {
+            if (store.hasMigrated()) return
+            if (store.legacyEnabled()) {
+                mobile.setKillSwitch(true)
+            }
+            store.markMigrated()
+        }.onFailure { e ->
+            if (BuildConfig.DEBUG) Log.e(TAG, "Kill switch migration failed: ${e::class.simpleName}", e)
         }
-        store.markMigrated()
     }
 
     fun getSignPolicyStore(): SignPolicyStore? = signPolicyStore
@@ -322,10 +331,6 @@ class KeepMobileApp : Application() {
     }
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
-        // Mirror the kill switch into the Rust core before connecting so the FROST
-        // co-signer honors it (pre_sign reads this), consistent with the
-        // NIP-55/NIP-46 paths after a cold start or upgrade.
-        migrateKillSwitch(mobile)
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
