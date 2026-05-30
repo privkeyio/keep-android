@@ -164,7 +164,7 @@ tasks.register("verifyNoProprietaryDeps") {
 dependencies {
     val roomVersion = "2.8.4"
 
-    implementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -176,12 +176,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    implementation("net.zetetic:sqlcipher-android:4.15.0")
+    implementation("net.zetetic:sqlcipher-android:4.16.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0")
-    implementation("androidx.camera:camera-camera2:1.6.0")
-    implementation("androidx.camera:camera-lifecycle:1.6.0")
-    implementation("androidx.camera:camera-view:1.6.0")
+    implementation("androidx.camera:camera-camera2:1.6.1")
+    implementation("androidx.camera:camera-lifecycle:1.6.1")
+    implementation("androidx.camera:camera-view:1.6.1")
     implementation("com.google.zxing:core:3.5.4")
     implementation("net.java.dev.jna:jna:5.18.1@aar")
 
