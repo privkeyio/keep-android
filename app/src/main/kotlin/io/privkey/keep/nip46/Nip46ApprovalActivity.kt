@@ -19,7 +19,6 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,8 +39,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
     }
 
     private lateinit var biometricHelper: BiometricHelper
+    private val keepApp: KeepMobileApp? get() = application as? KeepMobileApp
     private var storage: AndroidKeystoreStorage? = null
-    private var killSwitchStore: KillSwitchStore? = null
     private var permissionStore: PermissionStore? = null
     private var requestId: String? = null
     private var clientPubkey: String? = null
@@ -58,7 +57,6 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val app = application as? KeepMobileApp
         biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         storage = app?.getStorage()
-        killSwitchStore = app?.getKillSwitchStore()
         permissionStore = app?.getPermissionStore()
 
         requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
@@ -85,7 +83,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
             }
         })
 
-        if (killSwitchStore?.isEnabled() == true) {
+        if (keepApp?.isSigningKilled() == true) {
             respond(false, null)
             return
         }
@@ -118,8 +116,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
         approveCompletionCallback = onComplete
 
         val keystoreStorage = storage
-        if (keystoreStorage == null || killSwitchStore?.isEnabled() == true) {
-            if (killSwitchStore?.isEnabled() == true) {
+        if (keystoreStorage == null || keepApp?.isSigningKilled() == true) {
+            if (keepApp?.isSigningKilled() == true) {
                 Toast.makeText(this, getString(io.privkey.keep.R.string.kill_switch_active_toast), Toast.LENGTH_SHORT).show()
             }
             respond(false, null)

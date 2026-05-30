@@ -16,7 +16,6 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
-import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
@@ -33,10 +32,10 @@ import java.util.UUID
 
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
+    private val keepApp: KeepMobileApp? get() = application as? KeepMobileApp
     private var handler: Nip55Handler? = null
     private var storage: AndroidKeystoreStorage? = null
     private var permissionStore: PermissionStore? = null
-    private var killSwitchStore: KillSwitchStore? = null
     private var pinStore: PinStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
     private var request: Nip55Request? = null
@@ -72,7 +71,6 @@ class Nip55Activity : FragmentActivity() {
         handler = app?.getNip55Handler()
         storage = app?.getStorage()
         permissionStore = app?.getPermissionStore()
-        killSwitchStore = app?.getKillSwitchStore()
         pinStore = app?.getPinStore()
         notificationManager = app?.getSigningNotificationManager()
         callerVerificationStore = app?.getCallerVerificationStore()
@@ -87,11 +85,11 @@ class Nip55Activity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (killSwitchStore?.isEnabled() == true) finishWithError("signing_disabled")
+        if (keepApp?.isSigningKilled() == true) finishWithError("signing_disabled")
     }
 
     private fun handleIntent(intent: Intent) {
-        if (killSwitchStore?.isEnabled() == true) return finishWithError("signing_disabled")
+        if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
 
         identifyCaller(intent)
@@ -300,7 +298,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleApprove(duration: PermissionDuration) {
-        if (killSwitchStore?.isEnabled() == true) {
+        if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
         val req = request ?: return

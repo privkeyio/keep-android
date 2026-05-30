@@ -229,9 +229,9 @@ class FrostSigningIntegrationTest {
 
     @Test
     fun killSwitch_isDisabledByDefault() {
-        val killSwitchStore = app!!.getKillSwitchStore()
-        assertNotNull(killSwitchStore)
-        assertFalse("Kill switch should be disabled by default", killSwitchStore!!.isEnabled())
+        val mobile = getKeepMobile()
+        assertNotNull(mobile)
+        assertFalse("Kill switch should be disabled by default", mobile!!.getKillSwitch())
     }
 
     @Test

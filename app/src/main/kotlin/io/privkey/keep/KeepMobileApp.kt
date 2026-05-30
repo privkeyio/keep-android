@@ -185,7 +185,19 @@ class KeepMobileApp : Application() {
 
     fun getStorage(): AndroidKeystoreStorage? = storage
 
-    fun getKillSwitchStore(): KillSwitchStore? = killSwitchStore
+    fun isSigningKilled(): Boolean {
+        val mobile = getKeepMobile() ?: return true
+        return runCatching { mobile.getKillSwitch() }.getOrDefault(true)
+    }
+
+    private fun migrateKillSwitch(mobile: KeepMobile) {
+        val store = killSwitchStore ?: return
+        if (store.hasMigrated()) return
+        if (store.legacyEnabled()) {
+            runCatching { mobile.setKillSwitch(true) }.onFailure { return }
+        }
+        store.markMigrated()
+    }
 
     fun getSignPolicyStore(): SignPolicyStore? = signPolicyStore
 
@@ -313,7 +325,7 @@ class KeepMobileApp : Application() {
         // Mirror the kill switch into the Rust core before connecting so the FROST
         // co-signer honors it (pre_sign reads this), consistent with the
         // NIP-55/NIP-46 paths after a cold start or upgrade.
-        runCatching { mobile.setKillSwitch(killSwitchStore?.isEnabled() == true) }
+        migrateKillSwitch(mobile)
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")

@@ -1,24 +1,24 @@
 package io.privkey.keep.storage
 
 import android.content.Context
-import android.content.SharedPreferences
 
 class KillSwitchStore(private val context: Context) {
 
     companion object {
         private const val PREFS_NAME = "keep_kill_switch"
         private const val KEY_ENABLED = "kill_switch_enabled"
+        private const val KEY_MIGRATED = "migrated_to_core"
     }
 
-    private val prefs: SharedPreferences = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
-    fun isEnabled(): Boolean {
-        return LegacyPrefsMigration.migrateBooleanIfNeeded(
-            context, PREFS_NAME, KEY_ENABLED, prefs, safeDefault = false
-        )
-    }
+    fun hasMigrated(): Boolean = prefs.getBoolean(KEY_MIGRATED, false)
 
-    fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()
+    fun legacyEnabled(): Boolean = LegacyPrefsMigration.migrateBooleanIfNeeded(
+        context, PREFS_NAME, KEY_ENABLED, prefs, safeDefault = false
+    )
+
+    fun markMigrated() {
+        prefs.edit().putBoolean(KEY_MIGRATED, true).commit()
     }
 }
