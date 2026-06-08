@@ -336,6 +336,14 @@ class BunkerService : Service() {
                 override fun onConnect(pubkey: String, name: String) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
                     logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, name.ifBlank { pubkey.take(8) }, "connected")
+                    val mobile = keepMobileRef ?: return
+                    runCatching {
+                        val config = mobile.getBunkerConfig()
+                        val pk = pubkey.lowercase()
+                        if (config.authorizedClients.none { it.lowercase() == pk }) {
+                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + pk))
+                        }
+                    }
                 }
             }
 
