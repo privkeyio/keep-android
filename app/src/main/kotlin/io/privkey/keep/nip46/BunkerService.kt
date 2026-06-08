@@ -326,6 +326,10 @@ class BunkerService : Service() {
                 override fun requestApproval(request: BunkerApprovalRequest): Boolean {
                     return handleApprovalRequest(request)
                 }
+
+                override fun onConnect(pubkey: String, name: String) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
+                }
             }
 
             val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
