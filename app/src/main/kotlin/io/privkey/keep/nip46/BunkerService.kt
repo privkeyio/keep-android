@@ -238,7 +238,7 @@ class BunkerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val authorizedClientsMutex = Mutex()
-    private val inMemoryAuthorizedClients = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
@@ -340,7 +340,7 @@ class BunkerService : Service() {
                 override fun onConnect(pubkey: String, name: String) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
                     logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, name.ifBlank { pubkey.take(8) }, "connected")
-                    authorizeClient(pubkey)
+                    authorizeClient(pubkey, name, safeRelays)
                 }
             }
 
@@ -452,18 +452,25 @@ class BunkerService : Service() {
         }
     }
 
-    private fun authorizeClient(pubkey: String) {
+    private fun authorizeClient(pubkey: String, name: String? = null, relays: List<String> = emptyList()) {
         val pk = pubkey.lowercase()
-        inMemoryAuthorizedClients.add(pk)
+        pendingAuthSaves.add(pk)
         serviceScope.launch(Dispatchers.IO) {
-            authorizedClientsMutex.withLock {
-                runCatching {
-                    val mobile = keepMobileRef ?: return@withLock
-                    val config = mobile.getBunkerConfig()
-                    if (config.authorizedClients.none { it.lowercase() == pk }) {
-                        mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + pk))
+            try {
+                authorizedClientsMutex.withLock {
+                    runCatching {
+                        val mobile = keepMobileRef ?: return@runCatching
+                        val config = mobile.getBunkerConfig()
+                        if (config.authorizedClients.none { it.lowercase() == pk }) {
+                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + pk))
+                        }
                     }
                 }
+                if (name != null) {
+                    runCatching { Nip46ClientStore.saveClient(this@BunkerService, pk, name, relays) }
+                }
+            } finally {
+                pendingAuthSaves.remove(pk)
             }
         }
     }
@@ -490,7 +497,7 @@ class BunkerService : Service() {
         }
 
         val mobile = keepMobileRef
-        val isAuthorized = inMemoryAuthorizedClients.contains(clientPubkey.lowercase()) || (mobile != null && runCatching {
+        val isAuthorized = pendingAuthSaves.contains(clientPubkey.lowercase()) || (mobile != null && runCatching {
             mobile.getBunkerConfig().authorizedClients.any { it.lowercase() == clientPubkey.lowercase() }
         }.getOrDefault(false))
         val isConnectRequest = request.method == "connect"

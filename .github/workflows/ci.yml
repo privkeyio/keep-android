@@ -170,7 +170,7 @@ jobs:
 
       - name: Free up disk space for emulator
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache/CodeQL || true
           sudo docker image prune --all --force || true
           df -h /
 
