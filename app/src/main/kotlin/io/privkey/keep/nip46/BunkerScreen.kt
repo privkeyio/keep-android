@@ -208,8 +208,9 @@ fun BunkerScreen(
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            val current = keepMobile.getBunkerConfig()
-                            keepMobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                            BunkerConfigStore.update(keepMobile) { current ->
+                                BunkerConfigInfo(enabled, current.authorizedClients)
+                            }
                         }
                     }.onSuccess {
                         onToggleBunker(enabled)
@@ -241,13 +242,14 @@ fun BunkerScreen(
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            val config = keepMobile.getBunkerConfig()
-                            val filtered = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
-                            keepMobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, filtered))
-                            filtered
+                            Nip46ClientStore.addToDenylist(context, pubkey)
+                            BunkerConfigStore.update(keepMobile) { config ->
+                                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
+                            }
                         }
-                    }.onSuccess { updated ->
-                        authorizedClients = updated.toSet()
+                    }.onSuccess { saved ->
+                        BunkerService.forgetPendingAuth(pubkey)
+                        authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
@@ -282,11 +284,16 @@ fun BunkerScreen(
         RevokeAllClientsDialog(
             onConfirm = {
                 scope.launch {
+                    val revoked = authorizedClients
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            keepMobile.saveBunkerConfig(BunkerConfigInfo(keepMobile.getBunkerConfig().enabled, emptyList()))
+                            Nip46ClientStore.addAllToDenylist(context, revoked)
+                            BunkerConfigStore.update(keepMobile) { config ->
+                                BunkerConfigInfo(config.enabled, emptyList())
+                            }
                         }
                     }.onSuccess {
+                        revoked.forEach { BunkerService.forgetPendingAuth(it) }
                         authorizedClients = emptySet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {

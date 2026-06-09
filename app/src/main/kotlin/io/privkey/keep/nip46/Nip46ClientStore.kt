@@ -13,6 +13,9 @@ object Nip46ClientStore {
 
     private const val PREFS_NAME = "keep_nip46_clients"
     private const val KEY_CLIENTS = "clients"
+    private const val KEY_DENYLIST = "denylist"
+
+    private val lock = Any()
 
     @Volatile
     private var cachedPrefs: SharedPreferences? = null
@@ -34,7 +37,7 @@ object Nip46ClientStore {
         }
     }
 
-    fun saveClient(context: Context, pubkey: String, name: String, relays: List<String>) {
+    fun saveClient(context: Context, pubkey: String, name: String, relays: List<String>) = synchronized(lock) {
         val normalizedPubkey = pubkey.lowercase()
         val clients = getClients(context).toMutableMap()
         clients[normalizedPubkey] = Nip46ClientInfo(
@@ -72,10 +75,42 @@ object Nip46ClientStore {
     fun getClient(context: Context, pubkey: String): Nip46ClientInfo? =
         getClients(context)[pubkey.lowercase()]
 
-    fun removeClient(context: Context, pubkey: String) {
+    fun removeClient(context: Context, pubkey: String) = synchronized(lock) {
         val clients = getClients(context).toMutableMap()
         clients.remove(pubkey.lowercase())
         saveClients(context, clients)
+    }
+
+    fun getDenylist(context: Context): Set<String> {
+        val stored = getPrefs(context).getString(KEY_DENYLIST, null) ?: return emptySet()
+        return runCatching {
+            val json = JSONArray(stored)
+            (0 until json.length()).map { json.getString(it) }.toSet()
+        }.getOrDefault(emptySet())
+    }
+
+    fun isDenylisted(context: Context, pubkey: String): Boolean =
+        getDenylist(context).contains(pubkey.lowercase())
+
+    fun addToDenylist(context: Context, pubkey: String) = synchronized(lock) {
+        val current = getDenylist(context).toMutableSet()
+        if (current.add(pubkey.lowercase())) saveDenylist(context, current)
+    }
+
+    fun addAllToDenylist(context: Context, pubkeys: Collection<String>) = synchronized(lock) {
+        val current = getDenylist(context).toMutableSet()
+        if (current.addAll(pubkeys.map { it.lowercase() })) saveDenylist(context, current)
+    }
+
+    fun removeFromDenylist(context: Context, pubkey: String) = synchronized(lock) {
+        val current = getDenylist(context).toMutableSet()
+        if (current.remove(pubkey.lowercase())) saveDenylist(context, current)
+    }
+
+    private fun saveDenylist(context: Context, pubkeys: Set<String>) {
+        val json = JSONArray()
+        pubkeys.forEach { json.put(it) }
+        getPrefs(context).edit().putString(KEY_DENYLIST, json.toString()).apply()
     }
 
     private fun saveClients(context: Context, clients: Map<String, Nip46ClientInfo>) {

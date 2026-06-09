@@ -90,6 +90,14 @@ internal fun formatNip46Method(method: String): String = when (method) {
     else -> method
 }
 
+internal fun sanitizeDisplayName(name: String): String {
+    return name
+        .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "")
+        .replace(Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
+        .take(50)
+        .ifBlank { "Unknown App" }
+}
+
 internal fun mapMethodToNip55RequestType(method: String): Nip55RequestType? = when (method) {
     "sign_event" -> Nip55RequestType.SIGN_EVENT
     "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT

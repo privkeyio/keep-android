@@ -66,6 +66,7 @@ class BunkerService : Service() {
         private const val GLOBAL_RATE_LIMIT_WINDOW_MS = 60_000L
         private const val GLOBAL_MAX_REQUESTS_PER_WINDOW = 100
         private const val MAX_TRACKED_CLIENTS = 1000
+        internal const val MAX_AUTHORIZED_CLIENTS = 100
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
@@ -89,6 +90,10 @@ class BunkerService : Service() {
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
+
+        internal fun forgetPendingAuth(pubkey: String) {
+            current()?.pendingAuthSaves?.remove(pubkey.lowercase())
+        }
 
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
             return pendingNostrConnectRequests.offer(request)
@@ -235,6 +240,7 @@ class BunkerService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
@@ -335,7 +341,9 @@ class BunkerService : Service() {
 
                 override fun onConnect(pubkey: String, name: String) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
-                    logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, name.ifBlank { pubkey.take(8) }, "connected")
+                    val safeName = sanitizeDisplayName(name)
+                    logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, safeName.ifBlank { pubkey.take(8) }, "connected")
+                    authorizeClient(pubkey, safeName, safeRelays)
                 }
             }
 
@@ -447,6 +455,54 @@ class BunkerService : Service() {
         }
     }
 
+    private fun authorizeClient(
+        pubkey: String,
+        name: String? = null,
+        relays: List<String> = emptyList(),
+        clearDenylist: Boolean = false
+    ) {
+        val pk = pubkey.lowercase()
+        if (!HEX_PUBKEY_REGEX.matches(pk)) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid pubkey in authorizeClient")
+            return
+        }
+        pendingAuthSaves.add(pk)
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                if (clearDenylist) {
+                    runCatching { Nip46ClientStore.removeFromDenylist(this@BunkerService, pk) }
+                } else if (runCatching { Nip46ClientStore.isDenylisted(this@BunkerService, pk) }.getOrDefault(true)) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring connect from revoked client")
+                    return@launch
+                }
+                val mobile = keepMobileRef
+                val evicted = mutableListOf<String>()
+                if (mobile != null) {
+                    runCatching {
+                        BunkerConfigStore.update(mobile) { config ->
+                            if (config.authorizedClients.none { it.lowercase() == pk }) {
+                                val combined = config.authorizedClients + pk
+                                val capped = combined.takeLast(MAX_AUTHORIZED_CLIENTS)
+                                evicted.addAll(combined.dropLast(capped.size))
+                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
+                            } else {
+                                config
+                            }
+                        }
+                    }.onFailure {
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
+                    }
+                }
+                evicted.forEach { runCatching { Nip46ClientStore.removeClient(this@BunkerService, it) } }
+                if (name != null) {
+                    runCatching { Nip46ClientStore.saveClient(this@BunkerService, pk, sanitizeDisplayName(name), relays) }
+                }
+            } finally {
+                pendingAuthSaves.remove(pk)
+            }
+        }
+    }
+
     private fun handleApprovalRequest(request: BunkerApprovalRequest): Boolean {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread")
@@ -469,9 +525,11 @@ class BunkerService : Service() {
         }
 
         val mobile = keepMobileRef
-        val isAuthorized = mobile != null && runCatching {
-            mobile.getBunkerConfig().authorizedClients.any { it.lowercase() == clientPubkey.lowercase() }
-        }.getOrDefault(false)
+        val pk = clientPubkey.lowercase()
+        val denylisted = runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)
+        val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || (mobile != null && runCatching {
+            mobile.getBunkerConfig().authorizedClients.any { it.lowercase() == pk }
+        }.getOrDefault(false)))
         val isConnectRequest = request.method == "connect"
 
         if (!isAuthorized && !isConnectRequest) {
@@ -526,13 +584,7 @@ class BunkerService : Service() {
 
         val result = approvedRef.get() ?: false
         if (result && isConnectRequest && mobile != null) {
-            runCatching {
-                val config = mobile.getBunkerConfig()
-                if (!config.authorizedClients.any { it.lowercase() == clientPubkey.lowercase() }) {
-                    val updated = config.authorizedClients + clientPubkey.lowercase()
-                    mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
-                }
-            }
+            authorizeClient(clientPubkey, clearDenylist = true)
             if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
         }
 
