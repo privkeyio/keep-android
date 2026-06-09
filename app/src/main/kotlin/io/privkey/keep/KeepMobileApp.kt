@@ -76,6 +76,7 @@ class KeepMobileApp : Application() {
     private val initMutex = Mutex()
     private val initDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val bunkerToggleDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     var liveState: KeepLiveState? by mutableStateOf(null)
@@ -320,7 +321,7 @@ class KeepMobileApp : Application() {
 
     fun updateBunkerService(enabled: Boolean) {
         val mobile = keepMobile ?: return
-        applicationScope.launch {
+        applicationScope.launch(bunkerToggleDispatcher) {
             BunkerConfigStore.withLock {
                 runCatching {
                     val current = mobile.getBunkerConfig()

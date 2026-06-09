@@ -242,11 +242,13 @@ fun BunkerScreen(
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
+                            Nip46ClientStore.addToDenylist(context, pubkey)
                             BunkerConfigStore.update(keepMobile) { config ->
                                 BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
                             }
                         }
                     }.onSuccess { saved ->
+                        BunkerService.forgetPendingAuth(pubkey)
                         authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
@@ -282,13 +284,16 @@ fun BunkerScreen(
         RevokeAllClientsDialog(
             onConfirm = {
                 scope.launch {
+                    val revoked = authorizedClients
                     runCatching {
                         withContext(Dispatchers.IO) {
+                            Nip46ClientStore.addAllToDenylist(context, revoked)
                             BunkerConfigStore.update(keepMobile) { config ->
                                 BunkerConfigInfo(config.enabled, emptyList())
                             }
                         }
                     }.onSuccess {
+                        revoked.forEach { BunkerService.forgetPendingAuth(it) }
                         authorizedClients = emptySet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {

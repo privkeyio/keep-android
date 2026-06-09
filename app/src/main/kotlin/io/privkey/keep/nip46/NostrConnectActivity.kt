@@ -158,15 +158,22 @@ class NostrConnectActivity : FragmentActivity() {
                 queued = true
 
                 withContext(Dispatchers.IO) {
+                    val evicted = mutableListOf<String>()
                     if (mobile != null) {
                         BunkerConfigStore.update(mobile) { config ->
                             if (!config.authorizedClients.any { it.lowercase() == request.clientPubkey.lowercase() }) {
-                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + request.clientPubkey.lowercase())
+                                val combined = config.authorizedClients + request.clientPubkey.lowercase()
+                                val capped = combined.takeLast(BunkerService.MAX_AUTHORIZED_CLIENTS)
+                                evicted.addAll(combined.dropLast(capped.size))
+                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
                             } else {
                                 config
                             }
                         }
                     }
+                    evicted.forEach { runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, it) } }
+
+                    Nip46ClientStore.removeFromDenylist(this@NostrConnectActivity, request.clientPubkey)
 
                     Nip46ClientStore.saveClient(
                         this@NostrConnectActivity,
@@ -202,6 +209,8 @@ class NostrConnectActivity : FragmentActivity() {
                         }
                     }
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
+                    runCatching { Nip46ClientStore.addToDenylist(this@NostrConnectActivity, request.clientPubkey) }
+                    BunkerService.forgetPendingAuth(request.clientPubkey)
                     if (permissionStore != null) {
                         val callerPackage = "nip46:${request.clientPubkey}"
                         for (perm in request.permissions) {
@@ -270,14 +279,6 @@ class NostrConnectActivity : FragmentActivity() {
                 if (kind != null && (kind < 0 || kind > 65535)) return@mapNotNull null
                 RequestedPermission(type, kind)
             }
-        }
-
-        private fun sanitizeDisplayName(name: String): String {
-            return name
-                .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "")
-                .replace(Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
-                .take(50)
-                .ifBlank { "Unknown App" }
         }
 
         private fun mapPermissionToRequestType(type: String): Nip55RequestType? =

@@ -26,6 +26,7 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip46.BunkerConfigStore
+import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip46.Nip46ClientStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.BunkerConfigInfo
@@ -371,6 +372,8 @@ private fun AppPermissionsListContent(
 }
 
 private suspend fun revokeNip46Client(context: android.content.Context, pubkey: String) {
+    runCatching { Nip46ClientStore.addToDenylist(context, pubkey) }
+        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to denylist NIP-46 client: ${it::class.simpleName}") }
     runCatching { Nip46ClientStore.removeClient(context, pubkey) }
         .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
     runCatching {
@@ -381,6 +384,7 @@ private suspend fun revokeNip46Client(context: android.content.Context, pubkey: 
             }
         }
     }.onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke bunker client: ${it::class.simpleName}") }
+    BunkerService.forgetPendingAuth(pubkey)
 }
 
 @Composable
