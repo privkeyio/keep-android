@@ -158,36 +158,36 @@ fun BiometricTimeoutCard(
             title = stringResource(R.string.settings_biometric_reauth_title),
             subtitle = stringResource(R.string.settings_biometric_reauth_subtitle),
             trailing = {
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = it }
-            ) {
-                OutlinedTextField(
-                    value = BiometricTimeoutStore.formatTimeout(currentTimeout),
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                    modifier = Modifier
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                        .width(140.dp),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    singleLine = true
-                )
-                ExposedDropdownMenu(
+                ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onDismissRequest = { expanded = false }
+                    onExpandedChange = { expanded = it }
                 ) {
-                    BiometricTimeoutStore.TIMEOUT_OPTIONS.forEach { timeout ->
-                        DropdownMenuItem(
-                            text = { Text(BiometricTimeoutStore.formatTimeout(timeout)) },
-                            onClick = {
-                                onTimeoutChanged(timeout)
-                                expanded = false
-                            }
-                        )
+                    OutlinedTextField(
+                        value = BiometricTimeoutStore.formatTimeout(currentTimeout),
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            .width(140.dp),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        BiometricTimeoutStore.TIMEOUT_OPTIONS.forEach { timeout ->
+                            DropdownMenuItem(
+                                text = { Text(BiometricTimeoutStore.formatTimeout(timeout)) },
+                                onClick = {
+                                    onTimeoutChanged(timeout)
+                                    expanded = false
+                                }
+                            )
+                        }
                     }
                 }
-            }
             }
         )
     }
