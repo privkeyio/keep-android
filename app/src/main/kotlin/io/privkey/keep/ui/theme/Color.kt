@@ -19,10 +19,6 @@ val KeepError = Color(0xFFE5534B)
 // Additive semantic tokens (derived from existing hues, low chroma on dark).
 // These do not change any existing brand color; they fill in container slots and
 // give shared components (status dots, badges, banners) consistent surfaces.
-val KeepSuccess = KeepGreen
-val KeepSuccessContainer = Color(0xFF12251A)
-val KeepInfo = Color(0xFF58A6FF)
-val KeepInfoContainer = Color(0xFF12243A)
 val KeepWarnContainer = Color(0xFF2A2410)
 val KeepErrorContainer = Color(0xFF2A1513)
 

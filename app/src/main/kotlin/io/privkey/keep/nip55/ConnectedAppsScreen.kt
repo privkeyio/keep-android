@@ -166,7 +166,8 @@ private fun ConnectedAppItem(
             AppAvatar(
                 key = app.packageName,
                 name = appLabel,
-                drawable = appIcon
+                drawable = appIcon,
+                unverified = !isVerified
             )
 
             Spacer(modifier = Modifier.width(16.dp))

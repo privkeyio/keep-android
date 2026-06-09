@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,9 +18,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import io.privkey.keep.R
 import io.privkey.keep.ui.theme.Dimens
 
 // Curated, on-brand avatar backgrounds (greens/teals/blues/neutrals that read on
@@ -37,31 +43,52 @@ fun AppAvatar(
     name: String?,
     modifier: Modifier = Modifier,
     drawable: Drawable? = null,
+    unverified: Boolean = false,
     size: Dp = Dimens.avatarSize
 ) {
     val shape = RoundedCornerShape(8.dp)
-    if (drawable != null) {
-        val bitmap = remember(drawable) { drawable.toBitmap().asImageBitmap() }
-        Image(
-            bitmap = bitmap,
-            contentDescription = null,
-            modifier = modifier
-                .size(size)
-                .clip(shape)
-        )
-    } else {
-        Box(
-            modifier = modifier
-                .size(size)
-                .clip(shape)
-                .background(avatarColor(key)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = monogram(name, key),
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White
+    val sizePx = with(LocalDensity.current) { size.roundToPx() }
+    when {
+        drawable != null -> {
+            val bitmap = remember(drawable, sizePx) { drawable.toBitmap(sizePx, sizePx).asImageBitmap() }
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                modifier = modifier
+                    .size(size)
+                    .clip(shape)
             )
+        }
+        unverified -> {
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .clip(shape)
+                    .background(MaterialTheme.colorScheme.errorContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = stringResource(R.string.connected_app_unverified),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(size * 0.6f)
+                )
+            }
+        }
+        else -> {
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .clip(shape)
+                    .background(avatarColor(key)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = monogram(name, key),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
+            }
         }
     }
 }

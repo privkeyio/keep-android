@@ -11,16 +11,10 @@ object Dimens {
     val space12 = 12.dp
     val space16 = 16.dp
     val space24 = 24.dp
-    val space32 = 32.dp
 
-    val screenPadding = 16.dp
     val cardPadding = 16.dp
-    val cardInnerGap = 12.dp
-    val sectionGap = 16.dp
 
     val avatarSize = 48.dp
-    val avatarSmall = 32.dp
-    val iconButton = 40.dp
 
     val cardBorderWidth = 1.dp
     val cardElevation = 0.dp

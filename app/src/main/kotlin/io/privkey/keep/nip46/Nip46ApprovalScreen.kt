@@ -44,6 +44,7 @@ fun Nip46ApprovalScreen(
     val sanitizedContent = remember(eventContent) {
         eventContent?.let { sanitizeDisplayContent(it) }
     }
+    val sanitizedAppName = remember(appName) { sanitizeDisplayContent(appName) }
 
     Column(
         modifier = Modifier
@@ -54,7 +55,7 @@ fun Nip46ApprovalScreen(
     ) {
         AppAvatar(
             key = appPubkey,
-            name = appName,
+            name = sanitizedAppName,
             size = 56.dp
         )
 
@@ -68,7 +69,7 @@ fun Nip46ApprovalScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = stringResource(R.string.connections_nip46_from, appName),
+            text = stringResource(R.string.connections_nip46_from, sanitizedAppName),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -128,6 +129,7 @@ fun Nip46ApprovalScreen(
                 CopyableValue(
                     label = stringResource(R.string.connections_nip46_app_public_key),
                     value = appPubkey,
+                    sensitive = false,
                     displayValue = formatPubkeyDisplay(appPubkey),
                     mono = true
                 )

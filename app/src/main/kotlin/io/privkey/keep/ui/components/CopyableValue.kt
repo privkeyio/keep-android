@@ -30,8 +30,8 @@ import io.privkey.keep.ui.theme.KeepMono
 fun CopyableValue(
     label: String,
     value: String,
+    sensitive: Boolean,
     modifier: Modifier = Modifier,
-    sensitive: Boolean = false,
     displayValue: String = value,
     mono: Boolean = false
 ) {
