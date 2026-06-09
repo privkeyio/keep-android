@@ -44,6 +44,9 @@ import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.ConnectedAppsScreen
 import io.privkey.keep.nip55.EventLogScreen
+import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.ui.components.KeepListRow
+import io.privkey.keep.ui.components.KeepRowAction
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SignPolicyScreen
@@ -1478,44 +1481,23 @@ private fun SettingsTab(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SecuritySettingsCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.main_security_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.main_security_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(stringResource(R.string.main_manage), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        }
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.main_security_title),
+            subtitle = stringResource(R.string.main_security_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.main_manage)) }
+        )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SigningHistoryCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.main_signing_history_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.main_signing_history_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(stringResource(R.string.main_view), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        }
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.main_signing_history_title),
+            subtitle = stringResource(R.string.main_signing_history_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.main_view)) }
+        )
     }
 }
 
