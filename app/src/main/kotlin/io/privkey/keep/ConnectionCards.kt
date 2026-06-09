@@ -412,15 +412,17 @@ fun Nip55SettingsCard(
             ) {
                 OutlinedButton(
                     onClick = onPermissionsClick,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text(stringResource(R.string.connections_nip55_permissions))
+                    Text(stringResource(R.string.connections_nip55_permissions), maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onHistoryClick,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text(stringResource(R.string.connections_nip55_history))
+                    Text(stringResource(R.string.connections_nip55_history), maxLines = 1)
                 }
             }
         }
