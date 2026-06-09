@@ -246,8 +246,8 @@ fun BunkerScreen(
                                 BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
                             }
                         }
-                    }.onSuccess {
-                        authorizedClients = authorizedClients.filter { it.lowercase() != pubkey.lowercase() }.toSet()
+                    }.onSuccess { saved ->
+                        authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()

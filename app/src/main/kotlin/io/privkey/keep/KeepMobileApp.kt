@@ -321,16 +321,17 @@ class KeepMobileApp : Application() {
     fun updateBunkerService(enabled: Boolean) {
         val mobile = keepMobile ?: return
         applicationScope.launch {
-            runCatching {
-                BunkerConfigStore.update(mobile) { current ->
-                    BunkerConfigInfo(enabled, current.authorizedClients)
+            BunkerConfigStore.withLock {
+                runCatching {
+                    val current = mobile.getBunkerConfig()
+                    mobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
+                    return@withLock
                 }
-            }.onFailure {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
-                return@launch
+                val action = if (enabled) BunkerService::start else BunkerService::stop
+                action(this@KeepMobileApp)
             }
-            val action = if (enabled) BunkerService::start else BunkerService::stop
-            action(this@KeepMobileApp)
         }
     }
 
