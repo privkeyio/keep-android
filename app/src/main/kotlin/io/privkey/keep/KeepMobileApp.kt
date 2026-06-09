@@ -206,7 +206,7 @@ class KeepMobileApp : Application() {
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
             autoSigningSafeguards = AutoSigningSafeguards(this)
-            val eventLog = EventLogStore(db)
+            val eventLog = EventLogStore.getInstance(db)
             eventLogStore = eventLog
             initializeSigningAuditLog(db)
             applicationScope.launch {

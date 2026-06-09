@@ -39,9 +39,9 @@ fun EventLogScreen(
     fun loadLogs(reset: Boolean = false) {
         coroutineScope.launch {
             if (reset) isLoading = true else isLoadingMore = true
-            val offset = if (reset) 0 else logs.size
+            val beforeId = if (reset) Long.MAX_VALUE else (logs.lastOrNull()?.id ?: Long.MAX_VALUE)
             val newLogs = withContext(Dispatchers.IO) {
-                runCatching { eventLogStore.getPage(PAGE_SIZE, offset) }.getOrDefault(emptyList())
+                runCatching { eventLogStore.getPageBefore(beforeId, PAGE_SIZE) }.getOrDefault(emptyList())
             }
             logs = if (reset) newLogs else logs + newLogs
             hasMore = newLogs.size == PAGE_SIZE

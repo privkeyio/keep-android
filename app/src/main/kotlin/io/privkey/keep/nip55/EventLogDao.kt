@@ -9,8 +9,8 @@ interface EventLogDao {
     @Insert
     suspend fun insert(entry: EventLogEntry): Long
 
-    @Query("SELECT * FROM event_log ORDER BY id DESC LIMIT :limit OFFSET :offset")
-    suspend fun getPage(limit: Int, offset: Int): List<EventLogEntry>
+    @Query("SELECT * FROM event_log WHERE id < :beforeId ORDER BY id DESC LIMIT :limit")
+    suspend fun getPageBefore(beforeId: Long, limit: Int): List<EventLogEntry>
 
     @Query("SELECT * FROM event_log ORDER BY id DESC LIMIT :limit")
     suspend fun getRecent(limit: Int): List<EventLogEntry>

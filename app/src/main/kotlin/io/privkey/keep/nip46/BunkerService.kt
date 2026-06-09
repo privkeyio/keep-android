@@ -276,7 +276,7 @@ class BunkerService : Service() {
 
         val db = Nip55Database.getInstance(this)
         permissionStore = PermissionStore(db)
-        eventLogStore = EventLogStore(db)
+        eventLogStore = EventLogStore.getInstance(db)
 
         val relays = runCatching { keepMobile.getRelayConfig(null).bunkerRelays }.getOrDefault(emptyList())
         if (relays.isEmpty()) {
@@ -335,18 +335,7 @@ class BunkerService : Service() {
 
                 override fun onConnect(pubkey: String, name: String) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
-                    eventLogStore?.let { activityLog ->
-                        serviceScope.launch {
-                            runCatching {
-                                activityLog.log(
-                                    category = EventLogCategory.BUNKER,
-                                    level = EventLogLevel.INFO,
-                                    source = name.ifBlank { pubkey.take(8) },
-                                    message = "connected"
-                                )
-                            }
-                        }
-                    }
+                    logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, name.ifBlank { pubkey.take(8) }, "connected")
                 }
             }
 
@@ -422,23 +411,24 @@ class BunkerService : Service() {
         }
     }
 
-    private fun logBunkerEvent(event: BunkerLogEvent) {
-        eventLogStore?.let { activityLog ->
-            serviceScope.launch {
-                runCatching {
-                    val message = buildString {
-                        append(event.action)
-                        event.detail?.takeIf { it.isNotBlank() }?.let { append(": "); append(it) }
-                    }
-                    activityLog.log(
-                        category = EventLogCategory.BUNKER,
-                        level = if (event.success) EventLogLevel.INFO else EventLogLevel.WARN,
-                        source = event.app,
-                        message = message
-                    )
-                }
-            }
+    private fun logActivity(category: EventLogCategory, level: EventLogLevel, source: String, message: String) {
+        val activityLog = eventLogStore ?: return
+        serviceScope.launch {
+            runCatching { activityLog.log(category, level, source, message) }
         }
+    }
+
+    private fun logBunkerEvent(event: BunkerLogEvent) {
+        val message = buildString {
+            append(event.action)
+            event.detail?.takeIf { it.isNotBlank() }?.let { append(": "); append(it) }
+        }
+        logActivity(
+            EventLogCategory.BUNKER,
+            if (event.success) EventLogLevel.INFO else EventLogLevel.WARN,
+            event.app,
+            message
+        )
 
         val store = permissionStore ?: return
         val requestType = mapMethodToNip55RequestType(event.action) ?: return

@@ -12,8 +12,8 @@ class EventLogStore(database: Nip55Database) {
                 timestamp = System.currentTimeMillis(),
                 category = category.name,
                 level = level.name,
-                source = source.take(MAX_SOURCE_LEN),
-                message = message.take(MAX_MESSAGE_LEN)
+                source = sanitize(source).take(MAX_SOURCE_LEN),
+                message = sanitize(message).take(MAX_MESSAGE_LEN)
             )
         )
         if (insertCounter.incrementAndGet() % TRIM_EVERY == 0) {
@@ -21,8 +21,8 @@ class EventLogStore(database: Nip55Database) {
         }
     }
 
-    suspend fun getPage(limit: Int, offset: Int): List<EventLogEntry> =
-        dao.getPage(limit.coerceIn(1, 100), offset.coerceAtLeast(0))
+    suspend fun getPageBefore(beforeId: Long, limit: Int): List<EventLogEntry> =
+        dao.getPageBefore(beforeId, limit.coerceIn(1, 100))
 
     suspend fun getRecent(limit: Int): List<EventLogEntry> =
         dao.getRecent(limit.coerceAtLeast(0))
@@ -38,5 +38,17 @@ class EventLogStore(database: Nip55Database) {
         private const val TRIM_EVERY = 64
         private const val MAX_SOURCE_LEN = 256
         private const val MAX_MESSAGE_LEN = 1024
+
+        private val CONTROL_CHARS = Regex("[\\u0000-\\u001F\\u007F]")
+
+        private fun sanitize(value: String): String = CONTROL_CHARS.replace(value, " ")
+
+        @Volatile
+        private var INSTANCE: EventLogStore? = null
+
+        fun getInstance(database: Nip55Database): EventLogStore =
+            INSTANCE ?: synchronized(this) {
+                INSTANCE ?: EventLogStore(database).also { INSTANCE = it }
+            }
     }
 }
