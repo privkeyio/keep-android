@@ -11,6 +11,9 @@ import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
+import io.privkey.keep.nip55.EventLogCategory
+import io.privkey.keep.nip55.EventLogLevel
+import io.privkey.keep.nip55.EventLogStore
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.KeepAliveService
@@ -25,10 +28,12 @@ import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.BunkerConfigInfo
+import io.privkey.keep.uniffi.ConnectionStatus
 import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepStateCallback
 import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.SigningAuditLog
@@ -45,6 +50,7 @@ import java.util.UUID
 import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
+private const val EVENT_LOG_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
 
 class KeepMobileApp : Application() {
     private var keepMobile: KeepMobile? = null
@@ -60,6 +66,7 @@ class KeepMobileApp : Application() {
     private var callerVerificationStore: CallerVerificationStore? = null
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
     private var signingAuditLog: SigningAuditLog? = null
+    private var eventLogStore: EventLogStore? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var signingNotificationManager: SigningNotificationManager? = null
     private var initError: String? = null
@@ -78,6 +85,11 @@ class KeepMobileApp : Application() {
 
     @Volatile
     private var killSwitchMigrationFailed: Boolean = false
+
+    // Activity-log dedup state. Read/written only inside the state-callback's
+    // mainHandler.post block, so it is effectively single-threaded.
+    private var lastConnStatusKey: String? = null
+    private val lastPeerStatus = HashMap<UShort, PeerStatus>()
 
     override fun onCreate() {
         super.onCreate()
@@ -113,12 +125,63 @@ class KeepMobileApp : Application() {
                             applicationContext,
                             state.pendingRequests,
                         )
+                        captureActivityEvents(state)
                     }
                 }
             })
         }.onFailure { e ->
             initError = getString(R.string.keep_mobile_init_failed_error)
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize KeepMobile: ${e::class.simpleName}", e)
+        }
+    }
+
+    // Called only on the main thread (from the state callback's mainHandler.post),
+    // so the dedup fields need no synchronization. Logs relay status only on
+    // transitions and peers only on per-share status changes; the first callback
+    // seeds state without emitting to avoid a startup burst.
+    private fun captureActivityEvents(state: KeepLiveState) {
+        val statusKey = connectionStatusKey(state.connectionStatus)
+        if (statusKey != lastConnStatusKey) {
+            val previous = lastConnStatusKey
+            lastConnStatusKey = statusKey
+            if (previous != null || state.connectionStatus !is ConnectionStatus.Disconnected) {
+                val (level, source, message) = connectionEventDetails(state.connectionStatus)
+                logActivityEvent(EventLogCategory.RELAY, level, source, message)
+            }
+        }
+
+        val seeded = lastPeerStatus.isNotEmpty()
+        for (peer in state.peers) {
+            val prev = lastPeerStatus[peer.shareIndex]
+            if (prev != peer.status) {
+                lastPeerStatus[peer.shareIndex] = peer.status
+                if (seeded || prev != null) {
+                    val label = peer.name?.takeIf { it.isNotBlank() } ?: "share #${peer.shareIndex}"
+                    val level = if (peer.status == PeerStatus.OFFLINE) EventLogLevel.WARN else EventLogLevel.INFO
+                    logActivityEvent(EventLogCategory.PEER, level, label, "peer ${peer.status.name.lowercase()}")
+                }
+            }
+        }
+    }
+
+    private fun connectionStatusKey(status: ConnectionStatus): String = when (status) {
+        is ConnectionStatus.Disconnected -> "disconnected"
+        is ConnectionStatus.Connecting -> "connecting"
+        is ConnectionStatus.Connected -> "connected"
+        is ConnectionStatus.Error -> "error:${status.message}"
+    }
+
+    private fun connectionEventDetails(status: ConnectionStatus): Triple<EventLogLevel, String, String> = when (status) {
+        is ConnectionStatus.Disconnected -> Triple(EventLogLevel.WARN, "", "disconnected")
+        is ConnectionStatus.Connecting -> Triple(EventLogLevel.INFO, "", "connecting")
+        is ConnectionStatus.Connected -> Triple(EventLogLevel.INFO, "", "connected")
+        is ConnectionStatus.Error -> Triple(EventLogLevel.ERROR, "", status.message)
+    }
+
+    private fun logActivityEvent(category: EventLogCategory, level: EventLogLevel, source: String, message: String) {
+        val store = eventLogStore ?: return
+        applicationScope.launch {
+            runCatching { store.log(category, level, source, message) }
         }
     }
 
@@ -143,10 +206,15 @@ class KeepMobileApp : Application() {
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
             autoSigningSafeguards = AutoSigningSafeguards(this)
+            val eventLog = EventLogStore(db)
+            eventLogStore = eventLog
             initializeSigningAuditLog(db)
             applicationScope.launch {
                 store.cleanupExpired()
                 callerVerificationStore?.cleanupExpiredNonces()
+                runCatching {
+                    eventLog.cleanupOld(System.currentTimeMillis() - EVENT_LOG_MAX_AGE_MS)
+                }
             }
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
@@ -240,6 +308,8 @@ class KeepMobileApp : Application() {
     fun getAutoSigningSafeguards(): AutoSigningSafeguards? = autoSigningSafeguards
 
     fun getSigningAuditLog(): SigningAuditLog? = signingAuditLog
+
+    fun getEventLogStore(): EventLogStore? = eventLogStore
 
     fun getSigningNotificationManager(): SigningNotificationManager? = signingNotificationManager
 
@@ -373,6 +443,7 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
+            runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
         }
     }
 

@@ -41,6 +41,20 @@
     <string name="settings_tor_activate">Activate</string>
     <string name="settings_tor_port_range_error">Port must be 1-65535</string>
 
+    <!-- ActivityLogCard -->
+    <string name="settings_activity_log_title">Activity Log</string>
+    <string name="settings_activity_log_subtitle">Live relay, bunker, and peer events</string>
+    <string name="settings_activity_log_action">View</string>
+
+    <!-- EventLogScreen -->
+    <string name="activity_log_title">Activity Log</string>
+    <string name="activity_log_empty">No activity yet</string>
+    <string name="activity_log_clear">Clear</string>
+    <string name="activity_log_clear_dialog_title">Clear Activity Log?</string>
+    <string name="activity_log_clear_dialog_text">This permanently removes all recorded activity events.</string>
+    <string name="activity_log_clear_confirm">Clear</string>
+    <string name="activity_log_cancel">Cancel</string>
+
     <!-- ExportLogsCard -->
     <string name="settings_export_logs_title">Export &amp; Share Logs</string>
     <string name="settings_export_logs_subtitle">Save diagnostics and audit history to a file</string>

@@ -18,6 +18,9 @@ import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
 import io.privkey.keep.R
+import io.privkey.keep.nip55.EventLogCategory
+import io.privkey.keep.nip55.EventLogLevel
+import io.privkey.keep.nip55.EventLogStore
 import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
@@ -236,6 +239,7 @@ class BunkerService : Service() {
     private var networkManager: NetworkConnectivityManager? = null
     private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
     private var permissionStore: PermissionStore? = null
+    private var eventLogStore: EventLogStore? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -270,7 +274,9 @@ class BunkerService : Service() {
 
         startForeground(NOTIFICATION_ID, createNotification(isActive = false))
 
-        permissionStore = PermissionStore(Nip55Database.getInstance(this))
+        val db = Nip55Database.getInstance(this)
+        permissionStore = PermissionStore(db)
+        eventLogStore = EventLogStore(db)
 
         val relays = runCatching { keepMobile.getRelayConfig(null).bunkerRelays }.getOrDefault(emptyList())
         if (relays.isEmpty()) {
@@ -329,6 +335,18 @@ class BunkerService : Service() {
 
                 override fun onConnect(pubkey: String, name: String) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
+                    eventLogStore?.let { activityLog ->
+                        serviceScope.launch {
+                            runCatching {
+                                activityLog.log(
+                                    category = EventLogCategory.BUNKER,
+                                    level = EventLogLevel.INFO,
+                                    source = name.ifBlank { pubkey.take(8) },
+                                    message = "connected"
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -405,6 +423,23 @@ class BunkerService : Service() {
     }
 
     private fun logBunkerEvent(event: BunkerLogEvent) {
+        eventLogStore?.let { activityLog ->
+            serviceScope.launch {
+                runCatching {
+                    val message = buildString {
+                        append(event.action)
+                        event.detail?.takeIf { it.isNotBlank() }?.let { append(": "); append(it) }
+                    }
+                    activityLog.log(
+                        category = EventLogCategory.BUNKER,
+                        level = if (event.success) EventLogLevel.INFO else EventLogLevel.WARN,
+                        source = event.app,
+                        message = message
+                    )
+                }
+            }
+        }
+
         val store = permissionStore ?: return
         val requestType = mapMethodToNip55RequestType(event.action) ?: return
         serviceScope.launch {
@@ -578,6 +613,7 @@ class BunkerService : Service() {
         bunkerHandler = null
         keepMobileRef = null
         permissionStore = null
+        eventLogStore = null
         _bunkerUrl.value = null
         _status.value = BunkerStatus.STOPPED
 

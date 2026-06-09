@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import io.privkey.keep.nip55.EventLogStore
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
@@ -53,6 +54,7 @@ fun ExportLogsScreen(
     storage: AndroidKeystoreStorage,
     signingAuditLog: SigningAuditLog?,
     permissionStore: PermissionStore?,
+    eventLogStore: EventLogStore?,
     foregroundServiceEnabled: Boolean,
     onDismiss: () -> Unit
 ) {
@@ -110,6 +112,7 @@ fun ExportLogsScreen(
                         storage = storage,
                         signingAuditLog = signingAuditLog,
                         permissionStore = permissionStore,
+                        eventLogStore = eventLogStore,
                         foregroundServiceEnabled = foregroundServiceEnabled
                     )
                 }
@@ -265,6 +268,7 @@ private suspend fun buildExportContent(
     storage: AndroidKeystoreStorage,
     signingAuditLog: SigningAuditLog?,
     permissionStore: PermissionStore?,
+    eventLogStore: EventLogStore?,
     foregroundServiceEnabled: Boolean
 ): String {
     val accountCountDisplay = runCatching { storage.listAllShares().size }.fold(
@@ -306,6 +310,23 @@ private suspend fun buildExportContent(
         }
     }
 
+    val activityLogResult = eventLogStore?.let { store ->
+        runCatching {
+            val total = store.getCount()
+            val entries = store.getRecent(1000)
+            val formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.systemDefault())
+            val text = entries.joinToString("\n") { e ->
+                val ts = formatter.format(Instant.ofEpochMilli(e.timestamp))
+                val src = if (e.source.isBlank()) "" else "${e.source} "
+                "$ts [${e.category}/${e.level}] $src${e.message}"
+            }
+            Triple(text, entries.size, total)
+        }.getOrElse { e ->
+            if (e is CancellationException) throw e
+            Triple("(export failed: ${e::class.simpleName})", 0, 0)
+        }
+    }
+
     return buildString {
         appendLine("=== Keep Diagnostics ===")
         appendLine("Exported: $timestamp")
@@ -340,6 +361,17 @@ private suspend fun buildExportContent(
                 appendLine("(truncated to $exported of $total entries)")
             }
             appendLine(json)
+        }
+        appendLine()
+        appendLine("=== Activity Log ===")
+        if (activityLogResult == null) {
+            appendLine("(unavailable)")
+        } else {
+            val (text, exported, total) = activityLogResult
+            if (total > exported) {
+                appendLine("(truncated to $exported of $total entries)")
+            }
+            if (text.isBlank()) appendLine("(no activity)") else appendLine(text)
         }
     }
 }
