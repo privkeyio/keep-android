@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.privkey.keep.descriptor.DescriptorSessionManager
+import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
@@ -319,15 +320,18 @@ class KeepMobileApp : Application() {
 
     fun updateBunkerService(enabled: Boolean) {
         val mobile = keepMobile ?: return
-        runCatching {
-            val current = mobile.getBunkerConfig()
-            mobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
-        }.onFailure {
-            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
-            return
+        applicationScope.launch {
+            runCatching {
+                BunkerConfigStore.update(mobile) { current ->
+                    BunkerConfigInfo(enabled, current.authorizedClients)
+                }
+            }.onFailure {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
+                return@launch
+            }
+            val action = if (enabled) BunkerService::start else BunkerService::stop
+            action(this@KeepMobileApp)
         }
-        val action = if (enabled) BunkerService::start else BunkerService::stop
-        action(this)
     }
 
     private fun getActiveRelays(): List<String> {
@@ -431,9 +435,12 @@ class KeepMobileApp : Application() {
         reconnectJob?.cancel()
         pinMismatch = null
         BunkerService.stop(this)
-        runCatching {
-            val current = keepMobile?.getBunkerConfig()
-            keepMobile?.saveBunkerConfig(BunkerConfigInfo(false, current?.authorizedClients ?: emptyList()))
+        keepMobile?.let { mobile ->
+            runCatching {
+                BunkerConfigStore.update(mobile) { current ->
+                    BunkerConfigInfo(false, current.authorizedClients)
+                }
+            }
         }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {

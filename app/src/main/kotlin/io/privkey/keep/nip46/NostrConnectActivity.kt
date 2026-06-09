@@ -159,10 +159,12 @@ class NostrConnectActivity : FragmentActivity() {
 
                 withContext(Dispatchers.IO) {
                     if (mobile != null) {
-                        val config = mobile.getBunkerConfig()
-                        if (!config.authorizedClients.any { it.lowercase() == request.clientPubkey.lowercase() }) {
-                            val updated = config.authorizedClients + request.clientPubkey.lowercase()
-                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
+                        BunkerConfigStore.update(mobile) { config ->
+                            if (!config.authorizedClients.any { it.lowercase() == request.clientPubkey.lowercase() }) {
+                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + request.clientPubkey.lowercase())
+                            } else {
+                                config
+                            }
                         }
                     }
 
@@ -194,9 +196,9 @@ class NostrConnectActivity : FragmentActivity() {
                 withContext(Dispatchers.IO) {
                     runCatching {
                         if (mobile != null) {
-                            val config = mobile.getBunkerConfig()
-                            val updated = config.authorizedClients.filter { it.lowercase() != request.clientPubkey.lowercase() }
-                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, updated))
+                            BunkerConfigStore.update(mobile) { config ->
+                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != request.clientPubkey.lowercase() })
+                            }
                         }
                     }
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }

@@ -40,8 +40,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
@@ -237,7 +235,6 @@ class BunkerService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val authorizedClientsMutex = Mutex()
     private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
@@ -454,16 +451,25 @@ class BunkerService : Service() {
 
     private fun authorizeClient(pubkey: String, name: String? = null, relays: List<String> = emptyList()) {
         val pk = pubkey.lowercase()
+        if (!HEX_PUBKEY_REGEX.matches(pk)) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Invalid pubkey in authorizeClient")
+            return
+        }
         pendingAuthSaves.add(pk)
         serviceScope.launch(Dispatchers.IO) {
             try {
-                authorizedClientsMutex.withLock {
+                val mobile = keepMobileRef
+                if (mobile != null) {
                     runCatching {
-                        val mobile = keepMobileRef ?: return@runCatching
-                        val config = mobile.getBunkerConfig()
-                        if (config.authorizedClients.none { it.lowercase() == pk }) {
-                            mobile.saveBunkerConfig(io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + pk))
+                        BunkerConfigStore.update(mobile) { config ->
+                            if (config.authorizedClients.none { it.lowercase() == pk }) {
+                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients + pk)
+                            } else {
+                                config
+                            }
                         }
+                    }.onFailure {
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
                     }
                 }
                 if (name != null) {

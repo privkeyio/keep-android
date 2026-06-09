@@ -25,6 +25,7 @@ import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.Nip46ClientStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.BunkerConfigInfo
@@ -369,15 +370,15 @@ private fun AppPermissionsListContent(
     }
 }
 
-private fun revokeNip46Client(context: android.content.Context, pubkey: String) {
+private suspend fun revokeNip46Client(context: android.content.Context, pubkey: String) {
     runCatching { Nip46ClientStore.removeClient(context, pubkey) }
         .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
     runCatching {
         val mobile = (context.applicationContext as? KeepMobileApp)?.getKeepMobile()
         if (mobile != null) {
-            val config = mobile.getBunkerConfig()
-            val updated = config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() }
-            mobile.saveBunkerConfig(BunkerConfigInfo(config.enabled, updated))
+            BunkerConfigStore.update(mobile) { config ->
+                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
+            }
         }
     }.onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke bunker client: ${it::class.simpleName}") }
 }
