@@ -26,18 +26,21 @@ Builds:
         | sha256sum -c -
       - chmod +x /tmp/rustup-init
       - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /tmp/rustup-init -y --default-toolchain
-        1.89.0 --profile minimal --no-modify-path
+        1.89.0 --profile minimal --component rustfmt,clippy --no-modify-path
       - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /opt/cargo/bin/rustup target
         add aarch64-linux-android x86_64-linux-android
       - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /opt/cargo/bin/cargo install
         --locked --version 4.1.2 cargo-ndk
-      - chmod -R a+rX /opt/cargo /opt/rustup
+      - chmod -R a+rwX /opt/cargo
+      - chmod -R a+rX /opt/rustup
     output: app/build/outputs/apk/release/app-release.apk
     prebuild:
       - KEEP_SHA="$(tr -d '[:space:]' < keep.version)"
       - rm -rf keep
       - git clone https://github.com/privkeyio/keep.git keep
       - git -C keep checkout "$KEEP_SHA"
+      - env CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /opt/cargo/bin/cargo fetch
+        --locked --manifest-path keep/Cargo.toml
     build: "export CARGO_HOME=/opt/cargo\nexport RUSTUP_HOME=/opt/rustup\nexport PATH=/opt/cargo/bin:$PATH\n\
       export AWS_LC_SYS_CMAKE_BUILDER=1\nexport SOURCE_DATE_EPOCH=\"$(./scripts/derive-sde.sh)\"\
       \n./gradlew assembleRelease --no-daemon"
