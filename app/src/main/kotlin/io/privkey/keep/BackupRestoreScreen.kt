@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -198,7 +199,7 @@ fun BackupRestoreScreen(
         ) {
             Text(stringResource(R.string.backup_restore_create_title), style = MaterialTheme.typography.titleLarge)
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            KeepCard(contentPadding = PaddingValues(0.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     OutlinedTextField(
                         value = backupPassphrase,
@@ -297,7 +298,7 @@ fun BackupRestoreScreen(
 
             Text(stringResource(R.string.backup_restore_restore_title), style = MaterialTheme.typography.titleLarge)
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            KeepCard(contentPadding = PaddingValues(0.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Button(
                         onClick = { openFileLauncher.launch(arrayOf("application/octet-stream", "*/*")) },

@@ -12,6 +12,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.ui.components.KeepListRow
+import io.privkey.keep.ui.components.KeepRowAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,30 +31,22 @@ fun PinSettingsCard(
     var error by remember { mutableStateOf<String?>(null) }
     val incorrectPinMsg = stringResource(R.string.settings_pin_incorrect)
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_pin_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (enabled) stringResource(R.string.settings_pin_enabled) else stringResource(R.string.settings_pin_disabled_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (enabled) {
-                TextButton(onClick = { showDisableDialog = true }) {
-                    Text(stringResource(R.string.settings_pin_disable), color = MaterialTheme.colorScheme.error)
-                }
-            } else {
-                TextButton(onClick = onSetupPin) {
-                    Text(stringResource(R.string.settings_pin_set_up))
+    KeepCard {
+        KeepListRow(
+            title = stringResource(R.string.settings_pin_title),
+            subtitle = if (enabled) stringResource(R.string.settings_pin_enabled) else stringResource(R.string.settings_pin_disabled_subtitle),
+            trailing = {
+                if (enabled) {
+                    TextButton(onClick = { showDisableDialog = true }) {
+                        Text(stringResource(R.string.settings_pin_disable), color = MaterialTheme.colorScheme.error)
+                    }
+                } else {
+                    TextButton(onClick = onSetupPin) {
+                        Text(stringResource(R.string.settings_pin_set_up))
+                    }
                 }
             }
-        }
+        )
     }
 
     if (showDisableDialog) {
@@ -130,43 +125,23 @@ fun PinSettingsCard(
 
 @Composable
 fun AutoStartCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_auto_start_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_auto_start_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(checked = enabled, onCheckedChange = onToggle)
-        }
+    KeepCard {
+        KeepListRow(
+            title = stringResource(R.string.settings_auto_start_title),
+            subtitle = stringResource(R.string.settings_auto_start_subtitle),
+            trailing = { Switch(checked = enabled, onCheckedChange = onToggle) }
+        )
     }
 }
 
 @Composable
 fun ForegroundServiceCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_foreground_service_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_foreground_service_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(checked = enabled, onCheckedChange = onToggle)
-        }
+    KeepCard {
+        KeepListRow(
+            title = stringResource(R.string.settings_foreground_service_title),
+            subtitle = stringResource(R.string.settings_foreground_service_subtitle),
+            trailing = { Switch(checked = enabled, onCheckedChange = onToggle) }
+        )
     }
 }
 
@@ -178,51 +153,43 @@ fun BiometricTimeoutCard(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_biometric_reauth_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_biometric_reauth_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = it }
-            ) {
-                OutlinedTextField(
-                    value = BiometricTimeoutStore.formatTimeout(currentTimeout),
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                    modifier = Modifier
-                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                        .width(140.dp),
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    singleLine = true
-                )
-                ExposedDropdownMenu(
+    KeepCard {
+        KeepListRow(
+            title = stringResource(R.string.settings_biometric_reauth_title),
+            subtitle = stringResource(R.string.settings_biometric_reauth_subtitle),
+            trailing = {
+                ExposedDropdownMenuBox(
                     expanded = expanded,
-                    onDismissRequest = { expanded = false }
+                    onExpandedChange = { expanded = it }
                 ) {
-                    BiometricTimeoutStore.TIMEOUT_OPTIONS.forEach { timeout ->
-                        DropdownMenuItem(
-                            text = { Text(BiometricTimeoutStore.formatTimeout(timeout)) },
-                            onClick = {
-                                onTimeoutChanged(timeout)
-                                expanded = false
-                            }
-                        )
+                    OutlinedTextField(
+                        value = BiometricTimeoutStore.formatTimeout(currentTimeout),
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            .width(140.dp),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        BiometricTimeoutStore.TIMEOUT_OPTIONS.forEach { timeout ->
+                            DropdownMenuItem(
+                                text = { Text(BiometricTimeoutStore.formatTimeout(timeout)) },
+                                onClick = {
+                                    onTimeoutChanged(timeout)
+                                    expanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
-        }
+        )
     }
 }
 
@@ -237,8 +204,8 @@ fun TorOrbotCard(
     var error by remember { mutableStateOf<String?>(null) }
     val portRangeError = stringResource(R.string.settings_tor_port_range_error)
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    KeepCard {
+        Column {
             Text(stringResource(R.string.settings_tor_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -325,65 +292,35 @@ fun TorOrbotCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityLogCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_activity_log_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_activity_log_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(stringResource(R.string.settings_activity_log_action), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        }
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.settings_activity_log_title),
+            subtitle = stringResource(R.string.settings_activity_log_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.settings_activity_log_action)) }
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportLogsCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_export_logs_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_export_logs_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(stringResource(R.string.settings_export_logs_action), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        }
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.settings_export_logs_title),
+            subtitle = stringResource(R.string.settings_export_logs_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.settings_export_logs_action)) }
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupSettingsCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(stringResource(R.string.settings_backup_title), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.settings_backup_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(stringResource(R.string.settings_backup_action), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-        }
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.settings_backup_title),
+            subtitle = stringResource(R.string.settings_backup_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.settings_backup_action)) }
+        )
     }
 }

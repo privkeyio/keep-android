@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -95,7 +96,7 @@ private fun BiometricLockOnLaunchCard(
     onToggle: (Boolean) -> Unit,
     biometricAvailable: Boolean
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,

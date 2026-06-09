@@ -24,6 +24,8 @@ fun KeepAndroidTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = KeepTypography,
+        shapes = KeepShapes,
         content = content
     )
 }

@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ClipData
@@ -438,7 +439,7 @@ internal fun setSecureScreen(context: Context, secure: Boolean) {
 internal fun NpubDisplay(npub: String) {
     val context = LocalContext.current
     val copiedToastMessage = stringResource(R.string.qr_code_npub_copied)
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.qr_code_npub_label),

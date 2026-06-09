@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -226,7 +227,7 @@ fun CertificatePinsCard(
     var showClearAllDialog by remember { mutableStateOf(false) }
     var pinToDelete by remember { mutableStateOf<String?>(null) }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

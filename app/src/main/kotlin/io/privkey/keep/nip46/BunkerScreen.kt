@@ -1,5 +1,6 @@
 package io.privkey.keep.nip46
 
+import io.privkey.keep.ui.components.KeepCard
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -492,7 +493,7 @@ private fun BunkerToggleCard(
     canEnable: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -522,7 +523,7 @@ private fun BunkerRelaysCard(
     onAddClick: () -> Unit,
     onRemove: (String) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -577,7 +578,7 @@ private fun AuthorizedClientsCard(
     onRevoke: (String) -> Unit,
     onRevokeAll: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

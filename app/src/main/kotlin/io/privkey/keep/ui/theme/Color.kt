@@ -16,6 +16,12 @@ val KeepMuted = Color(0xFF9AA4B2)
 val KeepWarn = Color(0xFFE3B341)
 val KeepError = Color(0xFFE5534B)
 
+// Additive semantic tokens (derived from existing hues, low chroma on dark).
+// These do not change any existing brand color; they fill in container slots and
+// give shared components (status dots, badges, banners) consistent surfaces.
+val KeepWarnContainer = Color(0xFF2A2410)
+val KeepErrorContainer = Color(0xFF2A1513)
+
 val KeepDarkColors = darkColorScheme(
     primary = KeepGreen,
     onPrimary = Color(0xFF06140C),
@@ -27,6 +33,8 @@ val KeepDarkColors = darkColorScheme(
     onSecondaryContainer = Color(0xFF7EE0A0),
     tertiary = KeepWarn,
     onTertiary = Color(0xFF1A1402),
+    tertiaryContainer = KeepWarnContainer,
+    onTertiaryContainer = Color(0xFFF0CE7A),
     background = KeepBg,
     onBackground = KeepText,
     surface = KeepSurface,
@@ -37,4 +45,6 @@ val KeepDarkColors = darkColorScheme(
     outlineVariant = Color(0xFF1F2630),
     error = KeepError,
     onError = Color(0xFF2A0907),
+    errorContainer = KeepErrorContainer,
+    onErrorContainer = Color(0xFFF2A39C),
 )

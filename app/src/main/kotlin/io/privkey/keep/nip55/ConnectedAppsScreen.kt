@@ -3,28 +3,27 @@ package io.privkey.keep.nip55
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.util.Log
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import io.privkey.keep.nip46.Nip46ClientStore
+import io.privkey.keep.ui.components.AppAvatar
+import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.ui.components.KeepEmptyState
+import io.privkey.keep.ui.components.KeepScreenScaffold
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -75,18 +74,9 @@ fun ConnectedAppsScreen(
         isLoading = false
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.connected_apps)) },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                }
-            )
-        },
-        containerColor = MaterialTheme.colorScheme.background
+    KeepScreenScaffold(
+        title = stringResource(R.string.connected_apps),
+        onBack = onDismiss
     ) { padding ->
         if (isLoading) {
             Box(
@@ -96,50 +86,26 @@ fun ConnectedAppsScreen(
                 CircularProgressIndicator()
             }
         } else if (loadError != null) {
-            val currentLoadError = loadError
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        stringResource(R.string.connected_apps_load_error),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        currentLoadError ?: "",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                KeepEmptyState(
+                    icon = Icons.Default.Warning,
+                    title = stringResource(R.string.connected_apps_load_error),
+                    subtitle = loadError
+                )
             }
         } else if (connectedApps.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        stringResource(R.string.no_connected_apps),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        stringResource(R.string.connected_apps_description),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                KeepEmptyState(
+                    icon = Icons.Default.Apps,
+                    title = stringResource(R.string.no_connected_apps),
+                    subtitle = stringResource(R.string.connected_apps_description)
+                )
             }
         } else {
             LazyColumn(
@@ -151,52 +117,6 @@ fun ConnectedAppsScreen(
                     ConnectedAppItem(app = app, onClick = { onAppClick(app.packageName) })
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun AppIconBox(
-    icon: Drawable?,
-    isNip46Client: Boolean,
-    isVerified: Boolean
-) {
-    when {
-        icon != null -> {
-            Image(
-                bitmap = icon.toBitmap(48, 48).asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.size(48.dp)
-            )
-        }
-        isNip46Client -> {
-            Box(
-                modifier = Modifier.size(48.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Cloud,
-                    contentDescription = stringResource(R.string.connections_app_nip46_client_cd),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        !isVerified -> {
-            Box(
-                modifier = Modifier.size(48.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Warning,
-                    contentDescription = stringResource(R.string.connected_app_unverified),
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-        else -> {
-            Spacer(modifier = Modifier.size(48.dp))
         }
     }
 }
@@ -241,17 +161,13 @@ private fun ConnectedAppItem(
         }
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AppIconBox(
-                icon = appIcon,
-                isNip46Client = isNip46Client,
-                isVerified = isVerified
+    KeepCard(onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppAvatar(
+                key = app.packageName,
+                name = appLabel,
+                drawable = appIcon,
+                unverified = !isVerified
             )
 
             Spacer(modifier = Modifier.width(16.dp))

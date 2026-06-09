@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -26,7 +27,7 @@ fun RelaysCard(
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.connections_relays_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
@@ -248,7 +249,7 @@ fun ConnectCard(
         else -> notConnected to colors.onSurfaceVariant
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -294,7 +295,7 @@ fun ConnectedAppsCard(onClick: () -> Unit) {
 
 @Composable
 fun PeersCard(peers: List<PeerInfo>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.connections_peers_title, peers.size), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
@@ -394,7 +395,7 @@ fun Nip55SettingsCard(
     onPermissionsClick: () -> Unit,
     onHistoryClick: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.connections_nip55_settings_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
@@ -411,15 +412,17 @@ fun Nip55SettingsCard(
             ) {
                 OutlinedButton(
                     onClick = onPermissionsClick,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text(stringResource(R.string.connections_nip55_permissions))
+                    Text(stringResource(R.string.connections_nip55_permissions), maxLines = 1)
                 }
                 OutlinedButton(
                     onClick = onHistoryClick,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    Text(stringResource(R.string.connections_nip55_history))
+                    Text(stringResource(R.string.connections_nip55_history), maxLines = 1)
                 }
             }
         }
