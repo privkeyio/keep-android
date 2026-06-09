@@ -8,12 +8,13 @@ import io.privkey.keep.storage.LegacyPrefsMigration
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.security.SecureRandom
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class], version = 7)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class, EventLogEntry::class], version = 8)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
     abstract fun appSettingsDao(): Nip55AppSettingsDao
     abstract fun velocityDao(): VelocityDao
+    abstract fun eventLogDao(): EventLogDao
 
     companion object {
         init {
@@ -88,7 +89,24 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS event_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        category TEXT NOT NULL,
+                        level TEXT NOT NULL,
+                        source TEXT NOT NULL DEFAULT '',
+                        message TEXT NOT NULL DEFAULT ''
+                    )
+                """)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_event_log_timestamp ON event_log(timestamp)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_event_log_category_timestamp ON event_log(category, timestamp)")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 
         private fun getEncryptedPrefs(context: Context) =
             KeystoreEncryptedPrefs.create(context, PREFS_NAME)

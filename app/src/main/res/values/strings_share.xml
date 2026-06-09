@@ -3,8 +3,8 @@
     <!-- ExportLogsScreen -->
     <string name="export_logs_title">Export &amp; Share Logs</string>
     <string name="export_logs_card_title">Diagnostic Logs</string>
-    <string name="export_logs_description">Collects app diagnostics into a plain text file. Includes: device manufacturer/model, Android version, app version and build type, account count, foreground service and Tor/proxy configuration, signing audit history (caller package names, caller display names, event kinds, and free-text reasons), and NIP-55 permission audit history. Does not include private keys, nsec, or seed words.</string>
-    <string name="export_logs_warning">Warning: audit entries include caller display names and free-text reasons supplied by third-party apps. These fields may contain personal information or attacker-controlled content. Review the file before sharing.</string>
+    <string name="export_logs_description">Collects app diagnostics into a plain text file. Includes: device manufacturer/model, Android version, app version and build type, account count, foreground service and Tor/proxy configuration, signing audit history (caller package names, caller display names, event kinds, and free-text reasons), NIP-55 permission audit history, and the activity log (relay connection events, bunker events with connected-app names and pubkey prefixes, and peer online/offline transitions with peer names). Does not include private keys, nsec, or seed words.</string>
+    <string name="export_logs_warning">Warning: audit and activity-log entries include caller display names, connected-app names and pubkey prefixes, peer names, and free-text reasons supplied by third-party apps and relays. These fields may contain personal information or attacker-controlled content. Review the file before sharing.</string>
     <string name="export_logs_save_to_file">Save to File</string>
     <string name="export_logs_share">Share</string>
     <string name="export_logs_saved_toast">Logs saved</string>

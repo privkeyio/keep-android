@@ -43,6 +43,7 @@ import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.ConnectedAppsScreen
+import io.privkey.keep.nip55.EventLogScreen
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
 import io.privkey.keep.nip55.SignPolicyScreen
@@ -296,6 +297,7 @@ fun MainScreen(
 
     val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
     val signingAuditLog = (LocalContext.current.applicationContext as? KeepMobileApp)?.getSigningAuditLog()
+    val eventLogStore = (LocalContext.current.applicationContext as? KeepMobileApp)?.getEventLogStore()
     val peers = appLiveState?.peers ?: emptyList()
     val pendingCount = appLiveState?.pendingRequests?.size ?: 0
     val connectionStatus = appLiveState?.connectionStatus
@@ -322,6 +324,7 @@ fun MainScreen(
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
     var showExportLogs by remember { mutableStateOf(false) }
+    var showEventLog by remember { mutableStateOf(false) }
     var showBackupRestore by remember { mutableStateOf(false) }
     var showRecoverNsec by remember { mutableStateOf(false) }
     var showCreateAccountScreen by remember { mutableStateOf(false) }
@@ -526,6 +529,10 @@ fun MainScreen(
                 showSecuritySettings = false
                 showExportLogs = true
             },
+            onViewActivityLog = {
+                showSecuritySettings = false
+                showEventLog = true
+            },
             onDismiss = { showSecuritySettings = false }
         )
         return
@@ -537,10 +544,22 @@ fun MainScreen(
             storage = storage,
             signingAuditLog = signingAuditLog,
             permissionStore = permissionStore,
+            eventLogStore = eventLogStore,
             foregroundServiceEnabled = foregroundServiceEnabled,
             onDismiss = { showExportLogs = false }
         )
         return
+    }
+
+    if (showEventLog) {
+        if (eventLogStore != null) {
+            EventLogScreen(
+                eventLogStore = eventLogStore,
+                onDismiss = { showEventLog = false }
+            )
+            return
+        }
+        showEventLog = false
     }
 
     if (showBackupRestore) {

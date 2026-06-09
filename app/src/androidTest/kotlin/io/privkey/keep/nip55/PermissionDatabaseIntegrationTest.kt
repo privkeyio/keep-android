@@ -20,6 +20,7 @@ class PermissionDatabaseIntegrationTest {
     private lateinit var permissionDao: Nip55PermissionDao
     private lateinit var auditLogDao: Nip55AuditLogDao
     private lateinit var appSettingsDao: Nip55AppSettingsDao
+    private lateinit var eventLogDao: EventLogDao
 
     private fun createPermission(
         callerPackage: String = "com.test.app",
@@ -82,7 +83,22 @@ class PermissionDatabaseIntegrationTest {
         permissionDao = database.permissionDao()
         auditLogDao = database.auditLogDao()
         appSettingsDao = database.appSettingsDao()
+        eventLogDao = database.eventLogDao()
     }
+
+    private fun createEventLog(
+        timestamp: Long = System.currentTimeMillis(),
+        category: String = EventLogCategory.RELAY.name,
+        level: String = EventLogLevel.INFO.name,
+        source: String = "",
+        message: String = "event"
+    ) = EventLogEntry(
+        timestamp = timestamp,
+        category = category,
+        level = level,
+        source = source,
+        message = message
+    )
 
     @After
     fun teardown() {
@@ -359,5 +375,94 @@ class PermissionDatabaseIntegrationTest {
         val all = permissionDao.getAll()
         assertEquals(1, all.size)
         assertEquals("deny", all[0].decision)
+    }
+
+    @Test
+    fun eventLogInsertAndCount() = runBlocking {
+        assertEquals(0, eventLogDao.getCount())
+        eventLogDao.insert(createEventLog(message = "first"))
+        eventLogDao.insert(createEventLog(message = "second"))
+
+        assertEquals(2, eventLogDao.getCount())
+        val recent = eventLogDao.getRecent(10)
+        assertEquals(2, recent.size)
+        assertEquals("second", recent[0].message)
+        assertEquals("first", recent[1].message)
+    }
+
+    @Test
+    fun eventLogKeysetPagination() = runBlocking {
+        repeat(25) { i -> eventLogDao.insert(createEventLog(message = "event $i")) }
+
+        val page1 = eventLogDao.getPageBefore(Long.MAX_VALUE, 10)
+        assertEquals(10, page1.size)
+        val page2 = eventLogDao.getPageBefore(page1.last().id, 10)
+        assertEquals(10, page2.size)
+        val page3 = eventLogDao.getPageBefore(page2.last().id, 10)
+        assertEquals(5, page3.size)
+
+        val ids = (page1 + page2 + page3).map { it.id }
+        assertEquals(ids.size, ids.toSet().size)
+        assertEquals(ids, ids.sortedDescending())
+    }
+
+    @Test
+    fun eventLogKeysetPaginationStableUnderConcurrentInsert() = runBlocking {
+        repeat(10) { eventLogDao.insert(createEventLog(message = "initial")) }
+
+        val page1 = eventLogDao.getPageBefore(Long.MAX_VALUE, 5)
+        assertEquals(5, page1.size)
+
+        repeat(5) { eventLogDao.insert(createEventLog(message = "inserted later")) }
+
+        val page2 = eventLogDao.getPageBefore(page1.last().id, 5)
+        val combinedIds = (page1 + page2).map { it.id }
+        assertEquals(combinedIds.size, combinedIds.toSet().size)
+        assertTrue(page2.all { it.id < page1.last().id })
+    }
+
+    @Test
+    fun eventLogTrimToMostRecent() = runBlocking {
+        repeat(20) { i -> eventLogDao.insert(createEventLog(message = "event $i")) }
+
+        eventLogDao.trimToMostRecent(5)
+
+        assertEquals(5, eventLogDao.getCount())
+        val remaining = eventLogDao.getRecent(100)
+        assertEquals(5, remaining.size)
+        assertEquals("event 19", remaining[0].message)
+        assertEquals("event 15", remaining[4].message)
+    }
+
+    @Test
+    fun eventLogTrimNoOpWhenUnderCap() = runBlocking {
+        repeat(3) { eventLogDao.insert(createEventLog()) }
+
+        eventLogDao.trimToMostRecent(10)
+
+        assertEquals(3, eventLogDao.getCount())
+    }
+
+    @Test
+    fun eventLogDeleteOlderThan() = runBlocking {
+        val now = System.currentTimeMillis()
+        eventLogDao.insert(createEventLog(timestamp = now - 100000, message = "old"))
+        eventLogDao.insert(createEventLog(timestamp = now - 1000, message = "recent"))
+
+        eventLogDao.deleteOlderThan(now - 50000)
+
+        val remaining = eventLogDao.getRecent(100)
+        assertEquals(1, remaining.size)
+        assertEquals("recent", remaining[0].message)
+    }
+
+    @Test
+    fun eventLogDeleteAll() = runBlocking {
+        repeat(5) { eventLogDao.insert(createEventLog()) }
+
+        eventLogDao.deleteAll()
+
+        assertEquals(0, eventLogDao.getCount())
+        assertTrue(eventLogDao.getRecent(10).isEmpty())
     }
 }
