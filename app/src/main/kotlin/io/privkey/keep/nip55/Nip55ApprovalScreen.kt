@@ -13,7 +13,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.graphics.drawable.Drawable
 import io.privkey.keep.R
+import io.privkey.keep.ui.components.AppAvatar
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.privkey.keep.uniffi.formatEventIdDisplay
 import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.uniffi.isHex64
@@ -132,6 +136,22 @@ fun ApprovalScreen(
         if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
     }
 
+    var callerIcon by remember(callerPackage) { mutableStateOf<Drawable?>(null) }
+    var callerLabel by remember(callerPackage) { mutableStateOf<String?>(null) }
+    LaunchedEffect(callerPackage) {
+        if (callerPackage != null) {
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pm = context.packageManager
+                    val info = pm.getApplicationInfo(callerPackage, 0)
+                    pm.getApplicationLabel(info).toString() to pm.getApplicationIcon(info)
+                }.getOrNull()
+            }
+            callerLabel = resolved?.first
+            callerIcon = resolved?.second
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -139,6 +159,15 @@ fun ApprovalScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        AppAvatar(
+            key = callerPackage ?: "unknown",
+            name = callerLabel,
+            drawable = callerIcon,
+            size = 56.dp
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         Text(
             text = request.requestType.headerTitle(context),
             style = MaterialTheme.typography.headlineMedium

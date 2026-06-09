@@ -15,6 +15,8 @@ import io.privkey.keep.R
 import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.nip55.EventKind
 import io.privkey.keep.nip55.PermissionDuration
+import io.privkey.keep.ui.components.AppAvatar
+import io.privkey.keep.ui.components.CopyableValue
 
 private fun sanitizeDisplayContent(content: String): String {
     return content
@@ -50,6 +52,14 @@ fun Nip46ApprovalScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        AppAvatar(
+            key = appPubkey,
+            name = appName,
+            size = 56.dp
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         Text(
             text = if (isConnectRequest) stringResource(R.string.connections_nip46_title_connect) else stringResource(R.string.connections_nip46_title_request),
             style = MaterialTheme.typography.headlineMedium
@@ -115,16 +125,11 @@ fun Nip46ApprovalScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.connections_nip46_app_public_key),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = formatPubkeyDisplay(appPubkey),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                CopyableValue(
+                    label = stringResource(R.string.connections_nip46_app_public_key),
+                    value = appPubkey,
+                    displayValue = formatPubkeyDisplay(appPubkey),
+                    mono = true
                 )
             }
         }
