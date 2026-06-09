@@ -1,5 +1,6 @@
 package io.privkey.keep.nip55
 
+import io.privkey.keep.ui.components.KeepCard
 import android.graphics.drawable.Drawable
 import android.util.Log
 import android.widget.Toast
@@ -259,7 +260,7 @@ private fun AppPermissionsListContent(
 
         if (signPolicyStore != null && !appState.isLoading) {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                KeepCard(contentPadding = PaddingValues(0.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         AppSignPolicySelector(
                             currentOverride = appState.signPolicyOverride,
@@ -395,7 +396,7 @@ private fun AppHeaderCard(
     isVerified: Boolean,
     isNip46Client: Boolean = false
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -480,7 +481,7 @@ private fun PermissionItem(
     val currentDecision = permission.permissionDecision
     val context = LocalContext.current
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -549,7 +550,7 @@ private fun AppExpirySelector(
         formatExpiry(currentExpiry)
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.app_expiry_label),

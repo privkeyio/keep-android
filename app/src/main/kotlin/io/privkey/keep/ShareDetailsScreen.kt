@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import io.privkey.keep.ui.components.KeepCard
 import io.privkey.keep.uniffi.hexToNpub
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -88,7 +89,7 @@ fun ShareDetailsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        KeepCard(contentPadding = PaddingValues(0.dp)) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = stringResource(R.string.share_details_npub_header),

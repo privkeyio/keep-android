@@ -1233,7 +1233,7 @@ private fun HomeTab(
         // on immediately (not buried below the status cards).
         if (pendingRequests.isNotEmpty()) {
             pendingRequests.forEach { req ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                KeepCard(contentPadding = PaddingValues(0.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             stringResource(R.string.cosign_request_label),
@@ -1350,7 +1350,7 @@ private fun AppsTab(
                 onClick = onWalletDescriptorClick
             )
         } else {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            KeepCard(contentPadding = PaddingValues(0.dp)) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -1550,7 +1550,7 @@ private fun AccountTab(
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            KeepCard(contentPadding = PaddingValues(0.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(stringResource(R.string.main_key_management), style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(12.dp))

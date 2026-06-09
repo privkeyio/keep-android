@@ -1,5 +1,6 @@
 package io.privkey.keep.descriptor
 
+import io.privkey.keep.ui.components.KeepCard
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.BuildConfig
@@ -595,7 +596,7 @@ private fun SessionStatusCard(state: DescriptorSessionState) {
                 MaterialTheme.colorScheme.error
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.wallet_descriptor_session_status), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
@@ -619,7 +620,7 @@ private fun PendingContributionsCard(
     onApprove: (DescriptorProposal) -> Unit,
     onReject: (DescriptorProposal) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.wallet_descriptor_pending_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
@@ -669,7 +670,7 @@ private fun DescriptorListCard(
     onExport: (WalletDescriptorInfo) -> Unit,
     onDelete: (WalletDescriptorInfo) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 stringResource(R.string.wallet_descriptor_list_title, descriptors.size),
@@ -910,7 +911,7 @@ private fun DeleteDescriptorDialog(
 
 @Composable
 private fun AnnouncedXpubsCard(announcedXpubs: Map<UShort, List<AnnouncedXpubInfo>>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.wallet_descriptor_announced_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
