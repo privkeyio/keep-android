@@ -75,6 +75,10 @@
     <string name="bunker_service_title" translatable="false">Keep Bunker</string>
     <string name="bunker_service_text_starting">Starting bunker...</string>
     <string name="bunker_service_text_active">Bunker active - accepting remote signing requests</string>
+    <string name="bunker_approval_channel_name">Bunker approval requests</string>
+    <string name="bunker_approval_channel_description">Alerts when a connected app is waiting for signing approval</string>
+    <string name="bunker_approval_notification_title">Signing approval needed</string>
+    <string name="bunker_approval_notification_text"><xliff:g id="app">%1$s</xliff:g> is requesting <xliff:g id="method">%2$s</xliff:g></string>
 
     <!-- Common / shared -->
     <string name="common_cancel">Cancel</string>
