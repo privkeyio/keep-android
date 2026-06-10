@@ -72,6 +72,10 @@
     <string name="bunker_service_channel_description">Dauerhafte Benachrichtigung für den NIP-46-Bunker-Modus</string>
     <string name="bunker_service_text_starting">Bunker wird gestartet...</string>
     <string name="bunker_service_text_active">Bunker aktiv - nimmt entfernte Signieranfragen an</string>
+    <string name="bunker_approval_channel_name">Bunker-Genehmigungsanfragen</string>
+    <string name="bunker_approval_channel_description">Benachrichtigt, wenn eine verbundene App auf eine Signiergenehmigung wartet</string>
+    <string name="bunker_approval_notification_title">Signiergenehmigung erforderlich</string>
+    <string name="bunker_approval_notification_text"><xliff:g id="app">%1$s</xliff:g> fordert <xliff:g id="method">%2$s</xliff:g> an</string>
 
     <!-- Common / shared -->
     <string name="common_cancel">Abbrechen</string>

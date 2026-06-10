@@ -71,6 +71,10 @@
     <string name="bunker_service_channel_description">NIP-46バンカーモードの常時通知</string>
     <string name="bunker_service_text_starting">バンカーを起動中...</string>
     <string name="bunker_service_text_active">バンカー起動中 - リモート署名リクエストを受け付け中</string>
+    <string name="bunker_approval_channel_name">バンカー承認リクエスト</string>
+    <string name="bunker_approval_channel_description">接続中のアプリが署名承認を待っているときに通知します</string>
+    <string name="bunker_approval_notification_title">署名の承認が必要です</string>
+    <string name="bunker_approval_notification_text"><xliff:g id="app">%1$s</xliff:g> が <xliff:g id="method">%2$s</xliff:g> をリクエストしています</string>
 
     <!-- Common / shared -->
     <string name="common_cancel">キャンセル</string>
