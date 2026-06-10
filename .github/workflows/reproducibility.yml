@@ -66,12 +66,12 @@ jobs:
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@25435dc8dd3baed7417e0c96d3fe89013a5b2e09 # v2
+        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+        uses: gradle/actions/setup-gradle@5e2ebd065dc2488b7a6ad670704656cbbe1e8f60 # v6.1.1
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
