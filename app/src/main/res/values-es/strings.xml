@@ -73,6 +73,10 @@
     <string name="bunker_service_channel_description">Notificación persistente para el modo bunker NIP-46</string>
     <string name="bunker_service_text_starting">Iniciando bunker...</string>
     <string name="bunker_service_text_active">Bunker activo - aceptando solicitudes de firma remota</string>
+    <string name="bunker_approval_channel_name">Solicitudes de aprobación del bunker</string>
+    <string name="bunker_approval_channel_description">Avisa cuando una app conectada está esperando aprobación de firma</string>
+    <string name="bunker_approval_notification_title">Se necesita aprobación de firma</string>
+    <string name="bunker_approval_notification_text"><xliff:g id="app">%1$s</xliff:g> está solicitando <xliff:g id="method">%2$s</xliff:g></string>
 
     <!-- Common / shared -->
     <string name="common_cancel">Cancelar</string>

@@ -7,12 +7,15 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
@@ -31,10 +34,14 @@ import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerLogEvent
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,6 +69,11 @@ class BunkerService : Service() {
         private const val MAX_REQUESTS_PER_WINDOW = 30
         private const val BACKOFF_BASE_MS = 1000L
         private const val BACKOFF_MAX_MS = 60_000L
+        private const val MAX_START_RETRIES = 5
+        private const val START_RETRY_DELAY_MS = 2_000L
+        private const val APPROVAL_CHANNEL_ID = "keep_bunker_approvals"
+        private const val APPROVAL_NOTIFICATION_ID_BASE = 0x4E46
+
         private const val APPROVAL_TIMEOUT_MS = 60_000L
         private const val GLOBAL_RATE_LIMIT_WINDOW_MS = 60_000L
         private const val GLOBAL_MAX_REQUESTS_PER_WINDOW = 100
@@ -241,6 +253,9 @@ class BunkerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val startStopMutex = Mutex()
+    private val approvalIdCounter = AtomicInteger(0)
+    private val approvalIds = ConcurrentHashMap<String, Int>()
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
@@ -296,13 +311,19 @@ class BunkerService : Service() {
             startBunker(keepMobile, relays)
         }
 
+        networkManager?.unregister()
         networkManager = NetworkConnectivityManager(this) {
             serviceScope.launch {
-                val handler = bunkerHandler ?: return@launch
-                if (handler.getBunkerStatus() == BunkerStatus.RUNNING) {
-                    handler.stopBunker()
-                    startBunker(keepMobile, relays)
+                val shouldRestart = startStopMutex.withLock {
+                    val handler = bunkerHandler ?: return@withLock false
+                    if (handler.getBunkerStatus() == BunkerStatus.RUNNING) {
+                        handler.stopBunker()
+                        true
+                    } else {
+                        false
+                    }
                 }
+                if (shouldRestart) startBunker(keepMobile, relays)
             }
         }
         networkManager?.register()
@@ -310,20 +331,33 @@ class BunkerService : Service() {
         return START_STICKY
     }
 
-    private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>) {
+    private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>, attempt: Int = 0) {
+        val retryAfterInit = startStopMutex.withLock {
+            startBunkerLocked(keepMobile, relays, attempt)
+        }
+        if (retryAfterInit) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Bunker start waiting for init, retry ${attempt + 1}/$MAX_START_RETRIES")
+            delay(START_RETRY_DELAY_MS shl attempt)
+            startBunker(keepMobile, relays, attempt + 1)
+        }
+    }
+
+    private suspend fun startBunkerLocked(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>, attempt: Int): Boolean {
         try {
             val safeRelays = withContext(Dispatchers.IO) {
                 withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
             }
             if (safeRelays.isNullOrEmpty()) {
+                if (attempt < MAX_START_RETRIES) return true
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
-                return
+                return false
             }
 
             _status.value = BunkerStatus.STARTING
 
+            bunkerHandler?.let { runCatching { it.stopBunker() } }
             val handler = BunkerHandler(keepMobile)
             bunkerHandler = handler
 
@@ -361,9 +395,16 @@ class BunkerService : Service() {
             updateNotification(isActive = true)
 
             processQueuedNostrConnectRequests()
+            return false
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is io.privkey.keep.uniffi.KeepMobileException.NotInitialized && attempt < MAX_START_RETRIES) {
+                return true
+            }
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
+            stopSelf()
+            return false
         }
     }
 
@@ -571,6 +612,7 @@ class BunkerService : Service() {
         startApprovalActivity(requestId, request, isConnectRequest)
 
         val completed = latch.await(APPROVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        cancelApprovalNotification(requestId)
 
         if (!completed) {
             pendingApprovals.remove(requestId)?.let {
@@ -636,8 +678,54 @@ class BunkerService : Service() {
             request.eventContent?.let { putExtra(Nip46ApprovalActivity.EXTRA_EVENT_CONTENT, it) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        startActivity(intent)
+        runCatching { startActivity(intent) }
+        postApprovalNotification(requestId, request, intent)
     }
+
+    private fun postApprovalNotification(requestId: String, request: BunkerApprovalRequest, intent: Intent) {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) return
+        val notificationId = approvalNotificationId(requestId)
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val appLabel = sanitizeDisplayName(request.appName).ifBlank { truncatePubkey(request.appPubkey) }
+        val body = getString(R.string.bunker_approval_notification_text, appLabel, sanitizeDisplayName(request.method))
+        val publicVersion = NotificationCompat.Builder(this, APPROVAL_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(getString(R.string.bunker_approval_notification_title))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
+        val notification = NotificationCompat.Builder(this, APPROVAL_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(getString(R.string.bunker_approval_notification_title))
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
+            .setContentIntent(contentIntent)
+            .setFullScreenIntent(contentIntent, true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(APPROVAL_TIMEOUT_MS)
+            .build()
+        runCatching {
+            NotificationManagerCompat.from(this).notify(notificationId, notification)
+        }
+    }
+
+    private fun cancelApprovalNotification(requestId: String) {
+        val id = approvalIds.remove(requestId) ?: return
+        runCatching { NotificationManagerCompat.from(this).cancel(id) }
+    }
+
+    private fun approvalNotificationId(requestId: String): Int =
+        approvalIds.computeIfAbsent(requestId) {
+            APPROVAL_NOTIFICATION_ID_BASE + 1 + approvalIdCounter.getAndIncrement()
+        }
 
     private fun dismissApprovalActivity(requestId: String) {
         val intent = Intent(this, Nip46ApprovalActivity::class.java).apply {
@@ -645,7 +733,7 @@ class BunkerService : Service() {
             putExtra(Nip46ApprovalActivity.EXTRA_TIMEOUT, true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        startActivity(intent)
+        runCatching { startActivity(intent) }
     }
 
     override fun onDestroy() {
@@ -662,6 +750,7 @@ class BunkerService : Service() {
         synchronized(approvalLock) {
             pendingApprovals.keys.toList().forEach { reqId ->
                 pendingApprovals.remove(reqId)?.respond(false)
+                cancelApprovalNotification(reqId)
             }
         }
         clearRateLimitState()
@@ -684,8 +773,16 @@ class BunkerService : Service() {
                 description = getString(R.string.bunker_service_channel_description)
                 setShowBadge(false)
             }
+            val approvalChannel = NotificationChannel(
+                APPROVAL_CHANNEL_ID,
+                getString(R.string.bunker_approval_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.bunker_approval_channel_description)
+            }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(approvalChannel)
         }
     }
 
