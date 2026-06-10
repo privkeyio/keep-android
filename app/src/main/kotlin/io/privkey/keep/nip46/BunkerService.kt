@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -14,6 +15,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
@@ -704,6 +706,8 @@ class BunkerService : Service() {
             .setAutoCancel(true)
             .setTimeoutAfter(APPROVAL_TIMEOUT_MS)
             .build()
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) return
         runCatching {
             NotificationManagerCompat.from(this).notify(notificationId, notification)
         }
