@@ -348,6 +348,7 @@ class BunkerService : Service() {
                 withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
             }
             if (safeRelays.isNullOrEmpty()) {
+                if (attempt < MAX_START_RETRIES) return true
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
@@ -723,7 +724,7 @@ class BunkerService : Service() {
 
     private fun approvalNotificationId(requestId: String): Int =
         approvalIds.computeIfAbsent(requestId) {
-            APPROVAL_NOTIFICATION_ID_BASE + 1 + (approvalIdCounter.getAndIncrement() and 0x7FFF)
+            APPROVAL_NOTIFICATION_ID_BASE + 1 + approvalIdCounter.getAndIncrement()
         }
 
     private fun dismissApprovalActivity(requestId: String) {
