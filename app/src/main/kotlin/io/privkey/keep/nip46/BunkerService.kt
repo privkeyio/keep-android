@@ -32,11 +32,14 @@ import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerLogEvent
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.Nip55RequestType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -248,6 +251,9 @@ class BunkerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val startStopMutex = Mutex()
+    private val approvalIdCounter = AtomicInteger(0)
+    private val approvalIds = ConcurrentHashMap<String, Int>()
     private var bunkerHandler: BunkerHandler? = null
     private var networkManager: NetworkConnectivityManager? = null
     private var keepMobileRef: io.privkey.keep.uniffi.KeepMobile? = null
@@ -305,11 +311,16 @@ class BunkerService : Service() {
 
         networkManager = NetworkConnectivityManager(this) {
             serviceScope.launch {
-                val handler = bunkerHandler ?: return@launch
-                if (handler.getBunkerStatus() == BunkerStatus.RUNNING) {
-                    handler.stopBunker()
-                    startBunker(keepMobile, relays)
+                val shouldRestart = startStopMutex.withLock {
+                    val handler = bunkerHandler ?: return@withLock false
+                    if (handler.getBunkerStatus() == BunkerStatus.RUNNING) {
+                        handler.stopBunker()
+                        true
+                    } else {
+                        false
+                    }
                 }
+                if (shouldRestart) startBunker(keepMobile, relays)
             }
         }
         networkManager?.register()
@@ -318,6 +329,17 @@ class BunkerService : Service() {
     }
 
     private suspend fun startBunker(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>, attempt: Int = 0) {
+        val retryAfterInit = startStopMutex.withLock {
+            startBunkerLocked(keepMobile, relays, attempt)
+        }
+        if (retryAfterInit) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Bunker start waiting for init, retry ${attempt + 1}/$MAX_START_RETRIES")
+            delay(START_RETRY_DELAY_MS shl attempt)
+            startBunker(keepMobile, relays, attempt + 1)
+        }
+    }
+
+    private suspend fun startBunkerLocked(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>, attempt: Int): Boolean {
         try {
             val safeRelays = withContext(Dispatchers.IO) {
                 withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
@@ -326,7 +348,7 @@ class BunkerService : Service() {
                 if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
-                return
+                return false
             }
 
             _status.value = BunkerStatus.STARTING
@@ -368,15 +390,15 @@ class BunkerService : Service() {
             updateNotification(isActive = true)
 
             processQueuedNostrConnectRequests()
+            return false
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             if (e is io.privkey.keep.uniffi.KeepMobileException.NotInitialized && attempt < MAX_START_RETRIES) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Bunker start waiting for init, retry ${attempt + 1}/$MAX_START_RETRIES")
-                delay(START_RETRY_DELAY_MS shl attempt)
-                startBunker(keepMobile, relays, attempt + 1)
-                return
+                return true
             }
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
+            return false
         }
     }
 
@@ -655,14 +677,15 @@ class BunkerService : Service() {
     }
 
     private fun postApprovalNotification(requestId: String, request: BunkerApprovalRequest, intent: Intent) {
+        val notificationId = approvalNotificationId(requestId)
         val contentIntent = PendingIntent.getActivity(
             this,
-            requestId.hashCode(),
+            notificationId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val appLabel = sanitizeDisplayName(request.appName).ifBlank { truncatePubkey(request.appPubkey) }
-        val body = getString(R.string.bunker_approval_notification_text, appLabel, request.method)
+        val body = getString(R.string.bunker_approval_notification_text, appLabel, sanitizeDisplayName(request.method))
         val publicVersion = NotificationCompat.Builder(this, APPROVAL_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.bunker_approval_notification_title))
@@ -682,16 +705,19 @@ class BunkerService : Service() {
             .setTimeoutAfter(APPROVAL_TIMEOUT_MS)
             .build()
         runCatching {
-            NotificationManagerCompat.from(this).notify(approvalNotificationId(requestId), notification)
+            NotificationManagerCompat.from(this).notify(notificationId, notification)
         }
     }
 
     private fun cancelApprovalNotification(requestId: String) {
-        runCatching { NotificationManagerCompat.from(this).cancel(approvalNotificationId(requestId)) }
+        val id = approvalIds.remove(requestId) ?: return
+        runCatching { NotificationManagerCompat.from(this).cancel(id) }
     }
 
-    private fun approvalNotificationId(requestId: String) =
-        APPROVAL_NOTIFICATION_ID_BASE + (requestId.hashCode() and 0xFFFF)
+    private fun approvalNotificationId(requestId: String): Int =
+        approvalIds.computeIfAbsent(requestId) {
+            APPROVAL_NOTIFICATION_ID_BASE + 1 + (approvalIdCounter.getAndIncrement() and 0x7FFF)
+        }
 
     private fun dismissApprovalActivity(requestId: String) {
         val intent = Intent(this, Nip46ApprovalActivity::class.java).apply {
@@ -699,7 +725,7 @@ class BunkerService : Service() {
             putExtra(Nip46ApprovalActivity.EXTRA_TIMEOUT, true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        startActivity(intent)
+        runCatching { startActivity(intent) }
     }
 
     override fun onDestroy() {
@@ -716,6 +742,7 @@ class BunkerService : Service() {
         synchronized(approvalLock) {
             pendingApprovals.keys.toList().forEach { reqId ->
                 pendingApprovals.remove(reqId)?.respond(false)
+                cancelApprovalNotification(reqId)
             }
         }
         clearRateLimitState()
