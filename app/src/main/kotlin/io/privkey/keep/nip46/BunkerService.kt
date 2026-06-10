@@ -311,6 +311,7 @@ class BunkerService : Service() {
             startBunker(keepMobile, relays)
         }
 
+        networkManager?.unregister()
         networkManager = NetworkConnectivityManager(this) {
             serviceScope.launch {
                 val shouldRestart = startStopMutex.withLock {
@@ -355,6 +356,7 @@ class BunkerService : Service() {
 
             _status.value = BunkerStatus.STARTING
 
+            bunkerHandler?.let { runCatching { it.stopBunker() } }
             val handler = BunkerHandler(keepMobile)
             bunkerHandler = handler
 
@@ -400,6 +402,7 @@ class BunkerService : Service() {
             }
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR
+            stopSelf()
             return false
         }
     }
@@ -679,6 +682,8 @@ class BunkerService : Service() {
     }
 
     private fun postApprovalNotification(requestId: String, request: BunkerApprovalRequest, intent: Intent) {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) return
         val notificationId = approvalNotificationId(requestId)
         val contentIntent = PendingIntent.getActivity(
             this,
@@ -706,8 +711,6 @@ class BunkerService : Service() {
             .setAutoCancel(true)
             .setTimeoutAfter(APPROVAL_TIMEOUT_MS)
             .build()
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
-            != PackageManager.PERMISSION_GRANTED) return
         runCatching {
             NotificationManagerCompat.from(this).notify(notificationId, notification)
         }
