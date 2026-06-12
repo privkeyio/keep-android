@@ -116,12 +116,22 @@ class BunkerService : Service() {
 
         internal fun revokeClientInEngine(pubkey: String) {
             val handler = current()?.bunkerHandler ?: return
-            runCatching { handler.revokeClient(pubkey) }
+            try {
+                handler.revokeClient(pubkey)
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Engine client revoke failed: ${e::class.simpleName}")
+                throw e
+            }
         }
 
         internal fun revokeAllClientsInEngine() {
             val handler = current()?.bunkerHandler ?: return
-            runCatching { handler.revokeAllClients() }
+            try {
+                handler.revokeAllClients()
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Engine revoke-all failed: ${e::class.simpleName}")
+                throw e
+            }
         }
 
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
