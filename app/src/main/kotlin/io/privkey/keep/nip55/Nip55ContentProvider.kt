@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.database.MatrixCursor
+import android.os.SystemClock
 import android.net.Uri
 import android.os.Binder
 import android.util.Log
@@ -225,12 +226,16 @@ class Nip55ContentProvider : ContentProvider() {
             SignPolicy.AUTO, SignPolicy.BASIC -> PolicyMode.AUTO
         }
 
-        val safeguards = currentApp.getAutoSigningSafeguards()
-        val isOptedIn = safeguards?.isOptedIn(callerPackage) == true
+        val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
 
+        val limiter = currentApp.getSigningRateLimiter()
         val defaultVelocity = VelocityConfig()
-        val rateCheck = if (safeguards != null && isOptedIn) {
-            mapUsageResult(safeguards.checkAndRecordUsage(callerPackage), defaultVelocity)
+        val rateCheck = if (limiter != null && isOptedIn) {
+            limiter.checkAndRecord(
+                callerPackage,
+                SystemClock.elapsedRealtime().toULong(),
+                System.currentTimeMillis().toULong()
+            )
         } else {
             AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
         }
@@ -258,19 +263,6 @@ class Nip55ContentProvider : ContentProvider() {
         }
     }
 
-    private fun mapUsageResult(result: AutoSigningSafeguards.UsageCheckResult, velocity: VelocityConfig): AutoSignDecision =
-        when (result) {
-            is AutoSigningSafeguards.UsageCheckResult.Allowed ->
-                AutoSignDecision.Allowed(result.hourlyCount.toUInt(), result.dailyCount.toUInt(), 0u, velocity.hourlyLimit.toUInt(), velocity.dailyLimit.toUInt())
-            is AutoSigningSafeguards.UsageCheckResult.HourlyLimitExceeded ->
-                AutoSignDecision.HourlyLimitExceeded
-            is AutoSigningSafeguards.UsageCheckResult.DailyLimitExceeded ->
-                AutoSignDecision.DailyLimitExceeded
-            is AutoSigningSafeguards.UsageCheckResult.UnusualActivity ->
-                AutoSignDecision.UnusualActivity
-            is AutoSigningSafeguards.UsageCheckResult.CoolingOff ->
-                AutoSignDecision.CoolingOff(result.until.toULong())
-        }
 
     private fun checkPermissionWithRisk(
         store: PermissionStore,

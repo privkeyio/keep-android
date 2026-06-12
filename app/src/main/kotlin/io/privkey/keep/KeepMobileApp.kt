@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
+import io.privkey.keep.nip55.AndroidSigningRateLimiterStorage
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
 import io.privkey.keep.nip55.EventLogCategory
@@ -38,6 +39,7 @@ import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.SigningAuditLog
+import io.privkey.keep.uniffi.SigningRateLimiter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +68,7 @@ class KeepMobileApp : Application() {
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
+    private var signingRateLimiter: SigningRateLimiter? = null
     private var signingAuditLog: SigningAuditLog? = null
     private var eventLogStore: EventLogStore? = null
     private var networkManager: NetworkConnectivityManager? = null
@@ -208,6 +211,7 @@ class KeepMobileApp : Application() {
             permissionStore = store
             callerVerificationStore = CallerVerificationStore(this)
             autoSigningSafeguards = AutoSigningSafeguards(this)
+            signingRateLimiter = SigningRateLimiter(AndroidSigningRateLimiterStorage(this))
             val eventLog = EventLogStore.getInstance(db)
             eventLogStore = eventLog
             initializeSigningAuditLog(db)
@@ -308,6 +312,8 @@ class KeepMobileApp : Application() {
     fun getCallerVerificationStore(): CallerVerificationStore? = callerVerificationStore
 
     fun getAutoSigningSafeguards(): AutoSigningSafeguards? = autoSigningSafeguards
+
+    fun getSigningRateLimiter(): SigningRateLimiter? = signingRateLimiter
 
     fun getSigningAuditLog(): SigningAuditLog? = signingAuditLog
 
@@ -451,6 +457,7 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
+            runAccountSwitchCleanup("clear auto-sign rate limits") { signingRateLimiter?.clearAll() }
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
         }
