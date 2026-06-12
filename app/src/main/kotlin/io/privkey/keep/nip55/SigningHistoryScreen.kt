@@ -103,6 +103,9 @@ fun SigningHistoryScreen(
                 }
             } catch (e: Exception) {
                 loadError = errLoadApps
+                // Don't leave the indicator on a reassuring "verifying…" check if
+                // verification threw; surface it as a failed chain instead.
+                if (chainStatus == null) chainStatus = ChainVerificationResult.Broken(-1L)
             }
         }
     }
