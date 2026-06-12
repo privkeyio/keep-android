@@ -114,6 +114,16 @@ class BunkerService : Service() {
             current()?.pendingAuthSaves?.remove(pubkey.lowercase())
         }
 
+        internal fun revokeClientInEngine(pubkey: String) {
+            val handler = current()?.bunkerHandler ?: return
+            runCatching { handler.revokeClient(pubkey) }
+        }
+
+        internal fun revokeAllClientsInEngine() {
+            val handler = current()?.bunkerHandler ?: return
+            runCatching { handler.revokeAllClients() }
+        }
+
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
             return pendingNostrConnectRequests.offer(request)
         }

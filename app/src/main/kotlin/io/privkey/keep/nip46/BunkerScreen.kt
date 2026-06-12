@@ -250,6 +250,7 @@ fun BunkerScreen(
                         }
                     }.onSuccess { saved ->
                         BunkerService.forgetPendingAuth(pubkey)
+                        BunkerService.revokeClientInEngine(pubkey)
                         authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
@@ -295,6 +296,7 @@ fun BunkerScreen(
                         }
                     }.onSuccess {
                         revoked.forEach { BunkerService.forgetPendingAuth(it) }
+                        BunkerService.revokeAllClientsInEngine()
                         authorizedClients = emptySet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
