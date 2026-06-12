@@ -208,7 +208,14 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private fun respond(approved: Boolean, duration: PermissionDuration?) {
         approveCompletionCallback?.invoke(approved)
         approveCompletionCallback = null
-        requestId?.let { BunkerService.respondToApproval(it, approved, clientPubkey) }
+        val remember = if (approved) {
+            mapPermissionDurationToRemember(duration)
+        } else {
+            io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME
+        }
+        requestId?.let {
+            BunkerService.respondToApproval(it, approved, clientPubkey, remember)
+        }
         lifecycleScope.launch {
             if (approved && duration != null) {
                 savePermissionIfRequested(duration)
@@ -216,6 +223,26 @@ class Nip46ApprovalActivity : FragmentActivity() {
             finish()
         }
     }
+
+    private fun mapPermissionDurationToRemember(
+        duration: PermissionDuration?,
+    ): io.privkey.keep.uniffi.BunkerRememberDuration =
+        when (duration) {
+            null, PermissionDuration.JUST_THIS_TIME ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME
+            PermissionDuration.ONE_MINUTE ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_MINUTE
+            PermissionDuration.FIVE_MINUTES ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.FIVE_MINUTES
+            PermissionDuration.TEN_MINUTES ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.TEN_MINUTES
+            PermissionDuration.ONE_HOUR ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_HOUR
+            PermissionDuration.ONE_DAY ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_DAY
+            PermissionDuration.FOREVER ->
+                io.privkey.keep.uniffi.BunkerRememberDuration.FOREVER
+        }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
