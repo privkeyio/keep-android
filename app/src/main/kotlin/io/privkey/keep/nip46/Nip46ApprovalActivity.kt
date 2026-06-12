@@ -20,6 +20,7 @@ import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.BunkerRememberDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -208,7 +209,14 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private fun respond(approved: Boolean, duration: PermissionDuration?) {
         approveCompletionCallback?.invoke(approved)
         approveCompletionCallback = null
-        requestId?.let { BunkerService.respondToApproval(it, approved, clientPubkey) }
+        val remember = if (approved) {
+            mapPermissionDurationToRemember(duration)
+        } else {
+            BunkerRememberDuration.JUST_THIS_TIME
+        }
+        requestId?.let {
+            BunkerService.respondToApproval(it, approved, clientPubkey, remember)
+        }
         lifecycleScope.launch {
             if (approved && duration != null) {
                 savePermissionIfRequested(duration)
@@ -216,6 +224,26 @@ class Nip46ApprovalActivity : FragmentActivity() {
             finish()
         }
     }
+
+    private fun mapPermissionDurationToRemember(
+        duration: PermissionDuration?,
+    ): BunkerRememberDuration =
+        when (duration) {
+            null, PermissionDuration.JUST_THIS_TIME ->
+                BunkerRememberDuration.JUST_THIS_TIME
+            PermissionDuration.ONE_MINUTE ->
+                BunkerRememberDuration.ONE_MINUTE
+            PermissionDuration.FIVE_MINUTES ->
+                BunkerRememberDuration.FIVE_MINUTES
+            PermissionDuration.TEN_MINUTES ->
+                BunkerRememberDuration.TEN_MINUTES
+            PermissionDuration.ONE_HOUR ->
+                BunkerRememberDuration.ONE_HOUR
+            PermissionDuration.ONE_DAY ->
+                BunkerRememberDuration.ONE_DAY
+            PermissionDuration.FOREVER ->
+                BunkerRememberDuration.FOREVER
+        }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)

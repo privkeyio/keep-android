@@ -244,12 +244,14 @@ fun BunkerScreen(
                     runCatching {
                         withContext(Dispatchers.IO) {
                             Nip46ClientStore.addToDenylist(context, pubkey)
-                            BunkerConfigStore.update(keepMobile) { config ->
+                            val saved = BunkerConfigStore.update(keepMobile) { config ->
                                 BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
                             }
+                            BunkerService.forgetPendingAuth(pubkey)
+                            BunkerService.revokeClientInEngine(pubkey)
+                            saved
                         }
                     }.onSuccess { saved ->
-                        BunkerService.forgetPendingAuth(pubkey)
                         authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
@@ -292,9 +294,10 @@ fun BunkerScreen(
                             BunkerConfigStore.update(keepMobile) { config ->
                                 BunkerConfigInfo(config.enabled, emptyList())
                             }
+                            revoked.forEach { BunkerService.forgetPendingAuth(it) }
+                            BunkerService.revokeAllClientsInEngine()
                         }
                     }.onSuccess {
-                        revoked.forEach { BunkerService.forgetPendingAuth(it) }
                         authorizedClients = emptySet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
