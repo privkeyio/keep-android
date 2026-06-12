@@ -2,26 +2,27 @@ package io.privkey.keep.nip55
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.SystemClock
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import io.privkey.keep.storage.LegacyPrefsMigration
+import io.privkey.keep.uniffi.Nip55CallerVerification
+import io.privkey.keep.uniffi.Nip55NonceResult
+import io.privkey.keep.uniffi.Nip55NonceStore
+import io.privkey.keep.uniffi.nip55VerifyCaller
 import java.security.MessageDigest
-import java.security.SecureRandom
-import java.util.concurrent.ConcurrentHashMap
 
 class CallerVerificationStore(context: Context) {
 
     companion object {
         private const val PREFS_NAME = "nip55_caller_verification"
         private const val KEY_PREFIX_SIGNATURE = "sig_"
-        private const val NONCE_EXPIRY_MS = 5 * 60 * 1000L
-        private const val MAX_ACTIVE_NONCES = 1000
     }
 
-    private data class NonceData(val packageName: String, val expiresAtElapsed: Long)
-    private val activeNonces = ConcurrentHashMap<String, NonceData>()
+    // The TOFU decision and the challenge-nonce lifecycle live in Rust
+    // (keep-mobile nip55_caller); Android keeps only the PackageManager call and
+    // the trusted-signature storage.
+    private val nonceStore = Nip55NonceStore()
 
     private val prefs = run {
         val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
@@ -67,23 +68,9 @@ class CallerVerificationStore(context: Context) {
     private fun getTrustedSignature(packageName: String): String? =
         prefs.getString(KEY_PREFIX_SIGNATURE + packageName, null)
 
-    fun verifyOrTrust(packageName: String): VerificationResult {
-        val currentSignature = getPackageSignatureHash(packageName)
-            ?: return VerificationResult.NotInstalled
-
-        val trustedSignature = getTrustedSignature(packageName)
-            ?: return VerificationResult.FirstUseRequiresApproval(currentSignature)
-
-        val matches = MessageDigest.isEqual(
-            trustedSignature.toByteArray(Charsets.UTF_8),
-            currentSignature.toByteArray(Charsets.UTF_8)
-        )
-        return if (matches) {
-            VerificationResult.Verified(currentSignature)
-        } else {
-            VerificationResult.SignatureMismatch(trustedSignature, currentSignature)
-        }
-    }
+    fun verifyOrTrust(packageName: String): VerificationResult =
+        nip55VerifyCaller(getPackageSignatureHash(packageName), getTrustedSignature(packageName))
+            .toVerificationResult()
 
     fun trustPackage(packageName: String, signatureHash: String) {
         prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
@@ -91,50 +78,14 @@ class CallerVerificationStore(context: Context) {
 
     fun clearAllTrust() {
         prefs.edit().clear().commit()
-        synchronized(nonceLock) { activeNonces.clear() }
+        nonceStore.clear()
     }
 
-    private val nonceLock = Any()
+    fun generateNonce(packageName: String): String = nonceStore.generate(packageName)
 
-    fun generateNonce(packageName: String): String {
-        val bytes = ByteArray(32)
-        SecureRandom().nextBytes(bytes)
-        val nonce = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-        val expiresAtElapsed = SystemClock.elapsedRealtime() + NONCE_EXPIRY_MS
-        synchronized(nonceLock) {
-            activeNonces[nonce] = NonceData(packageName, expiresAtElapsed)
-            if (activeNonces.size > MAX_ACTIVE_NONCES) {
-                cleanupExpiredNonces()
-                if (activeNonces.size > MAX_ACTIVE_NONCES) {
-                    evictOldestNonces()
-                }
-            }
-        }
-        return nonce
-    }
+    fun consumeNonce(nonce: String): NonceResult = nonceStore.consume(nonce).toNonceResult()
 
-    fun consumeNonce(nonce: String): NonceResult {
-        val data = activeNonces.remove(nonce) ?: return NonceResult.Invalid
-        val nowElapsed = SystemClock.elapsedRealtime()
-        if (nowElapsed > data.expiresAtElapsed || data.expiresAtElapsed - nowElapsed > NONCE_EXPIRY_MS) {
-            return NonceResult.Expired
-        }
-        return NonceResult.Valid(data.packageName)
-    }
-
-    fun cleanupExpiredNonces() {
-        val nowElapsed = SystemClock.elapsedRealtime()
-        activeNonces.entries.removeIf {
-            nowElapsed > it.value.expiresAtElapsed ||
-            it.value.expiresAtElapsed - nowElapsed > NONCE_EXPIRY_MS
-        }
-    }
-
-    private fun evictOldestNonces() {
-        val sorted = activeNonces.entries.sortedBy { it.value.expiresAtElapsed }
-        val toRemove = sorted.take((sorted.size - MAX_ACTIVE_NONCES / 2).coerceAtLeast(1))
-        toRemove.forEach { activeNonces.remove(it.key) }
-    }
+    fun cleanupExpiredNonces() = nonceStore.cleanupExpired()
 
     sealed class VerificationResult {
         abstract val signatureHash: String?
@@ -161,3 +112,22 @@ class CallerVerificationStore(context: Context) {
         data object Expired : NonceResult()
     }
 }
+
+private fun Nip55CallerVerification.toVerificationResult(): CallerVerificationStore.VerificationResult =
+    when (this) {
+        is Nip55CallerVerification.NotInstalled ->
+            CallerVerificationStore.VerificationResult.NotInstalled
+        is Nip55CallerVerification.FirstUseRequiresApproval ->
+            CallerVerificationStore.VerificationResult.FirstUseRequiresApproval(signature)
+        is Nip55CallerVerification.Verified ->
+            CallerVerificationStore.VerificationResult.Verified(signature)
+        is Nip55CallerVerification.SignatureMismatch ->
+            CallerVerificationStore.VerificationResult.SignatureMismatch(expected, actual)
+    }
+
+private fun Nip55NonceResult.toNonceResult(): CallerVerificationStore.NonceResult =
+    when (this) {
+        is Nip55NonceResult.Valid -> CallerVerificationStore.NonceResult.Valid(packageName)
+        is Nip55NonceResult.Invalid -> CallerVerificationStore.NonceResult.Invalid
+        is Nip55NonceResult.Expired -> CallerVerificationStore.NonceResult.Expired
+    }
