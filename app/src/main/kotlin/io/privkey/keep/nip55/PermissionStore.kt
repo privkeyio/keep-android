@@ -2,15 +2,16 @@ package io.privkey.keep.nip55
 
 import android.os.SystemClock
 import androidx.room.withTransaction
+import io.privkey.keep.uniffi.Nip55AuditEntry
+import io.privkey.keep.uniffi.Nip55ChainStatus
 import io.privkey.keep.uniffi.Nip55PermissionDecision
 import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
+import io.privkey.keep.uniffi.nip55AuditEntryHash
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
-import java.security.MessageDigest
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+import io.privkey.keep.uniffi.nip55VerifyAuditChain
 
 private const val MINUTE_MS = 60 * 1000L
 private const val HOUR_MS = 60 * MINUTE_MS
@@ -182,58 +183,14 @@ class PermissionStore(private val database: Nip55Database) {
         )
     }
 
+    // Chain verification (keyed-HMAC walk: legacy/truncated/broken/tampered) lives
+    // in Rust; Android supplies the ordered rows and the keystore HMAC key.
     suspend fun verifyAuditChain(): ChainVerificationResult {
         val entries = auditDao.getAllOrdered()
-        val knownHashes = entries.mapNotNullTo(mutableSetOf()) { it.entryHash.takeIf { h -> h.isNotEmpty() } }
-        var inLegacyPhase = true
-        var legacyEntriesSkipped = 0
-        var truncated = false
-        var expectedPrevHash: String? = null
-
-        for (entry in entries) {
-            if (inLegacyPhase) {
-                if (entry.entryHash.isEmpty()) {
-                    legacyEntriesSkipped++
-                    continue
-                }
-                inLegacyPhase = false
-                if (!entry.previousHash.isNullOrEmpty()) {
-                    if (entry.previousHash !in knownHashes) {
-                        truncated = true
-                    } else {
-                        return ChainVerificationResult.Broken(entry.id)
-                    }
-                }
-            } else {
-                if (entry.entryHash.isEmpty()) {
-                    return ChainVerificationResult.Broken(entry.id)
-                }
-                if (!constantTimeEquals(entry.previousHash, expectedPrevHash)) {
-                    return ChainVerificationResult.Broken(entry.id)
-                }
-            }
-
-            val calculated = calculateEntryHash(
-                previousHash = entry.previousHash,
-                callerPackage = entry.callerPackage,
-                requestType = entry.requestType,
-                eventKind = entry.eventKind,
-                decision = entry.decision,
-                timestamp = entry.timestamp,
-                wasAutomatic = entry.wasAutomatic
-            )
-            if (!constantTimeEquals(calculated, entry.entryHash)) {
-                return ChainVerificationResult.Tampered(entry.id)
-            }
-
-            expectedPrevHash = entry.entryHash
-        }
-
-        return when {
-            truncated -> ChainVerificationResult.Truncated(entries.first { it.entryHash.isNotEmpty() }.id)
-            legacyEntriesSkipped > 0 -> ChainVerificationResult.PartiallyVerified(legacyEntriesSkipped)
-            else -> ChainVerificationResult.Valid
-        }
+        val hmacKey = Nip55Database.getHmacKey()
+            ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
+        return nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
+            .toChainVerificationResult()
     }
 
     suspend fun getAuditLogCount(): Int = auditDao.getCount()
@@ -444,20 +401,42 @@ private fun calculateEntryHash(
     timestamp: Long,
     wasAutomatic: Boolean
 ): String {
-    val content = "${previousHash ?: ""}|$callerPackage|$requestType|${eventKind ?: ""}|$decision|$timestamp|$wasAutomatic"
     val hmacKey = Nip55Database.getHmacKey()
         ?: throw IllegalStateException("HMAC key not initialized - cannot compute audit entry hash")
-    val mac = Mac.getInstance("HmacSHA256")
-    mac.init(SecretKeySpec(hmacKey, "HmacSHA256"))
-    val hashBytes = mac.doFinal(content.toByteArray(Charsets.UTF_8))
-    return hashBytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    return nip55AuditEntryHash(
+        previousHash,
+        callerPackage,
+        requestType,
+        eventKind,
+        decision,
+        timestamp,
+        wasAutomatic,
+        hmacKey
+    )
 }
 
-private fun constantTimeEquals(a: String?, b: String?): Boolean {
-    if (a == null && b == null) return true
-    if (a == null || b == null) return false
-    return MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
-}
+private fun Nip55AuditLog.toRustAuditEntry(): Nip55AuditEntry =
+    Nip55AuditEntry(
+        id = id,
+        timestamp = timestamp,
+        caller = callerPackage,
+        requestType = requestType,
+        eventKind = eventKind,
+        decision = decision,
+        wasAutomatic = wasAutomatic,
+        previousHash = previousHash,
+        entryHash = entryHash
+    )
+
+private fun Nip55ChainStatus.toChainVerificationResult(): ChainVerificationResult =
+    when (this) {
+        is Nip55ChainStatus.Valid -> ChainVerificationResult.Valid
+        is Nip55ChainStatus.PartiallyVerified ->
+            ChainVerificationResult.PartiallyVerified(legacyEntriesSkipped.toInt())
+        is Nip55ChainStatus.Truncated -> ChainVerificationResult.Truncated(entryId)
+        is Nip55ChainStatus.Broken -> ChainVerificationResult.Broken(entryId)
+        is Nip55ChainStatus.Tampered -> ChainVerificationResult.Tampered(entryId)
+    }
 
 private fun Nip55Permission.toStoredPermission(): Nip55StoredPermission =
     Nip55StoredPermission(

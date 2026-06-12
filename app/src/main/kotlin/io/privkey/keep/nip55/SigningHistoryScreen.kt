@@ -93,9 +93,9 @@ fun SigningHistoryScreen(
                 if (signingAuditLog != null) {
                     availableApps = signingAuditLog.getDistinctCallers()
                     logCount = signingAuditLog.getEntryCount().toInt().coerceAtLeast(0)
-                    val result = signingAuditLog.verifyChain()
-                    chainStatus = if (result.verified) ChainVerificationResult.Valid
-                        else ChainVerificationResult.Broken(-1L)
+                    // Verify via the keyed-HMAC chain that actually wrote these rows,
+                    // not the unkeyed Rust SigningAuditLog.verifyChain (#306).
+                    chainStatus = permissionStore.verifyAuditChain()
                 } else {
                     availableApps = permissionStore.getDistinctAuditCallers()
                     logCount = permissionStore.getAuditLogCount()
@@ -103,6 +103,9 @@ fun SigningHistoryScreen(
                 }
             } catch (e: Exception) {
                 loadError = errLoadApps
+                // Don't leave the indicator on a reassuring "verifying…" check if
+                // verification threw; surface it as a failed chain instead.
+                if (chainStatus == null) chainStatus = ChainVerificationResult.Broken(-1L)
             }
         }
     }
