@@ -156,6 +156,8 @@ data class ConnectedAppInfo(
     val expiresAt: Long?
 )
 
+// Expiry policy lives in Rust (`keep-mobile/src/nip55_policy.rs`); Android only
+// supplies the wall and monotonic clock readings.
 internal fun isTimestampExpired(
     expiresAt: Long?,
     createdAt: Long,
@@ -163,24 +165,11 @@ internal fun isTimestampExpired(
     durationMs: Long?,
     currentElapsed: Long,
     currentTimeMillis: Long
-): Boolean {
-    if (expiresAt == null && durationMs == null) return false
-
-    if (durationMs != null) {
-        if (createdAtElapsed > 0) {
-            if (currentElapsed < createdAtElapsed) return true
-            val elapsed = currentElapsed - createdAtElapsed
-            if (elapsed >= durationMs) return true
-        } else {
-            val wallClockExpiry = createdAt + durationMs
-            if (currentTimeMillis >= wallClockExpiry) return true
-        }
-    }
-
-    if (expiresAt != null) {
-        val clockManipulated = currentTimeMillis < createdAt
-        if (clockManipulated || expiresAt <= currentTimeMillis) return true
-    }
-
-    return false
-}
+): Boolean = io.privkey.keep.uniffi.nip55TimestampExpired(
+    expiresAt,
+    createdAt,
+    createdAtElapsed,
+    durationMs,
+    currentElapsed,
+    currentTimeMillis
+)
