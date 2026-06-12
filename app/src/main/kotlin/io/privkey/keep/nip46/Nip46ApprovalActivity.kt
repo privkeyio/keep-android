@@ -17,13 +17,10 @@ import io.privkey.keep.BiometricHelper
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip55.PermissionDuration
-import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.BunkerRememberDuration
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class Nip46ApprovalActivity : FragmentActivity() {
 
@@ -32,8 +29,6 @@ class Nip46ApprovalActivity : FragmentActivity() {
         const val EXTRA_REQUEST_ID = "request_id"
         const val EXTRA_APP_PUBKEY = "app_pubkey"
         const val EXTRA_APP_NAME = "app_name"
-        const val EXTRA_METHOD = "method"
-        const val EXTRA_EVENT_KIND = "event_kind"
         const val EXTRA_EVENT_CONTENT = "event_content"
         const val EXTRA_IS_CONNECT = "is_connect"
         const val EXTRA_TIMEOUT = "timeout"
@@ -42,11 +37,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private val keepApp: KeepMobileApp? get() = application as? KeepMobileApp
     private var storage: AndroidKeystoreStorage? = null
-    private var permissionStore: PermissionStore? = null
     private var requestId: String? = null
     private var clientPubkey: String? = null
-    private var method: String? = null
-    private var eventKind: Int? = null
     private var approveCompletionCallback: ((Boolean) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,12 +50,9 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val app = application as? KeepMobileApp
         biometricHelper = BiometricHelper(this, app?.getBiometricTimeoutStore())
         storage = app?.getStorage()
-        permissionStore = app?.getPermissionStore()
 
         requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
         clientPubkey = intent.getStringExtra(EXTRA_APP_PUBKEY)
-        method = intent.getStringExtra(EXTRA_METHOD)
-        eventKind = intent.getIntExtra(EXTRA_EVENT_KIND, -1).takeIf { it >= 0 }
         if (requestId == null) {
             if (BuildConfig.DEBUG) Log.e(TAG, "No request ID provided")
             finish()
@@ -177,31 +166,6 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    private suspend fun savePermissionIfRequested(duration: PermissionDuration) {
-        val store = permissionStore ?: return
-        val pubkey = clientPubkey ?: return
-        val methodName = method ?: return
-
-        if (!duration.shouldPersist) return
-
-        withContext(Dispatchers.IO) {
-            val callerPackage = "nip46:$pubkey"
-            val requestType = mapMethodToNip55RequestType(methodName) ?: return@withContext
-            try {
-                store.grantPermission(
-                    callerPackage = callerPackage,
-                    requestType = requestType,
-                    eventKind = eventKind,
-                    duration = duration
-                )
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist permission: ${e::class.simpleName}")
-            }
-        }
-    }
-
     private fun handleReject() {
         respond(false, null)
     }
@@ -217,12 +181,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         requestId?.let {
             BunkerService.respondToApproval(it, approved, clientPubkey, remember)
         }
-        lifecycleScope.launch {
-            if (approved && duration != null) {
-                savePermissionIfRequested(duration)
-            }
-            finish()
-        }
+        finish()
     }
 
     private fun mapPermissionDurationToRemember(
