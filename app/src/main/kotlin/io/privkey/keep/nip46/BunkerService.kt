@@ -25,7 +25,6 @@ import io.privkey.keep.nip55.EventLogCategory
 import io.privkey.keep.nip55.EventLogLevel
 import io.privkey.keep.nip55.EventLogStore
 import io.privkey.keep.nip55.Nip55Database
-import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.uniffi.BunkerApprovalRequest
@@ -48,7 +47,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
@@ -586,11 +584,6 @@ class BunkerService : Service() {
     private fun handleApprovalRequest(
         request: BunkerApprovalRequest,
     ): BunkerApprovalResult {
-        val approvedOnce = BunkerApprovalResult(
-            approved = true,
-            remember = BunkerRememberDuration.JUST_THIS_TIME,
-        )
-
         if (Looper.myLooper() == Looper.getMainLooper()) {
             if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread")
             return REJECTED
@@ -622,21 +615,6 @@ class BunkerService : Service() {
         if (!isAuthorized && !isConnectRequest) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
             return REJECTED
-        }
-
-        if (!isConnectRequest) {
-            val storedDecision = checkStoredPermission(clientPubkey, request)
-            if (storedDecision != null) {
-                val allowed = storedDecision == PermissionDecision.ALLOW
-                if (allowed) {
-                    synchronized(rateLimitLock) {
-                        clientConsecutiveRequests[clientPubkey]?.set(0)
-                    }
-                }
-                logBunkerEventWithDecision(request, allowed, wasAutomatic = true)
-                if (BuildConfig.DEBUG) Log.d(TAG, "Auto-${if (allowed) "approved" else "denied"} request from ${truncatePubkey(clientPubkey)} based on stored permission")
-                return if (allowed) approvedOnce else REJECTED
-            }
         }
 
         val requestId = UUID.randomUUID().toString()
@@ -679,48 +657,12 @@ class BunkerService : Service() {
         return result
     }
 
-    private fun checkStoredPermission(clientPubkey: String, request: BunkerApprovalRequest): PermissionDecision? {
-        require(clientPubkey.isNotBlank()) { "Client pubkey must not be blank" }
-        val store = permissionStore ?: return null
-        val callerPackage = "nip46:$clientPubkey"
-        val requestType = mapMethodToNip55RequestType(request.method) ?: return null
-        val eventKind = request.eventKind?.toInt()
-
-        return runCatching {
-            runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(5_000L) {
-                    store.getPermissionDecision(callerPackage, requestType, eventKind)
-                }
-            }
-        }.getOrNull()
-    }
-
-    private fun logBunkerEventWithDecision(request: BunkerApprovalRequest, allowed: Boolean, wasAutomatic: Boolean) {
-        val store = permissionStore ?: return
-        val requestType = mapMethodToNip55RequestType(request.method) ?: return
-        serviceScope.launch {
-            runCatching {
-                store.logOperation(
-                    callerPackage = "nip46:${request.appPubkey}",
-                    requestType = requestType,
-                    eventKind = request.eventKind?.toInt(),
-                    decision = if (allowed) "allow" else "deny",
-                    wasAutomatic = wasAutomatic
-                )
-            }.onFailure {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Failed to log bunker event: ${it::class.simpleName}")
-            }
-        }
-    }
-
     private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
         val intent = Intent(this, Nip46ApprovalActivity::class.java).apply {
             putExtra(Nip46ApprovalActivity.EXTRA_REQUEST_ID, requestId)
             putExtra(Nip46ApprovalActivity.EXTRA_APP_PUBKEY, request.appPubkey)
             putExtra(Nip46ApprovalActivity.EXTRA_APP_NAME, request.appName)
-            putExtra(Nip46ApprovalActivity.EXTRA_METHOD, request.method)
             putExtra(Nip46ApprovalActivity.EXTRA_IS_CONNECT, isConnectRequest)
-            request.eventKind?.let { putExtra(Nip46ApprovalActivity.EXTRA_EVENT_KIND, it.toInt()) }
             request.eventContent?.let { putExtra(Nip46ApprovalActivity.EXTRA_EVENT_CONTENT, it) }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }

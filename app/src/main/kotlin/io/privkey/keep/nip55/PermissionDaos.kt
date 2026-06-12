@@ -29,6 +29,9 @@ interface Nip55PermissionDao {
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
 
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage LIKE 'nip46:%'")
+    suspend fun deleteNip46Permissions()
+
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND requestType = :requestType")
     suspend fun deleteForCallerAndType(callerPackage: String, requestType: String)
 

@@ -25,6 +25,7 @@ class PermissionStore(private val database: Nip55Database) {
         val nowElapsed = SystemClock.elapsedRealtime()
         database.withTransaction {
             dao.deleteExpired(now, nowElapsed)
+            dao.deleteNip46Permissions()
             auditDao.deleteOlderThan(now - 30 * DAY_MS)
             val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
