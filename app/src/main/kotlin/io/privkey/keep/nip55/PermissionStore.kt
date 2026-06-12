@@ -475,10 +475,24 @@ private fun Nip55PermissionDecision.toPermissionDecision(): PermissionDecision =
         Nip55PermissionDecision.ASK -> PermissionDecision.ASK
     }
 
-// The uniffi and domain duration enums share variant names by construction
-// (both mirror the same NIP-55 set), so map by name.
 private fun PermissionDuration.toUniffi(): Nip55PermissionDuration =
-    Nip55PermissionDuration.valueOf(name)
+    when (this) {
+        PermissionDuration.JUST_THIS_TIME -> Nip55PermissionDuration.JUST_THIS_TIME
+        PermissionDuration.ONE_MINUTE -> Nip55PermissionDuration.ONE_MINUTE
+        PermissionDuration.FIVE_MINUTES -> Nip55PermissionDuration.FIVE_MINUTES
+        PermissionDuration.TEN_MINUTES -> Nip55PermissionDuration.TEN_MINUTES
+        PermissionDuration.ONE_HOUR -> Nip55PermissionDuration.ONE_HOUR
+        PermissionDuration.ONE_DAY -> Nip55PermissionDuration.ONE_DAY
+        PermissionDuration.FOREVER -> Nip55PermissionDuration.FOREVER
+    }
 
 private fun Nip55PermissionDuration.toDomain(): PermissionDuration =
-    PermissionDuration.valueOf(name)
+    when (this) {
+        Nip55PermissionDuration.JUST_THIS_TIME -> PermissionDuration.JUST_THIS_TIME
+        Nip55PermissionDuration.ONE_MINUTE -> PermissionDuration.ONE_MINUTE
+        Nip55PermissionDuration.FIVE_MINUTES -> PermissionDuration.FIVE_MINUTES
+        Nip55PermissionDuration.TEN_MINUTES -> PermissionDuration.TEN_MINUTES
+        Nip55PermissionDuration.ONE_HOUR -> PermissionDuration.ONE_HOUR
+        Nip55PermissionDuration.ONE_DAY -> PermissionDuration.ONE_DAY
+        Nip55PermissionDuration.FOREVER -> PermissionDuration.FOREVER
+    }
