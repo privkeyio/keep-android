@@ -2,7 +2,12 @@ package io.privkey.keep.nip55
 
 import android.os.SystemClock
 import androidx.room.withTransaction
+import io.privkey.keep.uniffi.Nip55PermissionDecision
+import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55StoredPermission
+import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
+import io.privkey.keep.uniffi.nip55ResolveDecision
 import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -35,16 +40,24 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
+    // Decision resolution (incl. the rule that sensitive kinds never fall back
+    // to a generic grant) lives in Rust; Android fetches the candidate rows and
+    // supplies the clock readings.
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
         val storedKind = eventKind ?: EVENT_KIND_GENERIC
-        val permission = dao.getPermission(callerPackage, requestType.name, storedKind)
-        if (permission != null && !permission.isExpired()) return permission.permissionDecision
-
-        if (eventKind != null && !isSensitiveKind(eventKind)) {
-            val genericPermission = dao.getPermission(callerPackage, requestType.name, EVENT_KIND_GENERIC)
-            if (genericPermission != null && !genericPermission.isExpired()) return genericPermission.permissionDecision
+        val exact = dao.getPermission(callerPackage, requestType.name, storedKind)
+        val generic = if (eventKind != null) {
+            dao.getPermission(callerPackage, requestType.name, EVENT_KIND_GENERIC)
+        } else {
+            null
         }
-        return null
+        return nip55ResolveDecision(
+            exact?.toStoredPermission(),
+            generic?.toStoredPermission(),
+            eventKind,
+            SystemClock.elapsedRealtime(),
+            System.currentTimeMillis()
+        )?.toPermissionDecision()
     }
 
     suspend fun grantPermission(
@@ -54,11 +67,8 @@ class PermissionStore(private val database: Nip55Database) {
         duration: PermissionDuration
     ) {
         require(callerPackage.isNotBlank()) { "callerPackage must not be blank" }
-        val effectiveDuration = if (eventKind != null && isSensitiveKind(eventKind) && duration == PermissionDuration.FOREVER) {
-            PermissionDuration.ONE_DAY
-        } else {
-            duration
-        }
+        // Sensitive-kind FOREVER -> ONE_DAY clamp lives in Rust.
+        val effectiveDuration = nip55EffectiveGrantDuration(eventKind, duration.toUniffi()).toDomain()
         savePermission(callerPackage, requestType, eventKind, effectiveDuration, "allow")
     }
 
@@ -448,3 +458,41 @@ private fun constantTimeEquals(a: String?, b: String?): Boolean {
     if (a == null || b == null) return false
     return MessageDigest.isEqual(a.toByteArray(Charsets.UTF_8), b.toByteArray(Charsets.UTF_8))
 }
+
+private fun Nip55Permission.toStoredPermission(): Nip55StoredPermission =
+    Nip55StoredPermission(
+        decision = decision,
+        expiresAt = expiresAt,
+        createdAt = createdAt,
+        createdAtElapsed = createdAtElapsed,
+        durationMs = durationMs
+    )
+
+private fun Nip55PermissionDecision.toPermissionDecision(): PermissionDecision =
+    when (this) {
+        Nip55PermissionDecision.ALLOW -> PermissionDecision.ALLOW
+        Nip55PermissionDecision.DENY -> PermissionDecision.DENY
+        Nip55PermissionDecision.ASK -> PermissionDecision.ASK
+    }
+
+private fun PermissionDuration.toUniffi(): Nip55PermissionDuration =
+    when (this) {
+        PermissionDuration.JUST_THIS_TIME -> Nip55PermissionDuration.JUST_THIS_TIME
+        PermissionDuration.ONE_MINUTE -> Nip55PermissionDuration.ONE_MINUTE
+        PermissionDuration.FIVE_MINUTES -> Nip55PermissionDuration.FIVE_MINUTES
+        PermissionDuration.TEN_MINUTES -> Nip55PermissionDuration.TEN_MINUTES
+        PermissionDuration.ONE_HOUR -> Nip55PermissionDuration.ONE_HOUR
+        PermissionDuration.ONE_DAY -> Nip55PermissionDuration.ONE_DAY
+        PermissionDuration.FOREVER -> Nip55PermissionDuration.FOREVER
+    }
+
+private fun Nip55PermissionDuration.toDomain(): PermissionDuration =
+    when (this) {
+        Nip55PermissionDuration.JUST_THIS_TIME -> PermissionDuration.JUST_THIS_TIME
+        Nip55PermissionDuration.ONE_MINUTE -> PermissionDuration.ONE_MINUTE
+        Nip55PermissionDuration.FIVE_MINUTES -> PermissionDuration.FIVE_MINUTES
+        Nip55PermissionDuration.TEN_MINUTES -> PermissionDuration.TEN_MINUTES
+        Nip55PermissionDuration.ONE_HOUR -> PermissionDuration.ONE_HOUR
+        Nip55PermissionDuration.ONE_DAY -> PermissionDuration.ONE_DAY
+        Nip55PermissionDuration.FOREVER -> PermissionDuration.FOREVER
+    }
