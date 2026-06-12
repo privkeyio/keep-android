@@ -29,9 +29,11 @@ import io.privkey.keep.nip55.PermissionDecision
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.uniffi.BunkerApprovalRequest
+import io.privkey.keep.uniffi.BunkerApprovalResult
 import io.privkey.keep.uniffi.BunkerCallbacks
 import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerLogEvent
+import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.CancellationException
@@ -81,6 +83,11 @@ class BunkerService : Service() {
         internal const val MAX_AUTHORIZED_CLIENTS = 100
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
+
+        private val REJECTED = BunkerApprovalResult(
+            approved = false,
+            remember = BunkerRememberDuration.JUST_THIS_TIME,
+        )
 
         private val _bunkerUrl = MutableStateFlow<String?>(null)
         val bunkerUrl: StateFlow<String?> = _bunkerUrl.asStateFlow()
@@ -132,8 +139,7 @@ class BunkerService : Service() {
             requestId: String,
             approved: Boolean,
             clientPubkey: String? = null,
-            remember: io.privkey.keep.uniffi.BunkerRememberDuration =
-                io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME,
+            remember: BunkerRememberDuration = BunkerRememberDuration.JUST_THIS_TIME,
         ) {
             pendingApprovals.remove(requestId)?.let { approval ->
                 globalPendingCount.decrementAndGet()
@@ -145,7 +151,7 @@ class BunkerService : Service() {
                     }
                 }
                 approval.respond(
-                    io.privkey.keep.uniffi.BunkerApprovalResult(
+                    BunkerApprovalResult(
                         approved = approved,
                         remember = remember,
                     )
@@ -281,7 +287,7 @@ class BunkerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         synchronized(approvalLock) {
             pendingApprovals.keys.toList().forEach { reqId ->
-                pendingApprovals.remove(reqId)?.respond(io.privkey.keep.uniffi.BunkerApprovalResult(false, io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME))
+                pendingApprovals.remove(reqId)?.respond(REJECTED)
             }
         }
         clearRateLimitState()
@@ -382,7 +388,7 @@ class BunkerService : Service() {
 
                 override fun requestApproval(
                     request: BunkerApprovalRequest,
-                ): io.privkey.keep.uniffi.BunkerApprovalResult {
+                ): BunkerApprovalResult {
                     return handleApprovalRequest(request)
                 }
 
@@ -559,34 +565,30 @@ class BunkerService : Service() {
 
     private fun handleApprovalRequest(
         request: BunkerApprovalRequest,
-    ): io.privkey.keep.uniffi.BunkerApprovalResult {
-        val rejected = io.privkey.keep.uniffi.BunkerApprovalResult(
-            approved = false,
-            remember = io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME,
-        )
-        val approvedOnce = io.privkey.keep.uniffi.BunkerApprovalResult(
+    ): BunkerApprovalResult {
+        val approvedOnce = BunkerApprovalResult(
             approved = true,
-            remember = io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME,
+            remember = BunkerRememberDuration.JUST_THIS_TIME,
         )
 
         if (Looper.myLooper() == Looper.getMainLooper()) {
             if (BuildConfig.DEBUG) Log.e(TAG, "handleApprovalRequest called from main thread")
-            return rejected
+            return REJECTED
         }
 
         val clientPubkey = request.appPubkey
         if (!HEX_PUBKEY_REGEX.matches(clientPubkey)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Invalid client pubkey format")
-            return rejected
+            return REJECTED
         }
         if (request.method.isBlank()) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Request method must not be blank")
-            return rejected
+            return REJECTED
         }
 
         if (isRateLimited(clientPubkey)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
-            return rejected
+            return REJECTED
         }
 
         val mobile = keepMobileRef
@@ -599,7 +601,7 @@ class BunkerService : Service() {
 
         if (!isAuthorized && !isConnectRequest) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
-            return rejected
+            return REJECTED
         }
 
         if (!isConnectRequest) {
@@ -613,13 +615,13 @@ class BunkerService : Service() {
                 }
                 logBunkerEventWithDecision(request, allowed, wasAutomatic = true)
                 if (BuildConfig.DEBUG) Log.d(TAG, "Auto-${if (allowed) "approved" else "denied"} request from ${truncatePubkey(clientPubkey)} based on stored permission")
-                return if (allowed) approvedOnce else rejected
+                return if (allowed) approvedOnce else REJECTED
             }
         }
 
         val requestId = UUID.randomUUID().toString()
         val latch = java.util.concurrent.CountDownLatch(1)
-        val resultRef = AtomicReference<io.privkey.keep.uniffi.BunkerApprovalResult?>(null)
+        val resultRef = AtomicReference<BunkerApprovalResult?>(null)
 
         val pendingApproval = PendingApproval(
             request,
@@ -630,7 +632,7 @@ class BunkerService : Service() {
         }
 
         if (!addPendingApproval(requestId, pendingApproval)) {
-            return rejected
+            return REJECTED
         }
 
         startApprovalActivity(requestId, request, isConnectRequest)
@@ -645,10 +647,10 @@ class BunkerService : Service() {
             }
             dismissApprovalActivity(requestId)
             if (BuildConfig.DEBUG) Log.w(TAG, "Approval request $requestId timed out")
-            return rejected
+            return REJECTED
         }
 
-        val result = resultRef.get() ?: rejected
+        val result = resultRef.get() ?: REJECTED
         if (result.approved && isConnectRequest && mobile != null) {
             authorizeClient(clientPubkey, clearDenylist = true)
             if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
@@ -773,7 +775,7 @@ class BunkerService : Service() {
 
         synchronized(approvalLock) {
             pendingApprovals.keys.toList().forEach { reqId ->
-                pendingApprovals.remove(reqId)?.respond(io.privkey.keep.uniffi.BunkerApprovalResult(false, io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME))
+                pendingApprovals.remove(reqId)?.respond(REJECTED)
                 cancelApprovalNotification(reqId)
             }
         }
@@ -840,7 +842,7 @@ class BunkerService : Service() {
 class PendingApproval(
     val request: BunkerApprovalRequest,
     val isConnectRequest: Boolean = false,
-    private val onResponse: (io.privkey.keep.uniffi.BunkerApprovalResult) -> Unit
+    private val onResponse: (BunkerApprovalResult) -> Unit
 ) {
-    fun respond(result: io.privkey.keep.uniffi.BunkerApprovalResult) = onResponse(result)
+    fun respond(result: BunkerApprovalResult) = onResponse(result)
 }

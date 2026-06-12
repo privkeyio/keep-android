@@ -20,6 +20,7 @@ import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.BunkerRememberDuration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -211,7 +212,7 @@ class Nip46ApprovalActivity : FragmentActivity() {
         val remember = if (approved) {
             mapPermissionDurationToRemember(duration)
         } else {
-            io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME
+            BunkerRememberDuration.JUST_THIS_TIME
         }
         requestId?.let {
             BunkerService.respondToApproval(it, approved, clientPubkey, remember)
@@ -226,22 +227,22 @@ class Nip46ApprovalActivity : FragmentActivity() {
 
     private fun mapPermissionDurationToRemember(
         duration: PermissionDuration?,
-    ): io.privkey.keep.uniffi.BunkerRememberDuration =
+    ): BunkerRememberDuration =
         when (duration) {
             null, PermissionDuration.JUST_THIS_TIME ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.JUST_THIS_TIME
+                BunkerRememberDuration.JUST_THIS_TIME
             PermissionDuration.ONE_MINUTE ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_MINUTE
+                BunkerRememberDuration.ONE_MINUTE
             PermissionDuration.FIVE_MINUTES ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.FIVE_MINUTES
+                BunkerRememberDuration.FIVE_MINUTES
             PermissionDuration.TEN_MINUTES ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.TEN_MINUTES
+                BunkerRememberDuration.TEN_MINUTES
             PermissionDuration.ONE_HOUR ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_HOUR
+                BunkerRememberDuration.ONE_HOUR
             PermissionDuration.ONE_DAY ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.ONE_DAY
+                BunkerRememberDuration.ONE_DAY
             PermissionDuration.FOREVER ->
-                io.privkey.keep.uniffi.BunkerRememberDuration.FOREVER
+                BunkerRememberDuration.FOREVER
         }
 
     override fun onNewIntent(intent: Intent) {
