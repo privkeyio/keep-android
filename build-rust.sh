@@ -40,6 +40,8 @@ fi
 NDK_DIR=""
 if [ -n "${ANDROID_NDK_HOME:-}" ] && [ "$(basename "$ANDROID_NDK_HOME")" = "$EXPECTED_NDK" ]; then
     NDK_DIR="$ANDROID_NDK_HOME"
+elif [ -n "${ANDROID_NDK_ROOT:-}" ] && [ "$(basename "$ANDROID_NDK_ROOT")" = "$EXPECTED_NDK" ]; then
+    NDK_DIR="$ANDROID_NDK_ROOT"
 else
     SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
     if [ -n "$SDK_DIR" ] && [ -d "$SDK_DIR/ndk/$EXPECTED_NDK" ]; then
@@ -47,7 +49,7 @@ else
     fi
 fi
 if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR" ]; then
-    echo "error: pinned NDK $EXPECTED_NDK not found (checked ANDROID_NDK_HOME and \$ANDROID_HOME/ndk/$EXPECTED_NDK)." >&2
+    echo "error: pinned NDK $EXPECTED_NDK not found (checked ANDROID_NDK_HOME, ANDROID_NDK_ROOT, and \$ANDROID_HOME/ndk/$EXPECTED_NDK)." >&2
     echo "Fix: sdkmanager --install \"ndk;$EXPECTED_NDK\" and set ANDROID_HOME." >&2
     exit 1
 fi
