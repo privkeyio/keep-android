@@ -105,7 +105,6 @@ data class Nip55AppSettings(
 data class VelocityConfig(
     val hourlyLimit: Int = 1000,
     val dailyLimit: Int = 5000,
-    val weeklyLimit: Int = 20000,
     val enabled: Boolean = true
 )
 

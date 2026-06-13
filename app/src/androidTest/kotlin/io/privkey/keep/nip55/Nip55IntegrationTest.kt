@@ -330,7 +330,8 @@ class Nip55IntegrationTest {
     fun rateLimiter_allowsNormalRequests() {
         val limiter = io.privkey.keep.uniffi.Nip55RequestRateLimiter()
         val now = android.os.SystemClock.elapsedRealtime().toULong()
-        for (i in 1..30) {
+        val frontDoorMaxRequests = 30
+        for (i in 1..frontDoorMaxRequests) {
             assertTrue("Request $i should be allowed", limiter.check("com.test.app", now))
         }
         assertFalse("Request beyond limit should be rejected", limiter.check("com.test.app", now))
