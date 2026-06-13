@@ -34,6 +34,7 @@ import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerLogEvent
 import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.uniffi.Nip46BunkerRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -65,18 +66,12 @@ class BunkerService : Service() {
         private const val MAX_PENDING_APPROVALS = 10
         private const val MAX_PENDING_NOSTR_CONNECT_REQUESTS = 10
         private const val MAX_CONCURRENT_PER_CLIENT = 3
-        private const val RATE_LIMIT_WINDOW_MS = 60_000L
-        private const val MAX_REQUESTS_PER_WINDOW = 30
-        private const val BACKOFF_BASE_MS = 1000L
-        private const val BACKOFF_MAX_MS = 60_000L
         private const val MAX_START_RETRIES = 5
         private const val START_RETRY_DELAY_MS = 2_000L
         private const val APPROVAL_CHANNEL_ID = "keep_bunker_approvals"
         private const val APPROVAL_NOTIFICATION_ID_BASE = 0x4E46
 
         private const val APPROVAL_TIMEOUT_MS = 60_000L
-        private const val GLOBAL_RATE_LIMIT_WINDOW_MS = 60_000L
-        private const val GLOBAL_MAX_REQUESTS_PER_WINDOW = 100
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
 
@@ -93,16 +88,13 @@ class BunkerService : Service() {
         private val _status = MutableStateFlow(BunkerStatus.STOPPED)
         val status: StateFlow<BunkerStatus> = _status.asStateFlow()
 
-        private const val GLOBAL_REQUEST_HISTORY_MAX_SIZE = 200
-
         private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
         private val globalPendingCount = AtomicInteger(0)
         private val clientPendingCounts = ConcurrentHashMap<String, AtomicInteger>()
-        private val rateLimitLock = Any()
-        private val clientRequestHistory = LinkedHashMap<String, MutableList<Long>>(16, 0.75f, true)
-        private val clientBackoffUntil = HashMap<String, Long>()
-        private val clientConsecutiveRequests = HashMap<String, AtomicInteger>()
-        private val globalRequestHistory = ArrayDeque<Long>(GLOBAL_REQUEST_HISTORY_MAX_SIZE)
+        // Global + per-client request rate limiting (window + exponential backoff)
+        // lives in Rust; the in-flight concurrency cap above stays here (it bounds
+        // pending approval UI, not a request rate).
+        private val bunkerRateLimiter by lazy { Nip46BunkerRateLimiter() }
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
@@ -164,9 +156,7 @@ class BunkerService : Service() {
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
-                    synchronized(rateLimitLock) {
-                        clientConsecutiveRequests[pubkey]?.set(0)
-                    }
+                    bunkerRateLimiter.resetConsecutive(pubkey)
                 }
                 approval.respond(
                     BunkerApprovalResult(
@@ -202,54 +192,14 @@ class BunkerService : Service() {
 
         fun getPendingApproval(requestId: String): PendingApproval? = pendingApprovals[requestId]
 
+        // Global + per-client window + exponential backoff live in Rust; Android
+        // supplies the monotonic clock.
         internal fun isRateLimited(clientPubkey: String): Boolean {
-            val now = SystemClock.elapsedRealtime()
-
-            synchronized(rateLimitLock) {
-                while (globalRequestHistory.isNotEmpty() && globalRequestHistory.first() < now - GLOBAL_RATE_LIMIT_WINDOW_MS) {
-                    globalRequestHistory.removeFirst()
-                }
-                if (globalRequestHistory.size >= GLOBAL_MAX_REQUESTS_PER_WINDOW) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Global rate limit exceeded")
-                    return true
-                }
-
-                val backoffUntil = clientBackoffUntil[clientPubkey] ?: 0L
-                if (now < backoffUntil) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Client ${truncatePubkey(clientPubkey)} in backoff")
-                    return true
-                }
-
-                if (clientRequestHistory.size >= MAX_TRACKED_CLIENTS && !clientRequestHistory.containsKey(clientPubkey)) {
-                    clientRequestHistory.keys.firstOrNull()?.let { evictKey ->
-                        clientRequestHistory.remove(evictKey)
-                        clientBackoffUntil.remove(evictKey)
-                        clientConsecutiveRequests.remove(evictKey)
-                    }
-                }
-                val history = clientRequestHistory.getOrPut(clientPubkey) { mutableListOf() }
-                history.removeAll { it < now - RATE_LIMIT_WINDOW_MS }
-
-                if (history.size >= MAX_REQUESTS_PER_WINDOW) {
-                    val consecutive = clientConsecutiveRequests.getOrPut(clientPubkey) { AtomicInteger(0) }
-                    val backoffMs = (BACKOFF_BASE_MS * (1 shl consecutive.getAndIncrement().coerceAtMost(6)))
-                        .coerceAtMost(BACKOFF_MAX_MS)
-                    clientBackoffUntil[clientPubkey] = now + backoffMs
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${truncatePubkey(clientPubkey)}")
-                    return true
-                }
-
-                history.add(now)
-
-                if (globalRequestHistory.size >= GLOBAL_REQUEST_HISTORY_MAX_SIZE) {
-                    globalRequestHistory.removeFirst()
-                }
-                globalRequestHistory.addLast(now)
-            }
+            val limited = bunkerRateLimiter.isRateLimited(clientPubkey, SystemClock.elapsedRealtime().toULong())
             if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
                 evictStaleMaps()
             }
-            return false
+            return limited
         }
 
         private fun truncatePubkey(pubkey: String): String =
@@ -260,24 +210,10 @@ class BunkerService : Service() {
                 globalPendingCount.set(0)
                 clientPendingCounts.clear()
             }
-            synchronized(rateLimitLock) {
-                clientRequestHistory.clear()
-                clientBackoffUntil.clear()
-                clientConsecutiveRequests.clear()
-                globalRequestHistory.clear()
-            }
+            bunkerRateLimiter.clear()
         }
 
         internal fun evictStaleMaps() {
-            synchronized(rateLimitLock) {
-                if (clientBackoffUntil.size > MAX_TRACKED_CLIENTS) {
-                    val now = SystemClock.elapsedRealtime()
-                    clientBackoffUntil.entries.removeAll { it.value < now }
-                }
-                if (clientConsecutiveRequests.size > MAX_TRACKED_CLIENTS) {
-                    clientConsecutiveRequests.entries.removeAll { it.value.get() == 0 }
-                }
-            }
             synchronized(approvalLock) {
                 if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
                     clientPendingCounts.entries.removeAll { it.value.get() <= 0 }
