@@ -846,7 +846,7 @@ class Nip55Activity : FragmentActivity() {
                 }
                 finishWithBatchResults(nip55Handler, rejected)
             } else {
-                finishWithError("User rejected")
+                finishWithRejection()
             }
         }
     }
