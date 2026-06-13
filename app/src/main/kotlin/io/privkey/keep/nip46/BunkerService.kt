@@ -156,7 +156,7 @@ class BunkerService : Service() {
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
-                    bunkerRateLimiter.resetConsecutive(pubkey)
+                    bunkerRateLimiter.resetConsecutive(pubkey.lowercase())
                 }
                 approval.respond(
                     BunkerApprovalResult(
@@ -193,9 +193,11 @@ class BunkerService : Service() {
         fun getPendingApproval(requestId: String): PendingApproval? = pendingApprovals[requestId]
 
         // Global + per-client window + exponential backoff live in Rust; Android
-        // supplies the monotonic clock.
+        // supplies the monotonic clock. Key on the lowercased pubkey so case-variant
+        // hex can't mint fresh per-client buckets (matches the authorization path).
         internal fun isRateLimited(clientPubkey: String): Boolean {
-            val limited = bunkerRateLimiter.isRateLimited(clientPubkey, SystemClock.elapsedRealtime().toULong())
+            val limited = bunkerRateLimiter.isRateLimited(clientPubkey.lowercase(), SystemClock.elapsedRealtime().toULong())
+            // Bounds the concurrency map (clientPendingCounts); rate-limit state is bounded in Rust.
             if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
                 evictStaleMaps()
             }
