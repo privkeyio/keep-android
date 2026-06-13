@@ -234,6 +234,7 @@
     <string name="connections_nip55_batch_header">Sign %1$d requests</string>
     <string name="connections_nip55_batch_approve_all">Approve all (%1$d)</string>
     <string name="connections_nip55_batch_event_index">Request %1$d</string>
+    <string name="connections_nip55_requested_permissions">App is requesting permission to:</string>
     <string name="connections_nip55_batch_auth_subtitle">%1$d signing requests</string>
     <string name="connections_nip55_type_label">Type</string>
     <string name="connections_nip55_recipient_label">Recipient</string>

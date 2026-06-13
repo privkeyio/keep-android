@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -10,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -21,8 +23,10 @@ import kotlinx.coroutines.withContext
 import io.privkey.keep.uniffi.formatEventIdDisplay
 import io.privkey.keep.uniffi.formatPubkeyDisplay
 import io.privkey.keep.uniffi.isHex64
+import io.privkey.keep.uniffi.Nip55DeclaredPermission
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.nip55ParsePermissions
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -124,7 +128,7 @@ fun ApprovalScreen(
     showFirstUseWarning: Boolean = false,
     callerSignatureFingerprint: String? = null,
     riskAssessment: RiskAssessment? = null,
-    onApprove: (PermissionDuration) -> Unit,
+    onApprove: (PermissionDuration, List<Nip55DeclaredPermission>) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
     val context = LocalContext.current
@@ -133,6 +137,21 @@ fun ApprovalScreen(
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     val eventPreview = remember(request) {
         if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
+    }
+    // A client MAY pre-declare a permission bundle alongside get_public_key; the
+    // user picks which to grant. Parsing/validation happens in Rust.
+    val declaredPermissions = remember(request) {
+        if (request.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+            nip55ParsePermissions(request.permissions)
+        } else {
+            emptyList()
+        }
+    }
+    val permissionChecked = remember(declaredPermissions) {
+        mutableStateListOf<Boolean>().apply { repeat(declaredPermissions.size) { add(true) } }
+    }
+    val bundleHasSensitiveKind = remember(declaredPermissions) {
+        declaredPermissions.any { it.kind?.let { k -> isSensitiveKind(k) } == true }
     }
     val callerInfo = rememberCallerInfo(callerPackage)
 
@@ -178,13 +197,18 @@ fun ApprovalScreen(
 
         RequestDetailsCard(request, eventPreview)
 
+        if (declaredPermissions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            PermissionsBundleCard(declaredPermissions, permissionChecked)
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         if (canRememberChoice) {
             DurationSelector(
                 selectedDuration = selectedDuration,
                 onDurationSelected = { selectedDuration = it },
-                isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
+                isSensitiveKind = (eventPreview != null && isSensitiveKind(eventPreview.kind)) || bundleHasSensitiveKind
             )
         }
 
@@ -201,9 +225,48 @@ fun ApprovalScreen(
             },
             onApprove = {
                 isLoading = true
-                onApprove(effectiveDuration)
+                val granted = declaredPermissions.filterIndexed { i, _ -> permissionChecked.getOrElse(i) { false } }
+                onApprove(effectiveDuration, granted)
             }
         )
+    }
+}
+
+@Composable
+private fun PermissionsBundleCard(
+    declared: List<Nip55DeclaredPermission>,
+    checked: MutableList<Boolean>
+) {
+    val context = LocalContext.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.connections_nip55_requested_permissions),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            declared.forEachIndexed { index, perm ->
+                val label = perm.requestType.displayName(context) +
+                    (perm.kind?.let { " · ${EventKind.displayName(context, it)}" } ?: "")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = checked.getOrElse(index) { false },
+                            role = Role.Checkbox,
+                            onValueChange = { if (index < checked.size) checked[index] = it }
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = checked.getOrElse(index) { false },
+                        onCheckedChange = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
     }
 }
 
