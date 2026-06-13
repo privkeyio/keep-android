@@ -416,7 +416,9 @@ class Nip55Activity : FragmentActivity() {
             riskAssessment = it.risk
         }
 
-        val req = request ?: return
+        // decisionLocked is set above, so finish rather than bare-return to avoid
+        // soft-locking the screen if there is somehow no displayed request.
+        val req = request ?: return finishWithError("Invalid request")
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
         val callerId = callerPackage ?: run {
