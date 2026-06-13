@@ -25,6 +25,47 @@ fi
 export SOURCE_DATE_EPOCH
 echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
 
+# Pin the NDK that cargo-ndk uses. cargo-ndk discovers the NDK from
+# ANDROID_NDK_HOME / ANDROID_NDK_ROOT / ANDROID_NDK and may prefer one over
+# another; on CI runners that preinstall a different NDK and set
+# ANDROID_NDK_ROOT, it silently builds the native libs with the wrong toolchain
+# and breaks reproducible builds. Resolve the pinned NDK (expectedNdkVersion in
+# build.gradle.kts) once and force every var to it.
+EXPECTED_NDK="$(sed -nE 's/^val expectedNdkVersion = "([0-9][0-9.]*)".*/\1/p' \
+    "$SCRIPT_DIR/build.gradle.kts" | head -1)"
+if [ -z "$EXPECTED_NDK" ]; then
+    echo "error: could not read expectedNdkVersion from $SCRIPT_DIR/build.gradle.kts." >&2
+    exit 1
+fi
+NDK_DIR=""
+if [ -n "${ANDROID_NDK_HOME:-}" ] && [ "$(basename "$ANDROID_NDK_HOME")" = "$EXPECTED_NDK" ]; then
+    NDK_DIR="$ANDROID_NDK_HOME"
+else
+    SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+    if [ -n "$SDK_DIR" ] && [ -d "$SDK_DIR/ndk/$EXPECTED_NDK" ]; then
+        NDK_DIR="$SDK_DIR/ndk/$EXPECTED_NDK"
+    fi
+fi
+if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR" ]; then
+    echo "error: pinned NDK $EXPECTED_NDK not found (checked ANDROID_NDK_HOME and \$ANDROID_HOME/ndk/$EXPECTED_NDK)." >&2
+    echo "Fix: sdkmanager --install \"ndk;$EXPECTED_NDK\" and set ANDROID_HOME." >&2
+    exit 1
+fi
+export ANDROID_NDK_HOME="$NDK_DIR"
+export ANDROID_NDK_ROOT="$NDK_DIR"
+export ANDROID_NDK="$NDK_DIR"
+echo "Using pinned NDK: $NDK_DIR"
+
+# Build aws-lc-sys's bundled C with a fixed CMake generator so every builder
+# (CI, F-Droid, local) produces identical native libraries. The Android NDK
+# CMake toolchain only reliably supports Ninja.
+if ! command -v ninja >/dev/null 2>&1; then
+    echo "error: ninja not found; required to build aws-lc-sys reproducibly." >&2
+    echo "Fix: install ninja (apt-get install ninja-build)." >&2
+    exit 1
+fi
+export CMAKE_GENERATOR=Ninja
+
 # Strip absolute paths from rustc debuginfo so two builders with different
 # CARGO_HOME / workspace locations produce byte-identical .so files.
 CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
