@@ -73,7 +73,7 @@ fun RelayAuthWhitelistScreen(
                     singleLine = true,
                     isError = error,
                     label = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_add_label)) },
-                    placeholder = { Text("wss://relay.example.com") }
+                    placeholder = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_placeholder)) }
                 )
                 Button(
                     enabled = input.isNotBlank(),

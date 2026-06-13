@@ -38,7 +38,7 @@ class RelayAuthWhitelistStore(context: Context) {
         val current = prefs.getStringSet(KEY_HOSTS, emptySet())?.toMutableSet() ?: mutableSetOf()
         if (host !in current && current.size >= MAX_ENTRIES) return null
         current.add(host)
-        prefs.edit().putStringSet(KEY_HOSTS, current).commit()
+        if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return null
         return host
     }
 

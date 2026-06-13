@@ -240,8 +240,9 @@
     <string name="connections_nip55_relay_scope_all">All relays</string>
     <string name="connections_nip55_relay_auth_whitelist">Relay Auth Whitelist</string>
     <string name="connections_nip55_relay_auth_whitelist_title">Relay Auth Whitelist</string>
-    <string name="connections_nip55_relay_auth_whitelist_description">When set, NIP-42 relay authentication (kind 22242) is auto-approved for listed relays and auto-rejected for all others in background (Content Resolver) requests. Leave empty to decide per app.</string>
+    <string name="connections_nip55_relay_auth_whitelist_description">When set, NIP-42 relay authentication (kind 22242) from relays not on the list is automatically rejected, both in the foreground and in background (Content Resolver) requests. Listed relays are auto-approved only for background requests. Leave empty to decide per app.</string>
     <string name="connections_nip55_relay_auth_whitelist_add_label">Relay URL</string>
+    <string name="connections_nip55_relay_auth_whitelist_placeholder">wss://relay.example.com</string>
     <string name="connections_nip55_relay_auth_whitelist_add">Add</string>
     <string name="connections_nip55_relay_auth_whitelist_empty">No relays whitelisted. NIP-42 auth follows normal per-app permissions.</string>
     <string name="connections_permissions_relay_scope">Relay: %1$s</string>
