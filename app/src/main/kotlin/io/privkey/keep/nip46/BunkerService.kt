@@ -537,11 +537,6 @@ class BunkerService : Service() {
             return REJECTED
         }
 
-        if (isRateLimited(clientPubkey)) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
-            return REJECTED
-        }
-
         val mobile = keepMobileRef
         val pk = clientPubkey.lowercase()
         val denylisted = runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)
@@ -550,8 +545,13 @@ class BunkerService : Service() {
         }.getOrDefault(false)))
         val isConnectRequest = request.method == "connect"
 
-        if (!isAuthorized && !isConnectRequest) {
+        if (requestGateDecision(isAuthorized, isConnectRequest) == RequestGate.REJECT_UNAUTHORIZED) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
+            return REJECTED
+        }
+
+        if (isRateLimited(clientPubkey)) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
             return REJECTED
         }
 
