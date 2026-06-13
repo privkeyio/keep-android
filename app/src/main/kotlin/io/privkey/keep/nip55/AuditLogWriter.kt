@@ -18,6 +18,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         buildLog: (previousHash: String?) -> Nip55AuditLog,
         extraInTransaction: (suspend () -> Unit)? = null
     ) = mutex.withLock {
+        reconcilePendingClear()
         val anchor = Nip55Database.getAuditAnchor()
         var tamper = false
         database.withTransaction {
@@ -33,6 +34,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     // mismatch against the anchor is out-of-band tampering. Re-pin to the post-prune
     // state regardless so the legitimately shrunk count is recorded.
     suspend fun prune(before: Long, extraInTransaction: suspend () -> Unit) = mutex.withLock {
+        reconcilePendingClear()
         val anchor = Nip55Database.getAuditAnchor()
         var tamper = false
         database.withTransaction {
@@ -44,12 +46,34 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         advanceAnchor()
     }
 
+    // Two-phase clear: the pending marker is committed before the wipe so a crash
+    // between the DB commit and the anchor reset is recoverable (see reconcilePendingClear).
     suspend fun clear(extraInTransaction: (suspend () -> Unit)? = null) = mutex.withLock {
+        Nip55Database.setAuditClearPending()
         database.withTransaction {
             auditDao.deleteAll()
             extraInTransaction?.invoke()
         }
         Nip55Database.resetAuditAnchor()
+    }
+
+    // Atomic read of rows + anchor under the same lock every write takes, so no
+    // append/prune/clear can interleave between the two reads and skew the snapshot.
+    suspend fun snapshot(): Pair<List<Nip55AuditLog>, AuditAnchor?> = mutex.withLock {
+        reconcilePendingClear()
+        auditDao.getAllOrdered() to Nip55Database.getAuditAnchor()
+    }
+
+    // Finish a clear() whose post-commit anchor reset was lost to a crash: an empty DB
+    // means the wipe committed, so complete the reset; a non-empty DB means the clear
+    // transaction rolled back, so just drop the (attacker-unforgeable) marker.
+    private suspend fun reconcilePendingClear() {
+        if (!Nip55Database.isAuditClearPending()) return
+        if (auditDao.getCount() == 0) {
+            Nip55Database.resetAuditAnchor()
+        } else {
+            Nip55Database.clearAuditClearPending()
+        }
     }
 
     private suspend fun anchorMismatch(anchor: AuditAnchor?): Boolean {
@@ -60,6 +84,11 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         // A legit append whose post-commit anchor advance was lost to a crash leaves the
         // DB one row ahead, chained onto the anchored tail. Re-pin without flagging.
         if (isResumableAppend(anchor, count, auditDao.getLastPreviousHash(), rustIntact = true)) {
+            return false
+        }
+        // Likewise a crash-interrupted head prune: fewer rows but the same tail. The Rust
+        // walk at verify time is authoritative for the rustIntact assumption here.
+        if (isResumablePrune(anchor, count, tail, rustIntact = true)) {
             return false
         }
         return true

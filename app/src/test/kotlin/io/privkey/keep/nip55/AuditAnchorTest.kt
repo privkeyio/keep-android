@@ -183,4 +183,41 @@ class AuditAnchorTest {
         assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 4L, "hashB", rustIntact = true))
         assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 1L, "hashB", rustIntact = true))
     }
+
+    @Test
+    fun resumableFirstAppendAfterResetWithNullPreviousHash() {
+        // After a clear/reset the zero anchor holds "" as the tail; the first real row
+        // chains onto it with a null previousHash, which must read as resumable.
+        assertTrue(isResumableAppend(AuditAnchor("", 0L), 1L, null, rustIntact = true))
+    }
+
+    @Test
+    fun resumablePruneWhenFewerRowsSameTailAndIntact() {
+        // Crash-interrupted head prune: oldest rows gone, tail unchanged, Rust intact.
+        assertTrue(isResumablePrune(AuditAnchor("hashB", 5L), 3L, "hashB", rustIntact = true))
+    }
+
+    @Test
+    fun notResumablePruneWhenTailChanged() {
+        // Tail truncation deletes the newest rows, so the tail hash differs: never excused.
+        assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 3L, "hashA", rustIntact = true))
+    }
+
+    @Test
+    fun notResumablePruneWhenRustNotIntact() {
+        assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 3L, "hashB", rustIntact = false))
+    }
+
+    @Test
+    fun notResumablePruneWhenCountNotLower() {
+        assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 5L, "hashB", rustIntact = true))
+        assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 6L, "hashB", rustIntact = true))
+    }
+
+    @Test
+    fun notResumablePruneToEmpty() {
+        // Prune that empties the DB changes the tail to "": indistinguishable from a full
+        // wipe by state alone, so it is not excused here (the clear marker handles clears).
+        assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 0L, "", rustIntact = true))
+    }
 }

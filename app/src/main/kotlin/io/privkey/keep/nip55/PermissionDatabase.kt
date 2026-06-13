@@ -30,6 +30,7 @@ abstract class Nip55Database : RoomDatabase() {
         private const val KEY_AUDIT_ANCHOR_HASH = "audit_anchor_hash"
         private const val KEY_AUDIT_ANCHOR_COUNT = "audit_anchor_count"
         private const val KEY_AUDIT_TAMPER = "audit_tamper_detected"
+        private const val KEY_AUDIT_CLEAR_PENDING = "audit_clear_pending"
 
         @Volatile
         private var hmacKey: ByteArray? = null
@@ -199,13 +200,34 @@ abstract class Nip55Database : RoomDatabase() {
             getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_TAMPER, true).commit()
         }
 
-        // Single commit so the anchor and the sticky flag can never diverge on reset.
+        // Recoverable intent marker for clear(): the tail goes empty, which is otherwise
+        // indistinguishable from total truncation, so a crash between the clear commit and
+        // the anchor reset needs a Keystore-backed (attacker-unforgeable) breadcrumb to
+        // prove the empty DB is a sanctioned clear rather than a wipe.
+        fun isAuditClearPending(): Boolean {
+            val ctx = appContext ?: return false
+            return getEncryptedPrefs(ctx).getBoolean(KEY_AUDIT_CLEAR_PENDING, false)
+        }
+
+        fun setAuditClearPending() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_CLEAR_PENDING, true).commit()
+        }
+
+        fun clearAuditClearPending() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_CLEAR_PENDING, false).commit()
+        }
+
+        // Single commit so the anchor, the sticky flag and the clear-pending marker can
+        // never diverge on reset.
         fun resetAuditAnchor() {
             val ctx = appContext ?: return
             getEncryptedPrefs(ctx).edit()
                 .putString(KEY_AUDIT_ANCHOR_HASH, "")
                 .putLong(KEY_AUDIT_ANCHOR_COUNT, 0L)
                 .putBoolean(KEY_AUDIT_TAMPER, false)
+                .putBoolean(KEY_AUDIT_CLEAR_PENDING, false)
                 .commit()
         }
 

@@ -73,4 +73,24 @@ internal fun isResumableAppend(
 ): Boolean =
     rustIntact &&
         entryCount == anchor.entryCount + 1L &&
-        newestPreviousHash == anchor.latestEntryHash
+        // The first row after a reset chains onto the empty zero anchor: its
+        // previousHash is null, which must read as equal to the "" anchor tail.
+        (newestPreviousHash ?: "") == anchor.latestEntryHash
+
+/**
+ * True when the DB has fewer rows than the [anchor] but its newest row's hash still
+ * matches the anchored tail. That is exactly the footprint of a head prune (oldest
+ * rows removed, tail untouched) whose post-commit anchor advance was lost to a crash:
+ * safe to re-pin to the lower count. Tail truncation deletes the newest rows, so the
+ * tail hash would differ and this stays false. Callers must require [rustIntact].
+ */
+internal fun isResumablePrune(
+    anchor: AuditAnchor,
+    entryCount: Long,
+    latestEntryHash: String,
+    rustIntact: Boolean
+): Boolean =
+    rustIntact &&
+        entryCount < anchor.entryCount &&
+        entryCount > 0L &&
+        latestEntryHash == anchor.latestEntryHash
