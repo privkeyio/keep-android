@@ -131,26 +131,10 @@ fun ApprovalScreen(
     var isLoading by remember { mutableStateOf(false) }
     val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
-    var durationDropdownExpanded by remember { mutableStateOf(false) }
     val eventPreview = remember(request) {
         if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
     }
-
-    var callerIcon by remember(callerPackage) { mutableStateOf<Drawable?>(null) }
-    var callerLabel by remember(callerPackage) { mutableStateOf<String?>(null) }
-    LaunchedEffect(callerPackage) {
-        if (callerPackage != null) {
-            val resolved = withContext(Dispatchers.IO) {
-                runCatching {
-                    val pm = context.packageManager
-                    val info = pm.getApplicationInfo(callerPackage, 0)
-                    pm.getApplicationLabel(info).toString() to pm.getApplicationIcon(info)
-                }.getOrNull()
-            }
-            callerLabel = resolved?.first
-            callerIcon = resolved?.second
-        }
-    }
+    val callerInfo = rememberCallerInfo(callerPackage)
 
     Column(
         modifier = Modifier
@@ -161,8 +145,8 @@ fun ApprovalScreen(
     ) {
         AppAvatar(
             key = callerPackage ?: "unknown",
-            name = callerLabel,
-            drawable = callerIcon,
+            name = callerInfo.label,
+            drawable = callerInfo.icon,
             size = 56.dp
         )
 
@@ -199,8 +183,6 @@ fun ApprovalScreen(
         if (canRememberChoice) {
             DurationSelector(
                 selectedDuration = selectedDuration,
-                expanded = durationDropdownExpanded,
-                onExpandedChange = { durationDropdownExpanded = it },
                 onDurationSelected = { selectedDuration = it },
                 isSensitiveKind = eventPreview != null && isSensitiveKind(eventPreview.kind)
             )
@@ -210,28 +192,229 @@ fun ApprovalScreen(
 
         val effectiveDuration = if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME
 
-        if (isLoading) {
-            CircularProgressIndicator()
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ApprovalFooter(
+            approveLabel = stringResource(R.string.connections_nip55_approve),
+            isLoading = isLoading,
+            onReject = {
+                isLoading = true
+                onReject(effectiveDuration)
+            },
+            onApprove = {
+                isLoading = true
+                onApprove(effectiveDuration)
+            }
+        )
+    }
+}
+
+@Composable
+fun BatchApprovalScreen(
+    requests: List<Nip55Request>,
+    callerPackage: String?,
+    callerVerified: Boolean,
+    showFirstUseWarning: Boolean = false,
+    callerSignatureFingerprint: String? = null,
+    riskAssessment: RiskAssessment? = null,
+    onApprove: (PermissionDuration) -> Unit,
+    onReject: (PermissionDuration) -> Unit
+) {
+    var isLoading by remember { mutableStateOf(false) }
+    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
+    var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
+    val anySensitive = remember(requests) {
+        requests.any { req -> req.eventKind()?.let { isSensitiveKind(it) } == true }
+    }
+    val callerInfo = rememberCallerInfo(callerPackage)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AppAvatar(
+            key = callerPackage ?: "unknown",
+            name = callerInfo.label,
+            drawable = callerInfo.icon,
+            size = 56.dp
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = stringResource(R.string.connections_nip55_batch_header, requests.size),
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        CallerLabel(callerPackage, callerVerified)
+
+        if (showFirstUseWarning) {
+            Spacer(modifier = Modifier.height(8.dp))
+            FirstUseWarning(signatureFingerprint = callerSignatureFingerprint)
+        } else if (!callerVerified) {
+            Spacer(modifier = Modifier.height(8.dp))
+            UnverifiedCallerWarning()
+        }
+
+        if (riskAssessment != null && riskAssessment.factors.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            RiskIndicator(riskAssessment)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val scrollState = rememberScrollState()
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OutlinedButton(
-                    onClick = { onReject(effectiveDuration) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(stringResource(R.string.connections_nip55_reject))
+                requests.forEachIndexed { index, req ->
+                    BatchRequestRow(index + 1, req)
+                    if (index < requests.size - 1) HorizontalDivider()
                 }
-                Button(
-                    onClick = {
-                        isLoading = true
-                        onApprove(effectiveDuration)
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(stringResource(R.string.connections_nip55_approve))
-                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (canRememberChoice) {
+            DurationSelector(
+                selectedDuration = selectedDuration,
+                onDurationSelected = { selectedDuration = it },
+                isSensitiveKind = anySensitive
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        val effectiveDuration = if (canRememberChoice) selectedDuration else PermissionDuration.JUST_THIS_TIME
+
+        ApprovalFooter(
+            approveLabel = stringResource(R.string.connections_nip55_batch_approve_all, requests.size),
+            isLoading = isLoading,
+            onReject = {
+                isLoading = true
+                onReject(effectiveDuration)
+            },
+            onApprove = {
+                isLoading = true
+                onApprove(effectiveDuration)
+            }
+        )
+    }
+}
+
+@Composable
+private fun BatchRequestRow(index: Int, request: Nip55Request) {
+    val context = LocalContext.current
+    val eventPreview = remember(request) {
+        if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.connections_nip55_batch_event_index, index),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = request.requestType.displayName(context), style = MaterialTheme.typography.bodyLarge)
+
+        if (eventPreview != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            DetailRow(stringResource(R.string.connections_nip55_event_kind_label), EventKind.displayName(context, eventPreview.kind))
+            sensitiveKindWarning(eventPreview.kind)?.let { warning ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            if (eventPreview.content.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = eventPreview.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        } else if (request.content.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = request.content,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        request.pubkey?.let { pk ->
+            Spacer(modifier = Modifier.height(4.dp))
+            DetailRow(stringResource(R.string.connections_nip55_recipient_label), formatPubkeyDisplay(pk), MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private data class CallerInfo(val label: String?, val icon: Drawable?)
+
+@Composable
+private fun rememberCallerInfo(callerPackage: String?): CallerInfo {
+    val context = LocalContext.current
+    var label by remember(callerPackage) { mutableStateOf<String?>(null) }
+    var icon by remember(callerPackage) { mutableStateOf<Drawable?>(null) }
+    LaunchedEffect(callerPackage) {
+        if (callerPackage != null) {
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pm = context.packageManager
+                    val info = pm.getApplicationInfo(callerPackage, 0)
+                    pm.getApplicationLabel(info).toString() to pm.getApplicationIcon(info)
+                }.getOrNull()
+            }
+            label = resolved?.first
+            icon = resolved?.second
+        }
+    }
+    return CallerInfo(label, icon)
+}
+
+@Composable
+private fun ApprovalFooter(
+    approveLabel: String,
+    isLoading: Boolean,
+    onReject: () -> Unit,
+    onApprove: () -> Unit
+) {
+    if (isLoading) {
+        CircularProgressIndicator()
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedButton(
+                onClick = onReject,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(stringResource(R.string.connections_nip55_reject))
+            }
+            Button(
+                onClick = onApprove,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(approveLabel)
             }
         }
     }
@@ -241,11 +424,10 @@ fun ApprovalScreen(
 @Composable
 private fun DurationSelector(
     selectedDuration: PermissionDuration,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
     onDurationSelected: (PermissionDuration) -> Unit,
     isSensitiveKind: Boolean = false
 ) {
+    var expanded by remember { mutableStateOf(false) }
     val availableDurations = if (isSensitiveKind) {
         PermissionDuration.entries.filter { it != PermissionDuration.FOREVER }
     } else {
@@ -261,7 +443,7 @@ private fun DurationSelector(
         Spacer(modifier = Modifier.height(4.dp))
         ExposedDropdownMenuBox(
             expanded = expanded,
-            onExpandedChange = onExpandedChange
+            onExpandedChange = { expanded = it }
         ) {
             OutlinedTextField(
                 value = stringResource(selectedDuration.displayNameRes),
@@ -274,14 +456,14 @@ private fun DurationSelector(
             )
             ExposedDropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { onExpandedChange(false) }
+                onDismissRequest = { expanded = false }
             ) {
                 availableDurations.forEach { duration ->
                     DropdownMenuItem(
                         text = { Text(stringResource(duration.displayNameRes)) },
                         onClick = {
                             onDurationSelected(duration)
-                            onExpandedChange(false)
+                            expanded = false
                         }
                     )
                 }

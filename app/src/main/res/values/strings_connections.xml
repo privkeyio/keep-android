@@ -231,6 +231,10 @@
     <string name="connections_nip55_from_unknown">from unknown app</string>
     <string name="connections_nip55_reject">Reject</string>
     <string name="connections_nip55_approve">Approve</string>
+    <string name="connections_nip55_batch_header">Sign %1$d requests</string>
+    <string name="connections_nip55_batch_approve_all">Approve all (%1$d)</string>
+    <string name="connections_nip55_batch_event_index">Request %1$d</string>
+    <string name="connections_nip55_batch_auth_subtitle">%1$d signing requests</string>
     <string name="connections_nip55_type_label">Type</string>
     <string name="connections_nip55_recipient_label">Recipient</string>
     <string name="connections_nip55_event_kind_label">Event Kind</string>
