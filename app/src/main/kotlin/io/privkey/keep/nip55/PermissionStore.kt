@@ -10,8 +10,8 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
 import io.privkey.keep.uniffi.Nip55VelocityResult
 import io.privkey.keep.uniffi.nip55AuditEntryHash
-import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55CheckVelocity
+import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
 

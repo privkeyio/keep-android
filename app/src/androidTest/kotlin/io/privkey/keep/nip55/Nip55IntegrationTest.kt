@@ -2,9 +2,11 @@ package io.privkey.keep.nip55
 
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -328,8 +330,8 @@ class Nip55IntegrationTest {
 
     @Test
     fun rateLimiter_allowsNormalRequests() {
-        val limiter = io.privkey.keep.uniffi.Nip55RequestRateLimiter()
-        val now = android.os.SystemClock.elapsedRealtime().toULong()
+        val limiter = Nip55RequestRateLimiter()
+        val now = SystemClock.elapsedRealtime().toULong()
         val frontDoorMaxRequests = 30
         for (i in 1..frontDoorMaxRequests) {
             assertTrue("Request $i should be allowed", limiter.check("com.test.app", now))
