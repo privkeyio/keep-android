@@ -69,6 +69,28 @@ class PermissionStoreIntegrationTest {
     }
 
     @Test
+    fun relayNoneGrantDoesNotAutoApproveValidRelay() = runBlocking {
+        // A 22242 grant stored with no relay (e.g. a malformed event whose relay could
+        // not be extracted) must NOT match a well-formed request for a real relay; it is
+        // fail-closed and only matches an equally relay-less request.
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_NONE
+        )
+
+        assertNull(
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.real.example.com")
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, RELAY_NONE)
+        )
+    }
+
+    @Test
     fun wildcardRelayGrantCoversAllRelays() = runBlocking {
         store.grantPermission(
             callerPackage = "com.test.app",

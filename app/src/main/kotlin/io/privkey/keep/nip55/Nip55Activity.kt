@@ -586,15 +586,17 @@ class Nip55Activity : FragmentActivity() {
     }
 
     // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
-    // a relay: ALL -> the wildcard, SPECIFIC -> the event's relay host (falling back to
-    // the wildcard if it can't be extracted, since a kind-22242 grant must be reachable
-    // by the relay-scoped lookup). Every other request grants with no relay scope.
+    // a relay: ALL -> the wildcard; SPECIFIC -> the event's relay host. If the host
+    // can't be extracted (missing/empty/multi relay tag) we fall back to RELAY_NONE,
+    // NOT the wildcard: extraction fails identically at lookup time, so a RELAY_NONE
+    // grant re-matches only the same malformed event (fail-closed) and never grants
+    // other relays. Every non-22242 request grants with no relay scope.
     private fun relayScopeForGrant(req: Nip55Request, scope: RelayAuthScope?): String {
         if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) {
             return RELAY_NONE
         }
         if (scope == RelayAuthScope.ALL) return RELAY_WILDCARD
-        return nip55ExtractRelayHost(req.content) ?: RELAY_WILDCARD
+        return nip55ExtractRelayHost(req.content) ?: RELAY_NONE
     }
 
     private suspend fun recordGrantAndTrust(
