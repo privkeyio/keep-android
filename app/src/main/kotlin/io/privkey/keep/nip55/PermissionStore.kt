@@ -46,11 +46,17 @@ class PermissionStore(private val database: Nip55Database) {
     // Decision resolution (incl. the rule that sensitive kinds never fall back
     // to a generic grant) lives in Rust; Android fetches the candidate rows and
     // supplies the clock readings.
-    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null): PermissionDecision? {
+    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null, relay: String = RELAY_NONE): PermissionDecision? {
         val storedKind = eventKind ?: EVENT_KIND_GENERIC
-        val exact = dao.getPermission(callerPackage, requestType.name, storedKind)
+        val exact = if (relay.isNotEmpty()) {
+            // Relay-scoped (kind 22242): the specific relay first, then the all-relays wildcard.
+            dao.getPermission(callerPackage, requestType.name, storedKind, relay)
+                ?: dao.getPermission(callerPackage, requestType.name, storedKind, RELAY_WILDCARD)
+        } else {
+            dao.getPermission(callerPackage, requestType.name, storedKind, RELAY_NONE)
+        }
         val generic = if (eventKind != null) {
-            dao.getPermission(callerPackage, requestType.name, EVENT_KIND_GENERIC)
+            dao.getPermission(callerPackage, requestType.name, EVENT_KIND_GENERIC, RELAY_NONE)
         } else {
             null
         }
@@ -67,22 +73,24 @@ class PermissionStore(private val database: Nip55Database) {
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
-        duration: PermissionDuration
+        duration: PermissionDuration,
+        relay: String = RELAY_NONE
     ) {
         require(callerPackage.isNotBlank()) { "callerPackage must not be blank" }
         // Sensitive-kind FOREVER -> ONE_DAY clamp lives in Rust.
         val effectiveDuration = nip55EffectiveGrantDuration(eventKind, duration.toUniffi()).toDomain()
-        savePermission(callerPackage, requestType, eventKind, effectiveDuration, "allow")
+        savePermission(callerPackage, requestType, eventKind, effectiveDuration, "allow", relay)
     }
 
     suspend fun denyPermission(
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
-        duration: PermissionDuration
+        duration: PermissionDuration,
+        relay: String = RELAY_NONE
     ) {
         require(callerPackage.isNotBlank()) { "callerPackage must not be blank" }
-        savePermission(callerPackage, requestType, eventKind, duration, "deny")
+        savePermission(callerPackage, requestType, eventKind, duration, "deny", relay)
     }
 
     private suspend fun savePermission(
@@ -90,7 +98,8 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         duration: PermissionDuration,
-        decision: String
+        decision: String,
+        relay: String = RELAY_NONE
     ) {
         if (!duration.shouldPersist) return
         val now = System.currentTimeMillis()
@@ -101,6 +110,7 @@ class PermissionStore(private val database: Nip55Database) {
                 callerPackage = callerPackage,
                 requestType = requestType.name,
                 eventKind = eventKind ?: EVENT_KIND_GENERIC,
+                relay = relay,
                 decision = decision,
                 expiresAt = duration.expiresAt(),
                 createdAt = now,

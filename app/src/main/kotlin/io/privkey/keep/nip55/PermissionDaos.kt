@@ -9,10 +9,11 @@ interface Nip55PermissionDao {
         WHERE callerPackage = :callerPackage
         AND requestType = :requestType
         AND eventKind = :eventKind
+        AND relay = :relay
         ORDER BY eventKind DESC
         LIMIT 1
     """)
-    suspend fun getPermission(callerPackage: String, requestType: String, eventKind: Int): Nip55Permission?
+    suspend fun getPermission(callerPackage: String, requestType: String, eventKind: Int, relay: String): Nip55Permission?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPermission(permission: Nip55Permission)

@@ -25,6 +25,7 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
+import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -313,7 +314,7 @@ class Nip55Activity : FragmentActivity() {
                         showFirstUseWarning = currentPendingFirstUse,
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = currentRisk,
-                        onApprove = ::handleApprove,
+                        onApprove = { duration, bundle, relayScope -> handleApprove(duration, bundle, relayScope) },
                         onReject = ::handleReject
                     )
                 }
@@ -411,7 +412,7 @@ class Nip55Activity : FragmentActivity() {
         )
     }
 
-    private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>) {
+    private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: a second tap, or an async render that re-enabled the
         // buttons, must not commit a second decision.
         if (decisionLocked) return
@@ -475,7 +476,7 @@ class Nip55Activity : FragmentActivity() {
                             finishWithError(pubkeyError)
                             return@onSuccess
                         }
-                        recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                        recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, relayScope))
                         // On a get_public_key connect, grant the checked pre-declared
                         // permission bundle so the ContentProvider can answer those
                         // methods later (only persists if the user chose a remembered
@@ -539,7 +540,9 @@ class Nip55Activity : FragmentActivity() {
                     val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                     result
                         .onSuccess { response ->
-                            recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                            // Batch has no per-event scope toggle; relay-auth events grant
+                            // to their specific relay (the secure default).
+                            recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, RelayAuthScope.SPECIFIC))
                             responses.add(response.copy(id = item.requestId))
                         }
                         .onFailure { e ->
@@ -582,15 +585,28 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
+    // a relay: ALL -> the wildcard, SPECIFIC -> the event's relay host (falling back to
+    // the wildcard if it can't be extracted, since a kind-22242 grant must be reachable
+    // by the relay-scoped lookup). Every other request grants with no relay scope.
+    private fun relayScopeForGrant(req: Nip55Request, scope: RelayAuthScope?): String {
+        if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) {
+            return RELAY_NONE
+        }
+        if (scope == RelayAuthScope.ALL) return RELAY_WILDCARD
+        return nip55ExtractRelayHost(req.content) ?: RELAY_WILDCARD
+    }
+
     private suspend fun recordGrantAndTrust(
         store: PermissionStore?,
         callerId: String,
         req: Nip55Request,
         eventKind: Int?,
-        duration: PermissionDuration
+        duration: PermissionDuration,
+        relay: String = RELAY_NONE
     ) {
         val permResult = runCatching {
-            store?.grantPermission(callerId, req.requestType, eventKind, duration)
+            store?.grantPermission(callerId, req.requestType, eventKind, duration, relay)
             if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
                 store?.grantPermission(callerId, req.requestType, null, duration)
             }

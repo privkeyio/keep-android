@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -26,6 +27,7 @@ import io.privkey.keep.uniffi.isHex64
 import io.privkey.keep.uniffi.Nip55DeclaredPermission
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import io.privkey.keep.uniffi.nip55ParsePermissions
 import org.json.JSONArray
 import org.json.JSONObject
@@ -128,7 +130,7 @@ fun ApprovalScreen(
     showFirstUseWarning: Boolean = false,
     callerSignatureFingerprint: String? = null,
     riskAssessment: RiskAssessment? = null,
-    onApprove: (PermissionDuration, List<Nip55DeclaredPermission>) -> Unit,
+    onApprove: (PermissionDuration, List<Nip55DeclaredPermission>, RelayAuthScope?) -> Unit,
     onReject: (PermissionDuration) -> Unit
 ) {
     val context = LocalContext.current
@@ -138,6 +140,11 @@ fun ApprovalScreen(
     val eventPreview = remember(request) {
         if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
     }
+    // Kind-22242 (NIP-42) relay auth: let the user scope the grant to this relay or all.
+    val relayAuthHost = remember(request) {
+        if (request.eventKind() == KIND_NIP42_AUTH) nip55ExtractRelayHost(request.content) else null
+    }
+    var relayScope by remember { mutableStateOf(RelayAuthScope.SPECIFIC) }
     // A client MAY pre-declare a permission bundle alongside get_public_key; the
     // user picks which to grant. Parsing/validation happens in Rust.
     val declaredPermissions = remember(request) {
@@ -204,6 +211,11 @@ fun ApprovalScreen(
         ) {
             RequestDetailsCard(request, eventPreview)
 
+            if (relayAuthHost != null && canRememberChoice) {
+                Spacer(modifier = Modifier.height(16.dp))
+                RelayAuthScopeCard(relayAuthHost, relayScope) { relayScope = it }
+            }
+
             if (declaredPermissions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 PermissionsBundleCard(declaredPermissions, permissionChecked)
@@ -234,9 +246,47 @@ fun ApprovalScreen(
             onApprove = {
                 isLoading = true
                 val granted = declaredPermissions.filterIndexed { i, _ -> permissionChecked.getOrElse(i) { false } }
-                onApprove(effectiveDuration, granted)
+                onApprove(effectiveDuration, granted, if (relayAuthHost != null) relayScope else null)
             }
         )
+    }
+}
+
+@Composable
+private fun RelayAuthScopeCard(
+    relayHost: String,
+    selected: RelayAuthScope,
+    onSelected: (RelayAuthScope) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            DetailRow(stringResource(R.string.connections_nip55_relay_auth_label), relayHost)
+            Spacer(modifier = Modifier.height(8.dp))
+            RelayScopeOption(
+                label = stringResource(R.string.connections_nip55_relay_scope_this, relayHost),
+                selected = selected == RelayAuthScope.SPECIFIC,
+                onClick = { onSelected(RelayAuthScope.SPECIFIC) }
+            )
+            RelayScopeOption(
+                label = stringResource(R.string.connections_nip55_relay_scope_all),
+                selected = selected == RelayAuthScope.ALL,
+                onClick = { onSelected(RelayAuthScope.ALL) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun RelayScopeOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

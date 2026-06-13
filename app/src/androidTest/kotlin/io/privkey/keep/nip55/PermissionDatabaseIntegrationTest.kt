@@ -110,7 +110,7 @@ class PermissionDatabaseIntegrationTest {
         val permission = createPermission()
         permissionDao.insertPermission(permission)
 
-        val retrieved = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1)
+        val retrieved = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1, "")
         assertNotNull(retrieved)
         assertEquals("com.test.app", retrieved?.callerPackage)
         assertEquals("SIGN_EVENT", retrieved?.requestType)
@@ -123,7 +123,7 @@ class PermissionDatabaseIntegrationTest {
         val permission = createPermission(requestType = "GET_PUBLIC_KEY", eventKind = EVENT_KIND_GENERIC)
         permissionDao.insertPermission(permission)
 
-        val retrieved = permissionDao.getPermission("com.test.app", "GET_PUBLIC_KEY", EVENT_KIND_GENERIC)
+        val retrieved = permissionDao.getPermission("com.test.app", "GET_PUBLIC_KEY", EVENT_KIND_GENERIC, "")
         assertNotNull(retrieved)
         assertEquals(EVENT_KIND_GENERIC, retrieved?.eventKind)
         assertNull(retrieved?.eventKindOrNull)
@@ -137,7 +137,7 @@ class PermissionDatabaseIntegrationTest {
         val updated = permission.copy(decision = "deny")
         permissionDao.insertPermission(updated)
 
-        val retrieved = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1)
+        val retrieved = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1, "")
         assertEquals("deny", retrieved?.decision)
     }
 
@@ -196,13 +196,13 @@ class PermissionDatabaseIntegrationTest {
 
         permissionDao.deleteExpired(now, nowElapsed)
 
-        assertNull(permissionDao.getPermission("com.test.expired.wallclock", "SIGN_EVENT", 1))
-        assertNull(permissionDao.getPermission("com.test.expired.manipulation", "SIGN_EVENT", 1))
-        assertNull(permissionDao.getPermission("com.test.expired.monotonic", "SIGN_EVENT", 1))
-        assertNull(permissionDao.getPermission("com.test.expired.elapsed_regression", "SIGN_EVENT", 1))
-        assertNotNull(permissionDao.getPermission("com.test.valid.wallclock", "SIGN_EVENT", 1))
-        assertNotNull(permissionDao.getPermission("com.test.valid.monotonic", "SIGN_EVENT", 1))
-        assertNotNull(permissionDao.getPermission("com.test.permanent", "SIGN_EVENT", 1))
+        assertNull(permissionDao.getPermission("com.test.expired.wallclock", "SIGN_EVENT", 1, ""))
+        assertNull(permissionDao.getPermission("com.test.expired.manipulation", "SIGN_EVENT", 1, ""))
+        assertNull(permissionDao.getPermission("com.test.expired.monotonic", "SIGN_EVENT", 1, ""))
+        assertNull(permissionDao.getPermission("com.test.expired.elapsed_regression", "SIGN_EVENT", 1, ""))
+        assertNotNull(permissionDao.getPermission("com.test.valid.wallclock", "SIGN_EVENT", 1, ""))
+        assertNotNull(permissionDao.getPermission("com.test.valid.monotonic", "SIGN_EVENT", 1, ""))
+        assertNotNull(permissionDao.getPermission("com.test.permanent", "SIGN_EVENT", 1, ""))
     }
 
     @Test
@@ -357,7 +357,7 @@ class PermissionDatabaseIntegrationTest {
     fun updateDecision() = runBlocking {
         permissionDao.insertPermission(createPermission())
 
-        val inserted = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1)
+        val inserted = permissionDao.getPermission("com.test.app", "SIGN_EVENT", 1, "")
         assertNotNull(inserted)
 
         permissionDao.updateDecision(inserted!!.id, "deny")

@@ -30,6 +30,7 @@ import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
 import io.privkey.keep.uniffi.SigningRequestContext
 import io.privkey.keep.uniffi.evaluateSignPolicy
+import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -308,9 +309,17 @@ class Nip55ContentProvider : ContentProvider() {
             return rejectedCursor(null)
         }
 
+        // Kind 22242 (NIP-42) grants are scoped per relay: resolve the relay host so
+        // the lookup can match a relay-specific grant before the all-relays wildcard.
+        val relay = if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
+            nip55ExtractRelayHost(rawContent) ?: RELAY_NONE
+        } else {
+            RELAY_NONE
+        }
+
         var decision: PermissionDecision? = null
         val decisionLoaded = runWithTimeout {
-            decision = store.getPermissionDecision(callerPackage, requestType, eventKind)
+            decision = store.getPermissionDecision(callerPackage, requestType, eventKind, relay)
             true
         }
         if (decisionLoaded == null) {
