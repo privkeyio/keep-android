@@ -56,7 +56,13 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         if (anchor == null) return false
         val tail = auditDao.getLastEntryHash() ?: ""
         val count = auditDao.getCount().toLong()
-        return tail != anchor.latestEntryHash || count != anchor.entryCount
+        if (tail == anchor.latestEntryHash && count == anchor.entryCount) return false
+        // A legit append whose post-commit anchor advance was lost to a crash leaves the
+        // DB one row ahead, chained onto the anchored tail. Re-pin without flagging.
+        if (isResumableAppend(anchor, count, auditDao.getLastPreviousHash(), rustIntact = true)) {
+            return false
+        }
+        return true
     }
 
     private suspend fun advanceAnchor() {

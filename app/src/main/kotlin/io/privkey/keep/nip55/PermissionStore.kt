@@ -223,8 +223,11 @@ class PermissionStore(private val database: Nip55Database) {
         var rustResult = walk(entries)
         var anchor = Nip55Database.getAuditAnchor()
         // A concurrent append landing between the row read and the anchor read shows up
-        // as a single-step shortfall; re-read once to avoid a false Truncated.
-        if (!tamperDetected && anchor != null && entries.size.toLong() == anchor.entryCount - 1L) {
+        // as a single-step skew either way; re-read once to avoid a false result.
+        if (!tamperDetected && anchor != null &&
+            (entries.size.toLong() == anchor.entryCount - 1L ||
+                entries.size.toLong() == anchor.entryCount + 1L)
+        ) {
             entries = auditDao.getAllOrdered()
             rustResult = walk(entries)
             anchor = Nip55Database.getAuditAnchor()
@@ -238,6 +241,16 @@ class PermissionStore(private val database: Nip55Database) {
             if (shouldSeed(anchor, rustResult)) {
                 Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
             }
+            return rustResult
+        }
+        // A crash between the row insert and the post-commit anchor advance leaves a legit
+        // row durable with the anchor trailing by one; heal it rather than report Tampered.
+        val rustIntact = rustResult is ChainVerificationResult.Valid ||
+            rustResult is ChainVerificationResult.PartiallyVerified
+        if (!tamperDetected &&
+            isResumableAppend(anchor, entries.size.toLong(), entries.lastOrNull()?.previousHash, rustIntact)
+        ) {
+            Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
             return rustResult
         }
         return resolveChainVerification(

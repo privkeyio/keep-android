@@ -53,3 +53,24 @@ internal fun shouldSeed(anchor: AuditAnchor?, rustResult: ChainVerificationResul
     anchor == null &&
         (rustResult is ChainVerificationResult.Valid ||
             rustResult is ChainVerificationResult.PartiallyVerified)
+
+/**
+ * True when the DB is exactly one append ahead of the [anchor] and that newest row
+ * chains onto the anchored tail ([newestPreviousHash] == [AuditAnchor.latestEntryHash]).
+ *
+ * The anchor advances only after the Room transaction commits, so a crash (or a
+ * not-yet-visible concurrent append) can leave a legitimately-appended row durable
+ * while the anchor still trails by one. Re-pinning instead of flagging is safe: a
+ * forged extra row cannot carry a valid HMAC [Nip55AuditLog.entryHash], so it is
+ * still caught by the Rust walk at verify time. Callers that have a Rust result
+ * should additionally require [rustIntact] before treating this as benign.
+ */
+internal fun isResumableAppend(
+    anchor: AuditAnchor,
+    entryCount: Long,
+    newestPreviousHash: String?,
+    rustIntact: Boolean
+): Boolean =
+    rustIntact &&
+        entryCount == anchor.entryCount + 1L &&
+        newestPreviousHash == anchor.latestEntryHash

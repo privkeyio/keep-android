@@ -157,4 +157,30 @@ class AuditAnchorTest {
         assertFalse(shouldSeed(AuditAnchor("hashB", 2L), valid))
         assertFalse(shouldSeed(AuditAnchor("", 0L), valid))
     }
+
+    @Test
+    fun resumableAppendWhenOneAheadChainedAndIntact() {
+        // DB one row ahead, newest row chained onto the anchored tail, Rust intact:
+        // a legit append whose post-commit anchor advance was lost to a crash.
+        assertTrue(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", rustIntact = true))
+    }
+
+    @Test
+    fun notResumableWhenNotChainedOntoAnchor() {
+        // Newest row does not link to the anchored tail (e.g. head fabrication shifts it).
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashX", rustIntact = true))
+    }
+
+    @Test
+    fun notResumableWhenRustNotIntact() {
+        // A forged extra row that the Rust walk rejects must never be healed.
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", rustIntact = false))
+    }
+
+    @Test
+    fun notResumableWhenNotExactlyOneAhead() {
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 2L, "hashB", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 4L, "hashB", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 1L, "hashB", rustIntact = true))
+    }
 }
