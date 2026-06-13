@@ -2,8 +2,9 @@ package io.privkey.keep.storage
 
 import android.util.Log
 import io.privkey.keep.BuildConfig
+import io.privkey.keep.nip55.AuditLogWriter
 import io.privkey.keep.nip55.Nip55AuditLog
-import io.privkey.keep.nip55.Nip55AuditLogDao
+import io.privkey.keep.nip55.Nip55Database
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SigningAuditStorage
 import kotlinx.coroutines.Dispatchers
@@ -15,8 +16,11 @@ private const val TAG = "SigningAuditStorage"
 private const val MAX_QUERY_LIMIT = 10_000
 
 class AndroidSigningAuditStorage(
-    private val auditDao: Nip55AuditLogDao
+    private val database: Nip55Database
 ) : SigningAuditStorage {
+
+    private val auditDao = database.auditLogDao()
+    private val auditWriter = AuditLogWriter(database)
 
     override fun storeEntry(entryJson: String) {
         val json = try {
@@ -44,7 +48,7 @@ class AndroidSigningAuditStorage(
             previousHash = prevHashBytes?.toHexString(),
             entryHash = hashBytes.toHexString()!!
         )
-        runBlocking(Dispatchers.IO) { auditDao.insert(log) }
+        runBlocking(Dispatchers.IO) { auditWriter.append({ log }) }
     }
 
     override fun loadEntries(limit: UInt?): List<String> {
@@ -82,7 +86,7 @@ class AndroidSigningAuditStorage(
     }
 
     override fun clearEntries(confirm: String) {
-        runBlocking(Dispatchers.IO) { auditDao.deleteAll() }
+        runBlocking(Dispatchers.IO) { auditWriter.clear() }
     }
 
     companion object {

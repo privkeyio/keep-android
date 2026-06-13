@@ -17,15 +17,20 @@ data class AuditAnchor(val latestEntryHash: String, val entryCount: Long)
  * is never downgraded. A null anchor (first run on an upgraded install) defers to
  * the Rust result so the caller can trust-on-first-use seed it.
  *
+ * A set [tamperDetected] sticky flag (out-of-band mutation caught at append/prune
+ * time) is authoritative: it overrides any now-consistent chain the walk reports.
+ *
  * Pure function: no storage, no native calls, fully unit-testable.
  */
 internal fun resolveChainVerification(
+    tamperDetected: Boolean,
     anchor: AuditAnchor?,
     entryCount: Long,
     latestEntryHash: String,
     latestEntryId: Long,
     rustResult: ChainVerificationResult
 ): ChainVerificationResult {
+    if (tamperDetected) return ChainVerificationResult.Tampered(latestEntryId)
     if (rustResult is ChainVerificationResult.Broken || rustResult is ChainVerificationResult.Tampered) {
         return rustResult
     }
@@ -38,3 +43,13 @@ internal fun resolveChainVerification(
     }
     return rustResult
 }
+
+/**
+ * Trust-on-first-use seed decision: only seed the anchor when there is none yet
+ * (fresh/upgraded install) AND the Rust walk reports an intact chain, so a
+ * corrupt chain is never baselined as the source of truth.
+ */
+internal fun shouldSeed(anchor: AuditAnchor?, rustResult: ChainVerificationResult): Boolean =
+    anchor == null &&
+        (rustResult is ChainVerificationResult.Valid ||
+            rustResult is ChainVerificationResult.PartiallyVerified)

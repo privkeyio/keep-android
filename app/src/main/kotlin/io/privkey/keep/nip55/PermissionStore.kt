@@ -25,32 +25,22 @@ class PermissionStore(private val database: Nip55Database) {
     private val auditDao = database.auditLogDao()
     private val appSettingsDao = database.appSettingsDao()
     private val velocityDao = database.velocityDao()
+    private val auditWriter = AuditLogWriter(database)
 
     val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
 
     suspend fun cleanupExpired() {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        database.withTransaction {
+        auditWriter.prune(now - 30 * DAY_MS) {
             dao.deleteExpired(now, nowElapsed)
             dao.deleteNip46Permissions()
-            auditDao.deleteOlderThan(now - 30 * DAY_MS)
-            updateAuditAnchor()
             val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
                 dao.deleteForCaller(pkg)
             }
             appSettingsDao.deleteExpired(now, nowElapsed)
         }
-    }
-
-    // Re-pins the tail anchor to the chain's current state after any legitimate
-    // mutation (append/prune), so the verifier can tell sanctioned changes from an
-    // attacker editing Room directly. Must run inside the audit-log transaction.
-    private suspend fun updateAuditAnchor() {
-        Nip55Database.setAuditAnchor(
-            AuditAnchor(auditDao.getLastEntryHash() ?: "", auditDao.getCount().toLong())
-        )
     }
 
     // Decision resolution (incl. the rule that sensitive kinds never fall back
@@ -148,34 +138,41 @@ class PermissionStore(private val database: Nip55Database) {
         eventKind: Int?,
         decision: String,
         wasAutomatic: Boolean
+    ) = logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic, null)
+
+    // [extraInTransaction] lets a related permission write commit atomically with the
+    // audit row in a single Room transaction; the anchor is advanced only once that
+    // transaction durably commits.
+    private suspend fun logOperation(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        decision: String,
+        wasAutomatic: Boolean,
+        extraInTransaction: (suspend () -> Unit)?
     ) {
         val normalizedEventKind = eventKind ?: EVENT_KIND_GENERIC
-        database.withTransaction {
-            val previousHash = auditDao.getLastEntryHash()
-            val timestamp = System.currentTimeMillis()
-            val entryHash = calculateEntryHash(
-                previousHash = previousHash,
+        val timestamp = System.currentTimeMillis()
+        auditWriter.append({ previousHash ->
+            Nip55AuditLog(
+                timestamp = timestamp,
                 callerPackage = callerPackage,
                 requestType = requestType.name,
                 eventKind = normalizedEventKind,
                 decision = decision,
-                timestamp = timestamp,
-                wasAutomatic = wasAutomatic
-            )
-            auditDao.insert(
-                Nip55AuditLog(
-                    timestamp = timestamp,
+                wasAutomatic = wasAutomatic,
+                previousHash = previousHash,
+                entryHash = calculateEntryHash(
+                    previousHash = previousHash,
                     callerPackage = callerPackage,
                     requestType = requestType.name,
                     eventKind = normalizedEventKind,
                     decision = decision,
-                    wasAutomatic = wasAutomatic,
-                    previousHash = previousHash,
-                    entryHash = entryHash
+                    timestamp = timestamp,
+                    wasAutomatic = wasAutomatic
                 )
             )
-            updateAuditAnchor()
-        }
+        }, extraInTransaction)
     }
 
     // The hourly/daily/weekly limit thresholds + block decision live in Rust;
@@ -216,27 +213,39 @@ class PermissionStore(private val database: Nip55Database) {
     // Chain verification (keyed-HMAC walk: legacy/truncated/broken/tampered) lives
     // in Rust; Android supplies the ordered rows and the keystore HMAC key.
     suspend fun verifyAuditChain(): ChainVerificationResult {
-        val entries = auditDao.getAllOrdered()
+        val tamperDetected = Nip55Database.isAuditTamperDetected()
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
-        val rustResult = nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
-            .toChainVerificationResult()
-        val anchor = Nip55Database.getAuditAnchor()
+        val walk: (List<Nip55AuditLog>) -> ChainVerificationResult = { es ->
+            nip55VerifyAuditChain(es.map { it.toRustAuditEntry() }, hmacKey).toChainVerificationResult()
+        }
+        var entries = auditDao.getAllOrdered()
+        var rustResult = walk(entries)
+        var anchor = Nip55Database.getAuditAnchor()
+        // A concurrent append landing between the row read and the anchor read shows up
+        // as a single-step shortfall; re-read once to avoid a false Truncated.
+        if (!tamperDetected && anchor != null && entries.size.toLong() == anchor.entryCount - 1L) {
+            entries = auditDao.getAllOrdered()
+            rustResult = walk(entries)
+            anchor = Nip55Database.getAuditAnchor()
+        }
         val latestHash = entries.lastOrNull()?.entryHash ?: ""
+        val latestId = entries.lastOrNull()?.id ?: 0L
         if (anchor == null) {
+            if (tamperDetected) return ChainVerificationResult.Tampered(latestId)
             // First verify on an upgraded/fresh install: trust-on-first-use seed the
             // anchor from the current intact tail rather than flagging it.
-            if (rustResult is ChainVerificationResult.Valid ||
-                rustResult is ChainVerificationResult.PartiallyVerified) {
+            if (shouldSeed(anchor, rustResult)) {
                 Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
             }
             return rustResult
         }
         return resolveChainVerification(
+            tamperDetected,
             anchor,
             entries.size.toLong(),
             latestHash,
-            entries.lastOrNull()?.id ?: 0L,
+            latestId,
             rustResult
         )
     }
@@ -313,9 +322,8 @@ class PermissionStore(private val database: Nip55Database) {
         }
         val storedRequestType = findRequestType(permission.requestType)
             ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
-        database.withTransaction {
+        logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false) {
             dao.updateDecision(id, decision.toString())
-            logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false)
         }
     }
 
@@ -326,7 +334,7 @@ class PermissionStore(private val database: Nip55Database) {
     ) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        database.withTransaction {
+        logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false) {
             dao.insertPermission(
                 Nip55Permission(
                     callerPackage = callerPackage,
@@ -339,7 +347,6 @@ class PermissionStore(private val database: Nip55Database) {
                     durationMs = null
                 )
             )
-            logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false)
         }
     }
 
@@ -351,10 +358,7 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
-    suspend fun clearAuditLog() {
-        auditDao.deleteAll()
-        Nip55Database.setAuditAnchor(AuditAnchor("", 0L))
-    }
+    suspend fun clearAuditLog() = auditWriter.clear()
 
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 
