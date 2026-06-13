@@ -621,7 +621,7 @@ fun MainScreen(
             )
             return
         }
-        showRelayAuthWhitelistScreen = false
+        LaunchedEffect(Unit) { showRelayAuthWhitelistScreen = false }
     }
 
     if (showPermissionsScreen) {

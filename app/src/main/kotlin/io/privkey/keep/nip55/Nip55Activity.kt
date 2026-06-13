@@ -27,7 +27,6 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.Nip55Response
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
-import io.privkey.keep.uniffi.nip55RelayAuthGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -317,7 +316,7 @@ class Nip55Activity : FragmentActivity() {
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = currentRisk,
                         onApprove = { duration, bundle, relayScope -> handleApprove(duration, bundle, relayScope) },
-                        onReject = ::handleReject
+                        onReject = { duration, relayScope -> handleReject(duration, relayScope) }
                     )
                 }
             }
@@ -345,7 +344,7 @@ class Nip55Activity : FragmentActivity() {
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = highestRisk,
                         onApprove = { duration -> handleApprove(duration, emptyList()) },
-                        onReject = ::handleReject
+                        onReject = { duration -> handleReject(duration) }
                     )
                 }
             }
@@ -609,9 +608,7 @@ class Nip55Activity : FragmentActivity() {
     // without signing, so the whitelist can't be bypassed via the Intent path.
     private fun relayAuthRejected(req: Nip55Request): Boolean {
         if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) return false
-        val whitelist = keepApp?.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
-        if (whitelist.isEmpty()) return false
-        return nip55RelayAuthGate(nip55ExtractRelayHost(req.content), whitelist) == Nip55RelayAuthGate.AUTO_REJECT
+        return evaluateRelayAuthGate(keepApp?.getRelayAuthWhitelistStore(), req.content).first == Nip55RelayAuthGate.AUTO_REJECT
     }
 
     // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
@@ -799,7 +796,7 @@ class Nip55Activity : FragmentActivity() {
         else -> "request_failed"
     }
 
-    private fun handleReject(duration: PermissionDuration) {
+    private fun handleReject(duration: PermissionDuration, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: mirrors handleApprove so neither path can run twice or
         // after the other has already committed.
         if (decisionLocked) return
@@ -818,7 +815,10 @@ class Nip55Activity : FragmentActivity() {
 
         lifecycleScope.launch {
             if (store != null && callerId != null) {
-                store.denyPermission(callerId, req.requestType, eventKind, duration)
+                // Persist the deny at the same relay scope a grant would use (host or "*"
+                // for kind-22242), so a remembered reject is consulted by the same lookup
+                // and replaces any matching ALLOW row.
+                store.denyPermission(callerId, req.requestType, eventKind, duration, relayScopeForGrant(req, relayScope))
                 store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
             }
             finishWithRejection()
@@ -834,7 +834,9 @@ class Nip55Activity : FragmentActivity() {
             if (store != null && callerId != null) {
                 items.forEach { item ->
                     val eventKind = item.request.eventKind()
-                    store.denyPermission(callerId, item.request.requestType, eventKind, duration)
+                    // Mirror the batch grant default (specific relay) so a remembered batch
+                    // reject for kind-22242 is scoped like its approve counterpart.
+                    store.denyPermission(callerId, item.request.requestType, eventKind, duration, relayScopeForGrant(item.request, RelayAuthScope.SPECIFIC))
                     store.logOperation(callerId, item.request.requestType, eventKind, "deny", wasAutomatic = false)
                 }
             }

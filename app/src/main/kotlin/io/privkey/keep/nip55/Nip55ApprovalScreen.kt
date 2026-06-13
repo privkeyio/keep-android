@@ -131,7 +131,7 @@ fun ApprovalScreen(
     callerSignatureFingerprint: String? = null,
     riskAssessment: RiskAssessment? = null,
     onApprove: (PermissionDuration, List<Nip55DeclaredPermission>, RelayAuthScope?) -> Unit,
-    onReject: (PermissionDuration) -> Unit
+    onReject: (PermissionDuration, RelayAuthScope?) -> Unit
 ) {
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
@@ -241,7 +241,7 @@ fun ApprovalScreen(
             isLoading = isLoading,
             onReject = {
                 isLoading = true
-                onReject(effectiveDuration)
+                onReject(effectiveDuration, if (relayAuthHost != null) relayScope else null)
             },
             onApprove = {
                 isLoading = true

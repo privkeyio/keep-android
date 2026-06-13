@@ -31,8 +31,6 @@ import io.privkey.keep.uniffi.SignPolicyEvaluation
 import io.privkey.keep.uniffi.SigningRequestContext
 import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.evaluateSignPolicy
-import io.privkey.keep.uniffi.nip55ExtractRelayHost
-import io.privkey.keep.uniffi.nip55RelayAuthGate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -173,10 +171,7 @@ class Nip55ContentProvider : ContentProvider() {
         // auto-sign policy, so a non-whitelisted relay can never be auto-approved by an
         // AUTO/BASIC sign policy (independent of 22242 being a sensitive kind).
         if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
-            val whitelist = currentApp.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
-            if (whitelist.isNotEmpty() &&
-                nip55RelayAuthGate(nip55ExtractRelayHost(rawContent), whitelist) == Nip55RelayAuthGate.AUTO_REJECT
-            ) {
+            if (evaluateRelayAuthGate(currentApp.getRelayAuthWhitelistStore(), rawContent).first == Nip55RelayAuthGate.AUTO_REJECT) {
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
                 return rejectedCursor(null)
             }
@@ -327,19 +322,14 @@ class Nip55ContentProvider : ContentProvider() {
         // Kind 22242 (NIP-42): resolve the relay host once for both the whitelist gate
         // and the relay-scoped grant lookup.
         val isRelayAuth = requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH
-        val relayHost = if (isRelayAuth) nip55ExtractRelayHost(rawContent) else null
+        val gate = if (isRelayAuth) {
+            evaluateRelayAuthGate(currentApp.getRelayAuthWhitelistStore(), rawContent)
+        } else null
+        val relayHost = gate?.second
 
-        if (isRelayAuth) {
-            val whitelist = currentApp.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
-            when (nip55RelayAuthGate(relayHost, whitelist)) {
-                Nip55RelayAuthGate.AUTO_REJECT -> {
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
-                    return rejectedCursor(null)
-                }
-                Nip55RelayAuthGate.AUTO_ACCEPT ->
-                    return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
-                Nip55RelayAuthGate.DEFER -> {} // fall through to normal grant resolution
-            }
+        if (gate?.first == Nip55RelayAuthGate.AUTO_REJECT) {
+            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
+            return rejectedCursor(null)
         }
 
         val relay = relayHost ?: RELAY_NONE
@@ -351,6 +341,12 @@ class Nip55ContentProvider : ContentProvider() {
         if (decisionLoaded == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Permission lookup timed out for ${hashPackageName(callerPackage)}/$requestType, denying request")
             return rejectedCursor(null)
+        }
+
+        // Whitelist AUTO_ACCEPT auto-signs, but an explicit per-app DENY still wins (and is
+        // not silently skipped). AUTO_REJECT already returned above (fail closed).
+        if (gate?.first == Nip55RelayAuthGate.AUTO_ACCEPT && decision != PermissionDecision.DENY) {
+            return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
         }
 
         return when (decision) {

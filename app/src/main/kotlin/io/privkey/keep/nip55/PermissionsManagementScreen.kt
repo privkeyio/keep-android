@@ -374,6 +374,18 @@ private fun PermissionCard(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (kind == KIND_NIP42_AUTH && permission.relay != RELAY_NONE) {
+                            val relayLabel = if (permission.relay == RELAY_WILDCARD) {
+                                stringResource(R.string.connections_nip55_relay_scope_all)
+                            } else {
+                                permission.relay
+                            }
+                            Text(
+                                text = stringResource(R.string.connections_permissions_relay_scope, relayLabel),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
                     val expiryText = permission.expiresAt?.let { stringResource(R.string.connections_permissions_expires, io.privkey.keep.uniffi.formatTimestampDetailed(it / 1000)) } ?: stringResource(R.string.connections_permissions_permanent)

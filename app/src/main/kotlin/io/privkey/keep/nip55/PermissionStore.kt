@@ -48,9 +48,14 @@ class PermissionStore(private val database: Nip55Database) {
     // supplies the clock readings.
     suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null, relay: String = RELAY_NONE): PermissionDecision? {
         val storedKind = eventKind ?: EVENT_KIND_GENERIC
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val now = System.currentTimeMillis()
         val exact = if (relay.isNotEmpty()) {
-            // Relay-scoped (kind 22242): the specific relay first, then the all-relays wildcard.
+            // Relay-scoped (kind 22242): the specific relay first, then the all-relays
+            // wildcard. An expired specific row must NOT shadow a still-valid wildcard,
+            // so fall back to the wildcard when the specific row is absent or expired.
             dao.getPermission(callerPackage, requestType.name, storedKind, relay)
+                ?.takeUnless { it.isExpired(nowElapsed, now) }
                 ?: dao.getPermission(callerPackage, requestType.name, storedKind, RELAY_WILDCARD)
         } else {
             dao.getPermission(callerPackage, requestType.name, storedKind, RELAY_NONE)

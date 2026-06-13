@@ -244,6 +244,7 @@
     <string name="connections_nip55_relay_auth_whitelist_add_label">Relay URL</string>
     <string name="connections_nip55_relay_auth_whitelist_add">Add</string>
     <string name="connections_nip55_relay_auth_whitelist_empty">No relays whitelisted. NIP-42 auth follows normal per-app permissions.</string>
+    <string name="connections_permissions_relay_scope">Relay: %1$s</string>
     <string name="connections_nip55_batch_auth_subtitle">%1$d signing requests</string>
     <string name="connections_nip55_type_label">Type</string>
     <string name="connections_nip55_recipient_label">Recipient</string>
