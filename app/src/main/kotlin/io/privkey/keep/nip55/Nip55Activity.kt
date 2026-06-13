@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import io.privkey.keep.BiometricHelper
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.R
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.PinStore
@@ -29,6 +30,7 @@ import kotlinx.coroutines.withContext
 import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
+import javax.crypto.Cipher
 
 class Nip55Activity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
@@ -50,6 +52,21 @@ class Nip55Activity : FragmentActivity() {
     private var isNotificationOriginated: Boolean = false
     private var riskAssessment: RiskAssessment? = null
 
+    // Accumulated requests for batch / multi-event signing. Sign requests from the
+    // same caller that arrive (via onNewIntent) before the user acts are collected
+    // here; size 1 renders the single-request UI, size >1 the multi-event UI.
+    private val pending = mutableListOf<PendingNip55Request>()
+    private var batchCaller: String? = null
+
+    private class PendingNip55Request(
+        val request: Nip55Request,
+        val requestId: String?,
+        val intentUri: String,
+    ) {
+        var risk: RiskAssessment? = null
+        var notificationRequestId: String? = null
+    }
+
     private class PreApproveFailedException : Exception()
 
     companion object {
@@ -58,6 +75,8 @@ class Nip55Activity : FragmentActivity() {
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_EXTRA_LENGTH = 2048
+        // Mirrors keep-mobile MAX_BATCH_SIZE; bounds accumulation against a spammy caller.
+        private const val MAX_BATCH_SIZE = 20
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,27 +112,56 @@ class Nip55Activity : FragmentActivity() {
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
 
         identifyCaller(intent)
-        if (callerPackage == null) {
+        val caller = callerPackage
+        if (caller == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting request from unverified caller")
             return finishWithError("unknown_caller")
         }
 
         val rawId = intent.getStringExtra("id")
         if (rawId != null && rawId.length > MAX_EXTRA_LENGTH) return finishWithError("Invalid request")
-        requestId = rawId
-        intentUri = intent.data?.let { uri ->
+        val uriStr = intent.data?.let { uri ->
             if (uri.scheme != "nostrsigner") return finishWithError("Invalid URI scheme")
             uri.toString()
         }
-        parseAndSetRequest(intent)
-        if (request != null) {
-            showNotification()
-            calculateRiskAndSetupContent()
+        if (handler == null) return finishWithError("Handler not initialized")
+
+        val parsed = parseRequest(intent, uriStr) ?: return finishWithError("Invalid request")
+        val parsedId = rawId ?: parsed.id
+
+        // Accumulate only same-caller operation requests (never get_public_key) up to the cap.
+        val batchable = parsed.requestType != Nip55RequestType.GET_PUBLIC_KEY
+        val canAccumulate = pending.isNotEmpty() &&
+            batchable &&
+            batchCaller == caller &&
+            pending.all { it.request.requestType != Nip55RequestType.GET_PUBLIC_KEY }
+        if (canAccumulate) {
+            if (pending.size >= MAX_BATCH_SIZE) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Dropping batch request beyond cap of $MAX_BATCH_SIZE")
+                return
+            }
+        } else {
+            cancelAllNotifications()
+            pending.clear()
         }
+
+        val item = PendingNip55Request(parsed, parsedId, uriStr ?: "")
+        pending.add(item)
+        batchCaller = caller
+
+        // Legacy single-request fields drive the single-request path and UI.
+        request = parsed
+        requestId = parsedId
+        intentUri = uriStr
+
+        // One notification per batch: the first request raises it; accumulated
+        // requests arrive while the approval UI is already up.
+        if (pending.size == 1) showNotificationFor(item)
+        calculateRiskAndSetupContent()
     }
 
     private fun calculateRiskAndSetupContent() {
-        val req = request ?: return
+        val item = pending.lastOrNull() ?: return
         val pkg = callerPackage
         val store = permissionStore
 
@@ -123,8 +171,8 @@ class Nip55Activity : FragmentActivity() {
         }
 
         lifecycleScope.launch {
-            riskAssessment = runCatching {
-                store.riskAssessor.assess(pkg, req.eventKind(), req.requestType)
+            val assessment = runCatching {
+                store.riskAssessor.assess(pkg, item.request.eventKind(), item.request.requestType)
             }.getOrElse {
                 RiskAssessment(
                     score = 100,
@@ -132,6 +180,8 @@ class Nip55Activity : FragmentActivity() {
                     requiredAuth = AuthLevel.EXPLICIT
                 )
             }
+            item.risk = assessment
+            riskAssessment = assessment
             setupContent()
         }
     }
@@ -192,18 +242,29 @@ class Nip55Activity : FragmentActivity() {
         callerPendingFirstUse = false
     }
 
-    private fun showNotification() {
-        val req = request ?: return
-        val uri = intentUri ?: return
-        notificationRequestId = notificationManager?.showSigningRequest(
-            requestType = req.requestType,
+    private fun showNotificationFor(item: PendingNip55Request) {
+        if (item.intentUri.isEmpty()) return
+        val id = notificationManager?.showSigningRequest(
+            requestType = item.request.requestType,
             callerPackage = callerPackage,
-            intentUri = uri,
-            requestId = requestId
+            intentUri = item.intentUri,
+            requestId = item.requestId
         )
+        item.notificationRequestId = id
+        notificationRequestId = id
+    }
+
+    private fun cancelAllNotifications() {
+        notificationManager?.cancelNotification(notificationRequestId)
+        pending.forEach { it.notificationRequestId?.let { id -> notificationManager?.cancelNotification(id) } }
     }
 
     private fun setupContent() {
+        if (pending.size > 1) {
+            setupBatchContent()
+            return
+        }
+
         val currentRequest = request ?: return
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
@@ -232,19 +293,45 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun parseAndSetRequest(intent: Intent) {
-        val uri = intent.data?.toString() ?: return finishWithError("Invalid request")
-        val h = handler ?: return finishWithError("Handler not initialized")
+    private fun setupBatchContent() {
+        val items = pending.toList()
+        val currentCallerPackage = callerPackage
+        val currentCallerVerified = callerVerified
+        val currentPendingFirstUse = callerPendingFirstUse
+        val currentSignatureHash = callerSignatureHash
+        val highestRisk = items.mapNotNull { it.risk }.maxByOrNull { it.score }
+
+        setContent {
+            KeepAndroidTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    BatchApprovalScreen(
+                        requests = items.map { it.request },
+                        callerPackage = currentCallerPackage,
+                        callerVerified = currentCallerVerified,
+                        showFirstUseWarning = currentPendingFirstUse,
+                        callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
+                        riskAssessment = highestRisk,
+                        onApprove = ::handleApprove,
+                        onReject = ::handleReject
+                    )
+                }
+            }
+        }
+    }
+
+    private fun parseRequest(intent: Intent, uriStr: String?): Nip55Request? {
+        val uri = uriStr ?: return null
+        val h = handler ?: return null
 
         val parsed = runCatching { h.parseIntentUri(uri) }.getOrNull()
             ?: (if (uri.startsWith("nostrsigner:")) parseRequestFromExtras(intent, uri) else null)
-            ?: return finishWithError("Invalid request")
+            ?: return null
 
-        request = parsed
         if (BuildConfig.DEBUG) Log.d(TAG, "Parsed request: type=${parsed.requestType.name}, contentLen=${parsed.content.length}, pubkey=${parsed.pubkey?.take(8)}")
-        if (requestId.isNullOrBlank()) {
-            requestId = parsed.id
-        }
+        return parsed
     }
 
     private fun parseRequestFromExtras(intent: Intent, uri: String): Nip55Request? {
@@ -301,6 +388,8 @@ class Nip55Activity : FragmentActivity() {
         if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
+        if (pending.size > 1) return handleApproveBatch(duration)
+
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
@@ -332,48 +421,10 @@ class Nip55Activity : FragmentActivity() {
             if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
 
             try {
-                val signResult = withContext(signingDispatcher) {
-                    requestId?.let { keystoreStorage?.setRequestIdContext(it) }
-                    try {
-                        val km = currentApp?.getKeepMobile()
-                        if (req.requestType == Nip55RequestType.SIGN_EVENT && km != null) {
-                            val preApprove = runCatching { km.preApproveNostrEvent(req.content) }
-                            if (preApprove.isFailure) {
-                                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
-                                return@withContext Result.failure<Nip55Response>(PreApproveFailedException())
-                            }
-                        }
-                        runCatching { nip55Handler.handleRequest(req, callerId) }
-                    } finally {
-                        keystoreStorage?.clearRequestIdContext()
-                    }
-                }
-
+                val signResult = signOneRequest(req, requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                 signResult
                     .onSuccess { response ->
-                        val permResult = runCatching {
-                            store?.grantPermission(callerId, req.requestType, eventKind, duration)
-                            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
-                                store?.grantPermission(callerId, req.requestType, null, duration)
-                            }
-
-                            if (callerPendingFirstUse) {
-                                val sigHash = callerSignatureHash
-                                val verificationStore = callerVerificationStore
-                                if (sigHash != null && verificationStore != null) {
-                                    verificationStore.trustPackage(callerId, sigHash)
-                                    callerPendingFirstUse = false
-                                    callerVerified = true
-                                } else {
-                                    if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
-                                }
-                            }
-                        }
-                        if (permResult.isFailure && BuildConfig.DEBUG) {
-                            Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
-                        }
-                        val auditAction = if (permResult.isFailure) "allow_grant_failed" else "allow"
-                        store?.logOperation(callerId, req.requestType, eventKind, auditAction, wasAutomatic = false)
+                        recordGrantAndTrust(store, callerId, req, eventKind, duration)
                         finishWithResult(response)
                     }
                     .onFailure { e ->
@@ -391,16 +442,153 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    private fun handleApproveBatch(duration: PermissionDuration) {
+        val items = pending.toList()
+        val nip55Handler = handler ?: return finishWithError("Handler not initialized")
+        val keystoreStorage = storage
+        val callerId = callerPackage ?: run {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rejecting batch from unknown caller")
+            return finishWithError("unknown_caller")
+        }
+        val store = permissionStore
+        val batchAuthId = UUID.randomUUID().toString()
+
+        lifecycleScope.launch {
+            val currentApp = application as? KeepMobileApp
+
+            // All batch items are operation requests (never get_public_key).
+            if (keystoreStorage != null && currentApp != null) {
+                try {
+                    val initError = initializeNodeIfNeeded(keystoreStorage, currentApp)
+                    if (initError != null) {
+                        finishWithError("Node initialization failed", initError)
+                        return@launch
+                    }
+                } catch (e: BiometricHelper.BiometricNotReadyException) {
+                    finishWithError("biometric_not_ready", e.message)
+                    return@launch
+                }
+            }
+
+            // One biometric presence gate covers the whole batch; the live node
+            // signs each event without re-consuming the (single-use) cipher.
+            if (!authenticateForBatch(keystoreStorage, items, batchAuthId)) return@launch
+
+            try {
+                val responses = ArrayList<Nip55Response>(items.size)
+                for (item in items) {
+                    val req = item.request
+                    val eventKind = req.eventKind()
+                    val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
+                    result
+                        .onSuccess { response ->
+                            recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                            responses.add(response.copy(id = item.requestId))
+                        }
+                        .onFailure { e ->
+                            val action = if (e is PreApproveFailedException) "preapprove_failed" else "deny"
+                            store?.logOperation(callerId, req.requestType, eventKind, action, wasAutomatic = false)
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Batch item failed: ${e::class.simpleName}")
+                            responses.add(Nip55Response(result = "", event = null, error = "request_failed", id = item.requestId))
+                        }
+                }
+                finishWithBatchResults(nip55Handler, responses)
+            } finally {
+                items.forEach { it.requestId?.let { id -> keystoreStorage?.clearPendingCipher(id) } }
+                keystoreStorage?.clearPendingCipher(batchAuthId)
+            }
+        }
+    }
+
+    // Runs preApprove (sign_event only) followed by the Rust handler for one
+    // request on the single-threaded signing dispatcher.
+    private suspend fun signOneRequest(
+        req: Nip55Request,
+        reqId: String?,
+        nip55Handler: Nip55Handler,
+        callerId: String,
+        keystoreStorage: AndroidKeystoreStorage?,
+        currentApp: KeepMobileApp?
+    ): Result<Nip55Response> = withContext(signingDispatcher) {
+        reqId?.let { keystoreStorage?.setRequestIdContext(it) }
+        try {
+            val km = currentApp?.getKeepMobile()
+            if (req.requestType == Nip55RequestType.SIGN_EVENT && km != null) {
+                val preApprove = runCatching { km.preApproveNostrEvent(req.content) }
+                if (preApprove.isFailure) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove.exceptionOrNull()?.message}")
+                    return@withContext Result.failure<Nip55Response>(PreApproveFailedException())
+                }
+            }
+            runCatching { nip55Handler.handleRequest(req, callerId) }
+        } finally {
+            keystoreStorage?.clearRequestIdContext()
+        }
+    }
+
+    private suspend fun recordGrantAndTrust(
+        store: PermissionStore?,
+        callerId: String,
+        req: Nip55Request,
+        eventKind: Int?,
+        duration: PermissionDuration
+    ) {
+        val permResult = runCatching {
+            store?.grantPermission(callerId, req.requestType, eventKind, duration)
+            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+                store?.grantPermission(callerId, req.requestType, null, duration)
+            }
+
+            if (callerPendingFirstUse) {
+                val sigHash = callerSignatureHash
+                val verificationStore = callerVerificationStore
+                if (sigHash != null && verificationStore != null) {
+                    verificationStore.trustPackage(callerId, sigHash)
+                    callerPendingFirstUse = false
+                    callerVerified = true
+                } else {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Trust persistence skipped: verification store unavailable")
+                }
+            }
+        }
+        if (permResult.isFailure && BuildConfig.DEBUG) {
+            Log.e(TAG, "Permission/trust write failed: ${permResult.exceptionOrNull()?.message}")
+        }
+        val auditAction = if (permResult.isFailure) "allow_grant_failed" else "allow"
+        store?.logOperation(callerId, req.requestType, eventKind, auditAction, wasAutomatic = false)
+    }
+
     private suspend fun authenticateForRequest(keystoreStorage: AndroidKeystoreStorage?, req: Nip55Request): Boolean {
+        val authedCipher = obtainAuthedCipher(keystoreStorage, req.requestType.displayName(this)) ?: return false
+        val reqId = requestId ?: UUID.randomUUID().toString().also { requestId = it }
+        keystoreStorage?.setPendingCipher(reqId, authedCipher)
+        return true
+    }
+
+    private suspend fun authenticateForBatch(
+        keystoreStorage: AndroidKeystoreStorage?,
+        items: List<PendingNip55Request>,
+        batchAuthId: String
+    ): Boolean {
+        val subtitle = getString(R.string.nip55_batch_auth_subtitle, items.size)
+        val authedCipher = obtainAuthedCipher(keystoreStorage, subtitle) ?: return false
+        // Register the cipher under each request id and the batch id so a share
+        // reload (only if the node is not already live) can find it.
+        items.forEach { it.requestId?.let { id -> keystoreStorage?.setPendingCipher(id, authedCipher) } }
+        keystoreStorage?.setPendingCipher(batchAuthId, authedCipher)
+        return true
+    }
+
+    private suspend fun obtainAuthedCipher(keystoreStorage: AndroidKeystoreStorage?, subtitle: String): Cipher? {
         if (keystoreStorage == null) {
             finishWithError("Storage unavailable")
-            return false
+            return null
         }
 
         val biometricStatus = biometricHelper.checkBiometricStatus()
         if (biometricStatus != BiometricHelper.BiometricStatus.AVAILABLE) {
             finishWithError("biometric_not_ready", BiometricHelper.getBiometricNotReadyMessage(this, biometricStatus))
-            return false
+            return null
         }
 
         val cipher = runCatching { keystoreStorage.getCipherForDecryption() }
@@ -409,26 +597,24 @@ class Nip55Activity : FragmentActivity() {
 
         if (cipher == null) {
             finishWithError(if (keystoreStorage.hasShare()) "Storage error" else "No share stored")
-            return false
+            return null
         }
 
         val authedCipher = runCatching {
             biometricHelper.authenticateWithCrypto(
                 cipher = cipher,
                 title = "Approve Request",
-                subtitle = req.requestType.displayName(this)
+                subtitle = subtitle
             )
         }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Biometric authentication failed: ${it::class.simpleName}") }
             .getOrNull()
 
         if (authedCipher == null) {
             finishWithError("Authentication failed")
-            return false
+            return null
         }
 
-        val reqId = requestId ?: UUID.randomUUID().toString().also { requestId = it }
-        keystoreStorage.setPendingCipher(reqId, authedCipher)
-        return true
+        return authedCipher
     }
 
     private suspend fun initializeNodeIfNeeded(keystoreStorage: AndroidKeystoreStorage, app: KeepMobileApp): String? {
@@ -493,6 +679,8 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleReject(duration: PermissionDuration) {
+        if (pending.size > 1) return handleRejectBatch(duration)
+
         val req = request ?: return finishWithError("User rejected")
         val callerId = callerPackage
         val store = permissionStore
@@ -507,8 +695,33 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    private fun handleRejectBatch(duration: PermissionDuration) {
+        val items = pending.toList()
+        val callerId = callerPackage
+        val store = permissionStore
+        val nip55Handler = handler
+
+        lifecycleScope.launch {
+            if (store != null && callerId != null) {
+                items.forEach { item ->
+                    val eventKind = item.request.eventKind()
+                    store.denyPermission(callerId, item.request.requestType, eventKind, duration)
+                    store.logOperation(callerId, item.request.requestType, eventKind, "deny", wasAutomatic = false)
+                }
+            }
+            if (nip55Handler != null) {
+                val rejected = items.map {
+                    Nip55Response(result = "", event = null, error = "rejected", id = it.requestId)
+                }
+                finishWithBatchResults(nip55Handler, rejected)
+            } else {
+                finishWithError("User rejected")
+            }
+        }
+    }
+
     private fun finishWithResult(response: Nip55Response) {
-        notificationManager?.cancelNotification(notificationRequestId)
+        cancelAllNotifications()
         val req = request
 
         if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
@@ -543,8 +756,23 @@ class Nip55Activity : FragmentActivity() {
         finish()
     }
 
+    private fun finishWithBatchResults(nip55Handler: Nip55Handler, responses: List<Nip55Response>) {
+        cancelAllNotifications()
+        val json = runCatching { nip55Handler.serializeBatchResults(responses) }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to serialize batch results: ${it::class.simpleName}") }
+            .getOrNull() ?: return finishWithError("request_failed")
+
+        if (BuildConfig.DEBUG) Log.d(TAG, "Returning batch results for ${responses.size} requests")
+        val resultIntent = Intent().apply {
+            putExtra("results", json)
+            putExtra("package", packageName)
+        }
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+
     private fun finishWithError(error: String, userMessage: String? = null) {
-        notificationManager?.cancelNotification(notificationRequestId)
+        cancelAllNotifications()
         if (BuildConfig.DEBUG) {
             val idSuffix = requestId?.let { " (requestId=$it)" }.orEmpty()
             Log.e(TAG, "NIP-55 request failed: $error$idSuffix")
