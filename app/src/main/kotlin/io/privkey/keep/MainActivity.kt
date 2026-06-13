@@ -49,6 +49,7 @@ import io.privkey.keep.ui.components.KeepListRow
 import io.privkey.keep.ui.components.KeepRowAction
 import io.privkey.keep.nip55.PermissionStore
 import io.privkey.keep.nip55.PermissionsManagementScreen
+import io.privkey.keep.nip55.RelayAuthWhitelistScreen
 import io.privkey.keep.nip55.SignPolicyScreen
 import io.privkey.keep.nip55.SigningHistoryScreen
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -292,6 +293,7 @@ fun MainScreen(
     var showPermissionsScreen by remember { mutableStateOf(false) }
     var showHistoryScreen by remember { mutableStateOf(false) }
     var showSignPolicyScreen by remember { mutableStateOf(false) }
+    var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -608,6 +610,18 @@ fun MainScreen(
             onDismiss = { showSignPolicyScreen = false }
         )
         return
+    }
+
+    if (showRelayAuthWhitelistScreen) {
+        val whitelistStore = (LocalContext.current.applicationContext as? KeepMobileApp)?.getRelayAuthWhitelistStore()
+        if (whitelistStore != null) {
+            RelayAuthWhitelistScreen(
+                store = whitelistStore,
+                onDismiss = { showRelayAuthWhitelistScreen = false }
+            )
+            return
+        }
+        showRelayAuthWhitelistScreen = false
     }
 
     if (showPermissionsScreen) {
@@ -1015,6 +1029,7 @@ fun MainScreen(
                     descriptorCount = descriptorCount,
                     onConnectedAppsClick = { showConnectedApps = true },
                     onSignPolicyClick = { showSignPolicyScreen = true },
+                    onRelayAuthWhitelistClick = { showRelayAuthWhitelistScreen = true },
                     onPermissionsClick = { showPermissionsScreen = true },
                     onHistoryClick = { showHistoryScreen = true },
                     onBunkerClick = { showBunkerScreen = true },
@@ -1312,6 +1327,7 @@ private fun AppsTab(
     descriptorCount: Int,
     onConnectedAppsClick: () -> Unit,
     onSignPolicyClick: () -> Unit,
+    onRelayAuthWhitelistClick: () -> Unit,
     onPermissionsClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onBunkerClick: () -> Unit,
@@ -1334,6 +1350,7 @@ private fun AppsTab(
 
             Nip55SettingsCard(
                 onSignPolicyClick = onSignPolicyClick,
+                onRelayAuthWhitelistClick = onRelayAuthWhitelistClick,
                 onPermissionsClick = onPermissionsClick,
                 onHistoryClick = onHistoryClick
             )

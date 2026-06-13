@@ -238,6 +238,12 @@
     <string name="connections_nip55_relay_auth_label">Relay authentication</string>
     <string name="connections_nip55_relay_scope_this">Only this relay (%1$s)</string>
     <string name="connections_nip55_relay_scope_all">All relays</string>
+    <string name="connections_nip55_relay_auth_whitelist">Relay Auth Whitelist</string>
+    <string name="connections_nip55_relay_auth_whitelist_title">Relay Auth Whitelist</string>
+    <string name="connections_nip55_relay_auth_whitelist_description">When set, NIP-42 relay authentication (kind 22242) is auto-approved for listed relays and auto-rejected for all others in background (Content Resolver) requests. Leave empty to decide per app.</string>
+    <string name="connections_nip55_relay_auth_whitelist_add_label">Relay URL</string>
+    <string name="connections_nip55_relay_auth_whitelist_add">Add</string>
+    <string name="connections_nip55_relay_auth_whitelist_empty">No relays whitelisted. NIP-42 auth follows normal per-app permissions.</string>
     <string name="connections_nip55_batch_auth_subtitle">%1$d signing requests</string>
     <string name="connections_nip55_type_label">Type</string>
     <string name="connections_nip55_recipient_label">Recipient</string>

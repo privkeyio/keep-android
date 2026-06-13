@@ -29,8 +29,10 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
 import io.privkey.keep.uniffi.SigningRequestContext
+import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.evaluateSignPolicy
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
+import io.privkey.keep.uniffi.nip55RelayAuthGate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -309,14 +311,25 @@ class Nip55ContentProvider : ContentProvider() {
             return rejectedCursor(null)
         }
 
-        // Kind 22242 (NIP-42) grants are scoped per relay: resolve the relay host so
-        // the lookup can match a relay-specific grant before the all-relays wildcard.
-        val relay = if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
-            nip55ExtractRelayHost(rawContent) ?: RELAY_NONE
-        } else {
-            RELAY_NONE
+        // Kind 22242 (NIP-42): resolve the relay host once for both the whitelist gate
+        // and the relay-scoped grant lookup.
+        val isRelayAuth = requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH
+        val relayHost = if (isRelayAuth) nip55ExtractRelayHost(rawContent) else null
+
+        if (isRelayAuth) {
+            val whitelist = currentApp.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
+            when (nip55RelayAuthGate(relayHost, whitelist)) {
+                Nip55RelayAuthGate.AUTO_REJECT -> {
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
+                    return rejectedCursor(null)
+                }
+                Nip55RelayAuthGate.AUTO_ACCEPT ->
+                    return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                Nip55RelayAuthGate.DEFER -> {} // fall through to normal grant resolution
+            }
         }
 
+        val relay = relayHost ?: RELAY_NONE
         var decision: PermissionDecision? = null
         val decisionLoaded = runWithTimeout {
             decision = store.getPermissionDecision(callerPackage, requestType, eventKind, relay)
