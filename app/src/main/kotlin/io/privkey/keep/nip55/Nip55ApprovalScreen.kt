@@ -218,7 +218,10 @@ fun ApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = { onReject(effectiveDuration) },
+                    onClick = {
+                        isLoading = true
+                        onReject(effectiveDuration)
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.connections_nip55_reject))
@@ -356,7 +359,10 @@ fun BatchApprovalScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 OutlinedButton(
-                    onClick = { onReject(effectiveDuration) },
+                    onClick = {
+                        isLoading = true
+                        onReject(effectiveDuration)
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.connections_nip55_reject))

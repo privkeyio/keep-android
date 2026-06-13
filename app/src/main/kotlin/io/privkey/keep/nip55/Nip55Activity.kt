@@ -196,6 +196,9 @@ class Nip55Activity : FragmentActivity() {
             }
             item.risk = assessment
             riskAssessment = assessment
+            // The user may have already decided while this assessment was running;
+            // do not resurrect the approval UI.
+            if (decisionLocked) return@launch
             setupContent()
         }
     }
@@ -274,6 +277,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun setupContent() {
+        // A late async render must not re-display (and re-enable) the approval UI
+        // after the user has already committed a decision.
+        if (decisionLocked) return
         val items = pending.toList()
         displayed = items
         if (items.size > 1) {
@@ -401,6 +407,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleApprove(duration: PermissionDuration) {
+        // Re-entry guard: a second tap, or an async render that re-enabled the
+        // buttons, must not commit a second decision.
+        if (decisionLocked) return
         if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
@@ -596,7 +605,7 @@ class Nip55Activity : FragmentActivity() {
         items: List<PendingNip55Request>,
         batchAuthId: String
     ): Boolean {
-        val subtitle = getString(R.string.nip55_batch_auth_subtitle, items.size)
+        val subtitle = getString(R.string.connections_nip55_batch_auth_subtitle, items.size)
         val authedCipher = obtainAuthedCipher(keystoreStorage, subtitle) ?: return false
         // The share is loaded (and the cipher consumed) only at init, which uses
         // its own cipher; signing runs on the live node. So this authed cipher is
@@ -705,6 +714,9 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleReject(duration: PermissionDuration) {
+        // Re-entry guard: mirrors handleApprove so neither path can run twice or
+        // after the other has already committed.
+        if (decisionLocked) return
         decisionLocked = true
         val shown = displayed
         if (shown.size > 1) return handleRejectBatch(duration, shown)
