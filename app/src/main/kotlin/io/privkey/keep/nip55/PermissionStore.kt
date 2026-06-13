@@ -155,8 +155,8 @@ class PermissionStore(private val database: Nip55Database) {
     // The hourly/daily/weekly limit thresholds + block decision live in Rust;
     // Android keeps the per-request velocity event log (Room) and feeds the
     // window counts in.
-    suspend fun checkAndRecordVelocity(packageName: String, eventKind: Int?, config: VelocityConfig = VelocityConfig()): VelocityResult {
-        if (!config.enabled) return VelocityResult.Allowed
+    suspend fun checkAndRecordVelocity(packageName: String, eventKind: Int?, enabled: Boolean = true): VelocityResult {
+        if (!enabled) return VelocityResult.Allowed
 
         return database.withTransaction {
             val now = System.currentTimeMillis()
