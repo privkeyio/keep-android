@@ -393,7 +393,8 @@ fun WalletDescriptorCard(descriptorCount: Int, onClick: () -> Unit) {
 fun Nip55SettingsCard(
     onSignPolicyClick: () -> Unit,
     onPermissionsClick: () -> Unit,
-    onHistoryClick: () -> Unit
+    onHistoryClick: () -> Unit,
+    onRelayAuthWhitelistClick: () -> Unit
 ) {
     KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -404,6 +405,13 @@ fun Nip55SettingsCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.connections_nip55_sign_policy))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onRelayAuthWhitelistClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.connections_nip55_relay_auth_whitelist))
             }
             Spacer(modifier = Modifier.height(8.dp))
             Row(

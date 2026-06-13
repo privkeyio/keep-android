@@ -24,15 +24,29 @@ enum class PermissionDecision(@param:StringRes val displayNameRes: Int) {
 
 const val EVENT_KIND_GENERIC = -1
 
+// Relay scope sentinels for kind-22242 (NIP-42) grants. RELAY_NONE is used for all
+// other grants, where the relay dimension is not meaningful.
+const val RELAY_NONE = ""
+const val RELAY_WILDCARD = "*"
+
+// NIP-42 relay authentication event kind; the only kind that carries relay scope.
+const val KIND_NIP42_AUTH = 22242
+
+// User's chosen scope when approving a kind-22242 (NIP-42) auth request.
+enum class RelayAuthScope { SPECIFIC, ALL }
+
 @Entity(
     tableName = "nip55_permissions",
-    indices = [Index(value = ["callerPackage", "requestType", "eventKind"], unique = true)]
+    indices = [Index(value = ["callerPackage", "requestType", "eventKind", "relay"], unique = true)]
 )
 data class Nip55Permission(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val callerPackage: String,
     val requestType: String,
     val eventKind: Int = EVENT_KIND_GENERIC,
+    // Relay scope for kind-22242 (NIP-42) grants: a specific host[:port], the
+    // wildcard "*" (all relays), or "" where relay is not meaningful.
+    val relay: String = RELAY_NONE,
     val decision: String,
     val expiresAt: Long?,
     val createdAt: Long,

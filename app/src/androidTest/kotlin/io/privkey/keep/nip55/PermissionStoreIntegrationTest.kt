@@ -1,5 +1,6 @@
 package io.privkey.keep.nip55
 
+import android.os.SystemClock
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -46,6 +47,190 @@ class PermissionStoreIntegrationTest {
 
         val decision = store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 1)
         assertEquals(PermissionDecision.ALLOW, decision)
+    }
+
+    @Test
+    fun relaySpecificGrantDoesNotLeakToOtherRelays() = runBlocking {
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = "relay.a.example.com"
+        )
+
+        // The granted relay resolves; a different relay does not.
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.a.example.com")
+        )
+        assertNull(
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.b.example.com")
+        )
+    }
+
+    @Test
+    fun relayNoneGrantDoesNotAutoApproveValidRelay() = runBlocking {
+        // A 22242 grant stored with no relay (e.g. a malformed event whose relay could
+        // not be extracted) must NOT match a well-formed request for a real relay; it is
+        // fail-closed and only matches an equally relay-less request.
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_NONE
+        )
+
+        assertNull(
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.real.example.com")
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, RELAY_NONE)
+        )
+    }
+
+    @Test
+    fun wildcardRelayGrantCoversAllRelays() = runBlocking {
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+
+        // Any relay resolves to the wildcard grant.
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.a.example.com")
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.b.example.com")
+        )
+    }
+
+    @Test
+    fun relaySpecificGrantTakesPrecedenceOverWildcard() = runBlocking {
+        // Wildcard allows everything, but a relay-specific DENY must win for that relay.
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+        store.denyPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = "relay.blocked.example.com"
+        )
+
+        assertEquals(
+            PermissionDecision.DENY,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.blocked.example.com")
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.other.example.com")
+        )
+    }
+
+    @Test
+    fun rememberedRejectAtWildcardOverridesWildcardAllow() = runBlocking {
+        // "Deny & remember" with the all-relays scope must override an existing wildcard
+        // ALLOW (same unique key -> REPLACE), so the remembered reject actually applies.
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+        store.denyPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+
+        assertEquals(
+            PermissionDecision.DENY,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.any.example.com")
+        )
+    }
+
+    @Test
+    fun rememberedRejectAtSpecificRelayOnlyBlocksThatRelay() = runBlocking {
+        // A specific-relay reject overrides only that relay's grant; other relays still
+        // resolve via the wildcard ALLOW.
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = "relay.a.example.com"
+        )
+        store.denyPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = "relay.a.example.com"
+        )
+
+        assertEquals(
+            PermissionDecision.DENY,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.a.example.com")
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.b.example.com")
+        )
+    }
+
+    @Test
+    fun expiredRelaySpecificGrantFallsBackToValidWildcard() = runBlocking {
+        val dao = database.permissionDao()
+        val now = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+
+        // An expired relay-specific row must NOT shadow a still-valid wildcard ALLOW.
+        dao.insertPermission(Nip55Permission(
+            callerPackage = "com.test.app",
+            requestType = "SIGN_EVENT",
+            eventKind = KIND_NIP42_AUTH,
+            relay = "relay.a.example.com",
+            decision = "allow",
+            expiresAt = now - 59_000,
+            createdAt = now - 60_000,
+            createdAtElapsed = nowElapsed - 60_000,
+            durationMs = 1_000
+        ))
+        store.grantPermission(
+            callerPackage = "com.test.app",
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = KIND_NIP42_AUTH,
+            duration = PermissionDuration.FOREVER,
+            relay = RELAY_WILDCARD
+        )
+
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.a.example.com")
+        )
     }
 
     @Test

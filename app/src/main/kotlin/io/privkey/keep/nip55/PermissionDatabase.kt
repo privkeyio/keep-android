@@ -8,7 +8,7 @@ import io.privkey.keep.storage.LegacyPrefsMigration
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.security.SecureRandom
 
-@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class, EventLogEntry::class], version = 8)
+@Database(entities = [Nip55Permission::class, Nip55AuditLog::class, Nip55AppSettings::class, VelocityEntry::class, EventLogEntry::class], version = 9)
 abstract class Nip55Database : RoomDatabase() {
     abstract fun permissionDao(): Nip55PermissionDao
     abstract fun auditLogDao(): Nip55AuditLogDao
@@ -106,7 +106,24 @@ abstract class Nip55Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+        // Adds the per-relay grant scope (NIP-42 / kind 22242). The relay column
+        // defaults to '' so every existing grant becomes a non-relay/wildcard grant
+        // (backward-compatible), and the unique index is widened to include relay so
+        // grants for the same (caller, type, kind) on different relays can coexist.
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE nip55_permissions ADD COLUMN relay TEXT NOT NULL DEFAULT ''")
+                // Existing kind-22242 grants were blanket (any relay). Promote them to
+                // the explicit all-relays wildcard so they keep auto-approving after the
+                // lookup becomes relay-scoped (relay-specific -> '*'); new grants default
+                // to the specific relay. All other grants keep relay='' (not meaningful).
+                db.execSQL("UPDATE nip55_permissions SET relay = '*' WHERE requestType = 'SIGN_EVENT' AND eventKind = 22242")
+                db.execSQL("DROP INDEX IF EXISTS index_nip55_permissions_callerPackage_requestType_eventKind")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_nip55_permissions_callerPackage_requestType_eventKind_relay ON nip55_permissions(callerPackage, requestType, eventKind, relay)")
+            }
+        }
+
+        private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
 
         private fun getEncryptedPrefs(context: Context) =
             KeystoreEncryptedPrefs.create(context, PREFS_NAME)

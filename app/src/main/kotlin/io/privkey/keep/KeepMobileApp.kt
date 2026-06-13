@@ -28,6 +28,7 @@ import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.ConnectionStatus
@@ -60,6 +61,7 @@ class KeepMobileApp : Application() {
     private var storage: AndroidKeystoreStorage? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var signPolicyStore: SignPolicyStore? = null
+    private var relayAuthWhitelistStore: RelayAuthWhitelistStore? = null
     private var autoStartStore: AutoStartStore? = null
     private var foregroundServiceStore: ForegroundServiceStore? = null
     private var pinStore: PinStore? = null
@@ -115,6 +117,7 @@ class KeepMobileApp : Application() {
             storage = newStorage
             killSwitchStore = KillSwitchStore(this)
             signPolicyStore = SignPolicyStore(this)
+            relayAuthWhitelistStore = RelayAuthWhitelistStore(this)
             autoStartStore = AutoStartStore(this)
             foregroundServiceStore = ForegroundServiceStore(this)
             pinStore = PinStore(this)
@@ -296,6 +299,8 @@ class KeepMobileApp : Application() {
     }
 
     fun getSignPolicyStore(): SignPolicyStore? = signPolicyStore
+
+    fun getRelayAuthWhitelistStore(): RelayAuthWhitelistStore? = relayAuthWhitelistStore
 
     fun getAutoStartStore(): AutoStartStore? = autoStartStore
 

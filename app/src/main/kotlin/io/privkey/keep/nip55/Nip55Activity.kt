@@ -24,7 +24,9 @@ import io.privkey.keep.uniffi.Nip55DeclaredPermission
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.Nip55Response
+import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -313,8 +315,8 @@ class Nip55Activity : FragmentActivity() {
                         showFirstUseWarning = currentPendingFirstUse,
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = currentRisk,
-                        onApprove = ::handleApprove,
-                        onReject = ::handleReject
+                        onApprove = { duration, bundle, relayScope -> handleApprove(duration, bundle, relayScope) },
+                        onReject = { duration, relayScope -> handleReject(duration, relayScope) }
                     )
                 }
             }
@@ -342,7 +344,7 @@ class Nip55Activity : FragmentActivity() {
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = highestRisk,
                         onApprove = { duration -> handleApprove(duration, emptyList()) },
-                        onReject = ::handleReject
+                        onReject = { duration -> handleReject(duration) }
                     )
                 }
             }
@@ -411,7 +413,7 @@ class Nip55Activity : FragmentActivity() {
         )
     }
 
-    private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>) {
+    private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: a second tap, or an async render that re-enabled the
         // buttons, must not commit a second decision.
         if (decisionLocked) return
@@ -441,6 +443,16 @@ class Nip55Activity : FragmentActivity() {
         }
         val store = permissionStore
         val eventKind = req.eventKind()
+
+        // Relay-auth allowlist: reject a non-whitelisted 22242 before any biometric/sign.
+        if (relayAuthRejected(req)) {
+            lifecycleScope.launch {
+                store?.logOperation(callerId, req.requestType, eventKind, "deny_relay_whitelist", wasAutomatic = false)
+                finishWithRejection()
+            }
+            return
+        }
+
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY ||
             (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
 
@@ -475,7 +487,7 @@ class Nip55Activity : FragmentActivity() {
                             finishWithError(pubkeyError)
                             return@onSuccess
                         }
-                        recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                        recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, relayScope))
                         // On a get_public_key connect, grant the checked pre-declared
                         // permission bundle so the ContentProvider can answer those
                         // methods later (only persists if the user chose a remembered
@@ -536,10 +548,19 @@ class Nip55Activity : FragmentActivity() {
                 for (item in items) {
                     val req = item.request
                     val eventKind = req.eventKind()
+                    // Relay-auth allowlist: a non-whitelisted 22242 event is rejected
+                    // rather than signed, without blocking the rest of the batch.
+                    if (relayAuthRejected(req)) {
+                        store?.logOperation(callerId, req.requestType, eventKind, "deny_relay_whitelist", wasAutomatic = false)
+                        responses.add(Nip55Response(result = "", event = null, error = "relay_not_whitelisted", id = item.requestId))
+                        continue
+                    }
                     val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                     result
                         .onSuccess { response ->
-                            recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                            // Batch has no per-event scope toggle; relay-auth events grant
+                            // to their specific relay (the secure default).
+                            recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, RelayAuthScope.SPECIFIC))
                             responses.add(response.copy(id = item.requestId))
                         }
                         .onFailure { e ->
@@ -582,15 +603,38 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    // Foreground allowlist enforcement (matches the background ContentProvider gate):
+    // a kind-22242 request whose relay is not on a non-empty whitelist is rejected
+    // without signing, so the whitelist can't be bypassed via the Intent path.
+    private fun relayAuthRejected(req: Nip55Request): Boolean {
+        if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) return false
+        return evaluateRelayAuthGate(keepApp?.getRelayAuthWhitelistStore(), req.content).first == Nip55RelayAuthGate.AUTO_REJECT
+    }
+
+    // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
+    // a relay: ALL -> the wildcard; SPECIFIC -> the event's relay host. If the host
+    // can't be extracted (missing/empty/multi relay tag) we fall back to RELAY_NONE,
+    // NOT the wildcard: extraction fails identically at lookup time, so a RELAY_NONE
+    // grant re-matches only the same malformed event (fail-closed) and never grants
+    // other relays. Every non-22242 request grants with no relay scope.
+    private fun relayScopeForGrant(req: Nip55Request, scope: RelayAuthScope?): String {
+        if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) {
+            return RELAY_NONE
+        }
+        if (scope == RelayAuthScope.ALL) return RELAY_WILDCARD
+        return nip55ExtractRelayHost(req.content) ?: RELAY_NONE
+    }
+
     private suspend fun recordGrantAndTrust(
         store: PermissionStore?,
         callerId: String,
         req: Nip55Request,
         eventKind: Int?,
-        duration: PermissionDuration
+        duration: PermissionDuration,
+        relay: String = RELAY_NONE
     ) {
         val permResult = runCatching {
-            store?.grantPermission(callerId, req.requestType, eventKind, duration)
+            store?.grantPermission(callerId, req.requestType, eventKind, duration, relay)
             if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
                 store?.grantPermission(callerId, req.requestType, null, duration)
             }
@@ -752,7 +796,7 @@ class Nip55Activity : FragmentActivity() {
         else -> "request_failed"
     }
 
-    private fun handleReject(duration: PermissionDuration) {
+    private fun handleReject(duration: PermissionDuration, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: mirrors handleApprove so neither path can run twice or
         // after the other has already committed.
         if (decisionLocked) return
@@ -771,7 +815,10 @@ class Nip55Activity : FragmentActivity() {
 
         lifecycleScope.launch {
             if (store != null && callerId != null) {
-                store.denyPermission(callerId, req.requestType, eventKind, duration)
+                // Persist the deny at the same relay scope a grant would use (host or "*"
+                // for kind-22242), so a remembered reject is consulted by the same lookup
+                // and replaces any matching ALLOW row.
+                store.denyPermission(callerId, req.requestType, eventKind, duration, relayScopeForGrant(req, relayScope))
                 store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
             }
             finishWithRejection()
@@ -787,7 +834,9 @@ class Nip55Activity : FragmentActivity() {
             if (store != null && callerId != null) {
                 items.forEach { item ->
                     val eventKind = item.request.eventKind()
-                    store.denyPermission(callerId, item.request.requestType, eventKind, duration)
+                    // Mirror the batch grant default (specific relay) so a remembered batch
+                    // reject for kind-22242 is scoped like its approve counterpart.
+                    store.denyPermission(callerId, item.request.requestType, eventKind, duration, relayScopeForGrant(item.request, RelayAuthScope.SPECIFIC))
                     store.logOperation(callerId, item.request.requestType, eventKind, "deny", wasAutomatic = false)
                 }
             }
