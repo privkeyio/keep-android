@@ -612,9 +612,10 @@ class Nip55Activity : FragmentActivity() {
     ) {
         if (store == null) return
         declared.forEach { perm ->
-            runCatching { store.grantPermission(callerId, perm.requestType, perm.kind, duration) }
+            val grantResult = runCatching { store.grantPermission(callerId, perm.requestType, perm.kind, duration) }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Bundle grant failed for ${perm.requestType.name}: ${it.message}") }
-            store.logOperation(callerId, perm.requestType, perm.kind, "allow", wasAutomatic = false)
+            val auditAction = if (grantResult.isFailure) "allow_grant_failed" else "allow"
+            store.logOperation(callerId, perm.requestType, perm.kind, auditAction, wasAutomatic = false)
         }
     }
 

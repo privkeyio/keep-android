@@ -195,11 +195,19 @@ fun ApprovalScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        RequestDetailsCard(request, eventPreview)
+        val contentScrollState = rememberScrollState()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false)
+                .verticalScroll(contentScrollState)
+        ) {
+            RequestDetailsCard(request, eventPreview)
 
-        if (declaredPermissions.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-            PermissionsBundleCard(declaredPermissions, permissionChecked)
+            if (declaredPermissions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                PermissionsBundleCard(declaredPermissions, permissionChecked)
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
