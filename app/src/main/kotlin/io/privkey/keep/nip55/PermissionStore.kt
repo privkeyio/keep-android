@@ -35,12 +35,22 @@ class PermissionStore(private val database: Nip55Database) {
             dao.deleteExpired(now, nowElapsed)
             dao.deleteNip46Permissions()
             auditDao.deleteOlderThan(now - 30 * DAY_MS)
+            updateAuditAnchor()
             val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
                 dao.deleteForCaller(pkg)
             }
             appSettingsDao.deleteExpired(now, nowElapsed)
         }
+    }
+
+    // Re-pins the tail anchor to the chain's current state after any legitimate
+    // mutation (append/prune), so the verifier can tell sanctioned changes from an
+    // attacker editing Room directly. Must run inside the audit-log transaction.
+    private suspend fun updateAuditAnchor() {
+        Nip55Database.setAuditAnchor(
+            AuditAnchor(auditDao.getLastEntryHash() ?: "", auditDao.getCount().toLong())
+        )
     }
 
     // Decision resolution (incl. the rule that sensitive kinds never fall back
@@ -164,6 +174,7 @@ class PermissionStore(private val database: Nip55Database) {
                     entryHash = entryHash
                 )
             )
+            updateAuditAnchor()
         }
     }
 
@@ -208,8 +219,26 @@ class PermissionStore(private val database: Nip55Database) {
         val entries = auditDao.getAllOrdered()
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
-        return nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
+        val rustResult = nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
             .toChainVerificationResult()
+        val anchor = Nip55Database.getAuditAnchor()
+        val latestHash = entries.lastOrNull()?.entryHash ?: ""
+        if (anchor == null) {
+            // First verify on an upgraded/fresh install: trust-on-first-use seed the
+            // anchor from the current intact tail rather than flagging it.
+            if (rustResult is ChainVerificationResult.Valid ||
+                rustResult is ChainVerificationResult.PartiallyVerified) {
+                Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
+            }
+            return rustResult
+        }
+        return resolveChainVerification(
+            anchor,
+            entries.size.toLong(),
+            latestHash,
+            entries.lastOrNull()?.id ?: 0L,
+            rustResult
+        )
     }
 
     suspend fun getAuditLogCount(): Int = auditDao.getCount()
@@ -322,7 +351,10 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
-    suspend fun clearAuditLog() = auditDao.deleteAll()
+    suspend fun clearAuditLog() {
+        auditDao.deleteAll()
+        Nip55Database.setAuditAnchor(AuditAnchor("", 0L))
+    }
 
     suspend fun getDistinctPermissionCallers(): List<String> = dao.getDistinctCallers()
 

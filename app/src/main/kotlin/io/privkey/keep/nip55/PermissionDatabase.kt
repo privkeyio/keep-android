@@ -27,9 +27,14 @@ abstract class Nip55Database : RoomDatabase() {
         private const val PREFS_NAME = "nip55_db_prefs"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
         private const val KEY_HMAC_SECRET = "hmac_secret"
+        private const val KEY_AUDIT_ANCHOR_HASH = "audit_anchor_hash"
+        private const val KEY_AUDIT_ANCHOR_COUNT = "audit_anchor_count"
 
         @Volatile
         private var hmacKey: ByteArray? = null
+
+        @Volatile
+        private var appContext: Context? = null
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -157,9 +162,29 @@ abstract class Nip55Database : RoomDatabase() {
 
         fun getHmacKey(): ByteArray? = hmacKey
 
+        // Audit tail anchor lives in the Keystore-backed encrypted prefs (same trust
+        // tier as the HMAC key), out of reach of an attacker with Room write access.
+        fun getAuditAnchor(): AuditAnchor? {
+            val ctx = appContext ?: return null
+            val prefs = getEncryptedPrefs(ctx)
+            if (!prefs.contains(KEY_AUDIT_ANCHOR_COUNT)) return null
+            val count = prefs.getLong(KEY_AUDIT_ANCHOR_COUNT, -1L)
+            if (count < 0L) return null
+            return AuditAnchor(prefs.getString(KEY_AUDIT_ANCHOR_HASH, "") ?: "", count)
+        }
+
+        fun setAuditAnchor(anchor: AuditAnchor) {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit()
+                .putString(KEY_AUDIT_ANCHOR_HASH, anchor.latestEntryHash)
+                .putLong(KEY_AUDIT_ANCHOR_COUNT, anchor.entryCount)
+                .commit()
+        }
+
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
+                    appContext = context.applicationContext
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
                     val factory = SupportOpenHelperFactory(passphrase)
