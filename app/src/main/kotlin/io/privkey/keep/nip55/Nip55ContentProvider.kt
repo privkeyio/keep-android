@@ -169,6 +169,19 @@ class Nip55ContentProvider : ContentProvider() {
         val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
         if (velocityCursor != null) return velocityCursor
 
+        // Enforce the relay-auth whitelist AUTO_REJECT for kind 22242 BEFORE the
+        // auto-sign policy, so a non-whitelisted relay can never be auto-approved by an
+        // AUTO/BASIC sign policy (independent of 22242 being a sensitive kind).
+        if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
+            val whitelist = currentApp.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
+            if (whitelist.isNotEmpty() &&
+                nip55RelayAuthGate(nip55ExtractRelayHost(rawContent), whitelist) == Nip55RelayAuthGate.AUTO_REJECT
+            ) {
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
+                return rejectedCursor(null)
+            }
+        }
+
         val policyCursor = evaluateAutoSignPolicy(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
         )

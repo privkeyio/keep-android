@@ -32,6 +32,7 @@ class RelayAuthWhitelistStore(context: Context) {
      * Normalizes [rawUrl] and adds it. Returns the normalized host on success, or null
      * if the input is not a usable relay host or the list is full.
      */
+    @Synchronized
     fun add(rawUrl: String): String? {
         val host = nip55NormalizeRelayHost(rawUrl) ?: return null
         val current = prefs.getStringSet(KEY_HOSTS, emptySet())?.toMutableSet() ?: mutableSetOf()
@@ -41,6 +42,7 @@ class RelayAuthWhitelistStore(context: Context) {
         return host
     }
 
+    @Synchronized
     fun remove(host: String) {
         val current = prefs.getStringSet(KEY_HOSTS, emptySet())?.toMutableSet() ?: return
         if (current.remove(host)) {

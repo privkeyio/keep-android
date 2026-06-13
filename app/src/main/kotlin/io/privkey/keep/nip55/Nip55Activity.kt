@@ -24,8 +24,10 @@ import io.privkey.keep.uniffi.Nip55DeclaredPermission
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.Nip55Response
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
+import io.privkey.keep.uniffi.nip55RelayAuthGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -442,6 +444,16 @@ class Nip55Activity : FragmentActivity() {
         }
         val store = permissionStore
         val eventKind = req.eventKind()
+
+        // Relay-auth allowlist: reject a non-whitelisted 22242 before any biometric/sign.
+        if (relayAuthRejected(req)) {
+            lifecycleScope.launch {
+                store?.logOperation(callerId, req.requestType, eventKind, "deny_relay_whitelist", wasAutomatic = false)
+                finishWithRejection()
+            }
+            return
+        }
+
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY ||
             (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
 
@@ -537,6 +549,13 @@ class Nip55Activity : FragmentActivity() {
                 for (item in items) {
                     val req = item.request
                     val eventKind = req.eventKind()
+                    // Relay-auth allowlist: a non-whitelisted 22242 event is rejected
+                    // rather than signed, without blocking the rest of the batch.
+                    if (relayAuthRejected(req)) {
+                        store?.logOperation(callerId, req.requestType, eventKind, "deny_relay_whitelist", wasAutomatic = false)
+                        responses.add(Nip55Response(result = "", event = null, error = "relay_not_whitelisted", id = item.requestId))
+                        continue
+                    }
                     val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                     result
                         .onSuccess { response ->
@@ -583,6 +602,16 @@ class Nip55Activity : FragmentActivity() {
         } finally {
             keystoreStorage?.clearRequestIdContext()
         }
+    }
+
+    // Foreground allowlist enforcement (matches the background ContentProvider gate):
+    // a kind-22242 request whose relay is not on a non-empty whitelist is rejected
+    // without signing, so the whitelist can't be bypassed via the Intent path.
+    private fun relayAuthRejected(req: Nip55Request): Boolean {
+        if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) return false
+        val whitelist = keepApp?.getRelayAuthWhitelistStore()?.getHosts().orEmpty()
+        if (whitelist.isEmpty()) return false
+        return nip55RelayAuthGate(nip55ExtractRelayHost(req.content), whitelist) == Nip55RelayAuthGate.AUTO_REJECT
     }
 
     // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
