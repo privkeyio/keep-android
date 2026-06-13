@@ -228,22 +228,32 @@ class Nip55ContentProvider : ContentProvider() {
 
         val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
 
-        val limiter = currentApp.getSigningRateLimiter()
-        val defaultVelocity = VelocityConfig()
-        val rateCheck = if (limiter != null && isOptedIn) {
-            limiter.checkAndRecord(
-                callerPackage,
-                SystemClock.elapsedRealtime().toULong(),
-                System.currentTimeMillis().toULong()
-            )
-        } else {
-            AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
-        }
-
         val hasSignedKindBefore = if (eventKind != null) {
             runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: true
         } else true
         val appAgeMs = runWithTimeout { store.getAppAgeMs(callerPackage) }
+
+        val limiter = currentApp.getSigningRateLimiter()
+        val defaultVelocity = VelocityConfig()
+        val rateCheck = if (isOptedIn) {
+            if (limiter == null) {
+                return PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
+            }
+            val recorded = runWithTimeout {
+                try {
+                    limiter.checkAndRecord(
+                        callerPackage,
+                        SystemClock.elapsedRealtime().toULong(),
+                        System.currentTimeMillis().toULong()
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            recorded ?: return PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
+        } else {
+            AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
+        }
 
         val ctx = SigningRequestContext(
             operation = requestType,

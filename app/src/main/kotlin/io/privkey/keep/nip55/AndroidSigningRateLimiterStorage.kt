@@ -16,11 +16,11 @@ class AndroidSigningRateLimiterStorage(context: Context) : SigningRateLimiterSto
     override fun load(key: String): String? = prefs.getString(key, null)
 
     override fun save(key: String, value: String) {
-        prefs.edit().putString(key, value).apply()
+        prefs.edit().putString(key, value).commit()
     }
 
     override fun remove(key: String) {
-        prefs.edit().remove(key).apply()
+        prefs.edit().remove(key).commit()
     }
 
     override fun clear() {
