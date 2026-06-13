@@ -1,0 +1,1 @@
+Versión de mantenimiento: actualización del núcleo de firma FROST integrado y de las dependencias.

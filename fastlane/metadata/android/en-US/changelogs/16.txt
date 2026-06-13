@@ -1,0 +1,1 @@
+Maintenance release: updated bundled FROST signing core and dependencies.

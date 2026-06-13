@@ -1,0 +1,1 @@
+Versão de manutenção: atualização do núcleo de assinatura FROST integrado e das dependências.

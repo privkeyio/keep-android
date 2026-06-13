@@ -1,0 +1,1 @@
+Wartungsrelease: Aktualisierung des integrierten FROST-Signaturkerns und der Abhängigkeiten.

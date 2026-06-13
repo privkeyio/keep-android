@@ -1,0 +1,1 @@
+UI/UX overhaul, live activity log for relay, bunker, and peer events, and bunker handshake fixes. Updated FROST signing core (keep v0.4.8).
