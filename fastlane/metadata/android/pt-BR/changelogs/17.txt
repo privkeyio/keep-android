@@ -1,0 +1,1 @@
+Reformulação da interface, registro de atividade ao vivo para eventos de relay, bunker e pares, e correções no handshake do bunker. Núcleo de assinatura FROST atualizado (keep v0.4.8).

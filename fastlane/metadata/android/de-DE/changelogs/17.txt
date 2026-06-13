@@ -1,0 +1,1 @@
+Überarbeitete Benutzeroberfläche, Live-Aktivitätsprotokoll für Relay-, Bunker- und Peer-Ereignisse sowie Korrekturen am Bunker-Handshake. Aktualisierter FROST-Signaturkern (keep v0.4.8).
