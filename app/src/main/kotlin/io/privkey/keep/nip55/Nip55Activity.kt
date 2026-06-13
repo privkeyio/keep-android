@@ -58,6 +58,14 @@ class Nip55Activity : FragmentActivity() {
     private val pending = mutableListOf<PendingNip55Request>()
     private var batchCaller: String? = null
 
+    // The exact set last rendered to the user. The approve/reject decision acts on
+    // this snapshot (never the live `pending` list), so a request that races in
+    // between render and the user's tap can never be folded into the signed set.
+    private var displayed: List<PendingNip55Request> = emptyList()
+    // Set once the user approves/rejects; further intents are ignored so the
+    // committed decision can only ever apply to what was on screen.
+    private var decisionLocked = false
+
     private class PendingNip55Request(
         val request: Nip55Request,
         val requestId: String?,
@@ -110,6 +118,12 @@ class Nip55Activity : FragmentActivity() {
     private fun handleIntent(intent: Intent) {
         if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
+        // The user has already committed a decision on the displayed set; do not
+        // fold a late-arriving request into it. The activity is finishing.
+        if (decisionLocked) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring intent after decision was committed")
+            return
+        }
 
         identifyCaller(intent)
         val caller = callerPackage
@@ -127,7 +141,7 @@ class Nip55Activity : FragmentActivity() {
         if (handler == null) return finishWithError("Handler not initialized")
 
         val parsed = parseRequest(intent, uriStr) ?: return finishWithError("Invalid request")
-        val parsedId = rawId ?: parsed.id
+        val parsedId = rawId?.takeIf { it.isNotBlank() } ?: parsed.id
 
         // Accumulate only same-caller operation requests (never get_public_key) up to the cap.
         val batchable = parsed.requestType != Nip55RequestType.GET_PUBLIC_KEY
@@ -260,17 +274,20 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun setupContent() {
-        if (pending.size > 1) {
-            setupBatchContent()
+        val items = pending.toList()
+        displayed = items
+        if (items.size > 1) {
+            setupBatchContent(items)
             return
         }
 
-        val currentRequest = request ?: return
+        val current = items.firstOrNull() ?: return
+        val currentRequest = current.request
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
         val currentPendingFirstUse = callerPendingFirstUse
         val currentSignatureHash = callerSignatureHash
-        val currentRisk = riskAssessment
+        val currentRisk = current.risk
 
         setContent {
             KeepAndroidTheme {
@@ -293,8 +310,7 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun setupBatchContent() {
-        val items = pending.toList()
+    private fun setupBatchContent(items: List<PendingNip55Request>) {
         val currentCallerPackage = callerPackage
         val currentCallerVerified = callerVerified
         val currentPendingFirstUse = callerPendingFirstUse
@@ -388,7 +404,17 @@ class Nip55Activity : FragmentActivity() {
         if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
-        if (pending.size > 1) return handleApproveBatch(duration)
+        // Lock in the decision and act on exactly the snapshot the user saw.
+        decisionLocked = true
+        val shown = displayed
+        if (shown.size > 1) return handleApproveBatch(duration, shown)
+        // Re-bind the single-request fields to the displayed request so a request
+        // that raced in after render (overwriting the fields) is never signed.
+        shown.firstOrNull()?.let {
+            request = it.request
+            requestId = it.requestId
+            riskAssessment = it.risk
+        }
 
         val req = request ?: return
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
@@ -442,8 +468,7 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun handleApproveBatch(duration: PermissionDuration) {
-        val items = pending.toList()
+    private fun handleApproveBatch(duration: PermissionDuration, items: List<PendingNip55Request>) {
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
         val callerId = callerPackage ?: run {
@@ -494,7 +519,6 @@ class Nip55Activity : FragmentActivity() {
                 }
                 finishWithBatchResults(nip55Handler, responses)
             } finally {
-                items.forEach { it.requestId?.let { id -> keystoreStorage?.clearPendingCipher(id) } }
                 keystoreStorage?.clearPendingCipher(batchAuthId)
             }
         }
@@ -572,9 +596,9 @@ class Nip55Activity : FragmentActivity() {
     ): Boolean {
         val subtitle = getString(R.string.nip55_batch_auth_subtitle, items.size)
         val authedCipher = obtainAuthedCipher(keystoreStorage, subtitle) ?: return false
-        // Register the cipher under each request id and the batch id so a share
-        // reload (only if the node is not already live) can find it.
-        items.forEach { it.requestId?.let { id -> keystoreStorage?.setPendingCipher(id, authedCipher) } }
+        // The share is loaded (and the cipher consumed) only at init, which uses
+        // its own cipher; signing runs on the live node. So this authed cipher is
+        // purely the biometric presence gate. Register it under the batch id only.
         keystoreStorage?.setPendingCipher(batchAuthId, authedCipher)
         return true
     }
@@ -679,7 +703,13 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun handleReject(duration: PermissionDuration) {
-        if (pending.size > 1) return handleRejectBatch(duration)
+        decisionLocked = true
+        val shown = displayed
+        if (shown.size > 1) return handleRejectBatch(duration, shown)
+        shown.firstOrNull()?.let {
+            request = it.request
+            requestId = it.requestId
+        }
 
         val req = request ?: return finishWithError("User rejected")
         val callerId = callerPackage
@@ -695,8 +725,7 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private fun handleRejectBatch(duration: PermissionDuration) {
-        val items = pending.toList()
+    private fun handleRejectBatch(duration: PermissionDuration, items: List<PendingNip55Request>) {
         val callerId = callerPackage
         val store = permissionStore
         val nip55Handler = handler
