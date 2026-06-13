@@ -80,6 +80,17 @@ class BatchAccumulationTest {
     }
 
     @Test
+    fun atCapFromDifferentCallerResets() {
+        // The different-caller check must win over the cap check: a full batch from
+        // caller A must not cause caller B's request to be silently dropped.
+        val full = List(cap) { Nip55RequestType.SIGN_EVENT }
+        assertEquals(
+            BatchAccumulation.RESET,
+            decide(full, pendingCaller = app, newType = Nip55RequestType.SIGN_EVENT, newCaller = "com.other.app")
+        )
+    }
+
+    @Test
     fun oneBelowCapStillAccumulates() {
         val nearFull = List(cap - 1) { Nip55RequestType.SIGN_EVENT }
         assertEquals(
