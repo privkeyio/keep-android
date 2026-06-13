@@ -24,6 +24,7 @@ import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
+import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.SignPolicyEvaluation
@@ -65,7 +66,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
     }
 
-    private val rateLimiter = RateLimiter()
+    private val rateLimiter by lazy { Nip55RequestRateLimiter() }
     private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(4)
 
@@ -124,7 +125,13 @@ class Nip55ContentProvider : ContentProvider() {
         val h = currentApp.getNip55Handler() ?: return errorCursor("Signing service is not available", null)
         val store = currentApp.getPermissionStore()
 
-        if (!rateLimiter.checkRateLimit(callerPackage)) {
+        val withinRateLimit = try {
+            rateLimiter.check(callerPackage, SystemClock.elapsedRealtime().toULong())
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed: ${e::class.simpleName}")
+            false
+        }
+        if (!withinRateLimit) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Rate limit exceeded for ${hashPackageName(callerPackage)}")
             return errorCursor("Too many requests, please try again later", null)
         }

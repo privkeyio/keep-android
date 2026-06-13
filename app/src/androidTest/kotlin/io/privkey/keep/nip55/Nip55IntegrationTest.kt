@@ -2,9 +2,11 @@ package io.privkey.keep.nip55
 
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -328,11 +330,13 @@ class Nip55IntegrationTest {
 
     @Test
     fun rateLimiter_allowsNormalRequests() {
-        val limiter = RateLimiter()
-        for (i in 1..limiter.maxRequests) {
-            assertTrue("Request $i should be allowed", limiter.checkRateLimit("com.test.app"))
+        val limiter = Nip55RequestRateLimiter()
+        val now = SystemClock.elapsedRealtime().toULong()
+        val frontDoorMaxRequests = 30
+        for (i in 1..frontDoorMaxRequests) {
+            assertTrue("Request $i should be allowed", limiter.check("com.test.app", now))
         }
-        assertFalse("Request beyond maxRequests should be rejected", limiter.checkRateLimit("com.test.app"))
+        assertFalse("Request beyond limit should be rejected", limiter.check("com.test.app", now))
     }
 
     // --- Risk Assessment Integration ---
