@@ -467,6 +467,14 @@ class Nip55Activity : FragmentActivity() {
                 val signResult = signOneRequest(req, requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                 signResult
                     .onSuccess { response ->
+                        // Verify a get_public_key response BEFORE persisting any grant
+                        // or first-use trust, so a failed connect leaves no persisted
+                        // state (#330).
+                        val pubkeyError = verifyGetPublicKeyResult(response)
+                        if (pubkeyError != null) {
+                            finishWithError(pubkeyError)
+                            return@onSuccess
+                        }
                         recordGrantAndTrust(store, callerId, req, eventKind, duration)
                         // On a get_public_key connect, grant the checked pre-declared
                         // permission bundle so the ContentProvider can answer those
@@ -794,26 +802,34 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    // Returns an error code if a get_public_key response fails integrity verification
+    // (empty, or does not match the stored group pubkey), else null. Other request
+    // types trivially pass. Used both to gate grant/trust persistence before it
+    // happens and to gate returning the result.
+    private fun verifyGetPublicKeyResult(response: Nip55Response): String? {
+        if (request?.requestType != Nip55RequestType.GET_PUBLIC_KEY) return null
+        if (response.result.isEmpty()) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Handler returned empty pubkey result")
+            return "pubkey_verification_failed"
+        }
+        val groupPubkey = storage?.getShareMetadata()?.groupPubkey
+        if (groupPubkey == null || groupPubkey.isEmpty()) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")
+            return "pubkey_verification_failed"
+        }
+        val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
+            return "pubkey_verification_failed"
+        }
+        return null
+    }
+
     private fun finishWithResult(response: Nip55Response) {
         cancelAllNotifications()
         val req = request
 
-        if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
-            if (response.result.isEmpty()) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Handler returned empty pubkey result")
-                return finishWithError("pubkey_verification_failed")
-            }
-            val groupPubkey = storage?.getShareMetadata()?.groupPubkey
-            if (groupPubkey == null || groupPubkey.isEmpty()) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")
-                return finishWithError("pubkey_verification_failed")
-            }
-            val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-            if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
-                return finishWithError("pubkey_verification_failed")
-            }
-        }
+        verifyGetPublicKeyResult(response)?.let { return finishWithError(it) }
 
         if (BuildConfig.DEBUG) Log.d(TAG, "Returning result for ${req?.requestType?.name} (requestId=${requestId})")
         val resultIntent = Intent().apply {
