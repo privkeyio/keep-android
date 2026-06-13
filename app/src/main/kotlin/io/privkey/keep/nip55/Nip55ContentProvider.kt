@@ -247,6 +247,7 @@ class Nip55ContentProvider : ContentProvider() {
                         System.currentTimeMillis().toULong()
                     )
                 } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed to UI: ${e::class.simpleName}")
                     null
                 }
             }
