@@ -751,7 +751,7 @@ class Nip55Activity : FragmentActivity() {
             requestId = it.requestId
         }
 
-        val req = request ?: return finishWithError("User rejected")
+        val req = request ?: return finishWithError("Invalid request")
         val callerId = callerPackage
         val store = permissionStore
         val eventKind = req.eventKind()
@@ -761,7 +761,7 @@ class Nip55Activity : FragmentActivity() {
                 store.denyPermission(callerId, req.requestType, eventKind, duration)
                 store.logOperation(callerId, req.requestType, eventKind, "deny", wasAutomatic = false)
             }
-            finishWithError("User rejected")
+            finishWithRejection()
         }
     }
 
@@ -835,6 +835,21 @@ class Nip55Activity : FragmentActivity() {
         val resultIntent = Intent().apply {
             putExtra("results", json)
             putExtra("package", packageName)
+        }
+        setResult(RESULT_OK, resultIntent)
+        finish()
+    }
+
+    // A user rejection is NOT a signer failure: per NIP-55, return RESULT_OK with
+    // rejected=true so the client can tell a declined request from a crash
+    // (RESULT_CANCELED). finishWithError stays reserved for actual failures.
+    private fun finishWithRejection() {
+        cancelAllNotifications()
+        if (BuildConfig.DEBUG) Log.d(TAG, "User rejected request (requestId=$requestId)")
+        val resultIntent = Intent().apply {
+            putExtra("rejected", true)
+            putExtra("package", packageName)
+            requestId?.let { putExtra("id", it) }
         }
         setResult(RESULT_OK, resultIntent)
         finish()
