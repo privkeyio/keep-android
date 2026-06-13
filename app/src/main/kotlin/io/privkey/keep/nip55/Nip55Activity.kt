@@ -20,6 +20,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.KeepMobileException
+import io.privkey.keep.uniffi.Nip55DeclaredPermission
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
@@ -336,7 +337,7 @@ class Nip55Activity : FragmentActivity() {
                         showFirstUseWarning = currentPendingFirstUse,
                         callerSignatureFingerprint = if (currentPendingFirstUse) currentSignatureHash else null,
                         riskAssessment = highestRisk,
-                        onApprove = ::handleApprove,
+                        onApprove = { duration -> handleApprove(duration, emptyList()) },
                         onReject = ::handleReject
                     )
                 }
@@ -406,7 +407,7 @@ class Nip55Activity : FragmentActivity() {
         )
     }
 
-    private fun handleApprove(duration: PermissionDuration) {
+    private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>) {
         // Re-entry guard: a second tap, or an async render that re-enabled the
         // buttons, must not commit a second decision.
         if (decisionLocked) return
@@ -462,6 +463,13 @@ class Nip55Activity : FragmentActivity() {
                 signResult
                     .onSuccess { response ->
                         recordGrantAndTrust(store, callerId, req, eventKind, duration)
+                        // On a get_public_key connect, grant the checked pre-declared
+                        // permission bundle so the ContentProvider can answer those
+                        // methods later (only persists if the user chose a remembered
+                        // duration; sensitive kinds stay clamped by the Rust rule).
+                        if (declaredBundle.isNotEmpty()) {
+                            grantDeclaredBundle(store, callerId, declaredBundle, duration)
+                        }
                         finishWithResult(response)
                     }
                     .onFailure { e ->
@@ -591,6 +599,24 @@ class Nip55Activity : FragmentActivity() {
         }
         val auditAction = if (permResult.isFailure) "allow_grant_failed" else "allow"
         store?.logOperation(callerId, req.requestType, eventKind, auditAction, wasAutomatic = false)
+    }
+
+    // Grants the user-checked pre-declared permission bundle from a get_public_key
+    // connect. The Rust duration clamp is applied per grant; JUST_THIS_TIME grants
+    // simply do not persist (matching the reference signer's default).
+    private suspend fun grantDeclaredBundle(
+        store: PermissionStore?,
+        callerId: String,
+        declared: List<Nip55DeclaredPermission>,
+        duration: PermissionDuration
+    ) {
+        if (store == null) return
+        declared.forEach { perm ->
+            val grantResult = runCatching { store.grantPermission(callerId, perm.requestType, perm.kind, duration) }
+                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Bundle grant failed for ${perm.requestType.name}: ${it.message}") }
+            val auditAction = if (grantResult.isFailure) "allow_grant_failed" else "allow"
+            store.logOperation(callerId, perm.requestType, perm.kind, auditAction, wasAutomatic = false)
+        }
     }
 
     private suspend fun authenticateForRequest(keystoreStorage: AndroidKeystoreStorage?, req: Nip55Request): Boolean {
