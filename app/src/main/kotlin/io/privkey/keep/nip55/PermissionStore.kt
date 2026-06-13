@@ -216,8 +216,8 @@ class PermissionStore(private val database: Nip55Database) {
         val tamperDetected = Nip55Database.isAuditTamperDetected()
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
-        val walk: (List<Nip55AuditLog>) -> ChainVerificationResult = { es ->
-            nip55VerifyAuditChain(es.map { it.toRustAuditEntry() }, hmacKey).toChainVerificationResult()
+        val walk: (List<Nip55AuditLog>) -> ChainVerificationResult = { rows ->
+            nip55VerifyAuditChain(rows.map { it.toRustAuditEntry() }, hmacKey).toChainVerificationResult()
         }
         var entries = auditDao.getAllOrdered()
         var rustResult = walk(entries)
@@ -232,6 +232,7 @@ class PermissionStore(private val database: Nip55Database) {
             rustResult = walk(entries)
             anchor = Nip55Database.getAuditAnchor()
         }
+        val count = entries.size.toLong()
         val latestHash = entries.lastOrNull()?.entryHash ?: ""
         val latestId = entries.lastOrNull()?.id ?: 0L
         if (anchor == null) {
@@ -239,7 +240,7 @@ class PermissionStore(private val database: Nip55Database) {
             // First verify on an upgraded/fresh install: trust-on-first-use seed the
             // anchor from the current intact tail rather than flagging it.
             if (shouldSeed(anchor, rustResult)) {
-                Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
+                Nip55Database.setAuditAnchor(AuditAnchor(latestHash, count))
             }
             return rustResult
         }
@@ -248,15 +249,15 @@ class PermissionStore(private val database: Nip55Database) {
         val rustIntact = rustResult is ChainVerificationResult.Valid ||
             rustResult is ChainVerificationResult.PartiallyVerified
         if (!tamperDetected &&
-            isResumableAppend(anchor, entries.size.toLong(), entries.lastOrNull()?.previousHash, rustIntact)
+            isResumableAppend(anchor, count, entries.lastOrNull()?.previousHash, rustIntact)
         ) {
-            Nip55Database.setAuditAnchor(AuditAnchor(latestHash, entries.size.toLong()))
+            Nip55Database.setAuditAnchor(AuditAnchor(latestHash, count))
             return rustResult
         }
         return resolveChainVerification(
             tamperDetected,
             anchor,
-            entries.size.toLong(),
+            count,
             latestHash,
             latestId,
             rustResult
