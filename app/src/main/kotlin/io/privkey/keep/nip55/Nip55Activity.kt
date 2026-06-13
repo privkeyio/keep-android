@@ -29,7 +29,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
-import java.security.MessageDigest
 import java.util.UUID
 import javax.crypto.Cipher
 
@@ -467,6 +466,15 @@ class Nip55Activity : FragmentActivity() {
                 val signResult = signOneRequest(req, requestId, nip55Handler, callerId, keystoreStorage, currentApp)
                 signResult
                     .onSuccess { response ->
+                        // Verify a get_public_key response BEFORE persisting any grant
+                        // or first-use trust, so a failed connect leaves no persisted
+                        // state (#330).
+                        val pubkeyError = verifyGetPublicKeyResult(response)
+                        if (pubkeyError != null) {
+                            store?.logOperation(callerId, req.requestType, eventKind, "pubkey_verification_failed", wasAutomatic = false)
+                            finishWithError(pubkeyError)
+                            return@onSuccess
+                        }
                         recordGrantAndTrust(store, callerId, req, eventKind, duration)
                         // On a get_public_key connect, grant the checked pre-declared
                         // permission bundle so the ContentProvider can answer those
@@ -794,26 +802,21 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
+    // Reads the captured request type and stored group pubkey, then delegates to
+    // the pure checkPubkey helper. Used both to gate grant/trust persistence before
+    // it happens and to gate returning the result.
+    private fun verifyGetPublicKeyResult(response: Nip55Response): String? =
+        checkPubkey(request?.requestType, response.result, storage?.getShareMetadata()?.groupPubkey)
+
     private fun finishWithResult(response: Nip55Response) {
         cancelAllNotifications()
         val req = request
 
-        if (req?.requestType == Nip55RequestType.GET_PUBLIC_KEY) {
-            if (response.result.isEmpty()) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Handler returned empty pubkey result")
-                return finishWithError("pubkey_verification_failed")
-            }
-            val groupPubkey = storage?.getShareMetadata()?.groupPubkey
-            if (groupPubkey == null || groupPubkey.isEmpty()) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Stored pubkey unavailable for verification")
-                return finishWithError("pubkey_verification_failed")
-            }
-            val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-            if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
-                return finishWithError("pubkey_verification_failed")
-            }
-        }
+        // Defense-in-depth: the single-request path already verified this before
+        // persisting any grant/trust. This re-check intentionally duplicates that
+        // gate so other callers of finishWithResult can never return an unverified
+        // get_public_key result; do not assume either gate covers the other.
+        verifyGetPublicKeyResult(response)?.let { return finishWithError(it) }
 
         if (BuildConfig.DEBUG) Log.d(TAG, "Returning result for ${req?.requestType?.name} (requestId=${requestId})")
         val resultIntent = Intent().apply {
