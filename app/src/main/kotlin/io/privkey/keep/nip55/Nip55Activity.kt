@@ -145,19 +145,24 @@ class Nip55Activity : FragmentActivity() {
         val parsedId = rawId?.takeIf { it.isNotBlank() } ?: parsed.id
 
         // Accumulate only same-caller operation requests (never get_public_key) up to the cap.
-        val batchable = parsed.requestType != Nip55RequestType.GET_PUBLIC_KEY
-        val canAccumulate = pending.isNotEmpty() &&
-            batchable &&
-            batchCaller == caller &&
-            pending.all { it.request.requestType != Nip55RequestType.GET_PUBLIC_KEY }
-        if (canAccumulate) {
-            if (pending.size >= MAX_BATCH_SIZE) {
+        when (
+            batchAccumulationDecision(
+                pendingTypes = pending.map { it.request.requestType },
+                pendingCaller = batchCaller,
+                newType = parsed.requestType,
+                newCaller = caller,
+                maxBatchSize = MAX_BATCH_SIZE
+            )
+        ) {
+            BatchAccumulation.DROP_OVER_CAP -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Dropping batch request beyond cap of $MAX_BATCH_SIZE")
                 return
             }
-        } else {
-            cancelAllNotifications()
-            pending.clear()
+            BatchAccumulation.RESET -> {
+                cancelAllNotifications()
+                pending.clear()
+            }
+            BatchAccumulation.ACCUMULATE -> {} // keep pending; the new item is appended below
         }
 
         val item = PendingNip55Request(parsed, parsedId, uriStr ?: "")
