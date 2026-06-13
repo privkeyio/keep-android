@@ -93,8 +93,10 @@ class BunkerService : Service() {
         private val clientPendingCounts = ConcurrentHashMap<String, AtomicInteger>()
         // Global + per-client request rate limiting (window + exponential backoff)
         // lives in Rust; the in-flight concurrency cap above stays here (it bounds
-        // pending approval UI, not a request rate).
+        // pending approval UI, not a request rate). The connect limiter is isolated
+        // so a connect flood cannot drain the signing budget.
         private val bunkerRateLimiter by lazy { Nip46BunkerRateLimiter() }
+        private val connectRateLimiter by lazy { Nip46BunkerRateLimiter() }
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
@@ -156,7 +158,11 @@ class BunkerService : Service() {
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
-                    bunkerRateLimiter.resetConsecutive(pubkey.lowercase())
+                    val limiter = when (rateLimitBudgetFor(approval.isConnectRequest)) {
+                        RateLimitBudget.CONNECT -> connectRateLimiter
+                        RateLimitBudget.SIGNING -> bunkerRateLimiter
+                    }
+                    limiter.resetConsecutive(pubkey.lowercase())
                 }
                 approval.respond(
                     BunkerApprovalResult(
@@ -195,8 +201,12 @@ class BunkerService : Service() {
         // Global + per-client window + exponential backoff live in Rust; Android
         // supplies the monotonic clock. Key on the lowercased pubkey so case-variant
         // hex can't mint fresh per-client buckets (matches the authorization path).
-        internal fun isRateLimited(clientPubkey: String): Boolean {
-            val limited = bunkerRateLimiter.isRateLimited(clientPubkey.lowercase(), SystemClock.elapsedRealtime().toULong())
+        internal fun isRateLimited(clientPubkey: String, isConnectRequest: Boolean): Boolean {
+            val limiter = when (rateLimitBudgetFor(isConnectRequest)) {
+                RateLimitBudget.CONNECT -> connectRateLimiter
+                RateLimitBudget.SIGNING -> bunkerRateLimiter
+            }
+            val limited = limiter.isRateLimited(clientPubkey.lowercase(), SystemClock.elapsedRealtime().toULong())
             // Bounds the concurrency map (clientPendingCounts); rate-limit state is bounded in Rust.
             if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
                 evictStaleMaps()
@@ -213,6 +223,7 @@ class BunkerService : Service() {
                 clientPendingCounts.clear()
             }
             bunkerRateLimiter.clear()
+            connectRateLimiter.clear()
         }
 
         internal fun evictStaleMaps() {
@@ -550,7 +561,7 @@ class BunkerService : Service() {
             return REJECTED
         }
 
-        if (isRateLimited(clientPubkey)) {
+        if (isRateLimited(clientPubkey, isConnectRequest)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
             return REJECTED
         }
