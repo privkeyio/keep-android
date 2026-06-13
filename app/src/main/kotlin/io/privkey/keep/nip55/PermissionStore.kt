@@ -8,8 +8,10 @@ import io.privkey.keep.uniffi.Nip55PermissionDecision
 import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
+import io.privkey.keep.uniffi.Nip55VelocityResult
 import io.privkey.keep.uniffi.nip55AuditEntryHash
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
+import io.privkey.keep.uniffi.nip55CheckVelocity
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
 
@@ -150,28 +152,30 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
+    // The hourly/daily/weekly limit thresholds + block decision live in Rust;
+    // Android keeps the per-request velocity event log (Room) and feeds the
+    // window counts in.
     suspend fun checkAndRecordVelocity(packageName: String, eventKind: Int?, config: VelocityConfig = VelocityConfig()): VelocityResult {
         if (!config.enabled) return VelocityResult.Allowed
 
         return database.withTransaction {
             val now = System.currentTimeMillis()
+            val hourly = velocityDao.countSince(packageName, now - HOUR_MS)
+            val daily = velocityDao.countSince(packageName, now - DAY_MS)
+            val weekly = velocityDao.countSince(packageName, now - WEEK_MS)
 
-            checkLimit(packageName, now, HOUR_MS, config.hourlyLimit, "Hourly")?.let { return@withTransaction it }
-            checkLimit(packageName, now, DAY_MS, config.dailyLimit, "Daily")?.let { return@withTransaction it }
-            checkLimit(packageName, now, WEEK_MS, config.weeklyLimit, "Weekly")?.let { return@withTransaction it }
-
-            velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
-            velocityDao.deleteOlderThan(now - WEEK_MS)
-
-            VelocityResult.Allowed
+            when (val decision = nip55CheckVelocity(hourly.toUInt(), daily.toUInt(), weekly.toUInt())) {
+                is Nip55VelocityResult.Blocked -> {
+                    val oldest = velocityDao.getOldestInWindow(packageName, now - decision.windowMs)
+                    VelocityResult.Blocked(decision.reason, (oldest ?: now) + decision.windowMs)
+                }
+                Nip55VelocityResult.Allowed -> {
+                    velocityDao.insert(VelocityEntry(packageName = packageName, timestamp = now, eventKind = eventKind))
+                    velocityDao.deleteOlderThan(now - WEEK_MS)
+                    VelocityResult.Allowed
+                }
+            }
         }
-    }
-
-    private suspend fun checkLimit(packageName: String, now: Long, windowMs: Long, limit: Int, label: String): VelocityResult.Blocked? {
-        val count = velocityDao.countSince(packageName, now - windowMs)
-        if (count < limit) return null
-        val oldest = velocityDao.getOldestInWindow(packageName, now - windowMs)
-        return VelocityResult.Blocked("$label limit ($count/$limit)", (oldest ?: now) + windowMs)
     }
 
     suspend fun getVelocityUsage(packageName: String): Triple<Int, Int, Int> {
