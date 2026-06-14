@@ -1,0 +1,1 @@
+Build fix: the app now builds without a release signing config (F-Droid compatibility), preserving reproducibility. No functional changes since 1.1.0.
