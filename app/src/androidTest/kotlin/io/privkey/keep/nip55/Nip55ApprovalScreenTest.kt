@@ -1,0 +1,121 @@
+package io.privkey.keep.nip55
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.privkey.keep.R
+import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.Nip55DeclaredPermission
+import io.privkey.keep.uniffi.Nip55Request
+import io.privkey.keep.uniffi.Nip55RequestType
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * User-flow tests for the NIP-55 approval screen: the screen a user sees when an
+ * external app asks Keep to sign. Guards against the approve/reject controls
+ * disappearing, being renamed, or wiring to the wrong callback.
+ */
+@RunWith(AndroidJUnit4::class)
+class Nip55ApprovalScreenTest {
+
+    @Suppress("DEPRECATION") // classic rule: UnconfinedTestDispatcher, immediate effect execution
+    @get:Rule
+    val compose = createComposeRule()
+
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    private fun signEventRequest(
+        content: String = """{"kind":1,"content":"gm","tags":[]}"""
+    ) = Nip55Request(
+        requestType = Nip55RequestType.SIGN_EVENT,
+        content = content,
+        pubkey = null,
+        returnType = "signature",
+        compressionType = "none",
+        callbackUrl = null,
+        id = "req-1",
+        currentUser = null,
+        permissions = null
+    )
+
+    @Test
+    fun signEvent_approve_invokesCallbackWithJustThisTime() {
+        var approved = false
+        var duration: PermissionDuration? = null
+        var bundle: List<Nip55DeclaredPermission>? = null
+
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    onApprove = { d, b, _ -> approved = true; duration = d; bundle = b },
+                    onReject = { _, _ -> }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_approve))
+            .assertIsDisplayed()
+            .performClick()
+        compose.waitForIdle()
+
+        assertTrue("onApprove should fire when Approve is tapped", approved)
+        assertEquals(
+            "An unverified caller cannot persist a grant",
+            PermissionDuration.JUST_THIS_TIME,
+            duration
+        )
+        assertTrue("No declared permissions to grant for a bare sign_event", bundle!!.isEmpty())
+    }
+
+    @Test
+    fun signEvent_reject_invokesCallback() {
+        var rejected = false
+
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    onApprove = { _, _, _ -> },
+                    onReject = { _, _ -> rejected = true }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_reject))
+            .assertIsDisplayed()
+            .performClick()
+        compose.waitForIdle()
+
+        assertTrue("onReject should fire when Reject is tapped", rejected)
+    }
+
+    @Test
+    fun unverifiedCaller_showsWarning() {
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    onApprove = { _, _, _ -> },
+                    onReject = { _, _ -> }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.nip55_unverified_caller_warning))
+            .assertIsDisplayed()
+    }
+}
