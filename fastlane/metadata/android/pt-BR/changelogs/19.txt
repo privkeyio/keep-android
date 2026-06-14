@@ -1,0 +1,1 @@
+Builds reproduzíveis: o APK publicado agora é compilado em um contêiner fixado para que possa ser verificado e reproduzido de forma independente. Sem mudanças funcionais desde a 1.1.0.
