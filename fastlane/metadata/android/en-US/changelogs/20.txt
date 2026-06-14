@@ -1,0 +1,1 @@
+Reproducible builds: corrected release signing so the published APK can be independently reproduced and verified. No functional changes since 1.1.0.

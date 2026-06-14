@@ -1,0 +1,1 @@
+Reproduzierbare Builds: Die Release-Signierung wurde korrigiert, sodass die veröffentlichte APK unabhängig reproduziert und überprüft werden kann. Keine funktionalen Änderungen gegenüber 1.1.0.
