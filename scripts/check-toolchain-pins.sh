@@ -81,8 +81,9 @@ extract_unique() {
 }
 
 # release.yml and reproducibility.yml build inside Dockerfile.reproducible
-# (which pins its own JDK via DOCKER_JDK_MAJOR below), so they have no
-# setup-java step to extract from. ci.yml still builds on the runner.
+# (which pins its own JDK via ARG JDK_VERSION, checked below as
+# DOCKER_JDK_MAJOR), so they have no setup-java step to extract from. ci.yml
+# still builds on the runner.
 CI_JDK=$(extract_unique "$CI_YML" "^[[:space:]]+java-version: '([0-9]+)'")
 
 check_equal() {

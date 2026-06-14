@@ -81,6 +81,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           APKSIGNER="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
           "$APKSIGNER" sign \
@@ -88,12 +89,33 @@ jobs:
             --ks-pass "env:KEYSTORE_PASSWORD" \
             --ks-key-alias "$KEY_ALIAS" \
             --key-pass "env:KEY_PASSWORD" \
-            --out "keep-android-${{ github.ref_name }}.apk" \
+            --out "keep-android-${REF_NAME}.apk" \
             docker-out/app-release.apk
 
-      - name: Verify APK is signed
+      - name: Verify APK signing certificate
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          # SHA-256 of the release signing certificate (DER encoding). Must
+          # equal the AllowedAPKSigningKeys value in
+          # metadata/io.privkey.keep.yml; both are the digest apksigner reports
+          # as "certificate SHA-256 digest".
+          EXPECTED_CERT_SHA256: 3eb0e6f6f4e0962ebd717f84eea47428b73087b686c956633d6a9fcc4c854f50
         run: |
-          "$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner" verify --print-certs "keep-android-${{ github.ref_name }}.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
+          CERTS="$("$APKSIGNER" verify --print-certs "keep-android-${REF_NAME}.apk")"
+          echo "$CERTS"
+          ACTUAL="$(printf '%s\n' "$CERTS" \
+            | sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]+).*/\1/p' \
+            | head -1 | tr 'A-F' 'a-f')"
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::could not parse signing certificate SHA-256 digest" >&2
+            exit 1
+          fi
+          if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::signing cert SHA-256 $ACTUAL does not match expected release key $EXPECTED_CERT_SHA256" >&2
+            exit 1
+          fi
+          echo "Signing certificate matches the expected release key."
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
