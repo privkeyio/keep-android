@@ -552,7 +552,7 @@ class Nip55Activity : FragmentActivity() {
                     // rather than signed, without blocking the rest of the batch.
                     if (relayAuthRejected(req)) {
                         store?.logOperation(callerId, req.requestType, eventKind, "deny_relay_whitelist", wasAutomatic = false)
-                        responses.add(Nip55Response(result = "", event = null, error = "relay_not_whitelisted", id = item.requestId))
+                        responses.add(Nip55Response(result = "", event = null, error = "relay_not_whitelisted", id = item.requestId, rejected = false))
                         continue
                     }
                     val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
@@ -567,7 +567,7 @@ class Nip55Activity : FragmentActivity() {
                             val action = if (e is PreApproveFailedException) "preapprove_failed" else "deny"
                             store?.logOperation(callerId, req.requestType, eventKind, action, wasAutomatic = false)
                             if (BuildConfig.DEBUG) Log.w(TAG, "Batch item failed: ${e::class.simpleName}")
-                            responses.add(Nip55Response(result = "", event = null, error = "request_failed", id = item.requestId))
+                            responses.add(Nip55Response(result = "", event = null, error = "request_failed", id = item.requestId, rejected = false))
                         }
                 }
                 finishWithBatchResults(nip55Handler, responses)
@@ -842,7 +842,7 @@ class Nip55Activity : FragmentActivity() {
             }
             if (nip55Handler != null) {
                 val rejected = items.map {
-                    Nip55Response(result = "", event = null, error = "rejected", id = it.requestId)
+                    Nip55Response(result = "", event = null, error = null, id = it.requestId, rejected = true)
                 }
                 finishWithBatchResults(nip55Handler, rejected)
             } else {
