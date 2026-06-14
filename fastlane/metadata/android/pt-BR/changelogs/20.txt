@@ -1,0 +1,1 @@
+Builds reproduzíveis: a assinatura da versão foi corrigida para que o APK publicado possa ser reproduzido e verificado de forma independente. Sem mudanças funcionais desde a 1.1.0.
