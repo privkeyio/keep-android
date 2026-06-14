@@ -93,9 +93,13 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
-      - name: Install build-tools (apksigcopier needs apksigner)
+      - name: Install build-tools and put apksigner on PATH
         if: github.event_name != 'pull_request'
-        run: sdkmanager --install "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+        run: |
+          sdkmanager --install "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+          # apksigcopier invokes `apksigner` from PATH; build-tools is not on
+          # PATH by default, so add it.
+          echo "${{ env.ANDROID_HOME }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}" >> "$GITHUB_PATH"
 
       - name: Install apksigcopier
         if: github.event_name != 'pull_request'
@@ -111,7 +115,6 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           REPOSITORY: ${{ github.repository }}
-          APKSIGNER: ${{ env.ANDROID_HOME }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner
         run: |
           echo "Verifying reproduction of $VERSION"
           URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}/keep-android-${VERSION}.apk"
