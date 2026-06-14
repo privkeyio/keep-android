@@ -1,0 +1,1 @@
+Reproducible builds: the published APK is now built in a pinned container so it can be independently verified and reproduced. No functional changes since 1.1.0.

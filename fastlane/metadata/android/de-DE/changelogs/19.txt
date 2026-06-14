@@ -1,0 +1,1 @@
+Reproduzierbare Builds: Die veröffentlichte APK wird jetzt in einem fixierten Container erstellt, sodass sie unabhängig überprüft und reproduziert werden kann. Keine funktionalen Änderungen gegenüber 1.1.0.

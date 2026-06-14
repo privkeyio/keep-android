@@ -1,0 +1,1 @@
+Compilaciones reproducibles: la APK publicada ahora se compila en un contenedor fijado para que pueda verificarse y reproducirse de forma independiente. Sin cambios funcionales desde la 1.1.0.
