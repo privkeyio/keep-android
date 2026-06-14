@@ -27,35 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      # Build the release APK inside the pinned, reproducible container
-      # (Dockerfile.reproducible) instead of on the bare runner. A clean, pinned
-      # environment is required for the native aws-lc artifacts to be
-      # bit-reproducible by F-Droid: the bare GitHub runner produces a
-      # non-standard aws-lc build that no other clean environment (F-Droid's
-      # buildserver, a local checkout, this container) reproduces. The container
-      # clones keep at the pinned SHA, derives SOURCE_DATE_EPOCH from commit
-      # times, runs check-toolchain-pins + verifyNoProprietaryDeps, and builds
-      # an APK whose payload is reproducible; it is signed with a throwaway key
-      # inside the container. We re-sign with the real release key below — the
-      # signature lives in the APK Signing Block, outside the zip payload that
-      # F-Droid compares for reproducibility.
-      - name: Build reproducible APK in pinned container
-        run: |
-          DOCKER_BUILDKIT=1 docker build \
-            --build-arg KEEP_SHA="$(tr -d '[:space:]' < keep.version)" \
-            --output type=local,dest=docker-out \
-            -f Dockerfile.reproducible .
-          test -f docker-out/app-release.apk
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
-
-      - name: Install build-tools (for apksigner)
-        run: sdkmanager --install "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
-
       - name: Decode keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "error: KEYSTORE_BASE64 secret is empty." >&2
@@ -67,30 +42,47 @@ jobs:
             echo "error: decoded keystore is empty; check KEYSTORE_BASE64 encoding." >&2
             exit 1
           fi
-          if ! KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}" \
-              keytool -list -keystore "$KEYSTORE_OUT" -storepass:env KEYSTORE_PASSWORD >/dev/null; then
+          if ! keytool -list -keystore "$KEYSTORE_OUT" -storepass:env KEYSTORE_PASSWORD >/dev/null; then
             echo "error: keystore failed to load (corrupt base64 or wrong password)." >&2
             exit 1
           fi
 
-      # Re-sign the reproducible payload with the real release key. The zip
-      # entries F-Droid compares are untouched — only the APK Signing Block
-      # changes — and the real key never enters the container build.
-      - name: Sign APK with release key
+      # Build the release APK inside the pinned, reproducible container
+      # (Dockerfile.reproducible) instead of on the bare runner. A clean, pinned
+      # environment is required for the native aws-lc artifacts to be
+      # bit-reproducible by F-Droid: the bare GitHub runner produces a
+      # non-standard aws-lc build that no clean environment (F-Droid's
+      # buildserver, a local checkout, this container) reproduces.
+      #
+      # The release keystore + passwords are passed as BuildKit secrets so
+      # Gradle signs the APK *during* the build. Signing during the build (not
+      # re-signing the finished APK with apksigner) keeps the payload identical
+      # to F-Droid's gradle-built rebuild — apksigner re-signing repacks the APK
+      # and would break the payload comparison. Secrets never land in an image
+      # layer or docker history.
+      - name: Build release-signed APK in pinned container
         env:
+          REF_NAME: ${{ github.ref_name }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
-          APKSIGNER="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
-          "$APKSIGNER" sign \
-            --ks "${{ runner.temp }}/release.keystore" \
-            --ks-pass "env:KEYSTORE_PASSWORD" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass "env:KEY_PASSWORD" \
-            --out "keep-android-${REF_NAME}.apk" \
-            docker-out/app-release.apk
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg KEEP_SHA="$(tr -d '[:space:]' < keep.version)" \
+            --secret id=keystore,src="${{ runner.temp }}/release.keystore" \
+            --secret id=keystore_pass,env=KEYSTORE_PASSWORD \
+            --secret id=key_alias,env=KEY_ALIAS \
+            --secret id=key_pass,env=KEY_PASSWORD \
+            --output type=local,dest=docker-out \
+            -f Dockerfile.reproducible .
+          test -f docker-out/app-release.apk
+          mv docker-out/app-release.apk "keep-android-${REF_NAME}.apk"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+
+      - name: Install build-tools (for apksigner)
+        run: sdkmanager --install "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
 
       - name: Verify APK signing certificate
         env:

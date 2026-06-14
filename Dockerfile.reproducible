@@ -278,13 +278,28 @@ RUN if [ -z "$KEEP_SHA" ]; then \
 # known path) and set KEYSTORE_FILE/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD
 # in the build environment before invoking docker build.
 WORKDIR /build/keep-android
-RUN set -eux; \
+RUN --mount=type=secret,id=keystore,uid=1000 \
+    --mount=type=secret,id=keystore_pass,uid=1000 \
+    --mount=type=secret,id=key_alias,uid=1000 \
+    --mount=type=secret,id=key_pass,uid=1000 \
+    set -eux; \
     if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then \
         export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"; \
     fi; \
     echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"; \
     export KEEP_REPO=/build/keep; \
     export AWS_LC_SYS_CMAKE_BUILDER=1; \
+    # A release keystore and its passwords may be supplied via BuildKit secrets
+    # so Gradle signs the release APK during the build. The secret never lands
+    # in an image layer or `docker history`. Signing during the Gradle build
+    # (not re-signing the finished APK) keeps the payload byte-identical to a
+    # debug-signed rebuild, which is what F-Droid compares against.
+    if [ -f /run/secrets/keystore ]; then \
+        KEYSTORE_FILE=/run/secrets/keystore; \
+        KEYSTORE_PASSWORD="$(cat /run/secrets/keystore_pass)"; \
+        KEY_ALIAS="$(cat /run/secrets/key_alias)"; \
+        KEY_PASSWORD="$(cat /run/secrets/key_pass)"; \
+    fi; \
     KEYSTORE_FILE="${KEYSTORE_FILE:-}"; \
     KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"; \
     KEY_ALIAS="${KEY_ALIAS:-}"; \
