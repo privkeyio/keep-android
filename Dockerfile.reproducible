@@ -123,6 +123,7 @@ RUN printf 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debia
         pkg-config \
         cmake \
         make \
+        ninja-build \
         gcc \
         g++ \
         libc6-dev \
@@ -316,7 +317,7 @@ RUN set -eux; \
         fi; \
     fi; \
     export KEYSTORE_FILE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; \
-    ./gradlew assembleRelease --no-daemon; \
+    ./gradlew :app:verifyNoProprietaryDeps assembleRelease --no-daemon; \
     mkdir -p /out; \
     cp app/build/outputs/apk/release/app-release.apk /out/app-release.apk; \
     echo "SHA256 of signed APK (depends on signing key; differs per build when"; \

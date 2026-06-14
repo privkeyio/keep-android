@@ -80,8 +80,9 @@ extract_unique() {
     echo "$vals"
 }
 
+# release.yml builds inside Dockerfile.reproducible (which pins its own JDK via
+# DOCKER_JDK_MAJOR below), so it has no setup-java step to extract from.
 CI_JDK=$(extract_unique "$CI_YML" "^[[:space:]]+java-version: '([0-9]+)'")
-REL_JDK=$(extract_unique "$RELEASE_YML" "^[[:space:]]+java-version: '([0-9]+)'")
 REPRO_JDK=$(extract_unique "$REPRO_YML" "^[[:space:]]+java-version: '([0-9]+)'")
 
 check_equal() {
@@ -100,7 +101,7 @@ check_equal() {
 check_equal "rust version"        "$BR_RUST"       "$CI_RUST"       "$REL_RUST"       "$REPRO_RUST"
 check_equal "cargo-ndk version"   "$BR_CARGO_NDK"  "$CI_CARGO_NDK"  "$REL_CARGO_NDK"  "$REPRO_CARGO_NDK"
 check_equal "ndk version"         "$CI_NDK"        "$REL_NDK"       "$GRADLE_NDK"     "$REPRO_NDK"
-check_equal "jdk major version"   "$GRADLE_JDK"    "$CI_JDK"        "$REL_JDK"        "$REPRO_JDK"
+check_equal "jdk major version"   "$GRADLE_JDK"    "$CI_JDK"        "$REPRO_JDK"
 check_equal "build-tools version" "$REL_BUILD_TOOLS" "$REPRO_BUILD_TOOLS"
 
 # Cross-check Dockerfile.reproducible pins against the same sources of truth
