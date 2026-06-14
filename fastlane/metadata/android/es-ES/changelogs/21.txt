@@ -1,0 +1,1 @@
+Corrección de compilación: la app ahora se compila sin una configuración de firma de versión (compatibilidad con F-Droid), manteniendo la reproducibilidad. Sin cambios funcionales desde la 1.1.0.

@@ -1,0 +1,1 @@
+Build-Fix: Die App lässt sich jetzt ohne Release-Signaturkonfiguration erstellen (F-Droid-Kompatibilität), bei gleichbleibender Reproduzierbarkeit. Keine funktionalen Änderungen gegenüber 1.1.0.
