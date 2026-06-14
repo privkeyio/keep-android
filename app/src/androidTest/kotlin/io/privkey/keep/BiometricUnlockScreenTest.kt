@@ -21,7 +21,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class BiometricUnlockScreenTest {
 
-    @Suppress("DEPRECATION") // classic rule: UnconfinedTestDispatcher, immediate effect execution
     @get:Rule
     val compose = createComposeRule()
 
@@ -75,5 +74,23 @@ class BiometricUnlockScreenTest {
 
         compose.onNodeWithText(context.getString(R.string.biometric_unlock_lockout))
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun permanentLockout_showsPermanentMessageAndStaysLocked() {
+        var unlocked = false
+
+        compose.setContent {
+            KeepAndroidTheme {
+                BiometricUnlockScreen(
+                    onAuthenticate = { BiometricHelper.AuthResult.LOCKOUT_PERMANENT },
+                    onUnlocked = { unlocked = true }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.biometric_unlock_lockout_permanent))
+            .assertIsDisplayed()
+        assertFalse("A permanent lockout must not unlock", unlocked)
     }
 }

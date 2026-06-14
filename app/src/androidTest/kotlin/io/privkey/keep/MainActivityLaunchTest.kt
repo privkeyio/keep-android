@@ -3,7 +3,6 @@ package io.privkey.keep
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -18,8 +17,9 @@ class MainActivityLaunchTest {
     @Test
     fun launches_reachesResumed_withoutCrashing() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            // moveToState throws if RESUMED is unreachable, so reaching this line
+            // means launch + native/DI/Compose setup succeeded without crashing.
             scenario.moveToState(Lifecycle.State.RESUMED)
-            assertEquals(Lifecycle.State.RESUMED, scenario.state)
         }
     }
 }

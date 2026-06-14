@@ -25,7 +25,6 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class Nip55ApprovalScreenTest {
 
-    @Suppress("DEPRECATION") // classic rule: UnconfinedTestDispatcher, immediate effect execution
     @get:Rule
     val compose = createComposeRule()
 
@@ -70,7 +69,8 @@ class Nip55ApprovalScreenTest {
 
         assertTrue("onApprove should fire when Approve is tapped", approved)
         assertEquals(
-            "An unverified caller cannot persist a grant",
+            "Duration is forced to JUST_THIS_TIME when remember-choice is gated off " +
+                "(here callerVerified=false and showFirstUseWarning=false)",
             PermissionDuration.JUST_THIS_TIME,
             duration
         )
@@ -99,6 +99,25 @@ class Nip55ApprovalScreenTest {
         compose.waitForIdle()
 
         assertTrue("onReject should fire when Reject is tapped", rejected)
+    }
+
+    @Test
+    fun firstUseCaller_canRememberChoice_showsDurationSelector() {
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    showFirstUseWarning = true,
+                    onApprove = { _, _, _ -> },
+                    onReject = { _, _ -> }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_remember_choice))
+            .assertIsDisplayed()
     }
 
     @Test
