@@ -8,8 +8,9 @@ release's signature block is stripped or the same signing key is used.
 
 The recipe is pinned, self-contained, and does not require contacting the
 maintainers. If your build does not match, the automated
-`.github/workflows/reproducibility.yml` job (which rebuilds twice and compares)
-is the reference and your environment drift is the likely cause.
+`.github/workflows/reproducibility.yml` job (which rebuilds in the pinned
+container and compares the payload against the published release) is the
+reference and your environment drift is the likely cause.
 
 ## Overview
 
