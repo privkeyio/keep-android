@@ -114,24 +114,30 @@ None currently documented. If a verifier finds a diff, attach the
 ## Automated CI enforcement
 
 `.github/workflows/reproducibility.yml` guards against regressions by
-building `assembleRelease` twice on the same runner and comparing the
-output APKs with `sha256sum`. The workflow:
+rebuilding inside the pinned `Dockerfile.reproducible` container and
+comparing the result against the published release APK. The workflow:
 
 - Runs on `workflow_dispatch`, a weekly `schedule` (Mondays 06:00 UTC),
   on `v*` tag pushes so every release is verified, and on pull requests
   carrying the `reproducibility` label. It is deliberately excluded from
-  the default PR path because running two release builds is expensive.
-- Pins the same toolchain as `release.yml` (Rust, cargo-ndk, NDK,
-  build-tools, JDK 17 Temurin) and derives `SOURCE_DATE_EPOCH` via
-  `scripts/derive-sde.sh`.
-- Generates a workflow-local PKCS12 keystore with `keytool` and exports
-  `KEYSTORE_FILE` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD`
-  so the release signing path is exercised without production secrets.
-  The same keystore is reused for both builds within the job.
-- Between the two builds it runs `./gradlew clean` and removes
-  `app/src/main/jniLibs`, the generated `uniffi` Kotlin bindings, and
-  `keep/keep-mobile/target` so run 2 exercises a cold Rust rebuild,
-  then re-invokes `./build-rust.sh` and `./gradlew assembleRelease`.
-- On mismatch it installs `diffoscope`, generates HTML + text reports,
-  and uploads them along with both APKs as the `diffoscope-report`
-  workflow artifact. The job fails so the regression is visible.
+  the default PR path because a release build is expensive.
+- Builds the APK exactly as `release.yml` does, inside
+  `Dockerfile.reproducible`, which owns the pinned toolchain (Rust,
+  cargo-ndk, NDK, build-tools, JDK) and derives `SOURCE_DATE_EPOCH`
+  internally. The bare runner produces a non-standard aws-lc build, so
+  the container is what makes the output match the release.
+- On `schedule`/`workflow_dispatch` it resolves the latest published
+  release tag, checks it out, and builds from that tag so the source
+  tree and `keep.version` match the downloaded APK. On a `v*` tag push it
+  builds that tag.
+- Downloads the published, developer-signed release APK and compares the
+  zip payload with `apksigcopier compare`, which ignores the signing
+  block, the same comparison F-Droid performs. A payload difference fails
+  the job so the regression is visible.
+- On labeled pull requests it builds the PR head in the container to
+  prove the reproducible path still builds, but skips the download and
+  comparison (there is no matching published APK).
+
+This verifies that the container build is deterministic and reproduces
+the published payload on the same runner. It is not an independent
+cross-environment rebuild, only F-Droid's buildserver provides that.

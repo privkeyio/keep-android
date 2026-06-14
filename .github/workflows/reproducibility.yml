@@ -16,6 +16,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# These pins are not consumed by the steps below (the build runs inside
+# Dockerfile.reproducible, which owns its own pinned toolchain), but
+# scripts/check-toolchain-pins.sh cross-validates them against the Dockerfile
+# and build.gradle.kts, so they must stay in sync.
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   NDK_VERSION: "29.0.14206865"
@@ -33,128 +37,82 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Setup keep checkout
-        uses: ./.github/actions/setup-keep
-
-      - name: Verify toolchain version pins are consistent
-        run: ./scripts/check-toolchain-pins.sh
-
-      - name: Derive SOURCE_DATE_EPOCH
-        run: |
-          SDE="$(ANDROID_REPO="$GITHUB_WORKSPACE" KEEP_REPO="$GITHUB_WORKSPACE/keep" \
-            ./scripts/derive-sde.sh)"
-          [[ "$SDE" =~ ^[0-9]+$ ]] || { echo "invalid SOURCE_DATE_EPOCH: $SDE" >&2; exit 1; }
-          echo "SOURCE_DATE_EPOCH=$SDE" >> "$GITHUB_ENV"
-          echo "Using SOURCE_DATE_EPOCH=$SDE"
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
-
-      - name: Install Android NDK and build-tools
-        run: sdkmanager --install "ndk;$NDK_VERSION" "build-tools;$BUILD_TOOLS_VERSION"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: aarch64-linux-android,x86_64-linux-android
-
-      - name: Install cargo-ndk
-        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2
-        with:
-          tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@5e2ebd065dc2488b7a6ad670704656cbbe1e8f60 # v6.1.1
-        with:
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      # Throwaway keystore for determinism verification only - never replace with real signing key.
-      - name: Generate workflow-local release keystore
-        run: |
-          KEYSTORE_OUT="${{ runner.temp }}/repro.keystore"
-          keytool -genkeypair -v \
-            -keystore "$KEYSTORE_OUT" \
-            -storetype PKCS12 \
-            -storepass reproducible \
-            -keypass reproducible \
-            -alias repro \
-            -keyalg RSA -keysize 4096 -validity 36500 \
-            -dname "CN=keep-reproducibility, O=CI, C=US"
-          echo "KEYSTORE_FILE=$KEYSTORE_OUT" >> "$GITHUB_ENV"
-          echo "KEY_ALIAS=repro" >> "$GITHUB_ENV"
-
-      - name: Build APK (run 1)
-        run: |
-          ./gradlew clean --no-daemon
-          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
-          ./build-rust.sh
-          ./gradlew assembleRelease --no-daemon
-          mkdir -p "${{ runner.temp }}/apks"
-          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build1.apk"
+      # Resolve the release tag whose published APK we compare against, then
+      # build from that exact tag (below) so the build ref and keep.version
+      # match the published artifact. On schedule/dispatch the runner checked
+      # out HEAD, which may have advanced past the latest release tag.
+      - name: Resolve release version to verify
+        id: ver
+        if: github.event_name != 'pull_request'
         env:
-          KEEP_REPO: ${{ github.workspace }}/keep
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          AWS_LC_SYS_CMAKE_BUILDER: "1"
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
-          KEYSTORE_PASSWORD: reproducible
-          KEY_PASSWORD: reproducible
-
-      - name: Build APK (run 2)
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          ./gradlew clean --no-daemon
-          rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi keep/keep-mobile/target
-          ./build-rust.sh
-          ./gradlew assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/apks/build2.apk"
-        env:
-          KEEP_REPO: ${{ github.workspace }}/keep
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          AWS_LC_SYS_CMAKE_BUILDER: "1"
-          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
-          KEYSTORE_PASSWORD: reproducible
-          KEY_PASSWORD: reproducible
-
-      - name: Compare APK checksums
-        id: compare
-        run: |
-          cd "${{ runner.temp }}/apks"
-          sha256sum build1.apk build2.apk | tee checksums.txt
-          H1=$(sha256sum build1.apk | awk '{print $1}')
-          H2=$(sha256sum build2.apk | awk '{print $1}')
-          if [ "$H1" != "$H2" ]; then
-            echo "mismatch=true" >> "$GITHUB_OUTPUT"
-            echo "::error::APK reproducibility check failed: $H1 != $H2"
+          if [ "$EVENT_NAME" = "push" ]; then
+            VERSION="$REF_NAME"
+          else
+            VERSION="$(curl -fsSL "https://api.github.com/repos/${REPOSITORY}/releases/latest" | jq -r .tag_name)"
+          fi
+          if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+            echo "::error::could not determine release version to verify" >&2
             exit 1
           fi
-          echo "APKs are bit-for-bit identical: $H1"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Will verify reproduction of $VERSION"
 
-      - name: Install diffoscope
-        if: failure() && steps.compare.outputs.mismatch == 'true'
+      # Build from the published tag (not HEAD) so the source tree and
+      # keep.version match the APK we downloaded. Skipped on PRs, which build
+      # the PR head to prove the reproducible path still builds.
+      - name: Check out published release tag
+        if: github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends diffoscope
+          git fetch --no-tags --depth 1 origin "+refs/tags/${VERSION}:refs/tags/${VERSION}"
+          git checkout -f "refs/tags/${VERSION}"
+          echo "Building from tag ${VERSION} (keep.version $(tr -d '[:space:]' < keep.version))"
 
-      - name: Run diffoscope
-        if: failure() && steps.compare.outputs.mismatch == 'true'
+      # Build the APK exactly as release.yml does: inside the pinned
+      # Dockerfile.reproducible container. This verifies that the container
+      # build is deterministic and reproduces the published release payload
+      # when run here. It is NOT an independent cross-environment rebuild: it
+      # runs on the same GitHub runner with the same Dockerfile, so it does not
+      # by itself prove that F-Droid's buildserver will reproduce the bytes. The
+      # bare GitHub runner produces a non-standard aws-lc build, which is why
+      # this builds in the pinned container rather than directly on the runner.
+      - name: Build APK in pinned container
         run: |
-          cd "${{ runner.temp }}/apks"
-          diffoscope --html diffoscope.html --text diffoscope.txt build1.apk build2.apk || true
+          DOCKER_BUILDKIT=1 docker build \
+            --build-arg KEEP_SHA="$(tr -d '[:space:]' < keep.version)" \
+            --output type=local,dest=out \
+            -f Dockerfile.reproducible .
+          test -f out/app-release.apk
 
-      - name: Upload diffoscope report
-        if: failure() && steps.compare.outputs.mismatch == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: diffoscope-report
-          path: |
-            ${{ runner.temp }}/apks/diffoscope.html
-            ${{ runner.temp }}/apks/diffoscope.txt
-            ${{ runner.temp }}/apks/checksums.txt
-            ${{ runner.temp }}/apks/build1.apk
-            ${{ runner.temp }}/apks/build2.apk
+      - name: Install apksigcopier
+        if: github.event_name != 'pull_request'
+        run: pipx install 'apksigcopier==1.1.1'
+
+      # Verify the container build reproduces the published, developer-signed
+      # release APK. apksigcopier compares the zip payload while ignoring the
+      # signing block, exactly the comparison F-Droid performs. Skipped on PRs,
+      # which have no matching published APK (the container build above already
+      # proves the reproducible path still builds).
+      - name: Reproduce published release
+        if: github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          echo "Verifying reproduction of $VERSION"
+          URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}/keep-android-${VERSION}.apk"
+          # On a tag push this runs concurrently with release.yml, so the asset
+          # may not be published yet. Wait for it (up to ~20 min).
+          for i in $(seq 1 40); do
+            if curl -fsSL -o published.apk "$URL"; then break; fi
+            echo "Published APK not available yet (attempt $i/40); waiting 30s..."
+            sleep 30
+          done
+          test -s published.apk
+          apksigcopier compare published.apk out/app-release.apk
+          echo "Container build reproduces the published $VERSION APK (payload identical)."
