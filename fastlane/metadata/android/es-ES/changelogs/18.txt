@@ -1,0 +1,6 @@
+NIP-55 / NIP-46 signer improvements:
+- Batch / multi-event signing: approve many events at once
+- Pre-authorize a permission bundle when an app connects
+- Per-relay scoping for NIP-42 relay auth, plus a relay-auth allowlist
+- Spec-correct handling of declined requests
+- Security hardening: permission policy, audit chain, rate limiting, and caller verification moved into the audited Rust core
