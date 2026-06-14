@@ -1,0 +1,1 @@
+Build now targets the same environment F-Droid uses (Debian trixie, OpenJDK 21) so the release reproduces on F-Droid. No functional changes since 1.1.0.

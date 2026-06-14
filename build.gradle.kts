@@ -4,7 +4,7 @@ plugins {
     id("com.google.devtools.ksp") version "2.3.9" apply false
 }
 
-val expectedJavaMajor = 17
+val expectedJavaMajor = 21
 val expectedNdkVersion = "29.0.14206865"
 
 fun validateSourceDateEpoch(sde: String): String {
@@ -45,7 +45,7 @@ gradle.taskGraph.whenReady {
         throw GradleException(
             "JDK $expectedJavaMajor is required but Gradle is running on ${System.getProperty("java.version")} " +
             "(java.home=${System.getProperty("java.home")}). " +
-            "Fix: set JAVA_HOME to a JDK $expectedJavaMajor install (e.g. Temurin 17) and re-run."
+            "Fix: set JAVA_HOME to a JDK $expectedJavaMajor install (e.g. Temurin 21) and re-run."
         )
     }
 

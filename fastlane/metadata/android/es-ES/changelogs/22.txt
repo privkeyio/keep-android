@@ -1,0 +1,1 @@
+La compilación ahora usa el mismo entorno que F-Droid (Debian trixie, OpenJDK 21) para que la versión sea reproducible en F-Droid. Sin cambios funcionales desde la 1.1.0.

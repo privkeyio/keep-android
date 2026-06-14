@@ -13,8 +13,8 @@ android {
         applicationId = "io.privkey.keep"
         minSdk = 33
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.1.3"
+        versionCode = 22
+        versionName = "1.1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

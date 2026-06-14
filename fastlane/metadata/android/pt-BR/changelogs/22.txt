@@ -1,0 +1,1 @@
+O build agora usa o mesmo ambiente que o F-Droid (Debian trixie, OpenJDK 21) para que a versão seja reproduzível no F-Droid. Sem mudanças funcionais desde a 1.1.0.

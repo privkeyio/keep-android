@@ -81,7 +81,7 @@ extract_unique() {
 }
 
 # release.yml and reproducibility.yml build inside Dockerfile.reproducible
-# (which pins its own JDK via ARG JDK_VERSION, checked below as
+# (which pins its own JDK via ARG JDK_MAJOR, checked below as
 # DOCKER_JDK_MAJOR), so they have no setup-java step to extract from. ci.yml
 # still builds on the runner.
 CI_JDK=$(extract_unique "$CI_YML" "^[[:space:]]+java-version: '([0-9]+)'")
@@ -113,7 +113,7 @@ if [ -f "$DOCKERFILE" ]; then
     DOCKER_CARGO_NDK=$(extract "$DOCKERFILE" 'ARG CARGO_NDK_VERSION=('"$SEMVER"')')
     DOCKER_NDK=$(extract "$DOCKERFILE" 'ARG ANDROID_NDK_VERSION=('"$NDK_VER"')')
     DOCKER_BUILD_TOOLS=$(extract "$DOCKERFILE" 'ARG ANDROID_BUILD_TOOLS_VERSION=('"$NDK_VER"')')
-    DOCKER_JDK_MAJOR=$(extract "$DOCKERFILE" 'ARG JDK_VERSION=([0-9]+)\.[0-9]+\.[0-9]+\+[0-9]+')
+    DOCKER_JDK_MAJOR=$(extract "$DOCKERFILE" 'ARG JDK_MAJOR=([0-9]+)')
     DOCKER_ANDROID_PLATFORM=$(extract "$DOCKERFILE" 'ARG ANDROID_PLATFORM=android-([0-9]+)')
     check_equal "Dockerfile rust version"        "$BR_RUST"        "$DOCKER_RUST"
     check_equal "Dockerfile cargo-ndk version"   "$BR_CARGO_NDK"   "$DOCKER_CARGO_NDK"
