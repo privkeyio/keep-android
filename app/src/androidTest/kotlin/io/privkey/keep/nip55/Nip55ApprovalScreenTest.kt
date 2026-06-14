@@ -25,16 +25,17 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class Nip55ApprovalScreenTest {
 
+    // createComposeRule() is deprecated in favor of the v2 API; the classic rule
+    // is intentional here, and the project builds with -Werror.
+    @Suppress("DEPRECATION")
     @get:Rule
     val compose = createComposeRule()
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    private fun signEventRequest(
-        content: String = """{"kind":1,"content":"gm","tags":[]}"""
-    ) = Nip55Request(
+    private fun signEventRequest() = Nip55Request(
         requestType = Nip55RequestType.SIGN_EVENT,
-        content = content,
+        content = """{"kind":1,"content":"gm","tags":[]}""",
         pubkey = null,
         returnType = "signature",
         compressionType = "none",

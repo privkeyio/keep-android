@@ -21,6 +21,9 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class BiometricUnlockScreenTest {
 
+    // createComposeRule() is deprecated in favor of the v2 API; the classic rule
+    // is intentional here, and the project builds with -Werror.
+    @Suppress("DEPRECATION")
     @get:Rule
     val compose = createComposeRule()
 
