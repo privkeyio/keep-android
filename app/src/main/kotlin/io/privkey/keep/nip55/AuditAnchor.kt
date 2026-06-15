@@ -41,6 +41,13 @@ internal fun resolveChainVerification(
     if (entryCount < anchor.entryCount || latestEntryHash != anchor.latestEntryHash) {
         return ChainVerificationResult.Truncated(latestEntryId)
     }
+    // Anchor matches the DB exactly (count + tail). A Rust Truncated here means the head
+    // row's previousHash dangles, a sanctioned head prune whose post-commit anchor we
+    // already advanced, not an attack: deleting head rows drops count below the anchor
+    // (caught above) and altering the tail fails the tail-hash check above. The keystore
+    // anchor (which a Room-write attacker cannot forge) vouches that this exact (count,
+    // tail) is the pruned state, so trust it over the dangling-head walk.
+    if (rustResult is ChainVerificationResult.Truncated) return ChainVerificationResult.Valid
     return rustResult
 }
 
@@ -64,14 +71,21 @@ internal fun shouldSeed(anchor: AuditAnchor?, rustResult: ChainVerificationResul
  * forged extra row cannot carry a valid HMAC [Nip55AuditLog.entryHash], so it is
  * still caught by the Rust walk at verify time. Callers that have a Rust result
  * should additionally require [rustIntact] before treating this as benign.
+ *
+ * A legitimate crash-resumed append always carries a real (non-empty) HMAC
+ * [latestEntryHash]; an all-legacy head injection against the empty zero anchor has
+ * an empty tail, so requiring [latestEntryHash] non-empty makes that injection fall
+ * through to resolveChainVerification → Tampered instead of being anchored as history.
  */
 internal fun isResumableAppend(
     anchor: AuditAnchor,
     entryCount: Long,
     newestPreviousHash: String?,
+    latestEntryHash: String,
     rustIntact: Boolean
 ): Boolean =
     rustIntact &&
+        latestEntryHash.isNotEmpty() &&
         entryCount == anchor.entryCount + 1L &&
         // The first row after a reset chains onto the empty zero anchor: its
         // previousHash is null, which must read as equal to the "" anchor tail.

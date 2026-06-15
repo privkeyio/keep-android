@@ -110,13 +110,42 @@ class AuditAnchorTest {
     }
 
     @Test
-    fun rustTruncatedPassesThroughWhenAnchorMatches() {
-        // Anchor is consistent but the keyed walk itself found a break: surface it.
+    fun sanctionedHeadPruneTruncatedIsDowngradedToValid() {
+        // FIX 4: anchor matches the DB EXACTLY (count + tail), but the head prune dropped
+        // the oldest rows so the new head's previousHash dangles and the Rust walk reports
+        // Truncated. The keystore anchor vouches this exact (count, tail) is the pruned
+        // state, so it must be trusted over the dangling-head walk: downgrade to Valid.
+        assertEquals(
+            ChainVerificationResult.Valid,
+            resolveChainVerification(
+                false, AuditAnchor("hashB", 3L), 3L, "hashB", 3L,
+                ChainVerificationResult.Truncated(3L)
+            )
+        )
+    }
+
+    @Test
+    fun truncatedNotDowngradedWhenCountBelowAnchor() {
+        // FIX 4 safety: a real tail truncation drops the count below the anchor. Even with
+        // a Rust Truncated this must stay Truncated, never be laundered into Valid.
         assertEquals(
             ChainVerificationResult.Truncated(2L),
             resolveChainVerification(
-                false, AuditAnchor("hashB", 2L), 2L, "hashB", 2L,
+                false, AuditAnchor("hashB", 3L), 2L, "hashA", 2L,
                 ChainVerificationResult.Truncated(2L)
+            )
+        )
+    }
+
+    @Test
+    fun truncatedNotDowngradedWhenTailHashDiffers() {
+        // FIX 4 safety: the count matches but the tail hash no longer matches the anchor
+        // (tail row swapped). The tail-mismatch branch must catch it before the downgrade.
+        assertEquals(
+            ChainVerificationResult.Truncated(3L),
+            resolveChainVerification(
+                false, AuditAnchor("hashB", 3L), 3L, "hashX", 3L,
+                ChainVerificationResult.Truncated(3L)
             )
         )
     }
@@ -162,33 +191,50 @@ class AuditAnchorTest {
     fun resumableAppendWhenOneAheadChainedAndIntact() {
         // DB one row ahead, newest row chained onto the anchored tail, Rust intact:
         // a legit append whose post-commit anchor advance was lost to a crash.
-        assertTrue(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", rustIntact = true))
+        assertTrue(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", "hashC", rustIntact = true))
     }
 
     @Test
     fun notResumableWhenNotChainedOntoAnchor() {
         // Newest row does not link to the anchored tail (e.g. head fabrication shifts it).
-        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashX", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashX", "hashC", rustIntact = true))
     }
 
     @Test
     fun notResumableWhenRustNotIntact() {
         // A forged extra row that the Rust walk rejects must never be healed.
-        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", rustIntact = false))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 3L, "hashB", "hashC", rustIntact = false))
     }
 
     @Test
     fun notResumableWhenNotExactlyOneAhead() {
-        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 2L, "hashB", rustIntact = true))
-        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 4L, "hashB", rustIntact = true))
-        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 1L, "hashB", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 2L, "hashB", "hashC", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 4L, "hashB", "hashC", rustIntact = true))
+        assertFalse(isResumableAppend(AuditAnchor("hashB", 2L), 1L, "hashB", "hashC", rustIntact = true))
     }
 
     @Test
     fun resumableFirstAppendAfterResetWithNullPreviousHash() {
         // After a clear/reset the zero anchor holds "" as the tail; the first real row
-        // chains onto it with a null previousHash, which must read as resumable.
-        assertTrue(isResumableAppend(AuditAnchor("", 0L), 1L, null, rustIntact = true))
+        // chains onto it with a null previousHash and a real (non-empty) HMAC hash,
+        // which must read as resumable.
+        assertTrue(isResumableAppend(AuditAnchor("", 0L), 1L, null, "hashA", rustIntact = true))
+    }
+
+    @Test
+    fun notResumableWhenEmptyTailLegacyInjectionAgainstZeroAnchor() {
+        // FIX 1: a single attacker-injected legacy row against the empty zero anchor has
+        // an empty entryHash. It otherwise looks like a first post-reset append (count 1,
+        // null previousHash, Rust excuses it as legacy), so the empty-tail guard is the
+        // only thing stopping the forged history from being anchored. Must be rejected.
+        assertFalse(isResumableAppend(AuditAnchor("", 0L), 1L, null, "", rustIntact = true))
+    }
+
+    @Test
+    fun resumableWhenNonEmptyTailFirstAppendStillHeals() {
+        // The legit crash-resumed first append carries a real HMAC tail, so the FIX 1
+        // guard does not disturb the healing path.
+        assertTrue(isResumableAppend(AuditAnchor("", 0L), 1L, null, "realHmac", rustIntact = true))
     }
 
     @Test

@@ -48,7 +48,16 @@ class AndroidSigningAuditStorage(
             previousHash = prevHashBytes?.toHexString(),
             entryHash = hashBytes.toHexString()!!
         )
-        runBlocking(Dispatchers.IO) { auditWriter.append({ log }) }
+        runBlocking(Dispatchers.IO) {
+            auditWriter.append({ roomPrev ->
+                // Invariant: Rust's chain tip (log.previousHash) must equal the Room tail the
+                // writer sees, or the anchor's resumable-append reconciliation would mis-fire.
+                check(log.previousHash == roomPrev) {
+                    "Signing-audit previousHash desync: rust=${log.previousHash} room=$roomPrev"
+                }
+                log
+            })
+        }
     }
 
     override fun loadEntries(limit: UInt?): List<String> {

@@ -57,11 +57,26 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         Nip55Database.resetAuditAnchor()
     }
 
-    // Atomic read of rows + anchor under the same lock every write takes, so no
-    // append/prune/clear can interleave between the two reads and skew the snapshot.
-    suspend fun snapshot(): Pair<List<Nip55AuditLog>, AuditAnchor?> = mutex.withLock {
+    // Atomic read of rows + anchor + tamper flag under the same lock every write takes,
+    // so no append/prune/clear can interleave between the reads and skew the snapshot.
+    suspend fun snapshot(): Triple<List<Nip55AuditLog>, AuditAnchor?, Boolean> = mutex.withLock {
         reconcilePendingClear()
-        auditDao.getAllOrdered() to Nip55Database.getAuditAnchor()
+        Triple(
+            auditDao.getAllOrdered(),
+            Nip55Database.getAuditAnchor(),
+            Nip55Database.isAuditTamperDetected()
+        )
+    }
+
+    // Compare-and-set the anchor under the write lock: only pin to (expectedHash, expectedCount)
+    // if the live DB still matches the snapshot the caller reconciled. A concurrent append/prune
+    // that already advanced the anchor since the snapshot wins; we must never roll it back.
+    suspend fun reconcileAnchor(expectedCount: Long, expectedHash: String) = mutex.withLock {
+        val liveTail = auditDao.getLastEntryHash() ?: ""
+        val liveCount = auditDao.getCount().toLong()
+        if (liveCount == expectedCount && liveTail == expectedHash) {
+            Nip55Database.setAuditAnchor(AuditAnchor(expectedHash, expectedCount))
+        }
     }
 
     // Finish a clear() whose post-commit anchor reset was lost to a crash: an empty DB
@@ -83,7 +98,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         if (tail == anchor.latestEntryHash && count == anchor.entryCount) return false
         // A legit append whose post-commit anchor advance was lost to a crash leaves the
         // DB one row ahead, chained onto the anchored tail. Re-pin without flagging.
-        if (isResumableAppend(anchor, count, auditDao.getLastPreviousHash(), rustIntact = true)) {
+        if (isResumableAppend(anchor, count, auditDao.getLastPreviousHash(), tail, rustIntact = true)) {
             return false
         }
         // Likewise a crash-interrupted head prune: fewer rows but the same tail. The Rust

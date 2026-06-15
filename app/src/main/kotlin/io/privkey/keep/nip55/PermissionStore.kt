@@ -213,13 +213,12 @@ class PermissionStore(private val database: Nip55Database) {
     // Chain verification (keyed-HMAC walk: legacy/truncated/broken/tampered) lives
     // in Rust; Android supplies the ordered rows and the keystore HMAC key.
     suspend fun verifyAuditChain(): ChainVerificationResult {
-        val tamperDetected = Nip55Database.isAuditTamperDetected()
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
-        // Read rows + anchor atomically under the audit write lock so no concurrent
-        // append/prune/clear can interleave between the two reads. The Rust walk and all
-        // reconciliation then run outside the lock on this consistent snapshot.
-        val (entries, anchor) = auditWriter.snapshot()
+        // Read rows + anchor + tamper flag atomically under the audit write lock so no
+        // concurrent append/prune/clear can interleave between the reads. The Rust walk and
+        // all reconciliation then run outside the lock on this consistent snapshot.
+        val (entries, anchor, tamperDetected) = auditWriter.snapshot()
         val rustResult = nip55VerifyAuditChain(
             entries.map { it.toRustAuditEntry() }, hmacKey
         ).toChainVerificationResult()
@@ -231,7 +230,7 @@ class PermissionStore(private val database: Nip55Database) {
             // First verify on an upgraded/fresh install: trust-on-first-use seed the
             // anchor from the current intact tail rather than flagging it.
             if (shouldSeed(anchor, rustResult)) {
-                Nip55Database.setAuditAnchor(AuditAnchor(latestHash, count))
+                auditWriter.reconcileAnchor(count, latestHash)
             }
             return rustResult
         }
@@ -240,16 +239,16 @@ class PermissionStore(private val database: Nip55Database) {
         // A crash between the row insert and the post-commit anchor advance leaves a legit
         // row durable with the anchor trailing by one; heal it rather than report Tampered.
         if (!tamperDetected &&
-            isResumableAppend(anchor, count, entries.lastOrNull()?.previousHash, rustIntact)
+            isResumableAppend(anchor, count, entries.lastOrNull()?.previousHash, latestHash, rustIntact)
         ) {
-            Nip55Database.setAuditAnchor(AuditAnchor(latestHash, count))
+            auditWriter.reconcileAnchor(count, latestHash)
             return rustResult
         }
         // A crash between a head prune commit and its anchor advance leaves fewer rows with
         // the tail unchanged; re-pin to the lower count. Tail truncation changes the tail
         // hash, so it falls through to resolveChainVerification and is still flagged.
         if (!tamperDetected && isResumablePrune(anchor, count, latestHash, rustIntact)) {
-            Nip55Database.setAuditAnchor(AuditAnchor(latestHash, count))
+            auditWriter.reconcileAnchor(count, latestHash)
             return rustResult
         }
         return resolveChainVerification(
