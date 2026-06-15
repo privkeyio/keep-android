@@ -130,6 +130,9 @@ interface Nip55AuditLogDao {
     @Query("SELECT entryHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
     suspend fun getLastEntryHash(): String?
 
+    @Query("SELECT previousHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
+    suspend fun getLastPreviousHash(): String?
+
     @Query("SELECT * FROM nip55_audit_log ORDER BY id ASC")
     suspend fun getAllOrdered(): List<Nip55AuditLog>
 

@@ -232,7 +232,7 @@ class KeepMobileApp : Application() {
 
     private fun initializeSigningAuditLog(db: Nip55Database) {
         runCatching {
-            val storage = AndroidSigningAuditStorage(db.auditLogDao())
+            val storage = AndroidSigningAuditStorage(db)
             signingAuditLog = SigningAuditLog(storage)
         }.onFailure { e ->
             Log.e(TAG, "Failed to initialize SigningAuditLog: ${e::class.simpleName}")

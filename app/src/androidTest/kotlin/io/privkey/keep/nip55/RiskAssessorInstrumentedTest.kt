@@ -221,6 +221,7 @@ class RiskAssessorInstrumentedTest {
         override suspend fun getDistinctCallers(): List<String> = emptyList()
         override suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int): Long? = null
         override suspend fun getLastEntryHash(): String? = null
+        override suspend fun getLastPreviousHash(): String? = null
         override suspend fun getAllOrdered(): List<Nip55AuditLog> = emptyList()
         override suspend fun getCount(): Int = 0
         override suspend fun countByPackageAndKind(packageName: String, eventKind: Int): Int = kindCount

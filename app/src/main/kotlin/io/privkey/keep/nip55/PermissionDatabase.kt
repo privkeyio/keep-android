@@ -27,9 +27,19 @@ abstract class Nip55Database : RoomDatabase() {
         private const val PREFS_NAME = "nip55_db_prefs"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
         private const val KEY_HMAC_SECRET = "hmac_secret"
+        private const val KEY_AUDIT_ANCHOR_HASH = "audit_anchor_hash"
+        private const val KEY_AUDIT_ANCHOR_COUNT = "audit_anchor_count"
+        private const val KEY_AUDIT_TAMPER = "audit_tamper_detected"
+        private const val KEY_AUDIT_CLEAR_PENDING = "audit_clear_pending"
 
         @Volatile
         private var hmacKey: ByteArray? = null
+
+        @Volatile
+        private var appContext: Context? = null
+
+        @Volatile
+        private var auditPrefs: android.content.SharedPreferences? = null
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -126,7 +136,9 @@ abstract class Nip55Database : RoomDatabase() {
         private val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
 
         private fun getEncryptedPrefs(context: Context) =
-            KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+            auditPrefs ?: synchronized(this) {
+                auditPrefs ?: KeystoreEncryptedPrefs.create(context, PREFS_NAME).also { auditPrefs = it }
+            }
 
         private fun getOrCreateKey(context: Context, prefKey: String, commit: Boolean = false): ByteArray {
             val prefs = getEncryptedPrefs(context)
@@ -157,9 +169,72 @@ abstract class Nip55Database : RoomDatabase() {
 
         fun getHmacKey(): ByteArray? = hmacKey
 
+        // Audit tail anchor lives in the Keystore-backed encrypted prefs (same trust
+        // tier as the HMAC key), out of reach of an attacker with Room write access.
+        fun getAuditAnchor(): AuditAnchor? {
+            val ctx = appContext ?: return null
+            val prefs = getEncryptedPrefs(ctx)
+            if (!prefs.contains(KEY_AUDIT_ANCHOR_COUNT)) return null
+            val count = prefs.getLong(KEY_AUDIT_ANCHOR_COUNT, -1L)
+            if (count < 0L) return null
+            return AuditAnchor(prefs.getString(KEY_AUDIT_ANCHOR_HASH, "") ?: "", count)
+        }
+
+        fun setAuditAnchor(anchor: AuditAnchor) {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit()
+                .putString(KEY_AUDIT_ANCHOR_HASH, anchor.latestEntryHash)
+                .putLong(KEY_AUDIT_ANCHOR_COUNT, anchor.entryCount)
+                .commit()
+        }
+
+        // Sticky evidence that the audit table was mutated out-of-band between two
+        // sanctioned writes; once set it stays set until a full clearAuditLog reset.
+        fun isAuditTamperDetected(): Boolean {
+            val ctx = appContext ?: return false
+            return getEncryptedPrefs(ctx).getBoolean(KEY_AUDIT_TAMPER, false)
+        }
+
+        fun setAuditTamperDetected() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_TAMPER, true).commit()
+        }
+
+        // Recoverable intent marker for clear(): the tail goes empty, which is otherwise
+        // indistinguishable from total truncation, so a crash between the clear commit and
+        // the anchor reset needs a Keystore-backed (attacker-unforgeable) breadcrumb to
+        // prove the empty DB is a sanctioned clear rather than a wipe.
+        fun isAuditClearPending(): Boolean {
+            val ctx = appContext ?: return false
+            return getEncryptedPrefs(ctx).getBoolean(KEY_AUDIT_CLEAR_PENDING, false)
+        }
+
+        fun setAuditClearPending() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_CLEAR_PENDING, true).commit()
+        }
+
+        fun clearAuditClearPending() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_CLEAR_PENDING, false).commit()
+        }
+
+        // Single commit so the anchor, the sticky flag and the clear-pending marker can
+        // never diverge on reset.
+        fun resetAuditAnchor() {
+            val ctx = appContext ?: return
+            getEncryptedPrefs(ctx).edit()
+                .putString(KEY_AUDIT_ANCHOR_HASH, "")
+                .putLong(KEY_AUDIT_ANCHOR_COUNT, 0L)
+                .putBoolean(KEY_AUDIT_TAMPER, false)
+                .putBoolean(KEY_AUDIT_CLEAR_PENDING, false)
+                .commit()
+        }
+
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
+                    appContext = context.applicationContext
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
                     val factory = SupportOpenHelperFactory(passphrase)
