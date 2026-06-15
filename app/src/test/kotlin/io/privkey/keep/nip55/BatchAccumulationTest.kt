@@ -98,4 +98,25 @@ class BatchAccumulationTest {
             decide(nearFull, app, Nip55RequestType.SIGN_EVENT)
         )
     }
+
+    @Test
+    fun beyondCapStillDrops() {
+        // Defensive: a pending list that has somehow exceeded the cap must keep dropping,
+        // not wrap back to accumulating.
+        val overFull = List(cap + 1) { Nip55RequestType.SIGN_EVENT }
+        assertEquals(
+            BatchAccumulation.DROP_OVER_CAP,
+            decide(overFull, app, Nip55RequestType.SIGN_EVENT)
+        )
+    }
+
+    @Test
+    fun pendingBatchContainingGetPublicKeyIsNeverBatchedInto() {
+        // The all{} guard must reject a new request even when get_public_key is not the
+        // sole pending item, so a stray get_public_key can never be co-signed in a batch.
+        assertEquals(
+            BatchAccumulation.RESET,
+            decide(listOf(Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY), app, Nip55RequestType.SIGN_EVENT)
+        )
+    }
 }

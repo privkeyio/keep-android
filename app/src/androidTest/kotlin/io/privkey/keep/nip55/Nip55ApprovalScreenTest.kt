@@ -103,6 +103,67 @@ class Nip55ApprovalScreenTest {
     }
 
     @Test
+    fun approve_hidesBothButtons_soASecondTapCannotDoubleSubmit() {
+        var approveCount = 0
+        var rejectCount = 0
+
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    onApprove = { _, _, _ -> approveCount++ },
+                    onReject = { _, _ -> rejectCount++ }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_approve))
+            .performClick()
+        compose.waitForIdle()
+
+        // isLoading flips true on the first tap and the footer swaps to a progress
+        // spinner, so neither button remains in the tree: a second tap (or a Reject
+        // after an Approve) can never commit a second decision.
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_approve))
+            .assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_reject))
+            .assertDoesNotExist()
+        assertEquals("Approve fires exactly once", 1, approveCount)
+        assertEquals("Reject must not fire after Approve", 0, rejectCount)
+    }
+
+    @Test
+    fun reject_hidesBothButtons_soASecondTapCannotDoubleSubmit() {
+        var approveCount = 0
+        var rejectCount = 0
+
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = signEventRequest(),
+                    callerPackage = "com.example.client",
+                    callerVerified = false,
+                    onApprove = { _, _, _ -> approveCount++ },
+                    onReject = { _, _ -> rejectCount++ }
+                )
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_reject))
+            .performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_reject))
+            .assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_approve))
+            .assertDoesNotExist()
+        assertEquals("Reject fires exactly once", 1, rejectCount)
+        assertEquals("Approve must not fire after Reject", 0, approveCount)
+    }
+
+    @Test
     fun firstUseCaller_canRememberChoice_showsDurationSelector() {
         compose.setContent {
             KeepAndroidTheme {

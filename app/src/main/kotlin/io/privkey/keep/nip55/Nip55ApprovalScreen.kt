@@ -240,13 +240,21 @@ fun ApprovalScreen(
             approveLabel = stringResource(R.string.connections_nip55_approve),
             isLoading = isLoading,
             onReject = {
-                isLoading = true
-                onReject(effectiveDuration, if (relayAuthHost != null) relayScope else null)
+                // Idempotency guard: a same-frame second tap (or an approve-then-reject)
+                // landing before the footer recomposes to a spinner must not commit a
+                // second decision. Protects the consent-integrity boundary independent of
+                // recomposition timing.
+                if (!isLoading) {
+                    isLoading = true
+                    onReject(effectiveDuration, if (relayAuthHost != null) relayScope else null)
+                }
             },
             onApprove = {
-                isLoading = true
-                val granted = declaredPermissions.filterIndexed { i, _ -> permissionChecked.getOrElse(i) { false } }
-                onApprove(effectiveDuration, granted, if (relayAuthHost != null) relayScope else null)
+                if (!isLoading) {
+                    isLoading = true
+                    val granted = declaredPermissions.filterIndexed { i, _ -> permissionChecked.getOrElse(i) { false } }
+                    onApprove(effectiveDuration, granted, if (relayAuthHost != null) relayScope else null)
+                }
             }
         )
     }
