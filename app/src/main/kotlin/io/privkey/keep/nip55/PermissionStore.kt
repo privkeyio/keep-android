@@ -222,9 +222,10 @@ class PermissionStore(private val database: Nip55Database) {
         val rustResult = nip55VerifyAuditChain(
             entries.map { it.toRustAuditEntry() }, hmacKey
         ).toChainVerificationResult()
+        val latest = entries.lastOrNull()
         val count = entries.size.toLong()
-        val latestHash = entries.lastOrNull()?.entryHash ?: ""
-        val latestId = entries.lastOrNull()?.id ?: 0L
+        val latestHash = latest?.entryHash ?: ""
+        val latestId = latest?.id ?: 0L
         if (anchor == null) {
             if (tamperDetected) return ChainVerificationResult.Tampered(latestId)
             // First verify on an upgraded/fresh install: trust-on-first-use seed the
@@ -239,7 +240,7 @@ class PermissionStore(private val database: Nip55Database) {
         // A crash between the row insert and the post-commit anchor advance leaves a legit
         // row durable with the anchor trailing by one; heal it rather than report Tampered.
         if (!tamperDetected &&
-            isResumableAppend(anchor, count, entries.lastOrNull()?.previousHash, latestHash, rustIntact)
+            isResumableAppend(anchor, count, latest?.previousHash, latestHash, rustIntact)
         ) {
             auditWriter.reconcileAnchor(count, latestHash)
             return rustResult

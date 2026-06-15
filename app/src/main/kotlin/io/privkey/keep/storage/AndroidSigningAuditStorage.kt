@@ -52,8 +52,12 @@ class AndroidSigningAuditStorage(
             auditWriter.append({ roomPrev ->
                 // Invariant: Rust's chain tip (log.previousHash) must equal the Room tail the
                 // writer sees, or the anchor's resumable-append reconciliation would mis-fire.
-                check(log.previousHash == roomPrev) {
-                    "Signing-audit previousHash desync: rust=${log.previousHash} room=$roomPrev"
+                // Throw the uniffi-declared StorageException (not check()'s IllegalStateException,
+                // which an attacker-triggered desync would surface as a fatal UnexpectedUniFFICallbackError).
+                if (log.previousHash != roomPrev) {
+                    throw KeepMobileException.StorageException(
+                        "Signing-audit previousHash desync: rust=${log.previousHash} room=$roomPrev"
+                    )
                 }
                 log
             })
