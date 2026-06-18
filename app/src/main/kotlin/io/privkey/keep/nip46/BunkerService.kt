@@ -113,6 +113,14 @@ class BunkerService : Service() {
             current()?.pendingAuthSaves?.remove(pubkey.lowercase())
         }
 
+        internal fun cacheAuthorizedClient(pubkey: String) {
+            current()?.authorizedClientsCache?.add(pubkey.lowercase())
+        }
+
+        internal fun uncacheAuthorizedClient(pubkey: String) {
+            current()?.authorizedClientsCache?.remove(pubkey.lowercase())
+        }
+
         internal fun revokeClientInEngine(pubkey: String) {
             current()?.authorizedClientsCache?.remove(pubkey.lowercase())
             val handler = current()?.bunkerHandler ?: return

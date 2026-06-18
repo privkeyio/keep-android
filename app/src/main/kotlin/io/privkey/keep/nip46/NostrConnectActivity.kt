@@ -171,7 +171,10 @@ class NostrConnectActivity : FragmentActivity() {
                             }
                         }
                     }
-                    evicted.forEach { runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, it) } }
+                    evicted.forEach {
+                        runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, it) }
+                        BunkerService.uncacheAuthorizedClient(it)
+                    }
 
                     Nip46ClientStore.removeFromDenylist(this@NostrConnectActivity, request.clientPubkey)
 
@@ -211,6 +214,7 @@ class NostrConnectActivity : FragmentActivity() {
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
                     runCatching { Nip46ClientStore.addToDenylist(this@NostrConnectActivity, request.clientPubkey) }
                     BunkerService.forgetPendingAuth(request.clientPubkey)
+                    BunkerService.uncacheAuthorizedClient(request.clientPubkey)
                     if (permissionStore != null) {
                         val callerPackage = "nip46:${request.clientPubkey}"
                         for (perm in request.permissions) {
@@ -223,6 +227,8 @@ class NostrConnectActivity : FragmentActivity() {
                 finish()
                 return@launch
             }
+
+            BunkerService.cacheAuthorizedClient(request.clientPubkey)
 
             BunkerService.current()?.processQueuedNostrConnectRequests()
                 ?: BunkerService.start(this@NostrConnectActivity)
