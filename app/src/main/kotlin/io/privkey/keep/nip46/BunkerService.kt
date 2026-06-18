@@ -114,6 +114,7 @@ class BunkerService : Service() {
         }
 
         internal fun revokeClientInEngine(pubkey: String) {
+            current()?.authorizedClientsCache?.remove(pubkey.lowercase())
             val handler = current()?.bunkerHandler ?: return
             try {
                 handler.revokeClient(pubkey)
@@ -124,6 +125,7 @@ class BunkerService : Service() {
         }
 
         internal fun revokeAllClientsInEngine() {
+            current()?.authorizedClientsCache?.clear()
             val handler = current()?.bunkerHandler ?: return
             try {
                 handler.revokeAllClients()
