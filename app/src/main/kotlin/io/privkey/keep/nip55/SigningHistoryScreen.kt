@@ -3,9 +3,10 @@ package io.privkey.keep.nip55
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Warning
@@ -127,19 +128,24 @@ fun SigningHistoryScreen(
         }
     }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.connections_history_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                }
+            )
+        }
+    ) { padding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            .padding(padding)
             .padding(24.dp)
     ) {
-        Text(
-            text = stringResource(R.string.connections_history_title),
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         Text(
             text = stringResource(R.string.connections_history_subtitle),
             style = MaterialTheme.typography.bodyMedium,
@@ -183,15 +189,7 @@ fun SigningHistoryScreen(
             listState = listState,
             modifier = Modifier.weight(1f)
         )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        TextButton(
-            onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.back))
-        }
+    }
     }
 }
 
@@ -267,10 +265,10 @@ private fun SigningHistoryLogsList(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(
+            itemsIndexed(
                 items = logs,
-                key = { log -> "${log.timestamp}_${log.caller}_${log.requestType}" }
-            ) { log ->
+                key = { index, log -> "${index}_${log.timestamp}_${log.caller}_${log.requestType}" }
+            ) { _, log ->
                 AuditLogCard(log)
             }
 

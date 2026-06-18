@@ -113,7 +113,16 @@ class BunkerService : Service() {
             current()?.pendingAuthSaves?.remove(pubkey.lowercase())
         }
 
+        internal fun cacheAuthorizedClient(pubkey: String) {
+            current()?.authorizedClientsCache?.add(pubkey.lowercase())
+        }
+
+        internal fun uncacheAuthorizedClient(pubkey: String) {
+            current()?.authorizedClientsCache?.remove(pubkey.lowercase())
+        }
+
         internal fun revokeClientInEngine(pubkey: String) {
+            current()?.authorizedClientsCache?.remove(pubkey.lowercase())
             val handler = current()?.bunkerHandler ?: return
             try {
                 handler.revokeClient(pubkey)
@@ -124,6 +133,7 @@ class BunkerService : Service() {
         }
 
         internal fun revokeAllClientsInEngine() {
+            current()?.authorizedClientsCache?.clear()
             val handler = current()?.bunkerHandler ?: return
             try {
                 handler.revokeAllClients()
@@ -236,6 +246,7 @@ class BunkerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val authorizedClientsCache = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val startStopMutex = Mutex()
     private val approvalIdCounter = AtomicInteger(0)
     private val approvalIds = ConcurrentHashMap<String, Int>()
@@ -275,6 +286,9 @@ class BunkerService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
+        authorizedClientsCache.clear()
+        bunkerConfig.authorizedClients.forEach { authorizedClientsCache.add(it.lowercase()) }
 
         startForeground(NOTIFICATION_ID, createNotification(isActive = false))
 
@@ -515,11 +529,16 @@ class BunkerService : Service() {
                                 config
                             }
                         }
+                    }.onSuccess {
+                        authorizedClientsCache.add(pk)
                     }.onFailure {
                         if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
                     }
                 }
-                evicted.forEach { runCatching { Nip46ClientStore.removeClient(this@BunkerService, it) } }
+                evicted.forEach {
+                    authorizedClientsCache.remove(it.lowercase())
+                    runCatching { Nip46ClientStore.removeClient(this@BunkerService, it) }
+                }
                 if (name != null) {
                     runCatching { Nip46ClientStore.saveClient(this@BunkerService, pk, sanitizeDisplayName(name), relays) }
                 }
@@ -550,9 +569,7 @@ class BunkerService : Service() {
         val mobile = keepMobileRef
         val pk = clientPubkey.lowercase()
         val denylisted = runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)
-        val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || (mobile != null && runCatching {
-            mobile.getBunkerConfig().authorizedClients.any { it.lowercase() == pk }
-        }.getOrDefault(false)))
+        val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || authorizedClientsCache.contains(pk))
         val isConnectRequest = request.method == "connect"
 
         if (requestGateDecision(isAuthorized, isConnectRequest) == RequestGate.REJECT_UNAUTHORIZED) {

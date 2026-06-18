@@ -7,6 +7,8 @@ import io.privkey.keep.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -182,6 +184,7 @@ object DescriptorSessionManager {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WalletDescriptorScreen(
     keepMobile: KeepMobile,
@@ -299,17 +302,26 @@ fun WalletDescriptorScreen(
         }
     }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.wallet_descriptor_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                }
+            )
+        }
+    ) { padding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            .padding(padding)
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(stringResource(R.string.wallet_descriptor_title), style = MaterialTheme.typography.headlineMedium)
-        Spacer(modifier = Modifier.height(16.dp))
-
         if (!callbacksRegistered) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -375,12 +387,7 @@ fun WalletDescriptorScreen(
             onExport = { showExportDialog = it },
             onDelete = { showDeleteConfirm = it }
         )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.back))
-        }
+    }
     }
 
     if (showProposeDialog) {

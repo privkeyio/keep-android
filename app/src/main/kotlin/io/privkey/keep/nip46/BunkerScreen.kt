@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -99,6 +100,7 @@ private suspend fun addBunkerRelays(
     return Result.success(toAdd)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BunkerScreen(
     keepMobile: KeepMobile,
@@ -155,21 +157,26 @@ fun BunkerScreen(
         }
     }
 
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.connections_bunker_screen_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                }
+            )
+        }
+    ) { padding ->
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
+            .padding(padding)
             .padding(24.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = stringResource(R.string.connections_bunker_screen_title),
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         StatusBadge(bunkerStatus)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -178,7 +185,8 @@ fun BunkerScreen(
             QrCodeDisplay(
                 data = bunkerUrl,
                 label = stringResource(R.string.connections_bunker_qr_label),
-                onCopied = {
+                onTapToCopy = {
+                    copySensitiveText(context, bunkerUrl, autoClear = false)
                     Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 }
             )
@@ -187,7 +195,7 @@ fun BunkerScreen(
 
             OutlinedButton(
                 onClick = {
-                    copySensitiveText(context, bunkerUrl)
+                    copySensitiveText(context, bunkerUrl, autoClear = false)
                     Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -261,15 +269,7 @@ fun BunkerScreen(
             },
             onRevokeAll = { showRevokeAllDialog = true }
         )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        TextButton(
-            onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(stringResource(R.string.back))
-        }
+    }
     }
 
     if (showAddDialog) {
