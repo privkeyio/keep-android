@@ -23,7 +23,7 @@ import io.privkey.keep.MAX_BUNKER_RELAYS
 import io.privkey.keep.QrCodeDisplay
 import io.privkey.keep.R
 import io.privkey.keep.RELAY_URL_REGEX
-import io.privkey.keep.copyPublicText
+import io.privkey.keep.copySensitiveText
 import io.privkey.keep.isInternalHost
 import io.privkey.keep.setSecureScreen
 import io.privkey.keep.uniffi.BunkerConfigInfo
@@ -186,7 +186,7 @@ fun BunkerScreen(
                 data = bunkerUrl,
                 label = stringResource(R.string.connections_bunker_qr_label),
                 onTapToCopy = {
-                    copyPublicText(context, bunkerUrl)
+                    copySensitiveText(context, bunkerUrl, autoClear = false)
                     Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 }
             )
@@ -195,7 +195,7 @@ fun BunkerScreen(
 
             OutlinedButton(
                 onClick = {
-                    copyPublicText(context, bunkerUrl)
+                    copySensitiveText(context, bunkerUrl, autoClear = false)
                     Toast.makeText(context, toastBunkerUrlCopied, Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth()

@@ -364,7 +364,7 @@ internal fun copyPublicText(context: Context, text: String) {
     clipboard.setPrimaryClip(ClipData.newPlainText("", text))
 }
 
-internal fun copySensitiveText(context: Context, text: String) {
+internal fun copySensitiveText(context: Context, text: String, autoClear: Boolean = true) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
     val clip = ClipData.newPlainText("", text)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -373,7 +373,7 @@ internal fun copySensitiveText(context: Context, text: String) {
         }
     }
     clipboard.setPrimaryClip(clip)
-    ClipboardClearManager.scheduleClear(clipboard, text, CLIPBOARD_CLEAR_DELAY_MS)
+    if (autoClear) ClipboardClearManager.scheduleClear(clipboard, text, CLIPBOARD_CLEAR_DELAY_MS)
 }
 
 private object SecureScreenManager {
