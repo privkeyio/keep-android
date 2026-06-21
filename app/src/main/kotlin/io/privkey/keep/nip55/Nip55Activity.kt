@@ -842,7 +842,7 @@ class Nip55Activity : FragmentActivity() {
             }
             if (nip55Handler != null) {
                 val rejected = items.map {
-                    Nip55Response(result = "", event = null, error = "rejected", id = it.requestId, rejected = true)
+                    Nip55Response(result = "", event = null, error = null, id = it.requestId, rejected = true)
                 }
                 finishWithBatchResults(nip55Handler, rejected)
             } else {
