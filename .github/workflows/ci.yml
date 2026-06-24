@@ -26,7 +26,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup keep checkout
         uses: ./.github/actions/setup-keep
@@ -68,7 +68,7 @@ jobs:
       # analogous cache keyed by github.sha for bit-for-bit reproducibility.
       - name: Cache Rust build outputs
         id: cache-rust-outputs
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             app/src/main/jniLibs
@@ -76,7 +76,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-aarch64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
+        uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
@@ -108,7 +108,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup keep checkout
         uses: ./.github/actions/setup-keep
@@ -142,7 +142,7 @@ jobs:
       # See aarch64 job for rationale.
       - name: Cache Rust build outputs
         id: cache-rust-outputs
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             app/src/main/jniLibs
@@ -150,7 +150,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-x86_64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2
+        uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
