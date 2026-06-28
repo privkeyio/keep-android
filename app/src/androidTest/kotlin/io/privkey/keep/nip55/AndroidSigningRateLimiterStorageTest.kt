@@ -35,6 +35,22 @@ class AndroidSigningRateLimiterStorageTest {
     }
 
     @Test
+    fun saveOverwritesExistingValue() {
+        storage.save("com.example.app", "counter=3")
+        storage.save("com.example.app", "counter=4")
+        assertEquals("counter=4", storage.load("com.example.app"))
+    }
+
+    @Test
+    fun distinctKeysRoundTripIndependently() {
+        storage.save("com.example.a", "counter=1")
+        storage.save("com.example.b", "counter=2")
+
+        assertEquals("counter=1", storage.load("com.example.a"))
+        assertEquals("counter=2", storage.load("com.example.b"))
+    }
+
+    @Test
     fun loadOfAbsentKeyReturnsNull() {
         assertNull(storage.load("com.example.missing"))
     }
@@ -47,9 +63,29 @@ class AndroidSigningRateLimiterStorageTest {
     }
 
     @Test
+    fun removeLeavesOtherKeysIntact() {
+        storage.save("com.example.a", "counter=1")
+        storage.save("com.example.b", "counter=2")
+
+        storage.remove("com.example.a")
+
+        assertNull(storage.load("com.example.a"))
+        assertEquals("counter=2", storage.load("com.example.b"))
+    }
+
+    @Test
+    fun removeOfAbsentKeyIsNoOp() {
+        storage.save("com.example.a", "counter=1")
+        storage.remove("com.example.missing")
+        assertEquals("counter=1", storage.load("com.example.a"))
+    }
+
+    @Test
     fun clearWipesAllEntries() {
         storage.save("com.example.a", "counter=1")
         storage.save("com.example.b", "counter=2")
+        assertEquals("counter=1", storage.load("com.example.a"))
+        assertEquals("counter=2", storage.load("com.example.b"))
 
         storage.clear()
 
