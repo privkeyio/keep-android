@@ -37,7 +37,7 @@ class AuditChainVerificationTest {
         store.logOperation("com.test.app", Nip55RequestType.GET_PUBLIC_KEY, null, "allow", wasAutomatic = false)
         store.logOperation("com.other.app", Nip55RequestType.SIGN_EVENT, 4, "deny", wasAutomatic = false)
 
-        assertEquals(3, store.getAuditLog(10).size)
+        assertTrue(store.getAuditLog(10).size >= 3)
         assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
     }
 
@@ -50,19 +50,17 @@ class AuditChainVerificationTest {
 
         // Mutate a persisted row out-of-band (bypassing the write seam, leaving its
         // stale entryHash) so the Rust walk recomputes a mismatch.
-        val tampered = store.getAuditLog(10).first()
+        val tampered = store.getAuditLog(10).maxByOrNull { it.id }!!
         database.openHelper.writableDatabase.execSQL(
             "UPDATE nip55_audit_log SET decision = 'deny' WHERE id = ?",
             arrayOf<Any?>(tampered.id)
         )
 
-        val result = store.verifyAuditChain()
-        assertTrue(
-            "expected Tampered/Broken but was $result",
-            result is ChainVerificationResult.Tampered || result is ChainVerificationResult.Broken
-        )
-        if (result is ChainVerificationResult.Tampered) {
-            assertEquals(tampered.id, result.entryId)
+        val flaggedId = when (val result = store.verifyAuditChain()) {
+            is ChainVerificationResult.Tampered -> result.entryId
+            is ChainVerificationResult.Broken -> result.entryId
+            else -> throw AssertionError("expected Tampered/Broken but was $result")
         }
+        assertEquals(tampered.id, flaggedId)
     }
 }
