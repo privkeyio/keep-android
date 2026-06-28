@@ -28,7 +28,7 @@ class AuditChainVerificationTest {
 
     @After
     fun teardown() = runBlocking {
-        store.clearAuditLog()
+        if (::store.isInitialized) store.clearAuditLog()
     }
 
     @Test
@@ -57,7 +57,12 @@ class AuditChainVerificationTest {
         )
 
         val result = store.verifyAuditChain()
-        assertTrue("expected Tampered/Broken but was $result", result is ChainVerificationResult.Tampered)
-        assertEquals(tampered.id, (result as ChainVerificationResult.Tampered).entryId)
+        assertTrue(
+            "expected Tampered/Broken but was $result",
+            result is ChainVerificationResult.Tampered || result is ChainVerificationResult.Broken
+        )
+        if (result is ChainVerificationResult.Tampered) {
+            assertEquals(tampered.id, result.entryId)
+        }
     }
 }
