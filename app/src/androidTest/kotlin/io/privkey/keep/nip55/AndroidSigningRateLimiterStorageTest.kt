@@ -7,6 +7,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -107,9 +108,14 @@ class AndroidSigningRateLimiterStorageTest {
         storage.save("com.example.app", "counter=3;cooloff=0")
 
         val basePrefs = context.getSharedPreferences("nip55_rate_limiter", Context.MODE_PRIVATE)
+        assertTrue(
+            "backing prefs must receive encrypted entries; empty means prefs-name drift or a no-write regression",
+            basePrefs.all.isNotEmpty()
+        )
         for ((key, value) in basePrefs.all) {
             assertFalse(key.contains("com.example.app"))
             assertFalse(value.toString().contains("com.example.app"))
+            assertFalse(value.toString().contains("counter=3;cooloff=0"))
             assertFalse(value.toString().contains("counter=3"))
         }
     }
