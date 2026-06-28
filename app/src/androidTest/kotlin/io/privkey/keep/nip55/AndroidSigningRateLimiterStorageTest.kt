@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -99,5 +100,32 @@ class AndroidSigningRateLimiterStorageTest {
 
         val reopened = AndroidSigningRateLimiterStorage(context)
         assertEquals("counter=7", reopened.load("com.example.app"))
+    }
+
+    @Test
+    fun storedEntriesAreEncryptedAtRest() {
+        storage.save("com.example.app", "counter=3;cooloff=0")
+
+        val basePrefs = context.getSharedPreferences("nip55_rate_limiter", Context.MODE_PRIVATE)
+        for ((key, value) in basePrefs.all) {
+            assertFalse(key.contains("com.example.app"))
+            assertFalse(value.toString().contains("com.example.app"))
+            assertFalse(value.toString().contains("counter=3"))
+        }
+    }
+
+    @Test
+    fun emptyValueRoundTripsAsEmptyNotNull() {
+        storage.save("com.example.app", "")
+        assertEquals("", storage.load("com.example.app"))
+    }
+
+    @Test
+    fun clearPersistsAcrossInstances() {
+        storage.save("com.example.app", "counter=1")
+        storage.clear()
+
+        val reopened = AndroidSigningRateLimiterStorage(context)
+        assertNull(reopened.load("com.example.app"))
     }
 }
