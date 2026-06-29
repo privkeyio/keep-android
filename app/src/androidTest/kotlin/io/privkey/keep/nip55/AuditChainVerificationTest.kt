@@ -21,6 +21,9 @@ class AuditChainVerificationTest {
     @Before
     fun setup() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
+        // Must use the production singleton, not Room.inMemoryDatabaseBuilder like the
+        // sibling store tests: getInstance is what wires up the Keystore-backed HMAC key
+        // and audit anchor that verifyAuditChain reads. An in-memory DB has neither.
         database = Nip55Database.getInstance(context)
         store = PermissionStore(database)
         store.clearAuditLog()
@@ -37,7 +40,7 @@ class AuditChainVerificationTest {
         store.logOperation("com.test.app", Nip55RequestType.GET_PUBLIC_KEY, null, "allow", wasAutomatic = false)
         store.logOperation("com.other.app", Nip55RequestType.SIGN_EVENT, 4, "deny", wasAutomatic = false)
 
-        assertTrue(store.getAuditLog(10).size >= 3)
+        assertEquals(3, store.getAuditLog(10).size)
         assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
     }
 
@@ -45,12 +48,18 @@ class AuditChainVerificationTest {
     fun tamperedAuditRowBreaksChain() = runBlocking {
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
 
         assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
 
-        // Mutate a persisted row out-of-band (bypassing the write seam, leaving its
-        // stale entryHash) so the Rust walk recomputes a mismatch.
-        val tampered = store.getAuditLog(10).maxByOrNull { it.id }!!
+        // Tamper a MIDDLE row, not the tail: the flagged id must then differ from the
+        // latest id, so this proves the walk pinpoints the corrupted entry rather than
+        // just echoing the chain tail. Mutate it out-of-band (bypassing the write seam,
+        // leaving its stale entryHash) so the Rust walk recomputes a mismatch; the
+        // unchanged tail keeps the anchor consistent, so detection can only come from
+        // the Rust HMAC walk, whose flagged id resolveChainVerification returns verbatim.
+        val rows = store.getAuditLog(10).sortedBy { it.id }
+        val tampered = rows[rows.size / 2]
         database.openHelper.writableDatabase.execSQL(
             "UPDATE nip55_audit_log SET decision = 'deny' WHERE id = ?",
             arrayOf<Any?>(tampered.id)
@@ -62,5 +71,8 @@ class AuditChainVerificationTest {
             else -> throw AssertionError("expected Tampered/Broken but was $result")
         }
         assertEquals(tampered.id, flaggedId)
+        // Guard that this really tampered a non-tail row, so the assertion above proves
+        // pinpointing and not a tail-id echo.
+        assertTrue(tampered.id != rows.last().id)
     }
 }
