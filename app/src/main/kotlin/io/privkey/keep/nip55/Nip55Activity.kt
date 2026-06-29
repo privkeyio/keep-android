@@ -122,7 +122,7 @@ class Nip55Activity : FragmentActivity() {
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
         // The user has already committed a decision on the displayed set; do not
         // fold a late-arriving request into it. The activity is finishing.
-        if (decisionLocked) {
+        if (!consentActionAdmitted(decisionLocked)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring intent after decision was committed")
             return
         }
@@ -205,7 +205,7 @@ class Nip55Activity : FragmentActivity() {
             riskAssessment = assessment
             // The user may have already decided while this assessment was running;
             // do not resurrect the approval UI.
-            if (decisionLocked) return@launch
+            if (!consentActionAdmitted(decisionLocked)) return@launch
             setupContent()
         }
     }
@@ -286,7 +286,7 @@ class Nip55Activity : FragmentActivity() {
     private fun setupContent() {
         // A late async render must not re-display (and re-enable) the approval UI
         // after the user has already committed a decision.
-        if (decisionLocked) return
+        if (!consentActionAdmitted(decisionLocked)) return
         val items = pending.toList()
         displayed = items
         if (items.size > 1) {
@@ -416,13 +416,13 @@ class Nip55Activity : FragmentActivity() {
     private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: a second tap, or an async render that re-enabled the
         // buttons, must not commit a second decision.
-        if (decisionLocked) return
+        if (!consentActionAdmitted(decisionLocked)) return
         if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
         // Lock in the decision and act on exactly the snapshot the user saw.
         decisionLocked = true
-        val shown = displayed
+        val shown = consentBoundSet(displayed, pending)
         if (shown.size > 1) return handleApproveBatch(duration, shown)
         // Re-bind the single-request fields to the displayed request so a request
         // that raced in after render (overwriting the fields) is never signed.
@@ -799,9 +799,9 @@ class Nip55Activity : FragmentActivity() {
     private fun handleReject(duration: PermissionDuration, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: mirrors handleApprove so neither path can run twice or
         // after the other has already committed.
-        if (decisionLocked) return
+        if (!consentActionAdmitted(decisionLocked)) return
         decisionLocked = true
-        val shown = displayed
+        val shown = consentBoundSet(displayed, pending)
         if (shown.size > 1) return handleRejectBatch(duration, shown)
         shown.firstOrNull()?.let {
             request = it.request
