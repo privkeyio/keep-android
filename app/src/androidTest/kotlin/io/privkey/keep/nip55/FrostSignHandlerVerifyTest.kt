@@ -11,6 +11,7 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.PeerStatus
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -21,6 +22,14 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class FrostSignHandlerVerifyTest {
 
+    private var mobile: KeepMobile? = null
+
+    @After
+    fun tearDown() {
+        mobile?.destroy()
+        mobile = null
+    }
+
     @Test(timeout = 180_000L)
     fun signEvent_throughHandler_producesValidSchnorrSignature() {
         val manual = InstrumentationRegistry.getArguments().getString(FrostSignFixture.MANUAL_ARG)
@@ -29,14 +38,14 @@ class FrostSignHandlerVerifyTest {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
-        val mobile = KeepMobile(storage)
+        val mobile = KeepMobile(storage).also { this.mobile = it }
 
-        importShareNoAuth(mobile, storage, FrostSignFixture.SHARE1_EXPORT_DATA, "signer-setup")
-        initializeWithDecryptContext(mobile, storage, "signer-connect")
+        FrostSignTestSupport.importShareNoAuth(mobile, storage, FrostSignFixture.SHARE1_EXPORT_DATA, "signer-setup")
+        FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "signer-connect")
+        val groupPubkeyHex = FrostSignTestSupport.assertFixtureShareLoaded(mobile)
         waitForOnlinePeer(mobile, 90_000L)
 
         val handler = Nip55Handler(mobile)
-        val groupPubkeyHex = requireNotNull(mobile.getShareInfo()) { "ShareInfo must not be null" }.groupPubkey
 
         val event = JSONObject().apply {
             put("pubkey", groupPubkeyHex)
@@ -85,40 +94,6 @@ class FrostSignHandlerVerifyTest {
         )
     }
 
-    private fun importShareNoAuth(
-        mobile: KeepMobile,
-        storage: AndroidKeystoreStorage,
-        exportData: String,
-        requestId: String,
-    ) {
-        if (storage.hasShare()) return
-        val cipher = storage.getCipherForEncryption()
-        storage.setRequestIdContext(requestId)
-        storage.setPendingCipher(requestId, cipher)
-        try {
-            mobile.importShare(exportData, FrostSignFixture.PASSPHRASE, "test")
-        } finally {
-            storage.clearRequestIdContext()
-            storage.clearPendingCipher(requestId)
-        }
-    }
-
-    private fun initializeWithDecryptContext(
-        mobile: KeepMobile,
-        storage: AndroidKeystoreStorage,
-        requestId: String,
-    ) {
-        val cipher = requireNotNull(storage.getCipherForDecryption()) { "decryption cipher must not be null" }
-        storage.setPendingCipher(requestId, cipher)
-        storage.setRequestIdContext(requestId)
-        try {
-            mobile.initialize(listOf(FrostSignFixture.RELAY))
-        } finally {
-            storage.clearRequestIdContext()
-            storage.clearPendingCipher(requestId)
-        }
-    }
-
     private fun waitForOnlinePeer(mobile: KeepMobile, timeoutMs: Long) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -131,7 +106,10 @@ class FrostSignHandlerVerifyTest {
     private fun hexDecode(hex: String): ByteArray {
         require(hex.length % 2 == 0) { "Hex string must have even length" }
         return ByteArray(hex.length / 2) { i ->
-            ((Character.digit(hex[i * 2], 16) shl 4) + Character.digit(hex[i * 2 + 1], 16)).toByte()
+            val hi = Character.digit(hex[i * 2], 16)
+            val lo = Character.digit(hex[i * 2 + 1], 16)
+            require(hi >= 0 && lo >= 0) { "Invalid hex character in: $hex" }
+            ((hi shl 4) + lo).toByte()
         }
     }
 }

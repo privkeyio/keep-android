@@ -5,12 +5,21 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class FrostSignFixtureGenerator {
+
+    private var mobile: KeepMobile? = null
+
+    @After
+    fun tearDown() {
+        mobile?.destroy()
+        mobile = null
+    }
 
     @Test
     fun generateSharePair() {
@@ -19,7 +28,7 @@ class FrostSignFixtureGenerator {
 
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
-        val mobile = KeepMobile(storage)
+        val mobile = KeepMobile(storage).also { this.mobile = it }
 
         val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", FrostSignFixture.PASSPHRASE)
 

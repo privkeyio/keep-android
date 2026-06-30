@@ -48,7 +48,7 @@ adb -s <serialB> shell am instrument -w \
   io.privkey.keep.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-Then, within ~90s, run the signer/verify test on device A:
+Then, within ~180s, run the signer/verify test on device A:
 
 ```
 # Device A (signer + verifier)
@@ -67,7 +67,7 @@ Gradle equivalent (single connected device, e.g. device A):
 ```
 
 Device B (co-signer) polls `getPendingRequests()` and calls `approveRequest(id)`
-for 90s. Device A builds a kind-1 event whose `pubkey` is the group pubkey, calls
+for 180s. Device A builds a kind-1 event whose `pubkey` is the group pubkey, calls
 `Nip55Handler.handleRequest(...)` with `SignEvent`, then verifies the returned
 64-byte Schnorr signature against the signed event id and the x-only group pubkey.
 
