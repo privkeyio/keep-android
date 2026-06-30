@@ -1,5 +1,8 @@
 package io.privkey.keep.nip55
 
+// WARNING: PASSPHRASE, SHARE1_EXPORT_DATA, SHARE2_EXPORT_DATA, and EXPECTED_GROUP_PUBKEY
+// are DISPOSABLE androidTest-only secrets. Never reuse them as a real Nostr identity,
+// never fund the resulting address, and never use them in production.
 object FrostSignFixture {
     const val PASSPHRASE = "test"
 

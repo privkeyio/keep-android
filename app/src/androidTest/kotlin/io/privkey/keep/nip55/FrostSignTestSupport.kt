@@ -12,7 +12,11 @@ object FrostSignTestSupport {
         exportData: String,
         requestId: String,
     ) {
-        if (storage.hasShare()) return
+        val existing = mobile.getShareInfo()
+        if (existing != null) {
+            if (existing.groupPubkey == FrostSignFixture.EXPECTED_GROUP_PUBKEY) return
+            mobile.deleteShare()
+        }
         val cipher = storage.getCipherForEncryption()
         storage.setRequestIdContext(requestId)
         storage.setPendingCipher(requestId, cipher)
