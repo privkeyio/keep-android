@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -28,8 +27,7 @@ class FrostSignCosignerTest {
         assumeTrue("manual-only test; pass -e ${FrostSignFixture.MANUAL_ARG} 1", manual == "1")
         assumeTrue("SHARE2_EXPORT_DATA not filled in", FrostSignFixture.SHARE2_EXPORT_DATA.isNotEmpty())
 
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        val storage = FrostSignTestSupport.noAuthStorage()
         val mobile = KeepMobile(storage).also { this.mobile = it }
 
         FrostSignTestSupport.importShareNoAuth(mobile, storage, FrostSignFixture.SHARE2_EXPORT_DATA, "cosign-setup")

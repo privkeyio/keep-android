@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import fr.acinq.secp256k1.Secp256k1
-import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
@@ -36,16 +35,13 @@ class FrostSignHandlerVerifyTest {
         assumeTrue("manual-only test; pass -e ${FrostSignFixture.MANUAL_ARG} 1", manual == "1")
         assumeTrue("SHARE1_EXPORT_DATA not filled in", FrostSignFixture.SHARE1_EXPORT_DATA.isNotEmpty())
 
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        val storage = FrostSignTestSupport.noAuthStorage()
         val mobile = KeepMobile(storage).also { this.mobile = it }
 
         FrostSignTestSupport.importShareNoAuth(mobile, storage, FrostSignFixture.SHARE1_EXPORT_DATA, "signer-setup")
         FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "signer-connect")
         val groupPubkeyHex = FrostSignTestSupport.assertFixtureShareLoaded(mobile)
         waitForOnlinePeer(mobile, 90_000L)
-
-        val handler = Nip55Handler(mobile)
 
         val event = JSONObject().apply {
             put("pubkey", groupPubkeyHex)
@@ -72,26 +68,28 @@ class FrostSignHandlerVerifyTest {
         // (mirrors Nip55Activity/Nip55ContentProvider before the Rust handler).
         mobile.preApproveNostrEvent(event.toString())
 
-        val response = handler.handleRequest(request, "io.privkey.keep.test")
+        Nip55Handler(mobile).use { handler ->
+            val response = handler.handleRequest(request, "io.privkey.keep.test")
 
-        assertNull("Error should be null: ${response.error}", response.error)
-        assertEquals("Signature should be 64 bytes (128 hex chars)", 128, response.result.length)
+            assertNull("Error should be null: ${response.error}", response.error)
+            assertEquals("Signature should be 64 bytes (128 hex chars)", 128, response.result.length)
 
-        val signedEvent = JSONObject(requireNotNull(response.event) { "Signed event must not be null" })
-        val eventId = signedEvent.getString("id")
+            val signedEvent = JSONObject(requireNotNull(response.event) { "Signed event must not be null" })
+            val eventId = signedEvent.getString("id")
 
-        val sig = hexDecode(response.result)
-        val msg = hexDecode(eventId)
-        val pubkey = hexDecode(groupPubkeyHex)
+            val sig = hexDecode(response.result)
+            val msg = hexDecode(eventId)
+            val pubkey = hexDecode(groupPubkeyHex)
 
-        assertEquals(64, sig.size)
-        assertEquals(32, msg.size)
-        assertEquals(32, pubkey.size)
+            assertEquals(64, sig.size)
+            assertEquals(32, msg.size)
+            assertEquals(32, pubkey.size)
 
-        assertTrue(
-            "Schnorr signature must verify against event id and group pubkey",
-            Secp256k1.verifySchnorr(sig, msg, pubkey)
-        )
+            assertTrue(
+                "Schnorr signature must verify against event id and group pubkey",
+                Secp256k1.verifySchnorr(sig, msg, pubkey)
+            )
+        }
     }
 
     private fun waitForOnlinePeer(mobile: KeepMobile, timeoutMs: Long) {

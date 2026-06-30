@@ -1,10 +1,17 @@
 package io.privkey.keep.nip55
 
+import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import org.junit.Assert.assertEquals
+import org.junit.AssumptionViolatedException
 
 object FrostSignTestSupport {
+
+    fun noAuthStorage(): AndroidKeystoreStorage {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        return AndroidKeystoreStorage(context, requireUserAuth = false)
+    }
 
     fun importShareNoAuth(
         mobile: KeepMobile,
@@ -15,7 +22,10 @@ object FrostSignTestSupport {
         val existing = mobile.getShareInfo()
         if (existing != null) {
             if (existing.groupPubkey == FrostSignFixture.EXPECTED_GROUP_PUBKEY) return
-            mobile.deleteShare()
+            throw AssumptionViolatedException(
+                "Device holds an unexpected share (group=${existing.groupPubkey}); refusing to " +
+                    "delete it. Manually clear the device before running this test."
+            )
         }
         val cipher = storage.getCipherForEncryption()
         storage.setRequestIdContext(requestId)

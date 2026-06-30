@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import org.junit.After
 import org.junit.Assume.assumeTrue
@@ -26,8 +25,7 @@ class FrostSignFixtureGenerator {
         val manual = InstrumentationRegistry.getArguments().getString(FrostSignFixture.MANUAL_ARG)
         assumeTrue("manual-only generator; pass -e ${FrostSignFixture.MANUAL_ARG} 1", manual == "1")
 
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        val storage = FrostSignTestSupport.noAuthStorage()
         val mobile = KeepMobile(storage).also { this.mobile = it }
 
         val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", FrostSignFixture.PASSPHRASE)
