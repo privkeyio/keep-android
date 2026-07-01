@@ -50,8 +50,11 @@ class SerializeBatchResultsTest {
     private fun rejected(id: String) =
         Nip55Response(result = "", event = null, error = null, id = id, rejected = true)
 
+    // A would-be-valid signature is carried alongside the error so the serializer is
+    // proven to actively suppress it (not merely blank an already-empty result) when
+    // error is set: the exact leak this seam guards against.
     private fun failed(id: String, error: String) =
-        Nip55Response(result = "", event = null, error = error, id = id, rejected = false)
+        Nip55Response(result = "deadbeef", event = null, error = error, id = id, rejected = false)
 
     @Test
     fun successResponseRoundTripsWithSignatureAndResult() {
@@ -62,8 +65,9 @@ class SerializeBatchResultsTest {
         val obj = arr.getJSONObject(0)
         assertEquals("req-1", obj.getString("id"))
         // Rust always emits a package key set to null; the Activity fills the caller
-        // package on the Intent, not in the per-request JSON.
-        assertTrue(obj.isNull("package"))
+        // package on the Intent, not in the per-request JSON. has() + isNull() locks
+        // the wire shape: isNull() alone also passes for an absent key.
+        assertTrue(obj.has("package") && obj.isNull("package"))
         assertEquals("deadbeef", obj.getString("signature"))
         assertEquals("deadbeef", obj.getString("result"))
         // A successful entry carries no rejected marker.
@@ -76,9 +80,9 @@ class SerializeBatchResultsTest {
         val obj = JSONArray(json).getJSONObject(0)
 
         assertEquals("req-2", obj.getString("id"))
-        assertTrue(obj.isNull("package"))
-        assertTrue(obj.isNull("signature"))
-        assertTrue(obj.isNull("result"))
+        assertTrue(obj.has("package") && obj.isNull("package"))
+        assertTrue(obj.has("signature") && obj.isNull("signature"))
+        assertTrue(obj.has("result") && obj.isNull("result"))
         assertTrue(obj.getBoolean("rejected"))
     }
 
@@ -91,8 +95,8 @@ class SerializeBatchResultsTest {
         val obj = JSONArray(json).getJSONObject(0)
 
         assertEquals("req-3", obj.getString("id"))
-        assertTrue(obj.isNull("signature"))
-        assertTrue(obj.isNull("result"))
+        assertTrue(obj.has("signature") && obj.isNull("signature"))
+        assertTrue(obj.has("result") && obj.isNull("result"))
         assertTrue(obj.getBoolean("rejected"))
     }
 
