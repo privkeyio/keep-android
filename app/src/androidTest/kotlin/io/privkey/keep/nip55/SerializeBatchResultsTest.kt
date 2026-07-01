@@ -27,7 +27,7 @@ import org.junit.runner.RunWith
 class SerializeBatchResultsTest {
 
     private var mobile: KeepMobile? = null
-    private lateinit var handler: Nip55Handler
+    private var handler: Nip55Handler? = null
 
     @Before
     fun setup() {
@@ -38,7 +38,8 @@ class SerializeBatchResultsTest {
 
     @After
     fun tearDown() {
-        handler.destroy()
+        handler?.destroy()
+        handler = null
         mobile?.destroy()
         mobile = null
     }
@@ -54,7 +55,7 @@ class SerializeBatchResultsTest {
 
     @Test
     fun successResponseRoundTripsWithSignatureAndResult() {
-        val json = handler.serializeBatchResults(listOf(success("req-1", "deadbeef")))
+        val json = handler!!.serializeBatchResults(listOf(success("req-1", "deadbeef")))
         val arr = JSONArray(json)
         assertEquals(1, arr.length())
 
@@ -71,7 +72,7 @@ class SerializeBatchResultsTest {
 
     @Test
     fun rejectedResponseRoundTripsWithNullsAndRejectedTrue() {
-        val json = handler.serializeBatchResults(listOf(rejected("req-2")))
+        val json = handler!!.serializeBatchResults(listOf(rejected("req-2")))
         val obj = JSONArray(json).getJSONObject(0)
 
         assertEquals("req-2", obj.getString("id"))
@@ -86,7 +87,7 @@ class SerializeBatchResultsTest {
         // An entry whose sign attempt failed (error set, rejected=false) must still
         // serialize as rejected=true with null signature/result, so the client can
         // never mistake a failed request for a signature.
-        val json = handler.serializeBatchResults(listOf(failed("req-3", "request_failed")))
+        val json = handler!!.serializeBatchResults(listOf(failed("req-3", "request_failed")))
         val obj = JSONArray(json).getJSONObject(0)
 
         assertEquals("req-3", obj.getString("id"))
@@ -103,7 +104,7 @@ class SerializeBatchResultsTest {
             failed("c", "request_failed"),
             success("d", "dd")
         )
-        val arr = JSONArray(handler.serializeBatchResults(responses))
+        val arr = JSONArray(handler!!.serializeBatchResults(responses))
         assertEquals(4, arr.length())
 
         assertEquals("a", arr.getJSONObject(0).getString("id"))
@@ -123,6 +124,6 @@ class SerializeBatchResultsTest {
 
     @Test
     fun emptyBatchSerializesToEmptyArray() {
-        assertEquals(0, JSONArray(handler.serializeBatchResults(emptyList())).length())
+        assertEquals(0, JSONArray(handler!!.serializeBatchResults(emptyList())).length())
     }
 }
