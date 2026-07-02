@@ -113,14 +113,19 @@ class BatchToctouRegressionTest {
     }
 
     @Test
-    fun lateRenderAfterDecisionDoesNotResurrectPending() {
+    fun deferredAsyncRenderAfterDecisionDoesNotRecaptureGrownPending() {
         val gate = BatchGate(cap)
         gate.deliverIntent("r1", Nip55RequestType.SIGN_EVENT, app)
         gate.render()
+
+        // The late intent lands before the tap, so it accumulates into pending, but
+        // its setupContent is deferred (calculateRiskAndSetupContent launches async)
+        // and only fires after the user has already committed the decision.
+        gate.deliverIntent("late", Nip55RequestType.SIGN_EVENT, app)
         gate.commitDecision()
 
-        // A late async setupContent must not re-capture a grown pending list; even
-        // if a late intent had slipped through, the displayed snapshot stays fixed.
+        // That deferred render must be blocked by the lock: it cannot re-capture the
+        // grown [r1, late] pending into displayed. Without the guard it would.
         gate.render()
 
         assertEquals(listOf("r1"), gate.displayed.map { it.first })
