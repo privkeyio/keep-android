@@ -13,16 +13,16 @@ android {
         applicationId = "io.privkey.keep"
         minSdk = 33
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.1.4"
+        versionCode = 23
+        versionName = "1.1.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
+        // ABI selection is handled by the `splits { abi }` block below (which is
+        // incompatible with ndk.abiFilters). splits.abi.include restricts the
+        // packaged architectures to arm64-v8a and x86_64.
     }
 
     // Reproducible builds: strip non-reproducible Play dependency metadata blob
@@ -88,10 +88,40 @@ android {
         }
     }
 
+    // Per-ABI APK splits for F-Droid: ship one APK per architecture instead of a
+    // single universal APK. Each split gets a distinct versionCode assigned in
+    // the androidComponents block below.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
 
+}
+
+// Assign each per-ABI release split its own versionCode: 10 * base + abiCode.
+// ABI codes follow F-Droid's required ordering (armeabi-v7a < arm64-v8a < x86 <
+// x86_64) and must match the VercodeOperation in metadata/io.privkey.keep.yml.
+val abiVersionCodes = mapOf("arm64-v8a" to 2, "x86_64" to 4)
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters
+                .firstOrNull { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }
+                ?.identifier
+            val abiCode = abiVersionCodes[abi]
+            if (abiCode != null) {
+                output.versionCode.set(10 * (android.defaultConfig.versionCode ?: 0) + abiCode)
+            }
+        }
+    }
 }
 
 kotlin {

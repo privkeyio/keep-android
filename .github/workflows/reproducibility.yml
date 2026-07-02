@@ -87,7 +87,9 @@ jobs:
             --build-arg KEEP_SHA="$(tr -d '[:space:]' < keep.version)" \
             --output type=local,dest=out \
             -f Dockerfile.reproducible .
-          test -f out/app-release.apk
+          # ABI splits produce one APK per architecture.
+          ls out/app-*-release.apk
+          test "$(ls out/app-*-release.apk | wc -l)" -ge 2
 
       - name: Setup Android SDK
         if: github.event_name != 'pull_request'
@@ -117,14 +119,19 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           echo "Verifying reproduction of $VERSION"
-          URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}/keep-android-${VERSION}.apk"
-          # On a tag push this runs concurrently with release.yml, so the asset
-          # may not be published yet. Wait for it (up to ~20 min).
-          for i in $(seq 1 40); do
-            if curl -fsSL -o published.apk "$URL"; then break; fi
-            echo "Published APK not available yet (attempt $i/40); waiting 30s..."
-            sleep 30
+          # One published APK per architecture; compare each to its container build.
+          for built in out/app-*-release.apk; do
+            abi="$(basename "$built" | sed -E 's/^app-(.*)-release\.apk$/\1/')"
+            URL="https://github.com/${REPOSITORY}/releases/download/${VERSION}/keep-android-${VERSION}-${abi}.apk"
+            # On a tag push this runs concurrently with release.yml, so the asset
+            # may not be published yet. Wait for it (up to ~20 min).
+            ok=""
+            for i in $(seq 1 40); do
+              if curl -fsSL -o "published-${abi}.apk" "$URL"; then ok=1; break; fi
+              echo "Published $abi APK not available yet (attempt $i/40); waiting 30s..."
+              sleep 30
+            done
+            [ -n "$ok" ] && test -s "published-${abi}.apk"
+            apksigcopier compare "published-${abi}.apk" "$built"
+            echo "Container build reproduces the published $VERSION $abi APK (payload identical)."
           done
-          test -s published.apk
-          apksigcopier compare published.apk out/app-release.apk
-          echo "Container build reproduces the published $VERSION APK (payload identical)."

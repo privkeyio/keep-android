@@ -293,16 +293,20 @@ RUN --mount=type=secret,id=keystore,uid=1000 \
     export KEYSTORE_FILE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; \
     ./gradlew :app:verifyNoProprietaryDeps assembleRelease --no-daemon; \
     mkdir -p /out; \
-    cp app/build/outputs/apk/release/app-release.apk /out/app-release.apk; \
-    echo "SHA256 of signed APK (depends on signing key; differs per build when"; \
-    echo "using the throwaway keystore, since the RSA key is regenerated):"; \
-    sha256sum /out/app-release.apk; \
-    echo ""; \
+    # ABI splits (isUniversalApk=false) produce one APK per architecture. Copy
+    # every per-ABI release APK; the export stage and release.yml publish them all.
+    found=""; \
+    for apk in app/build/outputs/apk/release/*-release.apk; do \
+        [ -f "$apk" ] || continue; \
+        cp "$apk" /out/; found="yes"; \
+        echo "SHA256 $(sha256sum "$apk")"; \
+    done; \
+    [ -n "$found" ] || { echo "no release APKs produced" >&2; exit 1; }; \
     echo "For reproducibility verification, compare APKs with diffoscope"; \
     echo "(see REPRODUCIBLE_BUILDS.md § 5.2). A matching signed-APK sha256 is"; \
     echo "only expected when the same KEYSTORE_FILE/PASSWORD/ALIAS is reused."
 
-# Export stage: extract just the APK using BuildKit's local output.
+# Export stage: extract the per-ABI APKs using BuildKit's local output.
 #   docker build --output type=local,dest=out -f Dockerfile.reproducible .
 FROM scratch AS export
-COPY --from=builder /out/app-release.apk /app-release.apk
+COPY --from=builder /out/ /

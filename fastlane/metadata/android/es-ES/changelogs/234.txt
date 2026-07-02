@@ -1,0 +1,1 @@
+Divididos en APKs por arquitectura (arm64-v8a, x86_64) para descargas más pequeñas. Sin cambios funcionales desde la 1.1.4.
