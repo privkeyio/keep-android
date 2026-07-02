@@ -54,19 +54,13 @@ class Nip55Activity : FragmentActivity() {
     private var isNotificationOriginated: Boolean = false
     private var riskAssessment: RiskAssessment? = null
 
-    // Accumulated requests for batch / multi-event signing. Sign requests from the
-    // same caller that arrive (via onNewIntent) before the user acts are collected
-    // here; size 1 renders the single-request UI, size >1 the multi-event UI.
-    private val pending = mutableListOf<PendingNip55Request>()
-    private var batchCaller: String? = null
-
-    // The exact set last rendered to the user. The approve/reject decision acts on
-    // this snapshot (never the live `pending` list), so a request that races in
-    // between render and the user's tap can never be folded into the signed set.
-    private var displayed: List<PendingNip55Request> = emptyList()
-    // Set once the user approves/rejects; further intents are ignored so the
-    // committed decision can only ever apply to what was on screen.
-    private var decisionLocked = false
+    // Batch / multi-event signing state machine. Sign requests from the same caller
+    // that arrive (via onNewIntent) before the user acts are accumulated here; size 1
+    // renders the single-request UI, size >1 the multi-event UI. The gate owns the
+    // pending list, the displayed snapshot the decision binds to, and the commit lock,
+    // and enforces the three TOCTOU guards so a late-racing request can never be folded
+    // into the signed set (gh #372).
+    private val gate = BatchConsentGate<PendingNip55Request, DisplayedCaller>(MAX_BATCH_SIZE) { it.request.requestType }
 
     private class PendingNip55Request(
         val request: Nip55Request,
@@ -75,6 +69,30 @@ class Nip55Activity : FragmentActivity() {
     ) {
         var risk: RiskAssessment? = null
         var notificationRequestId: String? = null
+    }
+
+    // Caller identity captured with the displayed batch so a late different-caller
+    // intent that swaps the live caller state between render and the tap cannot
+    // redirect the grant/trust/sign to the attacker's package (gh #372).
+    private data class DisplayedCaller(
+        val packageName: String?,
+        val verified: Boolean,
+        val signatureHash: String?,
+        val pendingFirstUse: Boolean,
+    )
+
+    private fun currentDisplayedCaller() =
+        DisplayedCaller(callerPackage, callerVerified, callerSignatureHash, callerPendingFirstUse)
+
+    // Re-bind the mutable caller fields to the snapshot the decision was displayed
+    // with, mirroring the request-field re-bind in handleApprove. All downstream sign
+    // /grant/trust/audit reads then use the caller the user actually saw.
+    private fun rebindDisplayedCaller() {
+        val bound = gate.displayedCaller ?: return
+        callerPackage = bound.packageName
+        callerVerified = bound.verified
+        callerSignatureHash = bound.signatureHash
+        callerPendingFirstUse = bound.pendingFirstUse
     }
 
     private class PreApproveFailedException : Exception()
@@ -122,7 +140,7 @@ class Nip55Activity : FragmentActivity() {
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
         // The user has already committed a decision on the displayed set; do not
         // fold a late-arriving request into it. The activity is finishing.
-        if (!consentActionAdmitted(decisionLocked)) {
+        if (!gate.admitsAction) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring intent after decision was committed")
             return
         }
@@ -145,30 +163,19 @@ class Nip55Activity : FragmentActivity() {
         val parsed = parseRequest(intent, uriStr) ?: return finishWithError("Invalid request")
         val parsedId = rawId?.takeIf { it.isNotBlank() } ?: parsed.id
 
-        // Accumulate only same-caller operation requests (never get_public_key) up to the cap.
-        when (
-            batchAccumulationDecision(
-                pendingTypes = pending.map { it.request.requestType },
-                pendingCaller = batchCaller,
-                newType = parsed.requestType,
-                newCaller = caller,
-                maxBatchSize = MAX_BATCH_SIZE
-            )
-        ) {
+        // Accumulate only same-caller operation requests (never get_public_key) up to
+        // the cap. On RESET the old batch's notifications are cancelled before the gate
+        // clears it, so no stale notification is left behind.
+        val item = PendingNip55Request(parsed, parsedId, uriStr ?: "")
+        when (gate.accumulate(item, caller, onReset = { cancelAllNotifications() })) {
             BatchAccumulation.DROP_OVER_CAP -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Dropping batch request beyond cap of $MAX_BATCH_SIZE")
                 return
             }
-            BatchAccumulation.RESET -> {
-                cancelAllNotifications()
-                pending.clear()
-            }
-            BatchAccumulation.ACCUMULATE -> {} // keep pending; the new item is appended below
+            // null (a committed decision locked the batch) is already excluded by the
+            // guard above; RESET/ACCUMULATE both accumulated the item.
+            else -> {}
         }
-
-        val item = PendingNip55Request(parsed, parsedId, uriStr ?: "")
-        pending.add(item)
-        batchCaller = caller
 
         // Legacy single-request fields drive the single-request path and UI.
         request = parsed
@@ -177,12 +184,12 @@ class Nip55Activity : FragmentActivity() {
 
         // One notification per batch: the first request raises it; accumulated
         // requests arrive while the approval UI is already up.
-        if (pending.size == 1) showNotificationFor(item)
+        if (gate.pending.size == 1) showNotificationFor(item)
         calculateRiskAndSetupContent()
     }
 
     private fun calculateRiskAndSetupContent() {
-        val item = pending.lastOrNull() ?: return
+        val item = gate.pending.lastOrNull() ?: return
         val pkg = callerPackage
         val store = permissionStore
 
@@ -205,7 +212,7 @@ class Nip55Activity : FragmentActivity() {
             riskAssessment = assessment
             // The user may have already decided while this assessment was running;
             // do not resurrect the approval UI.
-            if (!consentActionAdmitted(decisionLocked)) return@launch
+            if (!gate.admitsAction) return@launch
             setupContent()
         }
     }
@@ -280,15 +287,15 @@ class Nip55Activity : FragmentActivity() {
 
     private fun cancelAllNotifications() {
         notificationManager?.cancelNotification(notificationRequestId)
-        pending.forEach { it.notificationRequestId?.let { id -> notificationManager?.cancelNotification(id) } }
+        gate.pending.forEach { it.notificationRequestId?.let { id -> notificationManager?.cancelNotification(id) } }
     }
 
     private fun setupContent() {
         // A late async render must not re-display (and re-enable) the approval UI
-        // after the user has already committed a decision.
-        if (!consentActionAdmitted(decisionLocked)) return
-        val items = pending.toList()
-        displayed = items
+        // after the user has already committed a decision; the gate returns null and
+        // leaves the displayed snapshot untouched once a decision is locked. The caller
+        // is captured with the batch so the decision binds to who the user saw.
+        val items = gate.render(currentDisplayedCaller()) ?: return
         if (items.size > 1) {
             setupBatchContent(items)
             return
@@ -416,13 +423,15 @@ class Nip55Activity : FragmentActivity() {
     private fun handleApprove(duration: PermissionDuration, declaredBundle: List<Nip55DeclaredPermission>, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: a second tap, or an async render that re-enabled the
         // buttons, must not commit a second decision.
-        if (!consentActionAdmitted(decisionLocked)) return
+        if (!gate.admitsAction) return
         if (keepApp?.isSigningKilled() == true) {
             return finishWithError("signing_disabled")
         }
-        // Lock in the decision and act on exactly the snapshot the user saw.
-        decisionLocked = true
-        val shown = consentBoundSet(displayed, pending)
+        // Lock in the decision and act on exactly the snapshot the user saw. commit()
+        // locks the batch after the kill-switch check and returns the displayed set;
+        // rebind the caller to the one displayed with it before any grant/trust/sign.
+        val shown = gate.commit() ?: return
+        rebindDisplayedCaller()
         if (shown.size > 1) return handleApproveBatch(duration, shown)
         // Re-bind the single-request fields to the displayed request so a request
         // that raced in after render (overwriting the fields) is never signed.
@@ -432,8 +441,8 @@ class Nip55Activity : FragmentActivity() {
             riskAssessment = it.risk
         }
 
-        // decisionLocked is set above, so finish rather than bare-return to avoid
-        // soft-locking the screen if there is somehow no displayed request.
+        // The batch is locked by commit() above, so finish rather than bare-return to
+        // avoid soft-locking the screen if there is somehow no displayed request.
         val req = request ?: return finishWithError("Invalid request")
         val nip55Handler = handler ?: return finishWithError("Handler not initialized")
         val keystoreStorage = storage
@@ -799,9 +808,9 @@ class Nip55Activity : FragmentActivity() {
     private fun handleReject(duration: PermissionDuration, relayScope: RelayAuthScope? = null) {
         // Re-entry guard: mirrors handleApprove so neither path can run twice or
         // after the other has already committed.
-        if (!consentActionAdmitted(decisionLocked)) return
-        decisionLocked = true
-        val shown = consentBoundSet(displayed, pending)
+        if (!gate.admitsAction) return
+        val shown = gate.commit() ?: return
+        rebindDisplayedCaller()
         if (shown.size > 1) return handleRejectBatch(duration, shown)
         shown.firstOrNull()?.let {
             request = it.request
