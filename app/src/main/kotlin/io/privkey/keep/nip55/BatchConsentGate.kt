@@ -14,7 +14,7 @@ import io.privkey.keep.uniffi.Nip55RequestType
  * [BatchToctouRegressionTest] drives the real wiring: dropping a guard here fails the
  * test. Pure Kotlin, no Android or native dependencies, fully unit-testable.
  */
-internal class BatchConsentGate<T>(
+internal class BatchConsentGate<T, C>(
     private val maxBatchSize: Int,
     private val typeOf: (T) -> Nip55RequestType,
 ) {
@@ -29,6 +29,15 @@ internal class BatchConsentGate<T>(
 
     /** The exact set captured at the last [render]; what a decision must act on. */
     var displayed: List<T> = emptyList()
+        private set
+
+    /**
+     * The caller identity captured alongside [displayed] at the last [render]. A
+     * decision must bind to this, never the live caller state, so a late
+     * different-caller intent that swaps the live caller between render and the tap
+     * cannot redirect the grant/trust/sign to the attacker's package (gh #372).
+     */
+    var displayedCaller: C? = null
         private set
 
     /** Set once [commit] succeeds; every later action is then ignored. */
@@ -68,13 +77,15 @@ internal class BatchConsentGate<T>(
     }
 
     /**
-     * Mirrors [Nip55Activity.setupContent]: capture the pending list as the displayed
-     * snapshot and return it. Returns `null` (leaving [displayed] untouched) once a
-     * decision is locked, so a late async render cannot re-capture a grown batch.
+     * Mirrors [Nip55Activity.setupContent]: capture the pending list (and the [caller]
+     * that owns it) as the displayed snapshot and return it. Returns `null` (leaving
+     * [displayed]/[displayedCaller] untouched) once a decision is locked, so a late
+     * async render cannot re-capture a grown batch or a swapped caller.
      */
-    fun render(): List<T>? {
+    fun render(caller: C): List<T>? {
         if (!admitsAction) return null
         displayed = items.toList()
+        displayedCaller = caller
         return displayed
     }
 

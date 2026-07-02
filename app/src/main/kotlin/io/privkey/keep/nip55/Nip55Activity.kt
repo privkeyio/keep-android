@@ -60,7 +60,7 @@ class Nip55Activity : FragmentActivity() {
     // pending list, the displayed snapshot the decision binds to, and the commit lock,
     // and enforces the three TOCTOU guards so a late-racing request can never be folded
     // into the signed set (gh #372).
-    private val gate = BatchConsentGate<PendingNip55Request>(MAX_BATCH_SIZE) { it.request.requestType }
+    private val gate = BatchConsentGate<PendingNip55Request, DisplayedCaller>(MAX_BATCH_SIZE) { it.request.requestType }
 
     private class PendingNip55Request(
         val request: Nip55Request,
@@ -69,6 +69,30 @@ class Nip55Activity : FragmentActivity() {
     ) {
         var risk: RiskAssessment? = null
         var notificationRequestId: String? = null
+    }
+
+    // Caller identity captured with the displayed batch so a late different-caller
+    // intent that swaps the live caller state between render and the tap cannot
+    // redirect the grant/trust/sign to the attacker's package (gh #372).
+    private data class DisplayedCaller(
+        val packageName: String?,
+        val verified: Boolean,
+        val signatureHash: String?,
+        val pendingFirstUse: Boolean,
+    )
+
+    private fun currentDisplayedCaller() =
+        DisplayedCaller(callerPackage, callerVerified, callerSignatureHash, callerPendingFirstUse)
+
+    // Re-bind the mutable caller fields to the snapshot the decision was displayed
+    // with, mirroring the request-field re-bind in handleApprove. All downstream sign
+    // /grant/trust/audit reads then use the caller the user actually saw.
+    private fun rebindDisplayedCaller() {
+        val bound = gate.displayedCaller ?: return
+        callerPackage = bound.packageName
+        callerVerified = bound.verified
+        callerSignatureHash = bound.signatureHash
+        callerPendingFirstUse = bound.pendingFirstUse
     }
 
     private class PreApproveFailedException : Exception()
@@ -269,8 +293,9 @@ class Nip55Activity : FragmentActivity() {
     private fun setupContent() {
         // A late async render must not re-display (and re-enable) the approval UI
         // after the user has already committed a decision; the gate returns null and
-        // leaves the displayed snapshot untouched once a decision is locked.
-        val items = gate.render() ?: return
+        // leaves the displayed snapshot untouched once a decision is locked. The caller
+        // is captured with the batch so the decision binds to who the user saw.
+        val items = gate.render(currentDisplayedCaller()) ?: return
         if (items.size > 1) {
             setupBatchContent(items)
             return
@@ -403,8 +428,10 @@ class Nip55Activity : FragmentActivity() {
             return finishWithError("signing_disabled")
         }
         // Lock in the decision and act on exactly the snapshot the user saw. commit()
-        // locks the batch after the kill-switch check and returns the displayed set.
+        // locks the batch after the kill-switch check and returns the displayed set;
+        // rebind the caller to the one displayed with it before any grant/trust/sign.
         val shown = gate.commit() ?: return
+        rebindDisplayedCaller()
         if (shown.size > 1) return handleApproveBatch(duration, shown)
         // Re-bind the single-request fields to the displayed request so a request
         // that raced in after render (overwriting the fields) is never signed.
@@ -783,6 +810,7 @@ class Nip55Activity : FragmentActivity() {
         // after the other has already committed.
         if (!gate.admitsAction) return
         val shown = gate.commit() ?: return
+        rebindDisplayedCaller()
         if (shown.size > 1) return handleRejectBatch(duration, shown)
         shown.firstOrNull()?.let {
             request = it.request

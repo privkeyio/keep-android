@@ -28,20 +28,26 @@ class BatchToctouRegressionTest {
     private val cap = 20
 
     private fun gate() =
-        BatchConsentGate<Pair<String, Nip55RequestType>>(cap) { it.second }
+        BatchConsentGate<Pair<String, Nip55RequestType>, String>(cap) { it.second }
 
-    private fun BatchConsentGate<Pair<String, Nip55RequestType>>.deliver(
+    private fun BatchConsentGate<Pair<String, Nip55RequestType>, String>.deliver(
         id: String,
         type: Nip55RequestType = Nip55RequestType.SIGN_EVENT,
         caller: String = app,
     ) = accumulate(id to type, caller)
+
+    // Captures the current batch's caller with the displayed snapshot, mirroring the
+    // Activity passing its caller identity into render().
+    private fun BatchConsentGate<Pair<String, Nip55RequestType>, String>.renderAs(
+        caller: String = app,
+    ) = render(caller)
 
     @Test
     fun lateIntentBetweenRenderAndTapIsNeverSigned() {
         val gate = gate()
         gate.deliver("r1")
         gate.deliver("r2")
-        gate.render()
+        gate.renderAs()
 
         // Attacker races a request in after the user has seen {r1, r2}.
         gate.deliver("late")
@@ -56,7 +62,7 @@ class BatchToctouRegressionTest {
     fun intentDeliveredAfterDecisionIsIgnored() {
         val gate = gate()
         gate.deliver("r1")
-        gate.render()
+        gate.renderAs()
         gate.commit()
 
         // Once locked, a late intent must not mutate pending at all.
@@ -69,7 +75,7 @@ class BatchToctouRegressionTest {
     fun secondDecisionAfterLockIsIgnored() {
         val gate = gate()
         gate.deliver("r1")
-        gate.render()
+        gate.renderAs()
         val first = gate.commit()
 
         // A committed decision can never run twice.
@@ -83,7 +89,7 @@ class BatchToctouRegressionTest {
     fun deferredAsyncRenderAfterDecisionDoesNotRecaptureGrownPending() {
         val gate = gate()
         gate.deliver("r1")
-        gate.render()
+        gate.renderAs()
 
         // The late intent lands before the tap, so it accumulates into pending, but
         // its setupContent is deferred (calculateRiskAndSetupContent launches async)
@@ -93,7 +99,7 @@ class BatchToctouRegressionTest {
 
         // That deferred render must be blocked by the lock: it cannot re-capture the
         // grown [r1, late] pending into displayed. Without the guard it would.
-        gate.render()
+        gate.renderAs()
 
         assertEquals(listOf("r1"), gate.displayed.map { it.first })
     }
@@ -102,7 +108,7 @@ class BatchToctouRegressionTest {
     fun signedSetEqualsDisplayedSnapshotAcrossFullBatch() {
         val gate = gate()
         repeat(5) { gate.deliver("r$it") }
-        gate.render()
+        gate.renderAs()
         val displayedAtRender = gate.displayed.map { it.first }
 
         gate.deliver("late")
@@ -117,24 +123,30 @@ class BatchToctouRegressionTest {
         val gate = gate()
         gate.deliver("r1")
         gate.deliver("r2")
-        gate.render()
+        gate.renderAs(app)
 
         // A different-caller request resets the batch (pending is cleared and starts
-        // fresh), the most adversarial TOCTOU shape: the pending list the user saw is
-        // gone by decision time. The decision must still bind to the displayed {r1, r2}.
+        // fresh) and swaps the live batch caller to the attacker, the most adversarial
+        // TOCTOU shape: both the pending list and the caller the user saw are gone by
+        // decision time. Its render is deferred (never re-captures), so the decision
+        // must still bind to the displayed {r1, r2} AND to the original caller.
         gate.deliver("evil", caller = other)
         assertEquals(listOf("evil"), gate.pending.map { it.first })
+        assertEquals(other, gate.batchCaller)
 
         val signed = gate.commit()
 
         assertEquals(listOf("r1", "r2"), signed?.map { it.first })
+        // The caller binding, not just the request set: the committed decision is bound
+        // to the caller displayed with the batch, never the attacker who reset it.
+        assertEquals(app, gate.displayedCaller)
     }
 
     @Test
     fun lateGetPublicKeyRaceDoesNotJoinTheSignedSet() {
         val gate = gate()
         gate.deliver("r1")
-        gate.render()
+        gate.renderAs()
 
         // get_public_key never batches; it resets pending. The signed set is still the
         // displayed snapshot, so the racing get_public_key can never be folded in.
