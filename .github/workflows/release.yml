@@ -75,8 +75,20 @@ jobs:
             --secret id=key_pass,env=KEY_PASSWORD \
             --output type=local,dest=docker-out \
             -f Dockerfile.reproducible .
-          test -f docker-out/app-release.apk
-          mv docker-out/app-release.apk "keep-android-${REF_NAME}.apk"
+          # ABI splits produce one APK per architecture (app-<abi>-release.apk).
+          # Rename each to a release asset: keep-android-<tag>-<abi>.apk
+          shopt -s nullglob
+          count=0
+          for apk in docker-out/app-*-release.apk; do
+            abi="$(basename "$apk" | sed -E 's/^app-(.*)-release\.apk$/\1/')"
+            mv "$apk" "keep-android-${REF_NAME}-${abi}.apk"
+            count=$((count + 1))
+          done
+          if [ "$count" -lt 2 ]; then
+            echo "error: expected at least 2 per-ABI APKs, got $count" >&2
+            exit 1
+          fi
+          ls -la "keep-android-${REF_NAME}"-*.apk
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
@@ -94,25 +106,34 @@ jobs:
           EXPECTED_CERT_SHA256: 3eb0e6f6f4e0962ebd717f84eea47428b73087b686c956633d6a9fcc4c854f50
         run: |
           APKSIGNER="$ANDROID_HOME/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner"
-          CERTS="$("$APKSIGNER" verify --print-certs "keep-android-${REF_NAME}.apk")"
-          echo "$CERTS"
-          ACTUAL="$(printf '%s\n' "$CERTS" \
-            | sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]+).*/\1/p' \
-            | head -1 | tr 'A-F' 'a-f')"
-          if [ -z "$ACTUAL" ]; then
-            echo "::error::could not parse signing certificate SHA-256 digest" >&2
+          shopt -s nullglob
+          checked=0
+          for apk in "keep-android-${REF_NAME}"-*.apk; do
+            CERTS="$("$APKSIGNER" verify --print-certs "$apk")"
+            echo "$apk:"; echo "$CERTS"
+            ACTUAL="$(printf '%s\n' "$CERTS" \
+              | sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9a-fA-F]+).*/\1/p' \
+              | head -1 | tr 'A-F' 'a-f')"
+            if [ -z "$ACTUAL" ]; then
+              echo "::error::$apk: could not parse signing certificate SHA-256 digest" >&2
+              exit 1
+            fi
+            if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+              echo "::error::$apk signing cert SHA-256 $ACTUAL does not match expected release key $EXPECTED_CERT_SHA256" >&2
+              exit 1
+            fi
+            checked=$((checked + 1))
+          done
+          if [ "$checked" -lt 2 ]; then
+            echo "::error::expected to verify at least 2 per-ABI APKs, verified $checked" >&2
             exit 1
           fi
-          if [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
-            echo "::error::signing cert SHA-256 $ACTUAL does not match expected release key $EXPECTED_CERT_SHA256" >&2
-            exit 1
-          fi
-          echo "Signing certificate matches the expected release key."
+          echo "All $checked per-ABI APK signing certificates match the expected release key."
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: apk
-          path: keep-android-${{ github.ref_name }}.apk
+          path: keep-android-${{ github.ref_name }}-*.apk
 
   release:
     needs: [build]

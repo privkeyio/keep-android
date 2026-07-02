@@ -142,7 +142,7 @@ export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
 # container paths:
 #   * Host build: if no `KEYSTORE_FILE` is exported and no `storeFile` is
 #     resolved by `app/build.gradle.kts`, Gradle falls back to the debug
-#     signing key and still writes `app-release.apk`.
+#     signing key and still writes the per-ABI `app-<abi>-release.apk` files.
 #   * Container build (Section 4): `Dockerfile.reproducible` intentionally
 #     generates a throwaway keystore per build when `KEYSTORE_FILE` is unset,
 #     so the APK is always release-signed. This enforces a deterministic
@@ -153,7 +153,8 @@ export SOURCE_DATE_EPOCH="$(./scripts/derive-sde.sh)"
 ./gradlew assembleRelease --no-daemon
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk`.
+Output: per-ABI APKs in `app/build/outputs/apk/release/`, namely
+`app-arm64-v8a-release.apk` and `app-x86_64-release.apk`.
 
 If you want to reproduce the exact byte layout of the published APK, you must
 sign with the same release key; otherwise the APK payload is identical but the
@@ -187,7 +188,7 @@ DOCKER_BUILDKIT=1 docker build \
     -f Dockerfile.reproducible \
     .
 
-ls out/   # app-release.apk
+ls out/   # app-arm64-v8a-release.apk  app-x86_64-release.apk
 ```
 
 The container:
@@ -198,7 +199,7 @@ The container:
 3. Copies the keep-android sources in and clones `keep` at the pinned SHA.
 4. Runs `build-rust.sh` and `./gradlew assembleRelease` with
    `SOURCE_DATE_EPOCH` set.
-5. Exports the signed release APK to `./out/` (signed with a per-build
+5. Exports the signed per-ABI release APKs to `./out/` (signed with a per-build
    throwaway keystore unless a keystore is supplied; see § 4.1).
 
 ### 4.1 Optional build-args
@@ -257,7 +258,7 @@ sha256sum -c SHA256SUMS
 sudo apt-get install -y diffoscope
 diffoscope --html diffoscope.html --text diffoscope.txt \
     keep-android-v0.5.2.apk \
-    app/build/outputs/apk/release/app-release.apk
+    app/build/outputs/apk/release/app-arm64-v8a-release.apk
 ```
 
 A reproducible build produces a `diffoscope` report in which:
@@ -288,18 +289,19 @@ is removed explicitly so the sibling cargo target dir is purged even when
 rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi "$KEEP_REPO/keep-mobile/target"
 ./build-rust.sh
 ./gradlew assembleRelease --no-daemon
-cp app/build/outputs/apk/release/app-release.apk /tmp/build1.apk
+cp app/build/outputs/apk/release/app-arm64-v8a-release.apk /tmp/build1.apk
 
 ./gradlew clean --no-daemon
 rm -rf app/src/main/jniLibs app/src/main/kotlin/io/privkey/keep/uniffi "$KEEP_REPO/keep-mobile/target"
 ./build-rust.sh
 ./gradlew assembleRelease --no-daemon
-cp app/build/outputs/apk/release/app-release.apk /tmp/build2.apk
+cp app/build/outputs/apk/release/app-arm64-v8a-release.apk /tmp/build2.apk
 
 sha256sum /tmp/build1.apk /tmp/build2.apk
 ```
 
-The two SHA-256 hashes MUST be identical.
+The two SHA-256 hashes MUST be identical. Repeat the comparison for
+`app-x86_64-release.apk`; each per-ABI APK must reproduce independently.
 
 ## 6. Troubleshooting
 
