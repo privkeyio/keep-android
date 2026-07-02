@@ -131,7 +131,10 @@ jobs:
               echo "Published $abi APK not available yet (attempt $i/40); waiting 30s..."
               sleep 30
             done
-            [ -n "$ok" ] && test -s "published-${abi}.apk"
+            if [ -z "$ok" ] || ! test -s "published-${abi}.apk"; then
+              echo "::error::published $abi APK never became available at $URL" >&2
+              exit 1
+            fi
             apksigcopier compare "published-${abi}.apk" "$built"
             echo "Container build reproduces the published $VERSION $abi APK (payload identical)."
           done

@@ -108,7 +108,8 @@ android {
 
 // Assign each per-ABI release split its own versionCode: 10 * base + abiCode.
 // ABI codes follow F-Droid's required ordering (armeabi-v7a < arm64-v8a < x86 <
-// x86_64) and must match the VercodeOperation in metadata/io.privkey.keep.yml.
+// x86_64), yielding 232 (arm64-v8a) and 234 (x86_64). The F-Droid recipe must
+// declare matching per-ABI versionCodes for these splits.
 val abiVersionCodes = mapOf("arm64-v8a" to 2, "x86_64" to 4)
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->

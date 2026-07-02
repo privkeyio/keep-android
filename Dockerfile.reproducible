@@ -13,9 +13,9 @@
 #       --output type=local,dest=out \
 #       -f Dockerfile.reproducible .
 #
-# Output: ./out/app-release.apk  (unsigned; sign with your own key or compare
-# against the published APK with diffoscope — the payload is reproducible,
-# only the signing block necessarily differs).
+# Output: ./out/app-<abi>-release.apk, one per ABI (arm64-v8a, x86_64). Sign
+# with your own key or compare against the published APK with diffoscope; the
+# payload is reproducible, only the signing block necessarily differs.
 
 # Pinned base: Debian 13 (trixie), slim variant. This matches F-Droid's
 # buildserver OS so the published APK reproduces what F-Droid builds from the
