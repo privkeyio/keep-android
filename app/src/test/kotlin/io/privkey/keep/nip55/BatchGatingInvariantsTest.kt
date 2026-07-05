@@ -105,8 +105,9 @@ class BatchGatingInvariantsTest {
         assertEquals(BatchAccumulation.DROP_OVER_CAP, decisions.last())
         assertTrue(gate.pending.none { it.first == "r$cap" })
 
-        // What the user is shown is also capped at 20: the overflow can't sneak onto
-        // the consent screen either.
+        // The dropped overflow never entered the pending list, so the render snapshot
+        // the user is shown is capped at 20 too (the post-render TOCTOU sneak is
+        // BatchToctouRegressionTest's job; here the overflow is gone before render).
         assertEquals(cap, gate.render(app)!!.size)
     }
 
