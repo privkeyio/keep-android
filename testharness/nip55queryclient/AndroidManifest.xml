@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.privkey.keeptest.queryclient">
+
+    <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="34" />
+
+    <queries>
+        <provider android:authorities="io.privkey.keep.GET_PUBLIC_KEY" />
+        <provider android:authorities="io.privkey.keep.SIGN_EVENT" />
+        <provider android:authorities="io.privkey.keep.NIP04_ENCRYPT" />
+        <provider android:authorities="io.privkey.keep.NIP04_DECRYPT" />
+        <provider android:authorities="io.privkey.keep.NIP44_ENCRYPT" />
+        <provider android:authorities="io.privkey.keep.NIP44_DECRYPT" />
+        <provider android:authorities="io.privkey.keep.DECRYPT_ZAP_EVENT" />
+        <package android:name="io.privkey.keep" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:hasCode="true"
+        android:label="KeepQC">
+        <activity
+            android:name=".QueryActivity"
+            android:exported="true" />
+    </application>
+</manifest>
