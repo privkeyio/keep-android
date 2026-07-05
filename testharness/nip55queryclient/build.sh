@@ -37,12 +37,28 @@ pick_latest() {
   printf '%s\n' "${matches[@]}" | sort -V | tail -1
 }
 
-BT="$(pick_latest "$SDK/build-tools/*/")"
-BT="${BT%/}"
-[ -n "$BT" ] && [ -x "$BT/aapt2" ] || { echo "error: no usable build-tools under $SDK/build-tools" >&2; exit 1; }
-# NOTE: build-tools 34.0.0's d8 can crash with an internal R8 NPE on this client's
-# anonymous Runnable; 35.0.0+ (36.0.0 verified) build fine. pick_latest takes the
-# highest installed, so ensure a 35+ build-tools is present if the d8 step below fails.
+# Enforce a build-tools floor: javac below emits class file v61 (--release 17), and
+# 34.0.0's d8 crashes with an internal R8 NPE on this client's anonymous Runnable while
+# <34 predates reliable class-61 desugaring here; 35.0.0+ (36.0.0 verified) build fine.
+# Pick the NEWEST installed build-tools whose version is >= the floor, and fail fast with
+# an actionable message otherwise rather than letting an incompatible d8 crash mid-build.
+MIN_BUILD_TOOLS="35.0.0"
+BT=""
+for cand in "$SDK/build-tools/"*/; do
+  cand="${cand%/}"
+  ver="$(basename "$cand")"
+  [ -x "$cand/aapt2" ] || continue
+  [ "$(printf '%s\n%s\n' "$MIN_BUILD_TOOLS" "$ver" | sort -V | head -1)" = "$MIN_BUILD_TOOLS" ] || continue
+  if [ -z "$BT" ] || [ "$(printf '%s\n%s\n' "$(basename "$BT")" "$ver" | sort -V | tail -1)" = "$ver" ]; then
+    BT="$cand"
+  fi
+done
+if [ -z "$BT" ]; then
+  installed="$(pick_latest "$SDK/build-tools/*/")"; installed="${installed%/}"
+  echo "error: no build-tools >= $MIN_BUILD_TOOLS under $SDK/build-tools (d8 must handle class v61 from --release 17 and avoid the 34.0.0 R8 NPE);" \
+       "newest installed: ${installed:-none}. Install build-tools $MIN_BUILD_TOOLS or newer." >&2
+  exit 1
+fi
 
 # android-37.0 sorts after android-36 under -V; strip any non-numeric platform dirs
 # and take the highest numeric API android.jar available.
