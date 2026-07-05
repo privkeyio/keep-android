@@ -572,6 +572,7 @@ class BunkerService : Service() {
         val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || authorizedClientsCache.contains(pk))
         val isConnectRequest = request.method == "connect"
 
+        // Gate before limiter ordering is contract-tested by RateLimitDelegationTest.
         if (requestGateDecision(isAuthorized, isConnectRequest) == RequestGate.REJECT_UNAUTHORIZED) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
             return REJECTED
