@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
@@ -81,11 +82,15 @@ class CallerVerificationStore(context: Context) {
         nonceStore.clear()
     }
 
-    fun generateNonce(packageName: String): String = nonceStore.generate(packageName)
+    // Nonce freshness is measured on the boot-time clock (elapsedRealtime, which
+    // counts device suspend) so the 5-minute window holds across deep sleep.
+    fun generateNonce(packageName: String): String =
+        nonceStore.generate(packageName, SystemClock.elapsedRealtime().toULong())
 
-    fun consumeNonce(nonce: String): NonceResult = nonceStore.consume(nonce).toNonceResult()
+    fun consumeNonce(nonce: String): NonceResult =
+        nonceStore.consume(nonce, SystemClock.elapsedRealtime().toULong()).toNonceResult()
 
-    fun cleanupExpiredNonces() = nonceStore.cleanupExpired()
+    fun cleanupExpiredNonces() = nonceStore.cleanupExpired(SystemClock.elapsedRealtime().toULong())
 
     sealed class VerificationResult {
         abstract val signatureHash: String?
