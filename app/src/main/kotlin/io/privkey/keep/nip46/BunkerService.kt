@@ -98,8 +98,8 @@ class BunkerService : Service() {
         private val bunkerRateLimiter by lazy { Nip46BunkerRateLimiter() }
         private val connectRateLimiter by lazy { Nip46BunkerRateLimiter() }
 
-        private fun limiterFor(isConnectRequest: Boolean): Nip46BunkerRateLimiter =
-            when (rateLimitBudgetFor(isConnectRequest)) {
+        private fun limiterFor(budget: RateLimitBudget): Nip46BunkerRateLimiter =
+            when (budget) {
                 RateLimitBudget.CONNECT -> connectRateLimiter
                 RateLimitBudget.SIGNING -> bunkerRateLimiter
             }
@@ -175,7 +175,7 @@ class BunkerService : Service() {
                 val pubkey = clientPubkey ?: approval.request.appPubkey
                 clientPendingCounts[pubkey]?.decrementAndGet()
                 if (approved) {
-                    limiterFor(approval.isConnectRequest).resetConsecutive(pubkey.lowercase())
+                    limiterFor(rateLimitBudgetFor(approval.isConnectRequest)).resetConsecutive(pubkey.lowercase())
                 }
                 approval.respond(
                     BunkerApprovalResult(
@@ -214,8 +214,8 @@ class BunkerService : Service() {
         // Global + per-client window + exponential backoff live in Rust; Android
         // supplies the monotonic clock. Key on the lowercased pubkey so case-variant
         // hex can't mint fresh per-client buckets (matches the authorization path).
-        internal fun isRateLimited(clientPubkey: String, isConnectRequest: Boolean): Boolean {
-            val limited = limiterFor(isConnectRequest).isRateLimited(clientPubkey.lowercase(), SystemClock.elapsedRealtime().toULong())
+        internal fun isRateLimited(clientPubkey: String, budget: RateLimitBudget): Boolean {
+            val limited = limiterFor(budget).isRateLimited(clientPubkey.lowercase(), SystemClock.elapsedRealtime().toULong())
             // Bounds the concurrency map (clientPendingCounts); rate-limit state is bounded in Rust.
             if (clientPendingCounts.size > MAX_TRACKED_CLIENTS) {
                 evictStaleMaps()
@@ -572,13 +572,15 @@ class BunkerService : Service() {
         val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || authorizedClientsCache.contains(pk))
         val isConnectRequest = request.method == "connect"
 
-        // Gate before limiter ordering is contract-tested by RateLimitDelegationTest.
-        if (requestGateDecision(isAuthorized, isConnectRequest) == RequestGate.REJECT_UNAUTHORIZED) {
+        // Gate-then-budget ordering is contract-tested by RateLimitDelegationTest:
+        // a null budget means the gate rejected before any limiter is consulted.
+        val budget = rateLimitBudgetDecision(isAuthorized, isConnectRequest)
+        if (budget == null) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Unauthorized client ${truncatePubkey(clientPubkey)} attempted ${request.method}")
             return REJECTED
         }
 
-        if (isRateLimited(clientPubkey, isConnectRequest)) {
+        if (isRateLimited(clientPubkey, budget)) {
             if (BuildConfig.DEBUG) Log.w(TAG, "Request from ${truncatePubkey(clientPubkey)} rate limited")
             return REJECTED
         }

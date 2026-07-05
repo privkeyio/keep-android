@@ -13,24 +13,19 @@ import org.junit.Test
  */
 class RateLimitDelegationTest {
 
-    // Mirrors BunkerService.handleApprovalRequest ordering: the gate runs first,
-    // and only a RATE_LIMIT_THEN_PROCEED outcome consults limiterFor(isConnectRequest).
-    private fun budgetConsulted(isAuthorized: Boolean, isConnectRequest: Boolean): RateLimitBudget? =
-        when (requestGateDecision(isAuthorized, isConnectRequest)) {
-            RequestGate.REJECT_UNAUTHORIZED -> null
-            RequestGate.RATE_LIMIT_THEN_PROCEED -> rateLimitBudgetFor(isConnectRequest)
-        }
+    // Exercises the same rateLimitBudgetDecision seam BunkerService.handleApprovalRequest
+    // uses, so a production reordering (limiter consulted before the auth gate) fails here.
 
     @Test
     fun unauthorizedNonConnectConsultsNoLimiter() {
-        assertNull(budgetConsulted(isAuthorized = false, isConnectRequest = false))
+        assertNull(rateLimitBudgetDecision(isAuthorized = false, isConnectRequest = false))
     }
 
     @Test
     fun unauthorizedConnectDelegatesToConnectBudget() {
         assertEquals(
             RateLimitBudget.CONNECT,
-            budgetConsulted(isAuthorized = false, isConnectRequest = true)
+            rateLimitBudgetDecision(isAuthorized = false, isConnectRequest = true)
         )
     }
 
@@ -38,7 +33,7 @@ class RateLimitDelegationTest {
     fun authorizedSigningDelegatesToSigningBudget() {
         assertEquals(
             RateLimitBudget.SIGNING,
-            budgetConsulted(isAuthorized = true, isConnectRequest = false)
+            rateLimitBudgetDecision(isAuthorized = true, isConnectRequest = false)
         )
     }
 
@@ -46,7 +41,7 @@ class RateLimitDelegationTest {
     fun authorizedConnectDelegatesToConnectBudget() {
         assertEquals(
             RateLimitBudget.CONNECT,
-            budgetConsulted(isAuthorized = true, isConnectRequest = true)
+            rateLimitBudgetDecision(isAuthorized = true, isConnectRequest = true)
         )
     }
 }
