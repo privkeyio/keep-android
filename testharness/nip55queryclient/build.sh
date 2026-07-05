@@ -28,11 +28,21 @@ if [ -z "$SDK" ]; then
   exit 1
 fi
 
-pick_latest() { ls -d $1 2>/dev/null | sort -V | tail -1; }
+shopt -s nullglob
+# Highest-versioned match of a glob, or empty (no failing `ls` in a pipe, so a missing
+# dir does not trip `set -o pipefail` before the friendly guards below can report it).
+pick_latest() {
+  local matches=($1)
+  (( ${#matches[@]} )) || return 0
+  printf '%s\n' "${matches[@]}" | sort -V | tail -1
+}
 
 BT="$(pick_latest "$SDK/build-tools/*/")"
 BT="${BT%/}"
 [ -n "$BT" ] && [ -x "$BT/aapt2" ] || { echo "error: no usable build-tools under $SDK/build-tools" >&2; exit 1; }
+# NOTE: build-tools 34.0.0's d8 can crash with an internal R8 NPE on this client's
+# anonymous Runnable; 35.0.0+ (36.0.0 verified) build fine. pick_latest takes the
+# highest installed, so ensure a 35+ build-tools is present if the d8 step below fails.
 
 # android-37.0 sorts after android-36 under -V; strip any non-numeric platform dirs
 # and take the highest numeric API android.jar available.

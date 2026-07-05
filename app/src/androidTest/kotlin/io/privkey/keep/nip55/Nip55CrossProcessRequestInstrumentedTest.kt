@@ -30,14 +30,18 @@ import java.util.concurrent.TimeUnit
  * real request-handling branches (malformed request, per-app DENY reject, rate-limit)
  * the query must come from a DISTINCTLY-SIGNED, dedicated-UID caller that keep has
  * pinned via TOFU. A tiny standalone client APK (io.privkey.keeptest.queryclient,
- * scratchpad/nip55queryclient) supplies that caller: on launch it runs
+ * testharness/nip55queryclient) supplies that caller: on launch it runs
  * ContentResolver.query against keep's provider and broadcasts the resulting cursor's
  * columns + row0 back to this test.
  *
  * Trust is bootstrapped in-process: the test pins the client's signing-certificate hash
  * into CallerVerificationStore (the same TOFU seam a first-use UI approval would write),
  * so the client's query passes getVerifiedCaller() (cross-process UID, single package,
- * matching signature) and lands on the branch under test.
+ * matching signature) and lands on the branch under test. This pinned trust PERSISTS in
+ * keep's prefs after the run (there is no per-package untrust API, and clearAllTrust is
+ * too destructive to call in a finally): the harness client stays trusted on the target.
+ * Harmless on a throwaway dev device (re-pin is idempotent); do not run it against an
+ * install whose caller-trust set you care about.
  *
  * Out of scope (documented, not faked):
  *  - The AUTO_APPROVE / ALLOW success cursors require a provisioned signing key + a
@@ -61,6 +65,14 @@ class Nip55CrossProcessRequestInstrumentedTest {
     private val clientPkg = "io.privkey.keeptest.queryclient"
     private val clientActivity = "$clientPkg.QueryActivity"
     private val resultAction = "io.privkey.keeptest.QUERY_RESULT"
+
+    // The result broadcast receiver must be exported to receive the cross-UID reply, so a
+    // predictable, source-visible reqid would let any co-installed app forge a QUERY_RESULT
+    // and make the test assert a false PASS without keep's provider ever being hit. Each run
+    // uses an unguessable nonce so a spoofer cannot pre-know the reqid to match. The client
+    // echoes back whatever reqid it was launched with.
+    private val runNonce = java.util.UUID.randomUUID().toString()
+    private fun rid(label: String) = "$runNonce-$label"
 
     // Reference SHA-256 of the client APK's DER-encoded signing certificate for the
     // debug keystore that produced the originally-proven APK. Documented as a sanity
@@ -87,7 +99,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
         // ActivityNotFoundException => the client APK is not installed -> skip, don't fail.
         try {
             runClientQuery(
-                "xproc-prime", "io.privkey.keep.SIGN_EVENT",
+                rid("prime"), "io.privkey.keep.SIGN_EVENT",
                 arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
             )
         } catch (e: android.content.ActivityNotFoundException) {
@@ -176,7 +188,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
             "a".repeat(129), // > MAX_PUBKEY_LENGTH (128)
             ""
         )
-        val r = parse(runClientQuery("xproc-badpubkey", "io.privkey.keep.SIGN_EVENT", projection))
+        val r = parse(runClientQuery(rid("badpubkey"), "io.privkey.keep.SIGN_EVENT", projection))
         // Proves we are PAST the caller gate: a same-UID/untrusted caller would get the
         // "error"/"Request denied" cursor before any pubkey validation.
         assertEquals("Malformed request must map to the error-cursor contract", listOf("error"), r.cols)
@@ -195,7 +207,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
         try {
             val projection = arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
-            val r = parse(runClientQuery("xproc-deny", "io.privkey.keep.SIGN_EVENT", projection))
+            val r = parse(runClientQuery(rid("deny"), "io.privkey.keep.SIGN_EVENT", projection))
             assertEquals("DENY must map to the rejected-cursor contract", listOf("rejected"), r.cols)
             assertEquals("true", r.row0)
         } finally {
