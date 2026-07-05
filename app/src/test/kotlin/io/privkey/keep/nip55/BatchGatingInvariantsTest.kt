@@ -13,15 +13,19 @@ import org.junit.Test
  * to lock in the invariants that only hold across a whole batch:
  *
  * - a batch only ever contains one caller's requests (cross-caller / get_public_key
- *   mixing never survives accumulation, not merely a single decision),
+ *   mixing never survives accumulation, not merely a single decision), and
  * - the MAX_BATCH_SIZE cap holds as an accumulated-state invariant, not just as a
- *   per-call verdict, and
- * - one biometric presence gate covers N events while the per-request side effects
- *   (preApprove + grant + audit) still fire once per event, matching the single-sign
- *   path — the parity that makes batching a UX change, not a security downgrade.
+ *   per-call verdict.
  *
- * Dropping a guard in the gate, or the per-event loop in the modeled commit, fails
- * these tests: they exercise the code [Nip55Activity] actually delegates to.
+ * Dropping a guard in the gate fails these tests: they exercise the code
+ * [Nip55Activity] actually delegates to.
+ *
+ * The third #373 invariant — one biometric presence gate covering N events while
+ * preApprove + grant + audit still fire once per event — is not asserted here: that
+ * per-request loop lives in [Nip55Activity.handleApproveBatch] and is bound to the
+ * FragmentActivity, biometric prompt, and native FFI, so a JVM unit test cannot
+ * drive it without re-encoding it into a fiction that proves nothing. It is covered
+ * on-device (the NIP-55 e2e harness) and by the instrumented batch tests.
  */
 class BatchGatingInvariantsTest {
 
@@ -117,38 +121,5 @@ class BatchGatingInvariantsTest {
             assertEquals(BatchAccumulation.DROP_OVER_CAP, gate.deliver("over$i"))
         }
         assertEquals(cap, gate.pending.size)
-    }
-
-    @Test
-    fun oneBiometricGateCoversBatchWhilePerRequestEffectsFireOncePerEvent() {
-        val gate = gate()
-        val n = 5
-        repeat(n) { gate.deliver("r$it") }
-        val committed = gate.render(app).let { gate.commit() }!!
-
-        // The committed set is exactly the displayed batch: N events approved together.
-        assertEquals(gate.displayed, committed)
-        assertEquals(n, committed.size)
-
-        // Model handleApproveBatch: ONE presence gate for the whole set, then the
-        // per-request loop runs preApprove + grant + audit once for every event
-        // (parity with the single-sign path, where each fires exactly once).
-        var presenceGates = 0
-        var preApprovals = 0
-        var grants = 0
-        var audits = 0
-        run {
-            presenceGates++
-            for (item in committed) {
-                if (item.second == Nip55RequestType.SIGN_EVENT) preApprovals++
-                grants++
-                audits++
-            }
-        }
-
-        assertEquals(1, presenceGates)
-        assertEquals(n, preApprovals)
-        assertEquals(n, grants)
-        assertEquals(n, audits)
     }
 }
