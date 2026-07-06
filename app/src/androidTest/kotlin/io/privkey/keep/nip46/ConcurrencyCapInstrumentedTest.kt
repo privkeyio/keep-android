@@ -7,7 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
@@ -26,18 +25,17 @@ import java.util.UUID
  *
  * The companion counters (globalPendingCount, clientPendingCounts, pendingApprovals)
  * are process-global static state. clearRateLimitState() is not used for reset: it
- * leaves pendingApprovals untouched, so state is instead drained through the
+ * leaves pendingApprovals untouched, so state is instead drained in @After through the
  * production remove path (respondToApproval, approved=false — the branch that skips
- * the native limiter's resetConsecutive) so each method starts and ends with zeroed
- * counters and an empty map, giving full inter-method isolation.
+ * the native limiter's resetConsecutive), which removes each pending approval and
+ * returns the global and per-client counters to zero (the per-client map keeps its
+ * now-zero entries; a 0 count never trips the cap). Since this is the only instrumented
+ * class touching these counters, that @After drain gives full inter-method isolation.
  */
 @RunWith(AndroidJUnit4::class)
 class ConcurrencyCapInstrumentedTest {
 
     private val added = mutableListOf<Pair<String, String>>()
-
-    @Before
-    fun setUp() = drain()
 
     @After
     fun tearDown() = drain()
