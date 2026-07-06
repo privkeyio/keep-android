@@ -101,11 +101,24 @@ class Nip55RequestMappingInstrumentedTest {
 
     @Test
     fun activity_unverifiedCaller_signEventIntent_mapsToCanceledError() {
+        // Force a deterministically-unverified caller. Under ActivityScenario the
+        // launching package (getCallingActivity) resolves to the on-device test
+        // package, which the Activity would otherwise treat as a legitimate first-use
+        // caller and route to the approval UI (no auto-result). Issuing a nonce bound
+        // to a DIFFERENT package trips identifyCaller's direct-caller mismatch guard,
+        // which clears the caller to unverified. That is the very fail-closed contract
+        // under test: a well-formed sign_event request whose bearer nonce was issued to
+        // another package maps to RESULT_CANCELED (an error), never to a signature.
+        val app = context.applicationContext as io.privkey.keep.KeepMobileApp
+        val verificationStore = app.getCallerVerificationStore()
+            ?: error("CallerVerificationStore not initialized")
+        val nonce = verificationStore.generateNonce("com.example.unknown.caller")
         val intent = Intent(context, Nip55Activity::class.java).apply {
             action = Intent.ACTION_VIEW
             data = Uri.parse("nostrsigner:${Uri.encode("""{"kind":1,"content":"gm","tags":[]}""")}")
             putExtra("type", "sign_event")
             putExtra("id", "req-unhappy-1")
+            putExtra("nip55_nonce", nonce)
         }
         val result = launchAndGetResult(intent)
 
