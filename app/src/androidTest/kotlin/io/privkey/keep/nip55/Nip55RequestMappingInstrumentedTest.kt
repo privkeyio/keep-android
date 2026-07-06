@@ -129,9 +129,15 @@ class Nip55RequestMappingInstrumentedTest {
         )
         val data = result.resultData
         assertNotNull("Error result must carry a result intent", data)
-        val error = data!!.getStringExtra("error")
-        assertNotNull("Error mapping must include a user-facing error extra", error)
-        assertFalse("Error message must be non-empty", error!!.isEmpty())
+        // Pin the exact unknown_caller message so the assertion binds to the caller-
+        // mismatch path specifically. A killed/locked device short-circuits handleIntent
+        // to "signing_disabled"/"locked" BEFORE identifyCaller runs; asserting the exact
+        // message catches that state-dependent false-green rather than accepting any error.
+        assertEquals(
+            "Unverified caller must map to the unknown_caller user message",
+            "Request from unverified app",
+            data!!.getStringExtra("error")
+        )
         // The error mapping is distinct from the reject mapping (RESULT_OK + rejected)
         // and the success mapping (RESULT_OK + signature): neither extra is present.
         assertNull("Error result must not masquerade as a signature", data.getStringExtra("signature"))
@@ -139,14 +145,28 @@ class Nip55RequestMappingInstrumentedTest {
     }
 
     @Test
-    fun activity_unverifiedCaller_emptyIntent_mapsToCanceledError() {
-        // No data URI, no extras: still an unverified caller, still the error mapping.
+    fun activity_emptyIntent_missingUri_mapsToCanceledError() {
+        // No data URI: the caller resolves (first-use test package) and passes the caller
+        // gate, so parseRequest returning null on the missing URI is what cancels the
+        // request -> finishWithError("Invalid request") -> the generic "Request failed"
+        // user message. This covers the unparseable-request fail-closed mapping (canceled,
+        // no signature/rejected), distinct from the unverified-caller path above; it is
+        // NOT an unverified-caller test. On a killed/locked device it asserts the wrong
+        // message and fails loudly rather than false-greening.
         val intent = Intent(context, Nip55Activity::class.java).apply {
             action = Intent.ACTION_VIEW
         }
         val result = launchAndGetResult(intent)
 
         assertEquals(Activity.RESULT_CANCELED, result.resultCode)
-        assertNotNull(result.resultData?.getStringExtra("error"))
+        val data = result.resultData
+        assertNotNull("Error result must carry a result intent", data)
+        assertEquals(
+            "Missing-URI request must map to the invalid-request user message",
+            "Request failed",
+            data!!.getStringExtra("error")
+        )
+        assertNull("Error result must not masquerade as a signature", data.getStringExtra("signature"))
+        assertFalse("Error result must not carry the rejected flag", data.getBooleanExtra("rejected", false))
     }
 }
