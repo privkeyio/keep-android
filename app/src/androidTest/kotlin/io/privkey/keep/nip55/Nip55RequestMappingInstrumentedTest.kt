@@ -1,12 +1,15 @@
 package io.privkey.keep.nip55
 
 import android.app.Activity
+import android.app.Instrumentation
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.KeepMobileApp
+import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,6 +41,13 @@ import org.junit.runner.RunWith
 class Nip55RequestMappingInstrumentedTest {
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
+
+    // The unverified-caller test issues a nonce on the app-wide CallerVerificationStore
+    // singleton; sweep expired nonces so the shared production store is not left mutated.
+    @After
+    fun cleanupVerificationStore() {
+        (context.applicationContext as KeepMobileApp).getCallerVerificationStore()?.cleanupExpiredNonces()
+    }
 
     private val allAuthorities = listOf(
         "io.privkey.keep.GET_PUBLIC_KEY",
@@ -93,7 +103,7 @@ class Nip55RequestMappingInstrumentedTest {
 
     // --- Activity: unverified caller maps to RESULT_CANCELED + error extra ---
 
-    private fun launchAndGetResult(intent: Intent): android.app.Instrumentation.ActivityResult {
+    private fun launchAndGetResult(intent: Intent): Instrumentation.ActivityResult {
         ActivityScenario.launchActivityForResult<Nip55Activity>(intent).use { scenario ->
             return scenario.result
         }
@@ -109,7 +119,7 @@ class Nip55RequestMappingInstrumentedTest {
         // which clears the caller to unverified. That is the very fail-closed contract
         // under test: a well-formed sign_event request whose bearer nonce was issued to
         // another package maps to RESULT_CANCELED (an error), never to a signature.
-        val app = context.applicationContext as io.privkey.keep.KeepMobileApp
+        val app = context.applicationContext as KeepMobileApp
         val verificationStore = app.getCallerVerificationStore()
             ?: error("CallerVerificationStore not initialized")
         val nonce = verificationStore.generateNonce("com.example.unknown.caller")
