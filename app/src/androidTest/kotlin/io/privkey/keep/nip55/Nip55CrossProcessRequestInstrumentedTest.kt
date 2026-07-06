@@ -15,6 +15,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
@@ -37,16 +38,18 @@ import java.util.concurrent.TimeUnit
  * Trust is bootstrapped in-process: the test pins the client's signing-certificate hash
  * into CallerVerificationStore (the same TOFU seam a first-use UI approval would write),
  * so the client's query passes getVerifiedCaller() (cross-process UID, single package,
- * matching signature) and lands on the branch under test. This pinned trust PERSISTS in
- * keep's prefs after the run (there is no per-package untrust API, and clearAllTrust is
- * too destructive to call in a finally): the harness client stays trusted on the target.
- * Harmless on a throwaway dev device (re-pin is idempotent); do not run it against an
- * install whose caller-trust set you care about.
+ * matching signature) and lands on the branch under test. The pin is REVOKED in @After
+ * (untrustPackage restores the client to untrusted), so it does not persist after the run
+ * and does not widen the device's caller-trust set; re-running is safe.
  *
  * Out of scope (documented, not faked):
  *  - The AUTO_APPROVE / ALLOW success cursors require a provisioned signing key + a
  *    BIOMETRIC_STRONG prompt; the FirstUseRequiresApproval path requires the interactive
  *    TOFU approval UI. Those are not the malformed/rejected branches this issue targets.
+ *  - The "timed-out" acceptance branch (provider runWithTimeout -> rejectedCursor with
+ *    deny_timeout / deny_velocity_timeout) is deferred: it is not deterministically
+ *    reachable from a cross-process caller without injecting artificial delay into the
+ *    provider, which would add flakiness for no additional contract coverage (tracked in #389).
  *  - The front-door rate-limit errorCursor ("Too many requests...") is not
  *    deterministically reachable from a single cross-process caller: the per-request
  *    caller verification that runs BEFORE the 30 req/s check (getPackageSignatureHash ->
@@ -127,6 +130,13 @@ class Nip55CrossProcessRequestInstrumentedTest {
         store.trustPackage(clientPkg, live!!)
     }
 
+    @After
+    fun revokeClientTrust() {
+        // Revoke the harness client's TOFU pin so it does not persist past the run and
+        // does not widen the device's caller-trust set. Safe even if @Before was skipped.
+        app().getCallerVerificationStore()?.untrustPackage(clientPkg)
+    }
+
     private data class Report(val cols: List<String>, val row0: String, val raw: String)
 
     private fun parse(raw: String): Report {
@@ -200,14 +210,20 @@ class Nip55CrossProcessRequestInstrumentedTest {
     @Test
     fun crossProcess_perAppDeny_mapsToRejectedCursor() {
         val store = app().getPermissionStore()!!
-        runBlocking {
-            // Force the manual-review path (not auto-sign) then a persistent DENY.
-            store.setAppSignPolicyOverride(clientPkg, SignPolicy.MANUAL.ordinal)
-            store.denyPermission(clientPkg, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
-        }
         try {
+            runBlocking {
+                // Force the manual-review path (not auto-sign) then a persistent DENY.
+                // Inside the try so a throw mid-setup still hits the finally and leaves
+                // no persistent app settings behind.
+                store.setAppSignPolicyOverride(clientPkg, SignPolicy.MANUAL.ordinal)
+                store.denyPermission(clientPkg, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+            }
             val projection = arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
             val r = parse(runClientQuery(rid("deny"), "io.privkey.keep.SIGN_EVENT", projection))
+            // The "rejected" cursor is emitted by several branches (DENY, velocity, timeout,
+            // expiry); the shape is identical, so this asserts the rejected-cursor contract
+            // rather than proving the DENY branch specifically. It is deterministic here: this
+            // is the first query after clearAppSettings, with an explicit persistent DENY set.
             assertEquals("DENY must map to the rejected-cursor contract", listOf("rejected"), r.cols)
             assertEquals("true", r.row0)
         } finally {

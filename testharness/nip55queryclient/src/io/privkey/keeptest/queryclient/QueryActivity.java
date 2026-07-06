@@ -51,11 +51,14 @@ public class QueryActivity extends Activity {
                     boolean isError = false;
                     try {
                         Cursor c = getContentResolver().query(uri, projection, null, null, null);
-                        desc = describe(reqid, c);
-                        if (c != null) {
-                            String[] names = c.getColumnNames();
-                            isError = names.length == 1 && "error".equals(names[0]);
-                            c.close();
+                        try {
+                            desc = describe(reqid, c);
+                            if (c != null) {
+                                String[] names = c.getColumnNames();
+                                isError = names.length == 1 && "error".equals(names[0]);
+                            }
+                        } finally {
+                            if (c != null) c.close();
                         }
                     } catch (Throwable t) {
                         desc = "reqid=" + reqid + " exception=" + t.getClass().getName() + ":" + t.getMessage();
@@ -93,7 +96,12 @@ public class QueryActivity extends Activity {
         } else {
             result = errorResult != null ? errorResult : lastResult;
         }
-        Log.i(TAG, result);
+        // Redact row0 contents from logcat only: on an auto-approve path row0 can carry a
+        // real signature/pubkey (a SIGN_EVENT success row0 is signed-event JSON, which itself
+        // contains ']'). Match greedily to the last bracket so such payloads are fully
+        // redacted, failing safe toward more redaction. The broadcast below is
+        // setPackage(KEEP_PKG)-scoped and carries the complete payload for the test to parse.
+        Log.i(TAG, result.replaceAll("row0=\\[[\\s\\S]*\\]", "row0=[<redacted>]"));
         Intent back = new Intent(RESULT_ACTION);
         back.setPackage(KEEP_PKG);
         back.putExtra("reqid", reqid);

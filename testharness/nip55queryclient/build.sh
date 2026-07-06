@@ -32,6 +32,9 @@ shopt -s nullglob
 # Highest-versioned match of a glob, or empty (no failing `ls` in a pipe, so a missing
 # dir does not trip `set -o pipefail` before the friendly guards below can report it).
 pick_latest() {
+  # Empty IFS so a pattern whose literal portion contains spaces is not word-split;
+  # pathname expansion still splits $1 into separate matches with spaces preserved.
+  local IFS=
   local matches=($1)
   (( ${#matches[@]} )) || return 0
   printf '%s\n' "${matches[@]}" | sort -V | tail -1
@@ -85,8 +88,8 @@ javac --release 17 -classpath "$ANDROID_JAR" -d "$OUT/classes" \
   "$HERE/src/io/privkey/keeptest/queryclient/QueryActivity.java"
 
 echo "== d8 =="
-"$BT/d8" --min-api 33 --output "$OUT" \
-  $(find "$OUT/classes" -name '*.class')
+mapfile -t CLASS_FILES < <(find "$OUT/classes" -name '*.class')
+"$BT/d8" --min-api 33 --output "$OUT" "${CLASS_FILES[@]}"
 
 echo "== aapt2 link =="
 "$BT/aapt2" link \
@@ -96,7 +99,7 @@ echo "== aapt2 link =="
   -o "$OUT/base.apk"
 
 echo "== add dex =="
-( cd "$OUT" && jar uf "$OUT/base.apk" -C "$OUT" classes.dex )
+( cd "$OUT" && for dex in classes*.dex; do jar uf "$OUT/base.apk" -C "$OUT" "$dex"; done )
 
 echo "== zipalign =="
 "$BT/zipalign" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"

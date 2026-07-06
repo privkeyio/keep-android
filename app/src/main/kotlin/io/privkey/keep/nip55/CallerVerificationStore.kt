@@ -77,6 +77,10 @@ class CallerVerificationStore(context: Context) {
         prefs.edit().putString(KEY_PREFIX_SIGNATURE + packageName, signatureHash).commit()
     }
 
+    fun untrustPackage(packageName: String) {
+        prefs.edit().remove(KEY_PREFIX_SIGNATURE + packageName).commit()
+    }
+
     fun clearAllTrust() {
         prefs.edit().clear().commit()
         nonceStore.clear()
