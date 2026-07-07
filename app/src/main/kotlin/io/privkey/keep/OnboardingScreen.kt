@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.SignPolicyStore
 import io.privkey.keep.ui.components.KeepCard
@@ -142,7 +141,7 @@ private fun OnboardingInfoCard(
                 icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(Dimens.space24)
             )
             Spacer(Modifier.width(Dimens.space12))
             Text(title, style = MaterialTheme.typography.titleMedium)
