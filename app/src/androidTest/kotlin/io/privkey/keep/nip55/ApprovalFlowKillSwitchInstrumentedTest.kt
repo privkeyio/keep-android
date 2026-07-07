@@ -28,9 +28,15 @@ import org.junit.runner.RunWith
  * surfaced through [KeepMobileApp.isSigningKilled] (fail-closed on read error) and enforced
  * as the FIRST check in handleIntent -- before caller identification, handler wiring, or
  * request parsing. That ordering is the property under test: with the switch engaged no
- * branch downstream (and therefore no key material) is ever reachable. The prior core
- * switch value is captured in @Before and restored in @After so the run never leaves the
- * installed app in a kill-switched state.
+ * branch downstream (and therefore no key material) is ever reachable. @Before disengages
+ * the core switch to a known baseline before engaging it for the test, and @After forces it
+ * back to disengaged unconditionally -- so this class both self-heals a switch left engaged
+ * by a prior aborted run and never leaves the installed app kill-switched. The single
+ * residual gap is process death strictly between setKillSwitch(true) and @After, which is
+ * uncatchable in-process; a suite that must be hardened against that would need per-test
+ * process isolation (Android Test Orchestrator), a module-wide execution change out of scope
+ * here. Since the switch fails CLOSED (only ever disables signing), that residual cannot
+ * yield a rogue signature.
  *
  * Out of scope (documented, not faked), per the #388/#389 precedent:
  *  - Biometric-authentication FAILURE and user CANCELLATION of the prompt. On these
@@ -49,22 +55,21 @@ class ApprovalFlowKillSwitchInstrumentedTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private fun app(): KeepMobileApp = context.applicationContext as KeepMobileApp
 
-    private var priorKillSwitch: Boolean? = null
-
     @Before
     fun engageKillSwitch() {
         val mobile = app().getKeepMobile()
         assertNotNull("KeepMobile core must be initialized to drive the kill switch", mobile)
-        priorKillSwitch = mobile!!.getKillSwitch()
+        mobile!!.setKillSwitch(false)
         mobile.setKillSwitch(true)
     }
 
     @After
     fun restoreKillSwitch() {
-        // Restore the exact pre-test core state so the switch flip does not persist on the
-        // device or poison sibling tests. Safe if @Before was skipped (prior stays null).
+        // Force the core switch back to the suite's disengaged baseline (signing enabled).
+        // Unconditional so this class cannot leave -- or inherit -- a poisoned engaged state
+        // across any in-process-catchable failure mode. Safe if @Before was skipped.
         val mobile = app().getKeepMobile() ?: return
-        priorKillSwitch?.let { mobile.setKillSwitch(it) }
+        mobile.setKillSwitch(false)
     }
 
     private fun launchAndGetResult(intent: Intent): Instrumentation.ActivityResult {
