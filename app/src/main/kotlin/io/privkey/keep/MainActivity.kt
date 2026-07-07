@@ -85,16 +85,21 @@ class MainActivity : FragmentActivity() {
         val pinStore = app.getPinStore()
         val biometricTimeoutStore = app.getBiometricTimeoutStore()
         val permissionStore = app.getPermissionStore()
+        val onboardingStore = app.getOnboardingStore()
 
         val allDependenciesAvailable = listOf(
             keepMobile, storage, signPolicyStore,
             autoStartStore, foregroundServiceStore, pinStore, biometricTimeoutStore,
-            permissionStore
+            permissionStore, onboardingStore
         ).all { it != null }
 
         setContent {
             var isPinUnlocked by remember {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
+            }
+
+            var onboardingCompleted by remember {
+                mutableStateOf(onboardingStore?.isCompleted() ?: true)
             }
 
             var biometricStatus by remember {
@@ -162,6 +167,16 @@ class MainActivity : FragmentActivity() {
                                 ) ?: BiometricHelper.AuthResult.FAILED
                             },
                             onUnlocked = { isBiometricUnlocked = true }
+                        )
+                    } else if (allDependenciesAvailable && !onboardingCompleted) {
+                        val safeSignPolicyStore = signPolicyStore ?: return@Surface
+                        val safeOnboardingStore = onboardingStore ?: return@Surface
+                        OnboardingScreen(
+                            signPolicyStore = safeSignPolicyStore,
+                            onDone = {
+                                safeOnboardingStore.setCompleted(true)
+                                onboardingCompleted = true
+                            }
                         )
                     } else if (allDependenciesAvailable) {
                         val safeKeepMobile = keepMobile ?: return@Surface

@@ -27,6 +27,7 @@ import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.OnboardingStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.SignPolicyStore
@@ -66,6 +67,7 @@ class KeepMobileApp : Application() {
     private var foregroundServiceStore: ForegroundServiceStore? = null
     private var pinStore: PinStore? = null
     private var biometricTimeoutStore: BiometricTimeoutStore? = null
+    private var onboardingStore: OnboardingStore? = null
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
@@ -122,6 +124,7 @@ class KeepMobileApp : Application() {
             foregroundServiceStore = ForegroundServiceStore(this)
             pinStore = PinStore(this)
             biometricTimeoutStore = BiometricTimeoutStore(this)
+            onboardingStore = OnboardingStore(this)
             keepMobile = newKeepMobile
             migrateKillSwitch(newKeepMobile)
             nip55Handler = Nip55Handler(newKeepMobile)
@@ -309,6 +312,8 @@ class KeepMobileApp : Application() {
     fun getPinStore(): PinStore? = pinStore
 
     fun getBiometricTimeoutStore(): BiometricTimeoutStore? = biometricTimeoutStore
+
+    fun getOnboardingStore(): OnboardingStore? = onboardingStore
 
     fun getNip55Handler(): Nip55Handler? = nip55Handler
 
