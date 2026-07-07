@@ -143,15 +143,18 @@ class PermissionExpiryRegressionInstrumentedTest {
             createdAtElapsed = 0,
             durationMs = HOUR_MS
         ))
+        // Back-dated an hour with a day-long lifetime so the wall-fallback branch has margin
+        // on both sides: a backward NTP step can't drive now below createdAt (fail-closed),
+        // and the createdAt + durationMs expiry stays comfortably in the future.
         dao.insertPermission(Nip55Permission(
             callerPackage = "com.legacy.app",
             requestType = "SIGN_EVENT",
             eventKind = 2,
             decision = "allow",
             expiresAt = null,
-            createdAt = now,
+            createdAt = now - HOUR_MS,
             createdAtElapsed = 0,
-            durationMs = HOUR_MS
+            durationMs = DAY_MS
         ))
 
         assertNull(
@@ -161,6 +164,50 @@ class PermissionExpiryRegressionInstrumentedTest {
         assertEquals(
             PermissionDecision.ALLOW,
             store.getPermissionDecision("com.legacy.app", Nip55RequestType.SIGN_EVENT, 2)
+        )
+    }
+
+    // Branch (d): ordinary (non-tamper) monotonic-lifetime expiry. A row on the elapsed
+    // branch (createdAtElapsed > 0) whose lifetime has run out must read expired; the paired
+    // fresh row must still resolve ALLOW. This is the common expiry path a Rust regression
+    // could silently collapse while the tamper branches still pass.
+    @Test
+    fun elapsedDurationLifetimeExpiryReadsExpired() = runBlocking {
+        val dao = database.permissionDao()
+        val now = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+
+        // Stamped near boot (createdAtElapsed = 1 keeps it on the monotonic branch regardless
+        // of device uptime) with a 1 ms lifetime; the real elapsedRealtime is always far past
+        // it, so the elapsed comparison expires this row before expiresAt is ever consulted.
+        dao.insertPermission(Nip55Permission(
+            callerPackage = "com.elapsed.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 1,
+            decision = "allow",
+            expiresAt = now + HOUR_MS,
+            createdAt = now,
+            createdAtElapsed = 1,
+            durationMs = 1
+        ))
+        dao.insertPermission(Nip55Permission(
+            callerPackage = "com.elapsed.app",
+            requestType = "SIGN_EVENT",
+            eventKind = 2,
+            decision = "allow",
+            expiresAt = now + HOUR_MS,
+            createdAt = now,
+            createdAtElapsed = nowElapsed,
+            durationMs = HOUR_MS
+        ))
+
+        assertNull(
+            "elapsed monotonic lifetime exceeded must read expired",
+            store.getPermissionDecision("com.elapsed.app", Nip55RequestType.SIGN_EVENT, 1)
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.elapsed.app", Nip55RequestType.SIGN_EVENT, 2)
         )
     }
 
