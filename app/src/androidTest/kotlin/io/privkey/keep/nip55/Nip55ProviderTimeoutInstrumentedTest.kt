@@ -24,8 +24,8 @@ import java.util.concurrent.Semaphore
  * runWithTimeout -> rejectedCursor mapping without injecting real wall-clock delay. Here the
  * SAME null-result branch is driven by draining the provider's concurrentRequestSemaphore:
  * runWithTimeout fails its tryAcquire() and returns null immediately, which is the exact
- * condition ("timeout or concurrency limit") that logs deny_velocity_timeout / deny_timeout
- * and returns the rejected cursor. No sleeps, no flakiness.
+ * condition ("timeout or concurrency limit") that maps to the deny_velocity_timeout /
+ * deny_timeout branch and returns the rejected cursor. No sleeps, no flakiness.
  */
 @RunWith(AndroidJUnit4::class)
 class Nip55ProviderTimeoutInstrumentedTest {
