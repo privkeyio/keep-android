@@ -102,11 +102,11 @@ class ApprovalFlowKillSwitchInstrumentedTest {
         assertFalse("Gated result must not carry the rejected flag", data.getBooleanExtra("rejected", false))
     }
 
-    // The kill-switch check precedes caller identification and request parsing: a request
-    // that would otherwise fail-closed with a DIFFERENT message (a missing-URI request maps
-    // to "Request failed" when signing is enabled) instead maps to the signing-disabled
-    // message. This pins the gate ordering, proving the engaged switch short-circuits the
-    // entrypoint before any path that could reach key material.
+    // The kill-switch check precedes caller identification and request parsing: a bare intent
+    // that would otherwise fail-closed with a DIFFERENT message (the caller-verification or
+    // parse branch, when signing is enabled) instead maps to the signing-disabled message.
+    // This pins the gate ordering, proving the engaged switch short-circuits the entrypoint
+    // before any path that could reach key material.
     @Test
     fun killSwitchEngaged_precedesCallerAndParseChecks() {
         val intent = Intent(context, Nip55Activity::class.java).apply {
@@ -118,8 +118,7 @@ class ApprovalFlowKillSwitchInstrumentedTest {
         val data = result.resultData
         assertNotNull("Gated result must carry a result intent", data)
         assertEquals(
-            "Kill switch must gate BEFORE the invalid-request parse branch (which would " +
-                "otherwise report \"Request failed\")",
+            "Kill switch must gate BEFORE the caller-verification and parse branches",
             "Signing is disabled (kill switch is active)",
             data!!.getStringExtra("error")
         )
