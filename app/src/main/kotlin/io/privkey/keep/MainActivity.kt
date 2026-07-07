@@ -94,6 +94,8 @@ class MainActivity : FragmentActivity() {
         ).all { it != null }
 
         setContent {
+            val onboardingScope = rememberCoroutineScope()
+
             var isPinUnlocked by remember {
                 mutableStateOf(pinStore?.isSessionValid() ?: true)
             }
@@ -174,8 +176,12 @@ class MainActivity : FragmentActivity() {
                         OnboardingScreen(
                             signPolicyStore = safeSignPolicyStore,
                             onDone = {
-                                safeOnboardingStore.setCompleted(true)
-                                onboardingCompleted = true
+                                onboardingScope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        safeOnboardingStore.setCompleted(true)
+                                    }
+                                    onboardingCompleted = true
+                                }
                             }
                         )
                     } else if (allDependenciesAvailable) {

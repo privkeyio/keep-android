@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,7 +53,13 @@ fun OnboardingScreen(
     onDone: () -> Unit
 ) {
     var selectedPolicy by remember { mutableStateOf(SignPolicy.MANUAL) }
+    var userInteracted by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        val loaded = withContext(Dispatchers.IO) { signPolicyStore.getGlobalPolicy() }
+        if (!userInteracted) selectedPolicy = loaded
+    }
 
     KeepScreenScaffold(title = stringResource(R.string.onboarding_title)) { padding ->
         Column(
@@ -108,6 +115,7 @@ fun OnboardingScreen(
                     policy = policy,
                     isSelected = selectedPolicy == policy,
                     onClick = {
+                        userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
