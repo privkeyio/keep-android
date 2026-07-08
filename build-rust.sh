@@ -189,7 +189,7 @@ rm -f "$JNILIBS_DIR"/*/libredb-*.so
 
 BINDING_LIB=$(find "$JNILIBS_DIR" -name "libkeep_mobile.so" | LC_ALL=C sort | head -1)
 echo "Generating Kotlin bindings from $BINDING_LIB..."
-cargo run --bin uniffi-bindgen generate \
+cargo run --features cli --bin uniffi-bindgen generate \
     --library "$BINDING_LIB" \
     --language kotlin \
     --out-dir "$SCRIPT_DIR/app/src/main/kotlin"
