@@ -59,6 +59,7 @@ class ConcurrencyCapInstrumentedTest {
         eventKind = null,
         eventContent = null,
         requestedPermissions = null,
+        httpAuth = null,
     )
 
     private fun add(pubkey: String): Pair<String, Boolean> {
