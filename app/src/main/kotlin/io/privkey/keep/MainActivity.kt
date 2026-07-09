@@ -175,9 +175,10 @@ class MainActivity : FragmentActivity() {
                         val safeOnboardingStore = onboardingStore ?: return@Surface
                         OnboardingScreen(
                             signPolicyStore = safeSignPolicyStore,
-                            onDone = {
+                            onDone = { policy ->
                                 onboardingScope.launch {
                                     withContext(Dispatchers.IO) {
+                                        safeSignPolicyStore.setGlobalPolicy(policy)
                                         safeOnboardingStore.setCompleted(true)
                                     }
                                     onboardingCompleted = true

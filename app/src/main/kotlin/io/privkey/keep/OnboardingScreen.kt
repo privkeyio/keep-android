@@ -30,7 +30,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,17 +43,15 @@ import io.privkey.keep.ui.components.KeepCard
 import io.privkey.keep.ui.components.KeepScreenScaffold
 import io.privkey.keep.ui.theme.Dimens
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
 fun OnboardingScreen(
     signPolicyStore: SignPolicyStore,
-    onDone: () -> Unit
+    onDone: (SignPolicy) -> Unit
 ) {
     var selectedPolicy by remember { mutableStateOf(SignPolicy.MANUAL) }
     var userInteracted by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         val loaded = withContext(Dispatchers.IO) { signPolicyStore.getGlobalPolicy() }
@@ -117,18 +114,13 @@ fun OnboardingScreen(
                     onClick = {
                         userInteracted = true
                         selectedPolicy = policy
-                        coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
-                                signPolicyStore.setGlobalPolicy(policy)
-                            }
-                        }
                     }
                 )
             }
 
             Spacer(Modifier.height(Dimens.space4))
             Button(
-                onClick = onDone,
+                onClick = { onDone(selectedPolicy) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.onboarding_get_started))

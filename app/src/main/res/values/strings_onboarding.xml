@@ -6,7 +6,7 @@
     <string name="onboarding_frost_title">What is a FROST share?</string>
     <string name="onboarding_frost_body">Your Nostr key is split into multiple FROST shares instead of living in one place. Each device or backup holds only a share, so a single lost or stolen share never exposes your full key.</string>
     <string name="onboarding_threshold_title">Threshold and recovery</string>
-    <string name="onboarding_threshold_body">Signing needs a threshold of shares to cooperate — for example 2 of 3. You can recover your account as long as you still have a threshold of shares, and you can rotate a lost share without changing your public identity.</string>
+    <string name="onboarding_threshold_body">Signing needs a threshold of shares to cooperate, for example 2 of 3. You can recover your account as long as you still have a threshold of shares, and you can rotate a lost share without changing your public identity.</string>
     <string name="onboarding_nsec_title">nsec vs FROST share</string>
     <string name="onboarding_nsec_body">An nsec is your whole private key in one secret: simple, but anyone who copies it controls your account forever. A FROST share is safer because it is only one piece and can be revoked. Import an nsec only if you already manage one elsewhere.</string>
     <string name="onboarding_backup_title">What \"backup confirmed\" means</string>
