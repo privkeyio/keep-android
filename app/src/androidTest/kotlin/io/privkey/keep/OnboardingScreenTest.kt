@@ -1,8 +1,13 @@
 package io.privkey.keep
 
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.storage.SignPolicy
@@ -21,6 +26,10 @@ import org.junit.runner.RunWith
  * selection, and the chosen policy is reported once via `onDone`. This guards the
  * regression where tapping an option immediately committed the global signing
  * policy, so merely reading the least-secure "Auto" option applied it.
+ *
+ * The screen scrolls, so every interaction scrolls its target into view first.
+ * Each test also asserts the tap landed, otherwise a no-op click would satisfy
+ * the "nothing was persisted" assertions vacuously.
  */
 @RunWith(AndroidJUnit4::class)
 class OnboardingScreenTest {
@@ -45,18 +54,32 @@ class OnboardingScreenTest {
         context.deleteSharedPreferences(SIGN_POLICY_PREFS)
     }
 
-    @Test
-    fun selectingPolicyDoesNotPersistIt() {
-        var reported: SignPolicy? = null
+    private fun setContent(onDone: (SignPolicy) -> Unit) {
         compose.setContent {
             KeepAndroidTheme {
-                OnboardingScreen(signPolicyStore, onDone = { reported = it })
+                OnboardingScreen(signPolicyStore, onDone = onDone)
             }
         }
         compose.waitForIdle()
+    }
 
-        compose.onNodeWithText(context.getString(R.string.sign_policy_auto)).performClick()
+    /** The selectable card wrapping the option whose title is exactly [title]. */
+    private fun optionCard(title: String) =
+        compose.onNode(isSelectable() and hasAnyDescendant(hasText(title)))
+
+    private fun selectAuto() {
+        val auto = optionCard(context.getString(R.string.sign_policy_auto))
+        auto.performScrollTo().performClick()
         compose.waitForIdle()
+        auto.assertIsSelected()
+    }
+
+    @Test
+    fun selectingPolicyDoesNotPersistIt() {
+        var reported: SignPolicy? = null
+        setContent { reported = it }
+
+        selectAuto()
 
         assertEquals(SignPolicy.MANUAL, signPolicyStore.getGlobalPolicy())
         assertNull(reported)
@@ -65,15 +88,12 @@ class OnboardingScreenTest {
     @Test
     fun confirmingReportsSelectionWithoutWritingFromTheScreen() {
         var reported: SignPolicy? = null
-        compose.setContent {
-            KeepAndroidTheme {
-                OnboardingScreen(signPolicyStore, onDone = { reported = it })
-            }
-        }
-        compose.waitForIdle()
+        setContent { reported = it }
 
-        compose.onNodeWithText(context.getString(R.string.sign_policy_auto)).performClick()
-        compose.onNodeWithText(context.getString(R.string.onboarding_get_started)).performClick()
+        selectAuto()
+        compose.onNodeWithText(context.getString(R.string.onboarding_get_started))
+            .performScrollTo()
+            .performClick()
         compose.waitForIdle()
 
         assertEquals(SignPolicy.AUTO, reported)
