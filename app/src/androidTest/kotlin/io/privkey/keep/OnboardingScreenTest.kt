@@ -1,7 +1,6 @@
 package io.privkey.keep
 
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -63,9 +62,13 @@ class OnboardingScreenTest {
         compose.waitForIdle()
     }
 
-    /** The selectable card wrapping the option whose title is exactly [title]. */
+    /**
+     * The selectable card for the option titled exactly [title]. `Modifier.selectable`
+     * merges its descendants, so the card node carries the title and description text
+     * itself; [hasText] matches a whole entry, so the title never matches the body copy.
+     */
     private fun optionCard(title: String) =
-        compose.onNode(isSelectable() and hasAnyDescendant(hasText(title)))
+        compose.onNode(isSelectable() and hasText(title))
 
     private fun selectAuto() {
         val auto = optionCard(context.getString(R.string.sign_policy_auto))
