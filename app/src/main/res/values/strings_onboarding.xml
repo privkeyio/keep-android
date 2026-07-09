@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources tools:ignore="MissingTranslation" xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- OnboardingScreen -->
+    <string name="onboarding_title">Welcome to Keep</string>
+    <string name="onboarding_intro">Keep is a Nostr signer. Before you create or import an account, here is what protects your identity and how signing works.</string>
+    <string name="onboarding_frost_title">What is a FROST share?</string>
+    <string name="onboarding_frost_body">Your Nostr key is split into multiple FROST shares instead of living in one place. Each device or backup holds only a share, so a single lost or stolen share never exposes your full key.</string>
+    <string name="onboarding_threshold_title">Threshold and recovery</string>
+    <string name="onboarding_threshold_body">Signing needs a threshold of shares to cooperate, for example 2 of 3. You can recover your account as long as you still have a threshold of shares, and you can rotate a lost share without changing your public identity.</string>
+    <string name="onboarding_nsec_title">nsec vs FROST share</string>
+    <string name="onboarding_nsec_body">An nsec is your whole private key in one secret: simple, but anyone who copies it controls your account forever. A FROST share is safer because it is only one piece and can be revoked. Import an nsec only if you already manage one elsewhere.</string>
+    <string name="onboarding_backup_title">What \"backup confirmed\" means</string>
+    <string name="onboarding_backup_body">Confirming a backup tells Keep you have safely stored your recovery seed words offline. Until you confirm, losing this device can mean losing access. Keep never uploads your backup for you.</string>
+    <string name="onboarding_sign_policy_heading">Choose a signing policy</string>
+    <string name="onboarding_sign_policy_subheading">Decide how much Keep asks before signing. You can change this any time in Settings.</string>
+    <string name="onboarding_get_started">Get Started</string>
+</resources>
