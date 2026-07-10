@@ -46,6 +46,9 @@ jobs:
       - name: Check for locale drift
         run: ./scripts/check-locale-drift.sh
 
+      - name: Verify release changelogs exist for this versionCode
+        run: ./scripts/check-release-changelogs.sh
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
