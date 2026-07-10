@@ -44,8 +44,10 @@ while read -r abi code; do
     vercode=$((BASE * 10 + code))
     for locale in "${locales[@]}"; do
         f="$FASTLANE/$locale/changelogs/${vercode}.txt"
-        if [ ! -s "$f" ]; then
-            echo "error: missing or empty changelog for $abi (versionCode $vercode): ${f#"$ROOT"/}" >&2
+        # -s alone accepts a whitespace-only file, which renders as a blank
+        # "What's New" on F-Droid; require at least one non-whitespace char.
+        if [ ! -s "$f" ] || ! grep -q '[^[:space:]]' "$f"; then
+            echo "error: missing or blank changelog for $abi (versionCode $vercode): ${f#"$ROOT"/}" >&2
             missing=1
         fi
     done
