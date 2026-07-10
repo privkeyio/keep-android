@@ -1,0 +1,1 @@
+Enthält keep v0.5.0. Sicherheitshärtung: behebt eine Check-then-Set-Race-Condition in set_active_share, die NIP-98-HTTP-Auth-Abfrage zeigt jetzt die autorisierte URL und Methode an, und Fehler der RNG-Integritätsprüfung schlagen nun sicher fehl.

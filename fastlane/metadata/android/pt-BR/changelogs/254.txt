@@ -1,0 +1,1 @@
+Restaura compilações reprodutíveis: o código do UniFFI bindgen, cuja saída gerada não era determinista, não é mais vinculado à biblioteca de tempo de execução, então libkeep_mobile.so volta a compilar de forma determinista. Também atualiza dependências.

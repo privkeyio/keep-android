@@ -1,0 +1,1 @@
+Incluye keep v0.5.0. Refuerzo de seguridad: corrige una condición de carrera check-then-set en set_active_share, el aviso de autenticación HTTP NIP-98 ahora muestra la URL y el método autorizados, y los fallos de la comprobación de salud del RNG ahora fallan de forma segura.
