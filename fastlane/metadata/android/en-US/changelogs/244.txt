@@ -1,0 +1,1 @@
+Bundles keep v0.5.0. Security hardening: fixes a check-then-set race in set_active_share, the NIP-98 HTTP-auth prompt now shows the URL and method being authorized, and RNG health-check failures now fail closed.

@@ -27,6 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Fail before the expensive container build. F-Droid reads Fastlane
+      # metadata from the source tree at the tagged commit, so a release tagged
+      # without its per-ABI changelogs ships with no changelog, permanently.
+      - name: Verify release changelogs exist for this versionCode
+        run: ./scripts/check-release-changelogs.sh
+
       - name: Decode keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}

@@ -1,0 +1,1 @@
+Restores reproducible builds: the UniFFI bindgen code, whose generated output was non-deterministic, is no longer linked into the runtime library, so libkeep_mobile.so compiles deterministically again. Also updates dependencies.
