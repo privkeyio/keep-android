@@ -1,0 +1,1 @@
+Adds first-run onboarding: guidance on FROST key shares and a sign-policy choice during setup. Also brings the app listing screenshots. No other functional changes.

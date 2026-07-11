@@ -13,8 +13,8 @@ android {
         applicationId = "io.privkey.keep"
         minSdk = 33
         targetSdk = 36
-        versionCode = 25
-        versionName = "1.1.7"
+        versionCode = 26
+        versionName = "1.1.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -108,8 +108,8 @@ android {
 
 // Assign each per-ABI release split its own versionCode: 10 * base + abiCode.
 // ABI codes follow F-Droid's required ordering (armeabi-v7a < arm64-v8a < x86 <
-// x86_64), yielding 232 (arm64-v8a) and 234 (x86_64). The F-Droid recipe must
-// declare matching per-ABI versionCodes for these splits.
+// x86_64), so e.g. base 26 yields 262 (arm64-v8a) and 264 (x86_64). The F-Droid
+// recipe (VercodeOperation) and per-versionCode changelogs must match these.
 val abiVersionCodes = mapOf("arm64-v8a" to 2, "x86_64" to 4)
 androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
