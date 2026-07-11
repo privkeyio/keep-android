@@ -1,0 +1,1 @@
+Fügt ein Onboarding beim ersten Start hinzu: Hinweise zu FROST-Schlüsselanteilen und eine Auswahl der Signaturrichtlinie während der Einrichtung. Bringt außerdem die Screenshots für den App-Eintrag. Keine weiteren funktionalen Änderungen.

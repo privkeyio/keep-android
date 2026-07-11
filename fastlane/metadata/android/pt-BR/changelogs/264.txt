@@ -1,0 +1,1 @@
+Adiciona a introdução no primeiro uso: orientação sobre os fragmentos de chave FROST e uma escolha de política de assinatura durante a configuração. Também traz as capturas de tela da listagem. Sem outras mudanças funcionais.

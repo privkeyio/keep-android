@@ -1,0 +1,1 @@
+Añade una introducción en el primer inicio: orientación sobre los fragmentos de clave FROST y una elección de política de firma durante la configuración. También incorpora las capturas de pantalla del listado. Sin otros cambios funcionales.
