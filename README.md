@@ -35,7 +35,7 @@ Keep serves as a dedicated Nostr event signer that keeps private key material se
 
 [<img src="./assets/zapstore.svg"
 alt="Get it on Zapstore"
-height="70">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqq8kjmewwpexjantv4uju6m9v4cqugmg4r)
+height="70">](https://zapstore.dev/apps/io.privkey.keep)
 [<img src="./assets/obtainium.png"
 alt="Get it on Obtainium"
 height="70">](https://github.com/ImranR98/Obtainium)
