@@ -33,8 +33,18 @@ Keep serves as a dedicated Nostr event signer that keeps private key material se
 
 # Download
 
-[<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
-[<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqq8kjmewwpexjantv4uju6m9v4cqugmg4r)
+[<img src="./assets/zapstore.svg"
+alt="Get it on Zapstore"
+height="70">](https://zapstore.dev/apps/io.privkey.keep)
+[<img src="./assets/obtainium.png"
+alt="Get it on Obtainium"
+height="70">](https://github.com/ImranR98/Obtainium)
+[<img src="https://github.com/machiav3lli/oandbackupx/raw/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png"
+alt="Get it on GitHub"
+height="70">](https://github.com/privkeyio/keep-android/releases)
+[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
+alt="Get it on F-Droid"
+height="70">](https://f-droid.org/en/packages/io.privkey.keep/)
 
 # Usage
 
