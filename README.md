@@ -33,6 +33,7 @@ Keep serves as a dedicated Nostr event signer that keeps private key material se
 
 # Download
 
+[<img src="https://img.shields.io/badge/Get_it_on-F--Droid-1976d2?style=for-the-badge&logo=fdroid&logoColor=white" alt="Get it on F-Droid">](https://f-droid.org/en/packages/io.privkey.keep/)
 [<img src="https://img.shields.io/badge/Get_it_on-GitHub-blue?style=for-the-badge&logo=github" alt="Get it on GitHub">](https://github.com/privkeyio/keep-android/releases)
 [<img src="https://img.shields.io/badge/Get_it_on-Zapstore-orange?style=for-the-badge" alt="Get it on Zapstore">](https://zapstore.dev/apps/naddr1qvzqqqr7pvpzp43w35zzuz82rhvvy25c09ypvykewfqms5hlrvsv52vr6ftflfuuqq8kjmewwpexjantv4uju6m9v4cqugmg4r)
 
