@@ -24,6 +24,15 @@ enum class PermissionDecision(@param:StringRes val displayNameRes: Int) {
 
 const val EVENT_KIND_GENERIC = -1
 
+// Reserved caller sentinel for self-initiated key-management events in the activity
+// log (e.g. key export). Not a valid Android package name, so it cannot collide with
+// a real external caller.
+const val SELF_CALLER = "self"
+
+// Activity-log requestType values for self-initiated key-management operations.
+const val AUDIT_OP_EXPORT_NCRYPTSEC = "EXPORT_NCRYPTSEC"
+const val AUDIT_OP_EXPORT_SHARE = "EXPORT_SHARE"
+
 // Relay scope sentinels for kind-22242 (NIP-42) grants. RELAY_NONE is used for all
 // other grants, where the relay dimension is not meaningful.
 const val RELAY_NONE = ""

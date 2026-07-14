@@ -45,6 +45,22 @@ class AuditChainVerificationTest {
     }
 
     @Test
+    fun keyExportProducesVerifiableChain() = runBlocking {
+        store.logKeyExport(AUDIT_OP_EXPORT_NCRYPTSEC)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        store.logKeyExport(AUDIT_OP_EXPORT_SHARE)
+
+        val entries = store.getAuditLog(10)
+        assertEquals(3, entries.size)
+        // The self-initiated export entries chain in with the same tamper-evident HMAC.
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        val exports = entries.filter { it.callerPackage == SELF_CALLER }
+        assertEquals(2, exports.size)
+        assertTrue(exports.any { it.requestType == AUDIT_OP_EXPORT_NCRYPTSEC })
+        assertTrue(exports.any { it.requestType == AUDIT_OP_EXPORT_SHARE })
+    }
+
+    @Test
     fun tamperedAuditRowBreaksChain() = runBlocking {
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true)
