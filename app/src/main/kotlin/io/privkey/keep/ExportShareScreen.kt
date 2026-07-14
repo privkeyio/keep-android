@@ -19,6 +19,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.privkey.keep.nip55.AUDIT_OP_EXPORT_SHARE
+import io.privkey.keep.nip55.auditKeyExport
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -376,13 +377,7 @@ fun ExportShareScreen(
                                             }
                                             // Audit the share export (best-effort; must never
                                             // fail the export itself).
-                                            withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    (context.applicationContext as? KeepMobileApp)
-                                                        ?.getPermissionStore()
-                                                        ?.logKeyExport(AUDIT_OP_EXPORT_SHARE)
-                                                }
-                                            }
+                                            auditKeyExport(context, AUDIT_OP_EXPORT_SHARE)
                                             passphrase.clear()
                                             confirmPassphrase.clear()
                                             passphraseDisplay = ""

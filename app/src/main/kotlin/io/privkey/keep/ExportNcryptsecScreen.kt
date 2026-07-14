@@ -19,6 +19,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.privkey.keep.nip55.AUDIT_OP_EXPORT_NCRYPTSEC
+import io.privkey.keep.nip55.auditKeyExport
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -201,13 +202,7 @@ fun ExportNcryptsecScreen(
                                             }
                                             // Audit the private-key export (best-effort; must
                                             // never fail the export itself).
-                                            withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    (context.applicationContext as? KeepMobileApp)
-                                                        ?.getPermissionStore()
-                                                        ?.logKeyExport(AUDIT_OP_EXPORT_NCRYPTSEC)
-                                                }
-                                            }
+                                            auditKeyExport(context, AUDIT_OP_EXPORT_NCRYPTSEC)
                                             password.clear()
                                             confirmPassword.clear()
                                             passwordDisplay = ""

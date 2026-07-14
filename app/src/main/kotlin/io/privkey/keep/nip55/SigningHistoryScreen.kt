@@ -92,13 +92,15 @@ fun SigningHistoryScreen(
         withContext(Dispatchers.IO) {
             try {
                 if (signingAuditLog != null) {
-                    availableApps = signingAuditLog.getDistinctCallers()
+                    // The app-filter dropdown lists external callers; the SELF_CALLER
+                    // sentinel (self-initiated key exports) is not an app to filter by.
+                    availableApps = signingAuditLog.getDistinctCallers().filter { it != SELF_CALLER }
                     logCount = signingAuditLog.getEntryCount().toInt().coerceAtLeast(0)
                     // Verify via the keyed-HMAC chain that actually wrote these rows,
                     // not the unkeyed Rust SigningAuditLog.verifyChain (#306).
                     chainStatus = permissionStore.verifyAuditChain()
                 } else {
-                    availableApps = permissionStore.getDistinctAuditCallers()
+                    availableApps = permissionStore.getDistinctAuditCallers().filter { it != SELF_CALLER }
                     logCount = permissionStore.getAuditLogCount()
                     chainStatus = permissionStore.verifyAuditChain()
                 }
@@ -438,6 +440,8 @@ private fun formatSigningRequestType(type: SigningRequestType): String =
         SigningRequestType.NIP44_DECRYPT -> stringResource(R.string.connections_history_type_nip44_decrypt)
         SigningRequestType.DISCONNECT -> stringResource(R.string.connections_history_type_disconnect)
         SigningRequestType.KILL_SWITCH -> stringResource(R.string.connections_history_type_kill_switch)
+        SigningRequestType.EXPORT_NCRYPTSEC -> stringResource(R.string.connections_history_type_export_ncryptsec)
+        SigningRequestType.EXPORT_SHARE -> stringResource(R.string.connections_history_type_export_share)
     }
 
 private fun Nip55AuditLog.toSigningAuditEntry(): SigningAuditEntry {

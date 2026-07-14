@@ -212,6 +212,8 @@
     <string name="connections_history_type_nip44_decrypt">NIP-44 decrypt</string>
     <string name="connections_history_type_disconnect">Disconnect</string>
     <string name="connections_history_type_kill_switch">Kill switch</string>
+    <string name="connections_history_type_export_ncryptsec">Export private key (ncryptsec)</string>
+    <string name="connections_history_type_export_share">Export key share</string>
 
     <!-- Nip55ApprovalScreen -->
     <string name="connections_nip55_type_get_public_key">Get Public Key</string>
