@@ -32,6 +32,7 @@ import io.privkey.keep.uniffi.Nip55VelocityCheck
 import io.privkey.keep.uniffi.PolicyMode
 import io.privkey.keep.uniffi.evaluateNip55Request
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
+import io.privkey.keep.uniffi.nip55SignableEventKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -162,7 +163,10 @@ class Nip55ContentProvider : ContentProvider() {
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
             return errorCursor("Invalid public key", null)
 
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(rawContent)?.takeIf { it >= 0 } else null
+        // Derive the kind with the same serde parse the Rust decision uses, so the
+        // velocity bucket, permission-candidate lookup, and relay scope are keyed by the
+        // exact kind the orchestrator classifies on (no parser-differential drift).
+        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) nip55SignableEventKind(rawContent)?.toInt() else null
 
         if (store == null) return errorCursor("Permission store is not available", null)
 
