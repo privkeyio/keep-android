@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.privkey.keep.nip55.AUDIT_OP_EXPORT_SHARE
+import io.privkey.keep.nip55.auditKeyExport
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareInfo
@@ -373,6 +375,9 @@ fun ExportShareScreen(
                                                     storage.clearRequestIdContext()
                                                 }
                                             }
+                                            // Audit the share export (best-effort; must never
+                                            // fail the export itself).
+                                            auditKeyExport(context, AUDIT_OP_EXPORT_SHARE)
                                             passphrase.clear()
                                             confirmPassphrase.clear()
                                             passphraseDisplay = ""

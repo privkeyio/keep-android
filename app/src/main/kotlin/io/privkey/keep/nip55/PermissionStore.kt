@@ -191,6 +191,37 @@ class PermissionStore(private val database: Nip55Database) {
         }, extraInTransaction)
     }
 
+    /**
+     * Record a self-initiated key-management operation (e.g. a private-key export)
+     * in the tamper-evident activity log. Unlike [logOperation] this is not an
+     * external NIP-55 request, so it uses the reserved [SELF_CALLER] sentinel (not
+     * a real package name) and a fixed "allow" decision. Exporting a private key is
+     * a high-sensitivity action that must always be audited.
+     */
+    suspend fun logKeyExport(operation: String) {
+        val timestamp = System.currentTimeMillis()
+        auditWriter.append({ previousHash ->
+            Nip55AuditLog(
+                timestamp = timestamp,
+                callerPackage = SELF_CALLER,
+                requestType = operation,
+                eventKind = EVENT_KIND_GENERIC,
+                decision = "allow",
+                wasAutomatic = false,
+                previousHash = previousHash,
+                entryHash = calculateEntryHash(
+                    previousHash = previousHash,
+                    callerPackage = SELF_CALLER,
+                    requestType = operation,
+                    eventKind = EVENT_KIND_GENERIC,
+                    decision = "allow",
+                    timestamp = timestamp,
+                    wasAutomatic = false
+                )
+            )
+        }, null)
+    }
+
     // The hourly/daily/weekly limit thresholds + block decision live in Rust;
     // Android keeps the per-request velocity event log (Room) and feeds the
     // window counts in.

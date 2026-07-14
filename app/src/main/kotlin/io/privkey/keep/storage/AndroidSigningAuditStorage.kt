@@ -2,6 +2,8 @@ package io.privkey.keep.storage
 
 import android.util.Log
 import io.privkey.keep.BuildConfig
+import io.privkey.keep.nip55.AUDIT_OP_EXPORT_NCRYPTSEC
+import io.privkey.keep.nip55.AUDIT_OP_EXPORT_SHARE
 import io.privkey.keep.nip55.AuditLogWriter
 import io.privkey.keep.nip55.Nip55AuditLog
 import io.privkey.keep.nip55.Nip55Database
@@ -112,7 +114,9 @@ class AndroidSigningAuditStorage(
             "NIP04_DECRYPT" to "Nip04Decrypt",
             "NIP44_ENCRYPT" to "Nip44Encrypt",
             "NIP44_DECRYPT" to "Nip44Decrypt",
-            "KILL_SWITCH" to "KillSwitch"
+            "KILL_SWITCH" to "KillSwitch",
+            AUDIT_OP_EXPORT_NCRYPTSEC to "ExportNcryptsec",
+            AUDIT_OP_EXPORT_SHARE to "ExportShare"
         )
 
         private val RUST_TO_REQUEST_TYPE = REQUEST_TYPE_TO_RUST.entries.associate { (k, v) -> v to k }
