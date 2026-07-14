@@ -115,6 +115,7 @@ fun BunkerScreen(
     var authorizedClients by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
+    var showRotateUrlDialog by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
 
     val toastBunkerUrlCopied = stringResource(R.string.connections_bunker_url_copied)
@@ -125,6 +126,8 @@ fun BunkerScreen(
     val toastRevokeFailed = stringResource(R.string.connections_bunker_toast_revoke_failed)
     val toastAllClientsRevoked = stringResource(R.string.connections_bunker_toast_all_clients_revoked)
     val toastRevokeAllFailed = stringResource(R.string.connections_bunker_toast_revoke_all_failed)
+    val toastUrlRotated = stringResource(R.string.connections_bunker_toast_url_rotated)
+    val toastRotateUrlFailed = stringResource(R.string.connections_bunker_toast_rotate_url_failed)
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -201,6 +204,15 @@ fun BunkerScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.connections_bunker_copy_button))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { showRotateUrlDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.connections_bunker_rotate_url_button))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -306,6 +318,26 @@ fun BunkerScreen(
                 }
             },
             onDismiss = { showRevokeAllDialog = false }
+        )
+    }
+
+    if (showRotateUrlDialog) {
+        RotateBunkerUrlDialog(
+            onConfirm = {
+                showRotateUrlDialog = false
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            BunkerService.rotateBunkerUrlInService()
+                        }
+                    }.onSuccess {
+                        Toast.makeText(context, toastUrlRotated, Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(context, toastRotateUrlFailed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { showRotateUrlDialog = false }
         )
     }
 }
@@ -466,6 +498,35 @@ private fun RevokeAllClientsDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.connections_bunker_revoke_all_cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun RotateBunkerUrlDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.connections_bunker_rotate_url_title)) },
+        text = {
+            Text(stringResource(R.string.connections_bunker_rotate_url_text))
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text(stringResource(R.string.connections_bunker_rotate_url_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.connections_bunker_rotate_url_cancel))
             }
         }
     )

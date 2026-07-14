@@ -143,6 +143,13 @@ class BunkerService : Service() {
             }
         }
 
+        /** Rotate the bunker credentials (new URL) via the running service. */
+        internal suspend fun rotateBunkerUrlInService() {
+            val service = current()
+                ?: throw IllegalStateException("Bunker service not running")
+            service.rotateBunkerUrl()
+        }
+
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
             return pendingNostrConnectRequests.offer(request)
         }
@@ -336,6 +343,37 @@ class BunkerService : Service() {
             if (BuildConfig.DEBUG) Log.w(TAG, "Bunker start waiting for init, retry ${attempt + 1}/$MAX_START_RETRIES")
             delay(START_RETRY_DELAY_MS shl attempt)
             startBunker(keepMobile, relays, attempt + 1)
+        }
+    }
+
+    /**
+     * Rotate the bunker credentials so a previously distributed (possibly leaked)
+     * bunker:// URL can no longer pair or sign, then restart the bunker to publish
+     * the new URL. Throws if rotation fails; on throw rotation did NOT happen and
+     * the old URL is still valid, so callers must not report success.
+     */
+    suspend fun rotateBunkerUrl() {
+        val keepMobile = keepMobileRef
+            ?: throw IllegalStateException("Bunker not initialized")
+        // Rotate under the start/stop mutex so no concurrent start serves the old
+        // keys. rotateBunkerCredentials stops the running handler (if any) and
+        // replaces the persisted transport+connect secrets. Clear the displayed
+        // URL immediately: it is now invalid and must not linger on screen.
+        startStopMutex.withLock {
+            val handler = bunkerHandler ?: BunkerHandler(keepMobile)
+            handler.rotateBunkerCredentials()
+            _bunkerUrl.value = null
+            _status.value = BunkerStatus.STARTING
+        }
+        // Restart so a fresh handler derives and publishes the rotated URL. Run on
+        // the service's own scope so publishing completes even if the UI that
+        // triggered the rotation is disposed mid-restart.
+        val relays = runCatching { keepMobile.getRelayConfig(null).bunkerRelays }
+            .getOrDefault(emptyList())
+        if (relays.isNotEmpty()) {
+            serviceScope.launch { startBunker(keepMobile, relays) }
+        } else {
+            _status.value = BunkerStatus.STOPPED
         }
     }
 
