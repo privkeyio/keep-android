@@ -22,20 +22,22 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.AutoSignDecision
+import io.privkey.keep.uniffi.Nip55DecisionInputs
 import io.privkey.keep.uniffi.Nip55Handler
+import io.privkey.keep.uniffi.Nip55Outcome
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55VelocityCheck
 import io.privkey.keep.uniffi.PolicyMode
-import io.privkey.keep.uniffi.SignPolicyEvaluation
-import io.privkey.keep.uniffi.SigningRequestContext
-import io.privkey.keep.uniffi.Nip55RelayAuthGate
-import io.privkey.keep.uniffi.evaluateSignPolicy
+import io.privkey.keep.uniffi.evaluateNip55Request
+import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.util.Calendar
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -164,64 +166,20 @@ class Nip55ContentProvider : ContentProvider() {
 
         if (store == null) return errorCursor("Permission store is not available", null)
 
-        val velocityCursor = checkVelocityLimits(store, callerPackage, requestType, eventKind)
-        if (velocityCursor != null) return velocityCursor
-
-        // Enforce the relay-auth whitelist AUTO_REJECT for kind 22242 BEFORE the
-        // auto-sign policy, so a non-whitelisted relay can never be auto-approved by an
-        // AUTO/BASIC sign policy (independent of 22242 being a sensitive kind).
-        if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
-            if (evaluateRelayAuthGate(currentApp.getRelayAuthWhitelistStore(), rawContent).first == Nip55RelayAuthGate.AUTO_REJECT) {
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
-                return rejectedCursor(null)
-            }
-        }
-
-        val policyCursor = evaluateAutoSignPolicy(
+        return decideBackgroundRequest(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
         )
-        if (policyCursor != null) {
-            if (policyCursor is PolicyResult.FallToUi) {
-                return checkPermissionWithRisk(
-                    store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser,
-                    policyCursor.hasSignedKindBefore, policyCursor.appAgeMs
-                )
-            }
-            return policyCursor.cursorOrNull
-        }
-
-        return checkPermissionWithRisk(
-            store, h, currentApp, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
-        )
     }
 
-    private fun checkVelocityLimits(
-        store: PermissionStore,
-        callerPackage: String,
-        requestType: Nip55RequestType,
-        eventKind: Int?
-    ): Cursor? {
-        val velocityResult = runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }
-        if (velocityResult == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity check failed (timeout or concurrency limit), denying request")
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_velocity_timeout", wasAutomatic = true) }
-            return rejectedCursor(null)
-        }
-        if (velocityResult is VelocityResult.Blocked) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Velocity limit: ${velocityResult.reason}")
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "velocity_blocked", wasAutomatic = true) }
-            return rejectedCursor(null)
-        }
-        return null
-    }
-
-    private sealed class PolicyResult {
-        val cursorOrNull: Cursor? get() = (this as? Decided)?.cursor
-        class Decided(val cursor: Cursor?) : PolicyResult()
-        class FallToUi(val hasSignedKindBefore: Boolean, val appAgeMs: Long?) : PolicyResult()
-    }
-
-    private fun evaluateAutoSignPolicy(
+    /**
+     * Gather the platform inputs and delegate the full auto-sign decision to the
+     * Rust orchestrator (`evaluateNip55Request`), then map its outcome to a cursor.
+     * The stateful, ordered side effects (the atomic velocity check-and-record and
+     * the opt-in rate-limiter record) run here and their results feed the pure
+     * decision; the gate sequence, precedence, and DENY-wins rules live in Rust,
+     * shared with the foreground path. `null` means "no auto-decision, launch the UI".
+     */
+    private fun decideBackgroundRequest(
         currentApp: KeepMobileApp,
         store: PermissionStore,
         h: Nip55Handler,
@@ -231,14 +189,36 @@ class Nip55ContentProvider : ContentProvider() {
         rawPubkey: String?,
         eventKind: Int?,
         currentUser: String?
-    ): PolicyResult? {
+    ): Cursor? {
+        // Velocity: the check-and-record is atomic (one DB transaction), so it stays
+        // in Kotlin and only its outcome is handed to the decision.
+        val velocityCheck = when (runWithTimeout { store.checkAndRecordVelocity(callerPackage, eventKind) }) {
+            null -> Nip55VelocityCheck.TIMED_OUT
+            is VelocityResult.Blocked -> Nip55VelocityCheck.BLOCKED
+            VelocityResult.Allowed -> Nip55VelocityCheck.ALLOWED
+        }
+
+        // Relay-auth whitelist (kind 22242): the raw hosts plus a read-failed flag.
+        // No store or an empty list defers; a read error fails closed to auto-reject.
+        val whitelistStore = currentApp.getRelayAuthWhitelistStore()
+        var relayReadFailed = false
+        val relayWhitelist: List<String> = if (whitelistStore == null) {
+            emptyList()
+        } else {
+            try {
+                whitelistStore.getHosts()
+            } catch (_: Exception) {
+                relayReadFailed = true
+                emptyList()
+            }
+        }
+
+        // Sign-policy precedence: per-app override -> global -> MANUAL default.
         val effectivePolicy = runWithTimeout {
-            store.getAppSignPolicyOverride(callerPackage)
-                ?.let { SignPolicy.fromOrdinal(it) }
+            store.getAppSignPolicyOverride(callerPackage)?.let { SignPolicy.fromOrdinal(it) }
                 ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
-
         val policyMode = when (effectivePolicy) {
             SignPolicy.MANUAL -> PolicyMode.MANUAL
             SignPolicy.AUTO, SignPolicy.BASIC -> PolicyMode.AUTO
@@ -246,116 +226,86 @@ class Nip55ContentProvider : ContentProvider() {
 
         val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
 
-        val hasSignedKindBefore = if (eventKind != null) {
-            runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: true
-        } else true
-        val appAgeMs = runWithTimeout { store.getAppAgeMs(callerPackage) }
-
-        val limiter = currentApp.getSigningRateLimiter()
-        val defaultVelocity = VelocityConfig()
-        val rateCheck = if (isOptedIn) {
+        // Opt-in auto-sign limiter: recorded here as a throttle (a null limiter or a
+        // check failure falls open to the UI). Recording the attempt up-front mirrors
+        // the reference signer's front-door rate limiter.
+        val optInRateCheck: AutoSignDecision? = if (isOptedIn) {
+            val limiter = currentApp.getSigningRateLimiter()
             if (limiter == null) {
-                return PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
-            }
-            val recorded = runWithTimeout {
-                try {
-                    limiter.checkAndRecord(
-                        callerPackage,
-                        SystemClock.elapsedRealtime().toULong(),
-                        System.currentTimeMillis().toULong()
-                    )
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed to UI: ${e::class.simpleName}")
-                    null
+                null
+            } else {
+                runWithTimeout {
+                    try {
+                        limiter.checkAndRecord(
+                            callerPackage,
+                            SystemClock.elapsedRealtime().toULong(),
+                            System.currentTimeMillis().toULong()
+                        )
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed to UI: ${e::class.simpleName}")
+                        null
+                    }
                 }
             }
-            recorded ?: return PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
         } else {
-            AutoSignDecision.Allowed(0u, 0u, 0u, defaultVelocity.hourlyLimit.toUInt(), defaultVelocity.dailyLimit.toUInt())
+            null
         }
 
-        val ctx = SigningRequestContext(
-            operation = requestType,
-            packageName = callerPackage,
-            eventKind = eventKind?.takeIf { it >= 0 }?.toUInt(),
-            hasSignedKindBefore = hasSignedKindBefore,
-            appAgeMs = appAgeMs?.toULong()
-        )
-
-        val evaluation = evaluateSignPolicy(policyMode, ctx, isOptedIn, rateCheck)
-
-        return when (evaluation) {
-            SignPolicyEvaluation.AUTO_APPROVE -> {
-                PolicyResult.Decided(executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser))
-            }
-            SignPolicyEvaluation.FALL_TO_UI -> PolicyResult.FallToUi(hasSignedKindBefore, appAgeMs)
-        }
-    }
-
-
-    private fun checkPermissionWithRisk(
-        store: PermissionStore,
-        h: Nip55Handler,
-        currentApp: KeepMobileApp,
-        callerPackage: String,
-        requestType: Nip55RequestType,
-        rawContent: String,
-        rawPubkey: String?,
-        eventKind: Int?,
-        currentUser: String?,
-        precomputedHasSignedKindBefore: Boolean? = null,
-        precomputedAppAgeMs: Long? = null
-    ): Cursor? {
-        val isAppExpired = runWithTimeout { store.isAppExpired(callerPackage) }
-        if (isAppExpired == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "isAppExpired check timed out for ${hashPackageName(callerPackage)}, denying request")
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_timeout", wasAutomatic = true) }
-            return rejectedCursor(null)
-        }
-
-        if (isAppExpired) {
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_expired", wasAutomatic = true) }
-            runWithTimeout { store.cleanupExpired() }
-            return rejectedCursor(null)
-        }
-
-        // Kind 22242 (NIP-42): resolve the relay host once for both the whitelist gate
-        // and the relay-scoped grant lookup.
-        val isRelayAuth = requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH
-        val gate = if (isRelayAuth) {
-            evaluateRelayAuthGate(currentApp.getRelayAuthWhitelistStore(), rawContent)
-        } else null
-        val relayHost = gate?.second
-
-        if (gate?.first == Nip55RelayAuthGate.AUTO_REJECT) {
-            runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny_relay_whitelist", wasAutomatic = true) }
-            return rejectedCursor(null)
-        }
-
-        val relay = relayHost ?: RELAY_NONE
-        var decision: PermissionDecision? = null
-        val decisionLoaded = runWithTimeout {
-            decision = store.getPermissionDecision(callerPackage, requestType, eventKind, relay)
+        val hasSignedKindBefore = if (eventKind != null) {
+            runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: true
+        } else {
             true
         }
-        if (decisionLoaded == null) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Permission lookup timed out for ${hashPackageName(callerPackage)}/$requestType, denying request")
-            return rejectedCursor(null)
-        }
+        val appAgeMs = runWithTimeout { store.getAppAgeMs(callerPackage) }
+        val appExpired: Boolean? = runWithTimeout { store.isAppExpired(callerPackage) }
 
-        // Whitelist AUTO_ACCEPT auto-signs, but an explicit per-app DENY still wins (and is
-        // not silently skipped). AUTO_REJECT already returned above (fail closed).
-        if (gate?.first == Nip55RelayAuthGate.AUTO_ACCEPT && decision != PermissionDecision.DENY) {
-            return executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+        // Standing-permission candidate rows, relay-scoped for kind 22242.
+        val relayScope = if (requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH) {
+            nip55ExtractRelayHost(rawContent) ?: RELAY_NONE
+        } else {
+            RELAY_NONE
         }
+        var lookupOk = true
+        val candidates = runWithTimeout {
+            store.getPermissionCandidates(callerPackage, requestType, eventKind, relayScope)
+        }
+        if (candidates == null) lookupOk = false
 
-        return when (decision) {
-            PermissionDecision.ALLOW -> executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
-            PermissionDecision.DENY -> {
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "deny", wasAutomatic = true) }
+        val inputs = Nip55DecisionInputs(
+            packageName = callerPackage,
+            callerVerified = true,
+            signingKilled = false,
+            isLocked = false,
+            requestType = requestType,
+            eventJson = rawContent,
+            frontDoorWithinLimit = true,
+            velocityCheck = velocityCheck,
+            relayWhitelist = relayWhitelist,
+            relayWhitelistReadFailed = relayReadFailed,
+            policyMode = policyMode,
+            isOptedIn = isOptedIn,
+            optInRateCheck = optInRateCheck,
+            hasSignedKindBefore = hasSignedKindBefore,
+            appAgeMs = appAgeMs?.toULong(),
+            currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY).toUInt(),
+            appExpired = appExpired,
+            permissionLookupOk = lookupOk,
+            storedExactPermission = candidates?.first,
+            storedGenericPermission = candidates?.second,
+            nowElapsedMs = SystemClock.elapsedRealtime(),
+            nowWallMs = System.currentTimeMillis()
+        )
+
+        return when (val outcome = evaluateNip55Request(inputs)) {
+            Nip55Outcome.AutoApprove ->
+                executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+            is Nip55Outcome.Reject -> {
+                if (outcome.reason == "deny_expired") runWithTimeout { store.cleanupExpired() }
+                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, outcome.reason, wasAutomatic = true) }
                 rejectedCursor(null)
             }
-            PermissionDecision.ASK, null -> null
+            is Nip55Outcome.Error -> errorCursor(outcome.message, null)
+            is Nip55Outcome.RequireUi -> null
         }
     }
 
