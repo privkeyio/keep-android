@@ -95,6 +95,13 @@
     <string name="connections_bunker_revoke_all_text">This will disconnect all authorized clients. They will need to reconnect and be approved again.</string>
     <string name="connections_bunker_revoke_all_confirm">Revoke All</string>
     <string name="connections_bunker_revoke_all_cancel">Cancel</string>
+    <string name="connections_bunker_rotate_url_button">Rotate Bunker URL</string>
+    <string name="connections_bunker_rotate_url_title">Rotate Bunker URL</string>
+    <string name="connections_bunker_rotate_url_text">This generates a new bunker URL and invalidates the current one. Anyone holding the old URL (including from a leak) can no longer connect or sign. All existing clients must re-pair with the new URL.</string>
+    <string name="connections_bunker_rotate_url_confirm">Rotate URL</string>
+    <string name="connections_bunker_rotate_url_cancel">Cancel</string>
+    <string name="connections_bunker_toast_url_rotated">Bunker URL rotated. Re-pair your clients.</string>
+    <string name="connections_bunker_toast_rotate_url_failed">Failed to rotate bunker URL</string>
     <string name="connections_bunker_status_stopped">Stopped</string>
     <string name="connections_bunker_clients_title">Authorized Clients</string>
     <string name="connections_bunker_clients_revoke_all">Revoke All</string>
