@@ -46,7 +46,18 @@ class PermissionStore(private val database: Nip55Database) {
     // Decision resolution (incl. the rule that sensitive kinds never fall back
     // to a generic grant) lives in Rust; Android fetches the candidate rows and
     // supplies the clock readings.
-    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null, relay: String = RELAY_NONE): PermissionDecision? {
+    /**
+     * The raw standing-permission candidate rows (exact, generic) for a request,
+     * with the relay-scoped specific-then-wildcard selection applied. The
+     * allow/deny/ask resolution over these rows lives in Rust
+     * (`nip55_resolve_decision`); this only loads the candidates.
+     */
+    suspend fun getPermissionCandidates(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int? = null,
+        relay: String = RELAY_NONE
+    ): Pair<Nip55StoredPermission?, Nip55StoredPermission?> {
         val storedKind = eventKind ?: EVENT_KIND_GENERIC
         val nowElapsed = SystemClock.elapsedRealtime()
         val now = System.currentTimeMillis()
@@ -65,9 +76,14 @@ class PermissionStore(private val database: Nip55Database) {
         } else {
             null
         }
+        return exact?.toStoredPermission() to generic?.toStoredPermission()
+    }
+
+    suspend fun getPermissionDecision(callerPackage: String, requestType: Nip55RequestType, eventKind: Int? = null, relay: String = RELAY_NONE): PermissionDecision? {
+        val (exact, generic) = getPermissionCandidates(callerPackage, requestType, eventKind, relay)
         return nip55ResolveDecision(
-            exact?.toStoredPermission(),
-            generic?.toStoredPermission(),
+            exact,
+            generic,
             eventKind,
             SystemClock.elapsedRealtime(),
             System.currentTimeMillis()

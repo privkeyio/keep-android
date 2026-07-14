@@ -18,14 +18,18 @@ import org.junit.runner.RunWith
 import java.util.concurrent.Semaphore
 
 /**
- * Deterministic coverage of the provider's timed-out branches (gh #389, deferred from #374).
+ * Deterministic coverage of the provider's timed-out branch (gh #389, deferred from #374).
  *
  * The cross-process suite ([Nip55CrossProcessRequestInstrumentedTest]) cannot reach the
  * runWithTimeout -> rejectedCursor mapping without injecting real wall-clock delay. Here the
  * SAME null-result branch is driven by draining the provider's concurrentRequestSemaphore:
- * runWithTimeout fails its tryAcquire() and returns null immediately, which is the exact
- * condition ("timeout or concurrency limit") that maps to the deny_velocity_timeout /
- * deny_timeout branch and returns the rejected cursor. No sleeps, no flakiness.
+ * runWithTimeout fails its tryAcquire() and returns null immediately. The background decision
+ * (decideBackgroundRequest) gathers the velocity check-and-record first, so a drained
+ * semaphore surfaces as a velocity timeout, which the Rust orchestrator maps to
+ * deny_velocity_timeout and the provider returns as the rejected cursor. The individual
+ * per-gate timeout branches (velocity / permission lookup) are unit-tested in the orchestrator
+ * (keep-mobile nip55_decision); here we assert the provider's end-to-end timeout -> rejected
+ * and permits -> fall-to-UI mappings. No sleeps, no flakiness.
  */
 @RunWith(AndroidJUnit4::class)
 class Nip55ProviderTimeoutInstrumentedTest {
@@ -59,19 +63,13 @@ class Nip55ProviderTimeoutInstrumentedTest {
         return f.get(provider) as Semaphore
     }
 
-    private fun invokeVelocity(): Cursor? {
-        val m = Nip55ContentProvider::class.java.declaredMethods.first { it.name == "checkVelocityLimits" }
-        m.isAccessible = true
-        return m.invoke(provider, store, pkg, Nip55RequestType.SIGN_EVENT, 1) as Cursor?
-    }
-
-    private fun invokePermissionWithRisk(): Cursor? {
+    private fun invokeDecide(): Cursor? {
         val handler = Nip55Handler(NoHandle)
-        val m = Nip55ContentProvider::class.java.declaredMethods.first { it.name == "checkPermissionWithRisk" }
+        val m = Nip55ContentProvider::class.java.declaredMethods.first { it.name == "decideBackgroundRequest" }
         m.isAccessible = true
         return m.invoke(
-            provider, store, handler, app, pkg, Nip55RequestType.SIGN_EVENT,
-            content, null, 1, null, null, null
+            provider, app, store, handler, pkg, Nip55RequestType.SIGN_EVENT,
+            content, null, 1, null
         ) as Cursor?
     }
 
@@ -83,22 +81,18 @@ class Nip55ProviderTimeoutInstrumentedTest {
     }
 
     @Test
-    fun velocityCheck_timedOut_mapsToRejectedCursor() {
+    fun decision_timedOut_mapsToRejectedCursor() {
+        // Drained semaphore -> the velocity check-and-record returns null -> the orchestrator
+        // maps that to deny_velocity_timeout -> rejected cursor (fail closed).
         semaphore().drainPermits()
-        assertRejected(invokeVelocity())
+        assertRejected(invokeDecide())
     }
 
     @Test
-    fun permissionCheck_timedOut_mapsToRejectedCursor() {
-        semaphore().drainPermits()
-        assertRejected(invokePermissionWithRisk())
-    }
-
-    @Test
-    fun velocityCheck_withPermits_doesNotRejectAsTimeout() {
-        // Contrast: permits available -> runWithTimeout runs the real store check, which
-        // allows a fresh caller, so no rejected cursor is produced. Proves the rejection in
-        // the other cases comes from the timed-out branch, not from stored velocity data.
-        assertNull(invokeVelocity())
+    fun decision_withPermits_fallsToUi() {
+        // Contrast: permits available -> a fresh caller under the default MANUAL policy has no
+        // standing decision, i.e. RequireUi, which the background path returns as a null cursor.
+        // Proves the rejection above comes from the timed-out branch, not from stored data.
+        assertNull(invokeDecide())
     }
 }
