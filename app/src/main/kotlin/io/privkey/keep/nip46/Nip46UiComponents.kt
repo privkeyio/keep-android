@@ -21,13 +21,22 @@ import io.privkey.keep.nip55.PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 
 @Composable
-internal fun Nip46DetailRow(label: String, value: String) {
+internal fun Nip46DetailRow(
+    label: String,
+    value: String,
+    valueMaxLines: Int = Int.MAX_VALUE
+) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    Text(text = value, style = MaterialTheme.typography.bodyLarge)
+    Text(
+        text = value,
+        style = MaterialTheme.typography.bodyLarge,
+        maxLines = valueMaxLines,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
