@@ -538,6 +538,12 @@ class KeepMobileApp : Application() {
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
+    fun stageCertificatePin(hostname: String, spkiHash: String): Boolean =
+        keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false
+
+    fun removeCertificatePin(hostname: String, spkiHash: String): CertPinRemoval? =
+        keepMobile?.removeCertificatePinCompat(hostname, spkiHash)
+
     fun dismissPinMismatch() {
         pinMismatch = null
     }
