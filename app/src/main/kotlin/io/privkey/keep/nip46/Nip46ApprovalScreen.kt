@@ -26,6 +26,27 @@ private fun sanitizeDisplayContent(content: String): String {
         .take(500)
 }
 
+/**
+ * The HTTP-auth (NIP-98, kind 27235) detail rows for the approval prompt as
+ * (label resource id, display value) pairs, or empty when the request carries no
+ * HTTP-auth. Gated on presence ([hasHttpAuth]), not field content: the signer core
+ * returns a present-but-empty httpAuth for a malformed 27235 (no `u` tag), and both
+ * rows must still render with [unspecified] so the missing target is flagged, never
+ * silently hidden.
+ */
+internal fun httpAuthRows(
+    hasHttpAuth: Boolean,
+    url: String?,
+    method: String?,
+    unspecified: String
+): List<Pair<Int, String>> {
+    if (!hasHttpAuth) return emptyList()
+    return listOf(
+        R.string.connections_nip46_http_url to (url?.takeIf { it.isNotBlank() } ?: unspecified),
+        R.string.connections_nip46_http_method to (method?.takeIf { it.isNotBlank() } ?: unspecified)
+    )
+}
+
 @Composable
 fun Nip46ApprovalScreen(
     appPubkey: String,
@@ -34,6 +55,7 @@ fun Nip46ApprovalScreen(
     eventKind: Int?,
     eventContent: String?,
     isConnectRequest: Boolean = false,
+    hasHttpAuth: Boolean = false,
     httpAuthUrl: String? = null,
     httpAuthMethod: String? = null,
     onApprove: (duration: PermissionDuration, onComplete: (success: Boolean) -> Unit) -> Unit,
@@ -116,19 +138,14 @@ fun Nip46ApprovalScreen(
                     Nip46DetailRow(stringResource(R.string.connections_nip46_event_kind), EventKind.displayName(context, eventKind))
                 }
 
-                if (!sanitizedHttpUrl.isNullOrBlank() || !sanitizedHttpMethod.isNullOrBlank()) {
-                    val unspecified = stringResource(R.string.connections_nip46_http_unspecified)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Nip46DetailRow(
-                        stringResource(R.string.connections_nip46_http_url),
-                        sanitizedHttpUrl?.takeIf { it.isNotBlank() } ?: unspecified
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Nip46DetailRow(
-                        stringResource(R.string.connections_nip46_http_method),
-                        sanitizedHttpMethod?.takeIf { it.isNotBlank() } ?: unspecified
-                    )
-                }
+                // Gate on PRESENCE, not field content: the signer core returns a
+                // present-but-empty httpAuth for a malformed kind-27235 so the prompt
+                // must flag the missing target ("Unspecified"), never hide it.
+                httpAuthRows(hasHttpAuth, sanitizedHttpUrl, sanitizedHttpMethod, stringResource(R.string.connections_nip46_http_unspecified))
+                    .forEach { (labelRes, value) ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Nip46DetailRow(stringResource(labelRes), value, valueMaxLines = 4)
+                    }
 
                 if (!sanitizedContent.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(12.dp))
