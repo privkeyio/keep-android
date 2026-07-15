@@ -98,9 +98,11 @@
     <string name="settings_cert_pins_clear_all_dialog_title">Clear All Pins?</string>
     <string name="settings_cert_pins_clear_all_dialog_text">This will remove all stored certificate pins. New pins will be set on next connection.</string>
     <string name="settings_cert_pins_retire_keep_others">Remove this pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>? The host\'s other pins stay active.</string>
+    <string name="settings_cert_pins_retire_last_dialog_text">This is the only pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>. Removing it leaves the relay unpinned, so the next connection trusts whatever certificate is presented (including an attacker\'s). Only continue if you intend to reset this relay\'s pin.</string>
+    <string name="settings_cert_pins_unpinned_warning"><xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> is now unpinned; the next connection sets a new pin.</string>
     <string name="settings_cert_pins_stage">Stage backup pin</string>
     <string name="settings_cert_pins_stage_dialog_title">Stage Backup Pin</string>
-    <string name="settings_cert_pins_stage_dialog_text">Add a backup certificate pin for a relay so a key rotation verifies against the current or the next certificate during the overlap.</string>
+    <string name="settings_cert_pins_stage_dialog_text">Add a backup certificate pin so a relay key rotation verifies against the current or the next certificate during the overlap. Any certificate matching a pin is fully trusted: only enter a hash you obtained from the relay operator over a trusted channel.</string>
     <string name="settings_cert_pins_stage_host_label">Relay host</string>
     <string name="settings_cert_pins_stage_hash_label">SPKI SHA-256 (64 hex)</string>
     <string name="settings_cert_pins_stage_confirm">Stage</string>

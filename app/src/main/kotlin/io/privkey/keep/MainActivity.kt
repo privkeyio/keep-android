@@ -301,7 +301,7 @@ fun MainScreen(
     onClearCertificatePin: (String) -> Unit = {},
     onClearAllCertificatePins: () -> Unit = {},
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
-    onRemoveCertificatePin: (String, String) -> Unit = { _, _ -> },
+    onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
     onAccountSwitched: suspend () -> Unit = {}
 ) {
@@ -1130,8 +1130,17 @@ fun MainScreen(
                     },
                     onRetirePin = { hostname, spkiHash ->
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) { onRemoveCertificatePin(hostname, spkiHash) }
+                            val removal = withContext(Dispatchers.IO) {
+                                onRemoveCertificatePin(hostname, spkiHash)
+                            }
                             refreshCertificatePins()
+                            if (removal?.hostNowUnpinned == true) {
+                                Toast.makeText(
+                                    appContext,
+                                    appContext.getString(R.string.settings_cert_pins_unpinned_warning, hostname),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
                     },
                     onClearAllPins = {

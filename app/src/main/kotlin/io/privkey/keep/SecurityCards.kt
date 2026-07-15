@@ -304,7 +304,7 @@ fun CertificatePinsCard(
             text = {
                 Text(
                     if (lastPin) {
-                        stringResource(R.string.settings_cert_pins_clear_dialog_text, pin.hostname)
+                        stringResource(R.string.settings_cert_pins_retire_last_dialog_text, pin.hostname)
                     } else {
                         stringResource(R.string.settings_cert_pins_retire_keep_others, pin.hostname)
                     }
