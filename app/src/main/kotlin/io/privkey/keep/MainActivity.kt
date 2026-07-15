@@ -251,6 +251,10 @@ class MainActivity : FragmentActivity() {
                             onReconnectRelays = { app.reconnectRelays() },
                             onClearCertificatePin = app::clearCertificatePin,
                             onClearAllCertificatePins = app::clearAllCertificatePins,
+                            onStageCertificatePin = app::stageCertificatePin,
+                            onRemoveCertificatePin = { hostname, spkiHash ->
+                                app.removeCertificatePin(hostname, spkiHash)
+                            },
                             onDismissPinMismatch = app::dismissPinMismatch,
                             onAccountSwitched = { app.onAccountSwitched() }
                         )
@@ -296,6 +300,8 @@ fun MainScreen(
     onReconnectRelays: () -> Unit = {},
     onClearCertificatePin: (String) -> Unit = {},
     onClearAllCertificatePins: () -> Unit = {},
+    onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
+    onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
     onAccountSwitched: suspend () -> Unit = {}
 ) {
@@ -1108,10 +1114,33 @@ fun MainScreen(
                         profileRelays = updated
                         coroutineScope.launch { saveProfileRelays(updated) }
                     },
-                    onClearPin = { hostname ->
+                    onStagePin = { hostname, spkiHash ->
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) { onClearCertificatePin(hostname) }
+                            val staged = withContext(Dispatchers.IO) {
+                                onStageCertificatePin(hostname, spkiHash)
+                            }
                             refreshCertificatePins()
+                            val message = if (staged) {
+                                appContext.getString(R.string.settings_cert_pins_staged, hostname)
+                            } else {
+                                appContext.getString(R.string.settings_cert_pins_stage_failed)
+                            }
+                            Toast.makeText(appContext, message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onRetirePin = { hostname, spkiHash ->
+                        coroutineScope.launch {
+                            val removal = withContext(Dispatchers.IO) {
+                                onRemoveCertificatePin(hostname, spkiHash)
+                            }
+                            refreshCertificatePins()
+                            if (removal?.hostNowUnpinned == true) {
+                                Toast.makeText(
+                                    appContext,
+                                    appContext.getString(R.string.settings_cert_pins_unpinned_warning, hostname),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
                     },
                     onClearAllPins = {
@@ -1422,7 +1451,8 @@ private fun SettingsTab(
     onRemoveRelay: (String) -> Unit,
     onAddProfileRelay: (String) -> Unit,
     onRemoveProfileRelay: (String) -> Unit,
-    onClearPin: (String) -> Unit,
+    onStagePin: (String, String) -> Unit,
+    onRetirePin: (String, String) -> Unit,
     onClearAllPins: () -> Unit,
     onProxyActivate: (Int) -> Unit,
     onProxyDeactivate: () -> Unit,
@@ -1469,7 +1499,8 @@ private fun SettingsTab(
                 onRemoveRelay = onRemoveRelay,
                 onAddProfileRelay = onAddProfileRelay,
                 onRemoveProfileRelay = onRemoveProfileRelay,
-                onClearPin = onClearPin,
+                onStagePin = onStagePin,
+                onRetirePin = onRetirePin,
                 onClearAllPins = onClearAllPins,
                 onProxyActivate = onProxyActivate,
                 onProxyDeactivate = onProxyDeactivate
@@ -1768,7 +1799,8 @@ private fun ShareSettingsSection(
     onRemoveRelay: (String) -> Unit,
     onAddProfileRelay: (String) -> Unit,
     onRemoveProfileRelay: (String) -> Unit,
-    onClearPin: (String) -> Unit,
+    onStagePin: (String, String) -> Unit,
+    onRetirePin: (String, String) -> Unit,
     onClearAllPins: () -> Unit,
     onProxyActivate: (Int) -> Unit,
     onProxyDeactivate: () -> Unit
@@ -1785,7 +1817,8 @@ private fun ShareSettingsSection(
 
     CertificatePinsCard(
         pins = certificatePins,
-        onClearPin = onClearPin,
+        onStagePin = onStagePin,
+        onRetirePin = onRetirePin,
         onClearAllPins = onClearAllPins
     )
     Spacer(modifier = Modifier.height(16.dp))

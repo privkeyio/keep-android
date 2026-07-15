@@ -218,14 +218,24 @@ private fun SecurityLevelItem(
     }
 }
 
+/** A host is left fully unpinned (re-opening trust-on-first-use) when retiring its only pin. */
+internal fun isLastPinForHost(pins: List<CertificatePin>, hostname: String): Boolean =
+    pins.count { it.hostname == hostname } <= 1
+
+/** A valid SPKI pin is a SHA-256 digest: exactly 64 hex characters. */
+internal fun isValidSpkiHash(hash: String): Boolean =
+    hash.matches(Regex("[0-9a-fA-F]{64}"))
+
 @Composable
 fun CertificatePinsCard(
     pins: List<CertificatePin>,
-    onClearPin: (String) -> Unit,
+    onStagePin: (String, String) -> Unit,
+    onRetirePin: (String, String) -> Unit,
     onClearAllPins: () -> Unit
 ) {
     var showClearAllDialog by remember { mutableStateOf(false) }
-    var pinToDelete by remember { mutableStateOf<String?>(null) }
+    var showStageDialog by remember { mutableStateOf(false) }
+    var pinToRetire by remember { mutableStateOf<CertificatePin?>(null) }
 
     KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -268,7 +278,7 @@ fun CertificatePinsCard(
                             )
                         }
                         IconButton(
-                            onClick = { pinToDelete = pin.hostname },
+                            onClick = { pinToRetire = pin },
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(
@@ -280,26 +290,48 @@ fun CertificatePinsCard(
                     }
                 }
             }
+            TextButton(onClick = { showStageDialog = true }) {
+                Text(stringResource(R.string.settings_cert_pins_stage))
+            }
         }
     }
 
-    pinToDelete?.let { hostname ->
+    pinToRetire?.let { pin ->
+        val lastPin = isLastPinForHost(pins, pin.hostname)
         AlertDialog(
-            onDismissRequest = { pinToDelete = null },
+            onDismissRequest = { pinToRetire = null },
             title = { Text(stringResource(R.string.settings_cert_pins_clear_dialog_title)) },
-            text = { Text(stringResource(R.string.settings_cert_pins_clear_dialog_text, hostname)) },
+            text = {
+                Text(
+                    if (lastPin) {
+                        stringResource(R.string.settings_cert_pins_retire_last_dialog_text, pin.hostname)
+                    } else {
+                        stringResource(R.string.settings_cert_pins_retire_keep_others, pin.hostname)
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    onClearPin(hostname)
-                    pinToDelete = null
+                    onRetirePin(pin.hostname, pin.spkiHash)
+                    pinToRetire = null
                 }) {
                     Text(stringResource(R.string.settings_cert_pins_clear), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pinToDelete = null }) {
+                TextButton(onClick = { pinToRetire = null }) {
                     Text(stringResource(R.string.settings_cancel))
                 }
+            }
+        )
+    }
+
+    if (showStageDialog) {
+        StageBackupPinDialog(
+            onDismiss = { showStageDialog = false },
+            onStage = { host, hash ->
+                onStagePin(host, hash)
+                showStageDialog = false
             }
         )
     }
@@ -324,4 +356,59 @@ fun CertificatePinsCard(
             }
         )
     }
+}
+
+@Composable
+private fun StageBackupPinDialog(
+    onDismiss: () -> Unit,
+    onStage: (String, String) -> Unit
+) {
+    var host by remember { mutableStateOf("") }
+    var hash by remember { mutableStateOf("") }
+    val hostTrimmed = host.trim()
+    val hashTrimmed = hash.trim()
+    val canStage = hostTrimmed.isNotEmpty() && isValidSpkiHash(hashTrimmed)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_cert_pins_stage_dialog_title)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.settings_cert_pins_stage_dialog_text),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = { host = it },
+                    label = { Text(stringResource(R.string.settings_cert_pins_stage_host_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = hash,
+                    onValueChange = { hash = it },
+                    label = { Text(stringResource(R.string.settings_cert_pins_stage_hash_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onStage(hostTrimmed, hashTrimmed) },
+                enabled = canStage
+            ) {
+                Text(stringResource(R.string.settings_cert_pins_stage_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        }
+    )
 }
