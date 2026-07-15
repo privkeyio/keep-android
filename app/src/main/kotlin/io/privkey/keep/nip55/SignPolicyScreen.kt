@@ -1,23 +1,18 @@
 package io.privkey.keep.nip55
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.ui.components.SignPolicyOptionRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,10 +57,10 @@ fun SignPolicyScreen(
             )
 
             SignPolicy.entries.forEach { policy ->
-                SignPolicyOption(
+                SignPolicyOptionRow(
                     policy = policy,
                     isSelected = selectedPolicy == policy,
-                    onClick = {
+                    onSelected = {
                         userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
@@ -74,50 +69,6 @@ fun SignPolicyScreen(
                             }
                         }
                     }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SignPolicyOption(
-    policy: SignPolicy,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .border(2.dp, borderColor, RoundedCornerShape(12.dp))
-            .selectable(
-                selected = isSelected,
-                onClick = onClick,
-                role = Role.RadioButton
-            )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = isSelected,
-                onClick = null
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(
-                    text = stringResource(policy.displayNameRes),
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = stringResource(policy.descriptionRes),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

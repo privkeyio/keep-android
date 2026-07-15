@@ -22,10 +22,10 @@ fun KeepCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(Dimens.cardPadding),
+    border: BorderStroke = BorderStroke(Dimens.cardBorderWidth, MaterialTheme.colorScheme.outline),
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    val border = BorderStroke(Dimens.cardBorderWidth, MaterialTheme.colorScheme.outline)
     val elevation = CardDefaults.cardElevation(defaultElevation = Dimens.cardElevation)
     if (onClick != null) {
         Card(onClick = onClick, modifier = modifier.fillMaxWidth(), colors = colors, border = border, elevation = elevation) {
