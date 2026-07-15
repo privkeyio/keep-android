@@ -210,7 +210,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    implementation("net.zetetic:sqlcipher-android:4.16.0")
+    implementation("net.zetetic:sqlcipher-android:4.17.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("androidx.camera:camera-camera2:1.6.1")
