@@ -129,6 +129,9 @@
     <string name="connections_nip46_method">Method</string>
     <string name="connections_nip46_event_kind">Event Kind</string>
     <string name="connections_nip46_content">Content</string>
+    <string name="connections_nip46_http_url">HTTP URL</string>
+    <string name="connections_nip46_http_method">HTTP Method</string>
+    <string name="connections_nip46_http_unspecified">Unspecified</string>
     <string name="connections_nip46_app_public_key">App Public Key</string>
     <string name="connections_nip46_remember_decision">Remember this decision</string>
     <string name="connections_nip46_reject">Reject</string>

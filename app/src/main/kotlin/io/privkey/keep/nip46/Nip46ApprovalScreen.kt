@@ -34,6 +34,8 @@ fun Nip46ApprovalScreen(
     eventKind: Int?,
     eventContent: String?,
     isConnectRequest: Boolean = false,
+    httpAuthUrl: String? = null,
+    httpAuthMethod: String? = null,
     onApprove: (duration: PermissionDuration, onComplete: (success: Boolean) -> Unit) -> Unit,
     onReject: () -> Unit
 ) {
@@ -44,6 +46,11 @@ fun Nip46ApprovalScreen(
     val sanitizedContent = remember(eventContent) {
         eventContent?.let { sanitizeDisplayContent(it) }
     }
+    // NIP-98 (kind 27235) HTTP-auth: the security-relevant URL and method live in
+    // the event tags, not the (empty) content, so surface them so the user can see
+    // exactly which request they are authorizing before approving.
+    val sanitizedHttpUrl = remember(httpAuthUrl) { httpAuthUrl?.let { sanitizeDisplayContent(it) } }
+    val sanitizedHttpMethod = remember(httpAuthMethod) { httpAuthMethod?.let { sanitizeDisplayContent(it) } }
     val sanitizedAppName = remember(appName) { sanitizeDisplayContent(appName) }
 
     Column(
@@ -107,6 +114,20 @@ fun Nip46ApprovalScreen(
                 if (eventKind != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Nip46DetailRow(stringResource(R.string.connections_nip46_event_kind), EventKind.displayName(context, eventKind))
+                }
+
+                if (!sanitizedHttpUrl.isNullOrBlank() || !sanitizedHttpMethod.isNullOrBlank()) {
+                    val unspecified = stringResource(R.string.connections_nip46_http_unspecified)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Nip46DetailRow(
+                        stringResource(R.string.connections_nip46_http_url),
+                        sanitizedHttpUrl?.takeIf { it.isNotBlank() } ?: unspecified
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Nip46DetailRow(
+                        stringResource(R.string.connections_nip46_http_method),
+                        sanitizedHttpMethod?.takeIf { it.isNotBlank() } ?: unspecified
+                    )
                 }
 
                 if (!sanitizedContent.isNullOrBlank()) {

@@ -94,6 +94,8 @@ class Nip46ApprovalActivity : FragmentActivity() {
                         eventKind = request.eventKind?.toInt(),
                         eventContent = request.eventContent,
                         isConnectRequest = isConnect,
+                        httpAuthUrl = request.httpAuth?.url,
+                        httpAuthMethod = request.httpAuth?.method,
                         onApprove = ::handleApprove,
                         onReject = ::handleReject
                     )
