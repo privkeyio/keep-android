@@ -131,8 +131,16 @@ internal class AccountActions(
                             keepMobile.saveRelayConfig(currentKey, RelayConfigInfo(currentRelays, existing.profileRelays, existing.bunkerRelays))
                         }
                     }
-                    activateShare(authedCipher, account.groupPubkeyHex)
+                    // Clear the previous account's permissions/state BEFORE
+                    // activating the new signing key. The NIP-55 ContentProvider
+                    // signing path does not take accountMutex, so if activation
+                    // happened first a request racing this switch could resolve an
+                    // old grant against the newly-active key. Revoking first makes
+                    // the transition window fail-safe (no grants + old key -> the
+                    // request re-prompts). onAccountSwitched clears state account-
+                    // agnostically and does not depend on the new active share.
                     onAccountSwitched()
+                    activateShare(authedCipher, account.groupPubkeyHex)
                     refreshAccountState()
                 } catch (e: Exception) {
                     logAndToast("Switch failed", appContext.getString(R.string.account_switch_failed), e)
@@ -207,6 +215,11 @@ internal class AccountActions(
                 coroutineScope.launch {
                     accountMutex.withLock {
                         try {
+                            // Clear the deleted account's permissions/state before
+                            // activating the next account's key, so a signing request
+                            // racing this switch cannot resolve an old grant against
+                            // the new key (revoke-before-activate; see switchAccount).
+                            onAccountSwitched()
                             if (switchAuthed != null) {
                                 try {
                                     activateShare(switchAuthed, nextAccount.groupPubkeyHex)
@@ -214,7 +227,6 @@ internal class AccountActions(
                                     if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-delete switch failed: ${e::class.simpleName}")
                                 }
                             }
-                            onAccountSwitched()
                             refreshAccountState()
                         } finally {
                             onDismiss()
