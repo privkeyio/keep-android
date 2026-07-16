@@ -81,6 +81,17 @@ internal class SecurePassphrase {
 
     fun toCharArray(): CharArray = chars.copyOf()
 
+    // UTF-8 encode the passphrase into a fresh ByteArray without ever materializing
+    // an immutable String (which could not be wiped and would linger on the heap).
+    // Caller owns the result and must zero it after use.
+    fun toUtf8Bytes(): ByteArray {
+        val encoded = Charsets.UTF_8.encode(java.nio.CharBuffer.wrap(chars))
+        val out = ByteArray(encoded.remaining())
+        encoded.get(out)
+        if (encoded.hasArray()) Arrays.fill(encoded.array(), 0.toByte())
+        return out
+    }
+
     fun contentEquals(other: SecurePassphrase): Boolean = chars.contentEquals(other.chars)
 
     fun any(predicate: (Char) -> Boolean): Boolean = chars.any(predicate)

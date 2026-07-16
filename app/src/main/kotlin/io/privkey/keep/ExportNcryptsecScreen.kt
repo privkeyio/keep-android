@@ -173,8 +173,8 @@ fun ExportNcryptsecScreen(
                             cipherError = noEncryptionKeyMessage
                             return@NcryptsecInputForm
                         }
-                        val passwordChars = password.toCharArray()
-                        fun clearChars() = Arrays.fill(passwordChars, '\u0000')
+                        val passwordBytes = password.toUtf8Bytes()
+                        fun clearChars() = Arrays.fill(passwordBytes, 0.toByte())
                         sessionCanceled.set(false)
                         try {
                             onBiometricAuth(cipher) { authedCipher ->
@@ -186,16 +186,15 @@ fun ExportNcryptsecScreen(
                                     val exportId = java.util.UUID.randomUUID().toString()
                                     storage.setPendingCipher(exportId, authedCipher)
                                     exportState = NcryptsecExportState.Encrypting
-                                    // NOTE: String(passwordChars) below materializes an unwipable
-                                    // copy because the UniFFI surface requires String. Residual
-                                    // risk: password bytes linger in the String's backing array
-                                    // until GC. Same applies to the returned ncryptsec.
+                                    // The password crosses the FFI as a wipeable ByteArray
+                                    // (passwordBytes), cleared in clearChars() below. The returned
+                                    // ncryptsec String is itself the ciphertext, not the secret.
                                     exportJob = coroutineScope.launch {
                                         try {
                                             val ncryptsec = withContext(Dispatchers.IO) {
                                                 storage.setRequestIdContext(exportId)
                                                 try {
-                                                    keepMobile.exportNcryptsec(String(passwordChars))
+                                                    keepMobile.exportNcryptsec(passwordBytes)
                                                 } finally {
                                                     storage.clearRequestIdContext()
                                                 }
