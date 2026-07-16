@@ -12,6 +12,14 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
+/**
+ * DESTRUCTIVE: this suite operates on the production audit log. verifyAuditChain
+ * reads the Keystore-backed HMAC key and audit anchor wired up only by
+ * Nip55Database.getInstance, so setup/teardown call PermissionStore.clearAuditLog()
+ * on the real on-device database. Running these tests wipes any existing audit-log
+ * entries on the device/emulator. Do not point this at a device whose audit log
+ * you need to keep.
+ */
 @RunWith(AndroidJUnit4::class)
 class AuditChainVerificationTest {
 
