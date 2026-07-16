@@ -617,7 +617,11 @@ class BunkerService : Service() {
         val mobile = keepMobileRef
         val pk = clientPubkey.lowercase()
         val denylisted = runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)
-        val isAuthorized = !denylisted && (pendingAuthSaves.contains(pk) || authorizedClientsCache.contains(pk))
+        val isAuthorized = isClientAuthorized(
+            denylisted = denylisted,
+            inPendingAuth = pendingAuthSaves.contains(pk),
+            inCache = authorizedClientsCache.contains(pk)
+        )
         val isConnectRequest = request.method == "connect"
 
         // Gate-then-budget ordering is contract-tested by RateLimitDelegationTest:

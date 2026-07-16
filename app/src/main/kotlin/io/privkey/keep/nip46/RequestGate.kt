@@ -22,3 +22,19 @@ internal fun requestGateDecision(
     } else {
         RequestGate.RATE_LIMIT_THEN_PROCEED
     }
+
+/**
+ * Whether a NIP-46 client is authorized to have its (non-connect) requests
+ * served. The denylist always wins; otherwise the client must be present in
+ * either the warm-start `pending-auth` set (it just completed a connect
+ * approval before its persisted authorization was reloaded into the cache) or
+ * the authorized-clients cache. This is the security-critical authorization
+ * boolean feeding [requestGateDecision].
+ *
+ * Pure function: no Service state, no native calls, fully unit-testable.
+ */
+internal fun isClientAuthorized(
+    denylisted: Boolean,
+    inPendingAuth: Boolean,
+    inCache: Boolean
+): Boolean = !denylisted && (inPendingAuth || inCache)
