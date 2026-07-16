@@ -49,6 +49,12 @@ private const val MAX_SHARE_LENGTH = 8192
 private const val MAX_ANIMATED_FRAMES = 100
 private const val MAX_FRAME_LENGTH = 4096
 
+// Upper bound on a camera frame's reported width/height (and 4x for rowStride).
+// A real ImageAnalysis frame is ~640x480; this rejects pathological, possibly
+// HAL-reported, geometry so the byte-count arithmetic below (rowStride*(height-1)
+// + width, width*height) cannot overflow Int.
+private const val MAX_FRAME_DIMENSION = 10000
+
 private class LuminanceBuffers {
     private var raw: ByteArray = ByteArray(0)
     private var rotated: ByteArray = ByteArray(0)
@@ -75,7 +81,12 @@ private fun decodeQrFromImageProxy(
     val width = imageProxy.width
     val height = imageProxy.height
 
-    if (width <= 0 || height <= 0 || rowStride < width) return null
+    if (width <= 0 || height <= 0 || rowStride < width ||
+        width > MAX_FRAME_DIMENSION || height > MAX_FRAME_DIMENSION ||
+        rowStride > MAX_FRAME_DIMENSION * 4
+    ) {
+        return null
+    }
 
     val expected = rowStride * (height - 1) + width
     buffer.rewind()
