@@ -125,12 +125,6 @@ data class Nip55AppSettings(
         isTimestampExpired(expiresAt, createdAt, createdAtElapsed, durationMs, currentElapsed, currentTimeMillis)
 }
 
-data class VelocityConfig(
-    val hourlyLimit: Int = 1000,
-    val dailyLimit: Int = 5000,
-    val enabled: Boolean = true
-)
-
 sealed class VelocityResult {
     data object Allowed : VelocityResult()
     data class Blocked(val reason: String, val resetAt: Long) : VelocityResult()
