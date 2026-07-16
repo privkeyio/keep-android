@@ -419,9 +419,19 @@ class BunkerService : Service() {
             }
 
             val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
-            val proxyStarted = proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535 &&
-                invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)
-            if (!proxyStarted) {
+            if (proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535) {
+                // A proxy is configured. Fail closed if it cannot be started:
+                // falling back to a direct connection would leak the user's IP to
+                // the relays, defeating the point of the proxy (e.g. Tor).
+                if (!invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)) {
+                    if (BuildConfig.DEBUG) {
+                        Log.e(TAG, "proxy enabled but startBunkerWithProxy failed; refusing to connect without proxy")
+                    }
+                    _status.value = BunkerStatus.ERROR
+                    stopSelf()
+                    return false
+                }
+            } else {
                 handler.startBunker(safeRelays, callbacks)
             }
 
