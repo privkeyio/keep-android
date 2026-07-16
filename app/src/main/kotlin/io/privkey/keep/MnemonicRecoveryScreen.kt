@@ -375,7 +375,7 @@ private fun WordInputField(
     }
 }
 
-private fun handlePaste(
+internal fun handlePaste(
     text: String,
     startIndex: Int,
     words: MutableList<String>,
