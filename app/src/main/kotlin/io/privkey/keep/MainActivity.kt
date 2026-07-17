@@ -129,6 +129,15 @@ class MainActivity : FragmentActivity() {
                             biometricTimeoutStore.requiresBiometric()) {
                             isBiometricUnlocked = false
                         }
+                    } else if (event == Lifecycle.Event.ON_STOP) {
+                        // Close the biometric timeout window when the app leaves the
+                        // foreground. Otherwise a recently-authenticated session survives a
+                        // background transition, letting someone who resumes the app perform a
+                        // presence-gated action (cosign approval, kill-switch disable) without a
+                        // fresh biometric. ON_STOP (not ON_PAUSE) so the in-app BiometricPrompt
+                        // overlay, which pauses but does not stop the activity, is not clobbered.
+                        // Also lets lock-on-launch re-engage on resume (an open window suppressed it).
+                        biometricTimeoutStore?.invalidateSession()
                     }
                 }
                 lifecycle.addObserver(observer)
