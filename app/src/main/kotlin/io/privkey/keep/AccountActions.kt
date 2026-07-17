@@ -368,14 +368,16 @@ internal class AccountActions(
     }
 
     fun createAccountFromMnemonic(
-        mnemonic: String,
+        mnemonic: ByteArray,
         passphrase: String,
         name: String,
         cipher: Cipher,
         onImportStateChanged: (ImportState) -> Unit
     ) {
         onImportStateChanged(ImportState.Importing)
-        executeImport(cipher, onImportStateChanged) {
+        // The mnemonic crosses the FFI as a wipeable ByteArray; keep-mobile derives the
+        // key in-crate. Zero the bytes unconditionally once the async call has run.
+        executeImport(cipher, onImportStateChanged, cleanup = { mnemonic.fill(0.toByte()) }) {
             keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
         }
     }

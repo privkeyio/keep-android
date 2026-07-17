@@ -27,7 +27,7 @@ private const val MAX_MNEMONIC_LENGTH = 1024
 @Composable
 fun CreateAccountScreen(
     keepMobile: KeepMobile,
-    onCreateAccount: (mnemonic: String, passphrase: String, name: String, cipher: Cipher) -> Unit,
+    onCreateAccount: (mnemonic: ByteArray, passphrase: String, name: String, cipher: Cipher) -> Unit,
     onGetCipher: () -> Cipher,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit,
@@ -318,7 +318,7 @@ private fun ConfirmStep(
     mnemonicData: SecureShareData,
     onGetCipher: () -> Cipher,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
-    onCreateAccount: (mnemonic: String, passphrase: String, name: String, cipher: Cipher) -> Unit,
+    onCreateAccount: (mnemonic: ByteArray, passphrase: String, name: String, cipher: Cipher) -> Unit,
     onDismiss: () -> Unit,
     onBack: () -> Unit,
     importState: ImportState
@@ -386,7 +386,7 @@ private fun ConfirmStep(
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
                             if (authedCipher != null) {
-                                onCreateAccount(mnemonicData.valueUnsafe(), "", keyName.trim(), authedCipher)
+                                onCreateAccount(mnemonicData.toUtf8Bytes(), "", keyName.trim(), authedCipher)
                             }
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {
