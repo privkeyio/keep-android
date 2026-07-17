@@ -24,7 +24,7 @@ private const val MAX_NSEC_LENGTH = 128
 
 @Composable
 fun ImportNsecScreen(
-    onImport: (nsec: String, name: String, cipher: Cipher) -> Unit,
+    onImport: (nsec: ByteArray, name: String, cipher: Cipher) -> Unit,
     onGetCipher: () -> Cipher,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit,
@@ -192,7 +192,7 @@ fun ImportNsecScreen(
                         val cipher = onGetCipher()
                         onBiometricAuth(cipher) { authedCipher ->
                             if (authedCipher != null) {
-                                onImport(nsecData.valueUnsafe(), keyName, authedCipher)
+                                onImport(nsecData.toUtf8Bytes(), keyName, authedCipher)
                             }
                         }
                     } catch (e: KeyPermanentlyInvalidatedException) {

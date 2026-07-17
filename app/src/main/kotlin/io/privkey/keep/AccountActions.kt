@@ -5,7 +5,6 @@ import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.nsecToHex
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CoroutineScope
@@ -352,18 +351,19 @@ internal class AccountActions(
     }
 
     fun importNsec(
-        nsec: String,
+        nsec: ByteArray,
         name: String,
         cipher: Cipher,
         onImportStateChanged: (ImportState) -> Unit
     ) {
         onImportStateChanged(ImportState.Importing)
-        val hexKey = nsecToHex(nsec) ?: run {
-            onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_invalid_nsec)))
-            return
-        }
-        executeImport(cipher, onImportStateChanged) {
-            keepMobile.importNsec(hexKey, name)
+        // The nsec crosses the FFI as a wipeable ByteArray; keep-mobile decodes the
+        // bech32 and derives the key in-crate, so no plaintext key String lives on the
+        // JVM heap. The bytes are copied into the Rust buffer synchronously by
+        // importNsec, then zeroed unconditionally via executeImport's cleanup (which
+        // runs even if the coroutine is cancelled before the call dispatches).
+        executeImport(cipher, onImportStateChanged, cleanup = { nsec.fill(0.toByte()) }) {
+            keepMobile.importNsec(nsec, name)
         }
     }
 
@@ -541,35 +541,43 @@ internal class AccountActions(
     private fun executeImport(
         cipher: Cipher,
         onImportStateChanged: (ImportState) -> Unit,
+        cleanup: (() -> Unit)? = null,
         apiCall: suspend () -> ShareInfo
     ) {
         coroutineScope.launch {
-            accountMutex.withLock {
-                val importId = UUID.randomUUID().toString()
-                var pendingSet = false
-                try {
-                    storage.setPendingCipher(importId, cipher)
-                    pendingSet = true
-                    val result = withContext(Dispatchers.IO) {
-                        storage.setRequestIdContext(importId)
-                        try {
-                            apiCall()
-                        } finally {
-                            storage.clearRequestIdContext()
-                        }
-                    }
-                    onImportStateChanged(ImportState.Success(result.name, result.groupPubkey))
+            try {
+                accountMutex.withLock {
+                    val importId = UUID.randomUUID().toString()
+                    var pendingSet = false
                     try {
-                        refreshAccountState()
+                        storage.setPendingCipher(importId, cipher)
+                        pendingSet = true
+                        val result = withContext(Dispatchers.IO) {
+                            storage.setRequestIdContext(importId)
+                            try {
+                                apiCall()
+                            } finally {
+                                storage.clearRequestIdContext()
+                            }
+                        }
+                        onImportStateChanged(ImportState.Success(result.name, result.groupPubkey))
+                        try {
+                            refreshAccountState()
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-import refresh failed: ${e::class.simpleName}")
+                        }
                     } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-import refresh failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
+                        onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_failed)))
+                    } finally {
+                        if (pendingSet) storage.clearPendingCipher(importId)
                     }
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
-                    onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_failed)))
-                } finally {
-                    if (pendingSet) storage.clearPendingCipher(importId)
                 }
+            } finally {
+                // Runs on success, failure, AND coroutine cancellation (including a
+                // cancel while suspended on the lock, before apiCall ran), so a secret
+                // captured by apiCall is wiped unconditionally.
+                cleanup?.invoke()
             }
         }
     }
