@@ -311,9 +311,9 @@ internal class AccountActions(
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
                 try {
-                    storage.setPendingCipher(requestId, authedDecrypt)
+                    storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
                     pendingSet = true
-                    storage.setPendingCipher(requestId, authedEncrypt)
+                    storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
                     withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {
@@ -511,9 +511,9 @@ internal class AccountActions(
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
                 try {
-                    storage.setPendingCipher(requestId, authedDecrypt)
+                    storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
                     pendingSet = true
-                    storage.setPendingCipher(requestId, authedEncrypt)
+                    storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
                     withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {
