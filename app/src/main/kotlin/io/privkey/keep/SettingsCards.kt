@@ -324,3 +324,90 @@ fun BackupSettingsCard(onClick: () -> Unit) {
         )
     }
 }
+
+/**
+ * A PIN-entry dialog that verifies a PIN before performing a gated action. [onVerify]
+ * receives the entered PIN, performs its own work (verification + the action) off the
+ * main thread as needed, and returns whether it succeeded; on success the dialog
+ * dismisses, otherwise it shows an incorrect-PIN error. Reused by any settings action
+ * that must be PIN-gated (e.g. disabling the kill switch when biometrics are unavailable).
+ */
+@Composable
+fun PinPromptDialog(
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onVerify: suspend (String) -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    val incorrectPinMsg = stringResource(R.string.settings_pin_incorrect)
+    var pinInput by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = {
+            pinInput = ""
+            error = null
+            onDismiss()
+        },
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(message)
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = pinInput,
+                    onValueChange = { newValue ->
+                        if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
+                            pinInput = newValue
+                            error = null
+                        }
+                    },
+                    label = { Text(stringResource(R.string.settings_pin_current_label)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    isError = error != null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    coroutineScope.launch {
+                        val ok = onVerify(pinInput)
+                        if (ok) {
+                            pinInput = ""
+                            error = null
+                            onDismiss()
+                        } else {
+                            error = incorrectPinMsg
+                            pinInput = ""
+                        }
+                    }
+                },
+                enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                pinInput = ""
+                error = null
+                onDismiss()
+            }) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        }
+    )
+}
