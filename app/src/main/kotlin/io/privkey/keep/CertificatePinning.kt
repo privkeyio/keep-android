@@ -29,7 +29,10 @@ private fun Any.readBoolProperty(name: String): Boolean {
 fun KeepMobile.getCertificatePinsCompat(): List<CertificatePin> = runCatching {
     val method = javaClass.methods.firstOrNull { it.name == "getCertificatePins" }
     if (method == null) {
-        android.util.Log.w("CertificatePinning", "getCertificatePins method not found via reflection, pinning disabled")
+        // Enforcement lives in the Rust core (verify_relay_certificate), not here, so this
+        // only means the pin-management UI is degraded due to keep-mobile binding version
+        // drift. Log at ERROR so that drift is loud rather than a buried warning.
+        android.util.Log.e(CERT_PIN_TAG, "getCertificatePins not found via reflection (binding version drift); pin list unavailable in UI, Rust-side enforcement unaffected")
         return emptyList()
     }
     val result = method.invoke(this) as? List<*> ?: return emptyList()
@@ -51,7 +54,7 @@ fun KeepMobile.stageCertificatePinCompat(hostname: String, spkiHash: String): Bo
         it.name == "stageCertificatePin" && it.parameterCount == 2
     }
     if (method == null) {
-        android.util.Log.w(CERT_PIN_TAG, "stageCertificatePin method not found via reflection")
+        android.util.Log.e(CERT_PIN_TAG, "stageCertificatePin not found via reflection (binding version drift); cannot add pins, Rust-side enforcement unaffected")
         return false
     }
     method.invoke(this, hostname, spkiHash)
@@ -69,7 +72,7 @@ fun KeepMobile.removeCertificatePinCompat(hostname: String, spkiHash: String): C
         it.name == "removeCertificatePin" && it.parameterCount == 2
     }
     if (method == null) {
-        android.util.Log.w(CERT_PIN_TAG, "removeCertificatePin method not found via reflection")
+        android.util.Log.e(CERT_PIN_TAG, "removeCertificatePin not found via reflection (binding version drift); cannot remove pins, Rust-side enforcement unaffected")
         return null
     }
     val result = method.invoke(this, hostname, spkiHash) ?: return null

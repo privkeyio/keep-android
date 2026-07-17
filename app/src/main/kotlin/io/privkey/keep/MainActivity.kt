@@ -352,6 +352,12 @@ fun MainScreen(
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
     var showKillSwitchPinPrompt by remember { mutableStateOf(false) }
+    // Re-auth gate for security-downgrade actions (e.g. clearing/removing a certificate
+    // pin, which re-opens trust-on-first-use for that host).
+    var pendingAuthGateAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    var authGateTitle by remember { mutableStateOf("") }
+    var authGateMessage by remember { mutableStateOf("") }
+    var authGateConfirm by remember { mutableStateOf("") }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
     var showPinSetup by remember { mutableStateOf(false) }
@@ -409,6 +415,25 @@ fun MainScreen(
             showKillSwitchPinPrompt = true
         }
     }
+
+    // Runs [action] only after a verified auth factor: biometric when available, else a
+    // PIN prompt, else (no factor configured) immediately, consistent with the rest of the
+    // app in that config. Used to gate security-downgrade actions like clearing a cert pin.
+    val requireAuthThen: (String, String, String, suspend () -> Unit) -> Unit =
+        { title, message, confirmLabel, action ->
+            when {
+                biometricAvailable -> coroutineScope.launch {
+                    if (onBiometricAuth?.invoke(title, message) == true) action()
+                }
+                pinEnabled -> {
+                    authGateTitle = title
+                    authGateMessage = message
+                    authGateConfirm = confirmLabel
+                    pendingAuthGateAction = action
+                }
+                else -> coroutineScope.launch { action() }
+            }
+        }
 
     val accountActions = remember {
         AccountActions(
@@ -553,6 +578,24 @@ fun MainScreen(
                 }
             },
             onDismiss = { showKillSwitchPinPrompt = false }
+        )
+    }
+
+    pendingAuthGateAction?.let { action ->
+        PinPromptDialog(
+            title = authGateTitle,
+            message = authGateMessage,
+            confirmLabel = authGateConfirm,
+            onVerify = { pin ->
+                val verified = withContext(Dispatchers.IO) { pinStore.verifyPin(pin) }
+                if (verified) {
+                    action()
+                    true
+                } else {
+                    false
+                }
+            },
+            onDismiss = { pendingAuthGateAction = null }
         )
     }
 
@@ -973,7 +1016,13 @@ fun MainScreen(
         PinMismatchDialog(
             hostname = pinMismatchInfo.hostname,
             onClearAndRetry = {
-                coroutineScope.launch {
+                // Clearing a pin re-opens trust-on-first-use for this host (here, right after
+                // a possible-MITM mismatch), so require a fresh auth factor first.
+                requireAuthThen(
+                    appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
+                    appContext.getString(R.string.settings_cert_pins_clear_dialog_text, pinMismatchInfo.hostname),
+                    appContext.getString(R.string.settings_cert_pins_clear),
+                ) {
                     withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatchInfo.hostname) }
                     refreshCertificatePins()
                     onReconnectRelays()
@@ -1166,7 +1215,14 @@ fun MainScreen(
                         }
                     },
                     onRetirePin = { hostname, spkiHash ->
-                        coroutineScope.launch {
+                        // Removing a pin can leave a host unpinned (re-opening TOFU), so gate
+                        // it behind auth too, otherwise the clear-all gate is bypassable by
+                        // retiring pins one at a time.
+                        requireAuthThen(
+                            appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
+                            appContext.getString(R.string.settings_cert_pins_clear_dialog_text, hostname),
+                            appContext.getString(R.string.settings_cert_pins_clear),
+                        ) {
                             val removal = withContext(Dispatchers.IO) {
                                 onRemoveCertificatePin(hostname, spkiHash)
                             }
@@ -1181,7 +1237,11 @@ fun MainScreen(
                         }
                     },
                     onClearAllPins = {
-                        coroutineScope.launch {
+                        requireAuthThen(
+                            appContext.getString(R.string.settings_cert_pins_clear_all_dialog_title),
+                            appContext.getString(R.string.settings_cert_pins_clear_all_dialog_text),
+                            appContext.getString(R.string.settings_cert_pins_clear_all),
+                        ) {
                             withContext(Dispatchers.IO) { onClearAllCertificatePins() }
                             refreshCertificatePins()
                         }
