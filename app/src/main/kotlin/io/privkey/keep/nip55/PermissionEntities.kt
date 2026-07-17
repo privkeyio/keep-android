@@ -32,6 +32,8 @@ const val SELF_CALLER = "self"
 // Activity-log requestType values for self-initiated key-management operations.
 const val AUDIT_OP_EXPORT_NCRYPTSEC = "EXPORT_NCRYPTSEC"
 const val AUDIT_OP_EXPORT_SHARE = "EXPORT_SHARE"
+const val AUDIT_OP_ACCOUNT_SWITCH = "ACCOUNT_SWITCH"
+const val AUDIT_OP_ACCOUNT_DELETE = "ACCOUNT_DELETE"
 
 // Relay scope sentinels for kind-22242 (NIP-42) grants. RELAY_NONE is used for all
 // other grants, where the relay dimension is not meaningful.

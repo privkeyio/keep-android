@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
+import io.privkey.keep.nip55.AUDIT_OP_ACCOUNT_SWITCH
 import io.privkey.keep.nip55.AndroidSigningRateLimiterStorage
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
@@ -470,6 +471,12 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear auto-sign rate limits") { signingRateLimiter?.clearAll() }
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
+            // Genesis entry for the new account's fresh audit chain: the per-account wipe
+            // above clears the prior trail, so record the activation itself here to keep
+            // every account switch auditable (a switch is otherwise evidence-free).
+            runAccountSwitchCleanup("record account-switch audit") {
+                permissionStore?.logSelfEvent(AUDIT_OP_ACCOUNT_SWITCH)
+            }
         }
     }
 
