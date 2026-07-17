@@ -351,6 +351,7 @@ fun MainScreen(
 
     var foregroundServiceEnabled by remember { mutableStateOf(foregroundServiceStore.isEnabled()) }
     var showKillSwitchConfirmDialog by remember { mutableStateOf(false) }
+    var showKillSwitchPinPrompt by remember { mutableStateOf(false) }
     var showConnectedApps by remember { mutableStateOf(false) }
     var selectedAppPackage by remember { mutableStateOf<String?>(null) }
     var showPinSetup by remember { mutableStateOf(false) }
@@ -388,7 +389,7 @@ fun MainScreen(
     val handleKillSwitchToggle: (Boolean) -> Unit = { newValue ->
         if (newValue) {
             showKillSwitchConfirmDialog = true
-        } else {
+        } else if (biometricAvailable) {
             coroutineScope.launch {
                 val authenticated = onBiometricAuth?.invoke(
                     appContext.getString(R.string.main_disable_kill_switch_title),
@@ -401,6 +402,11 @@ fun MainScreen(
                     if (updated) killSwitchEnabled = false
                 }
             }
+        } else {
+            // Biometrics unavailable: fall back to PIN so the kill switch cannot lock the
+            // user out of signing permanently (the switch is enabled here only when a PIN
+            // is set). Disabling still requires a verified auth factor.
+            showKillSwitchPinPrompt = true
         }
     }
 
@@ -526,6 +532,27 @@ fun MainScreen(
                 }
             },
             onDismiss = { showKillSwitchConfirmDialog = false }
+        )
+    }
+
+    if (showKillSwitchPinPrompt) {
+        PinPromptDialog(
+            title = stringResource(R.string.main_disable_kill_switch_title),
+            message = stringResource(R.string.main_disable_kill_switch_subtitle),
+            confirmLabel = stringResource(R.string.settings_pin_disable),
+            onVerify = { pin ->
+                val verified = withContext(Dispatchers.IO) { pinStore.verifyPin(pin) }
+                if (!verified) {
+                    false
+                } else {
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.setKillSwitch(false) }.isSuccess
+                    }
+                    if (updated) killSwitchEnabled = false
+                    updated
+                }
+            },
+            onDismiss = { showKillSwitchPinPrompt = false }
         )
     }
 
@@ -1029,6 +1056,7 @@ fun MainScreen(
                     securityLevel = securityLevel,
                     killSwitchEnabled = killSwitchEnabled,
                     biometricAvailable = biometricAvailable,
+                    pinEnabled = pinEnabled,
                     onShareDetailsClick = { showShareDetails = true },
                     onAccountSwitcherClick = { showAccountSwitcher = true },
                     onImport = { showImportScreen = true },
@@ -1278,6 +1306,7 @@ private fun HomeTab(
     onRecoverMnemonic: () -> Unit,
     onConnect: () -> Unit,
     biometricAvailable: Boolean,
+    pinEnabled: Boolean,
     onKillSwitchToggle: (Boolean) -> Unit
 ) {
     Column(
@@ -1336,7 +1365,7 @@ private fun HomeTab(
         KillSwitchCard(
             enabled = killSwitchEnabled,
             onToggle = onKillSwitchToggle,
-            toggleEnabled = biometricAvailable
+            toggleEnabled = biometricAvailable || pinEnabled
         )
 
         Spacer(modifier = Modifier.height(16.dp))

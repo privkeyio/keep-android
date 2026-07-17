@@ -61,7 +61,7 @@ fun SecuritySettingsScreen(
             KillSwitchCard(
                 enabled = killSwitchEnabled,
                 onToggle = onKillSwitchToggle,
-                toggleEnabled = biometricAvailable
+                toggleEnabled = biometricAvailable || pinEnabled
             )
 
             PinSettingsCard(
