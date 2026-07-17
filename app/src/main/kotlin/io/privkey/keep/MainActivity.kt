@@ -622,16 +622,39 @@ fun MainScreen(
             },
             biometricTimeout = biometricTimeout,
             onTimeoutChanged = { newTimeout ->
-                coroutineScope.launch {
+                val applyTimeout: suspend () -> Unit = {
                     val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setTimeout(newTimeout) }
                     if (saved) biometricTimeout = newTimeout
+                }
+                // A larger value is a longer window before re-auth, so it weakens the gate;
+                // require a fresh factor. Shortening it (or every-time) applies immediately.
+                if (newTimeout > biometricTimeout) {
+                    requireAuthThen(
+                        appContext.getString(R.string.settings_biometric_timeout_reauth_title),
+                        appContext.getString(R.string.settings_biometric_timeout_reauth_text),
+                        appContext.getString(R.string.settings_reauth_confirm),
+                        applyTimeout,
+                    )
+                } else {
+                    coroutineScope.launch { applyTimeout() }
                 }
             },
             biometricLockOnLaunch = biometricLockOnLaunch,
             onBiometricLockOnLaunchChanged = { enabled ->
-                coroutineScope.launch {
+                val applyLockOnLaunch: suspend () -> Unit = {
                     val saved = withContext(Dispatchers.IO) { biometricTimeoutStore.setLockOnLaunch(enabled) }
                     if (saved) biometricLockOnLaunch = enabled
+                }
+                // Disabling app-lock weakens the gate; require a fresh factor. Enabling applies immediately.
+                if (!enabled) {
+                    requireAuthThen(
+                        appContext.getString(R.string.settings_biometric_lock_disable_reauth_title),
+                        appContext.getString(R.string.settings_biometric_lock_disable_reauth_text),
+                        appContext.getString(R.string.settings_reauth_confirm),
+                        applyLockOnLaunch,
+                    )
+                } else {
+                    coroutineScope.launch { applyLockOnLaunch() }
                 }
             },
             biometricAvailable = biometricAvailable,
