@@ -244,9 +244,16 @@ class MainActivity : FragmentActivity() {
                                 }
                             },
                             onBiometricAuth = { title, subtitle ->
+                                // This gate backs security-downgrade actions (kill-switch
+                                // disable, cert-pin clear/retire, weakening app-lock
+                                // settings). Force a live prompt so an attacker holding a
+                                // recently-authenticated, foregrounded phone cannot ride an
+                                // open biometric-timeout window to weaken security silently
+                                // (matches the app-unlock gate above).
                                 biometricHelper?.authenticate(
                                     title = title,
-                                    subtitle = subtitle
+                                    subtitle = subtitle,
+                                    forcePrompt = true
                                 ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
