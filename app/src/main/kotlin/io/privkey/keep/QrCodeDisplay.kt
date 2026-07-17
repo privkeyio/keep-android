@@ -109,6 +109,22 @@ internal class SecureShareData(private val maxLength: Int) {
         return true
     }
 
+    // Decode UTF-8 bytes into the backing CharArray without ever materializing a String.
+    // The caller still owns `bytes` and is responsible for wiping them.
+    fun updateFromBytes(bytes: ByteArray): Boolean {
+        val decoded = Charsets.UTF_8.decode(java.nio.ByteBuffer.wrap(bytes))
+        if (decoded.remaining() > maxLength) {
+            if (decoded.hasArray()) Arrays.fill(decoded.array(), 0.toChar())
+            return false
+        }
+        Arrays.fill(chars, 0.toChar())
+        val out = CharArray(decoded.remaining())
+        decoded.get(out)
+        chars = out
+        if (decoded.hasArray()) Arrays.fill(decoded.array(), 0.toChar())
+        return true
+    }
+
     fun clear() {
         Arrays.fill(chars, '\u0000')
         chars = CharArray(0)

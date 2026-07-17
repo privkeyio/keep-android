@@ -1217,7 +1217,7 @@ fun MainScreen(
                                 onResult = { mnemonic ->
                                     if (token != seedWordsRequestToken || !showSeedWordsScreen) return@viewSeedWords
                                     if (mnemonic != null) {
-                                        if (!seedWordsData.update(mnemonic)) {
+                                        if (!seedWordsData.updateFromBytes(mnemonic)) {
                                             Log.w("MainActivity", "Seed words exceeded MAX_SEED_WORDS_LENGTH=$MAX_SEED_WORDS_LENGTH; truncated/rejected")
                                         }
                                     }
