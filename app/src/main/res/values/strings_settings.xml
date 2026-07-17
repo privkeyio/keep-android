@@ -115,4 +115,9 @@
     <string name="settings_biometric_on_launch_title">Biometric on Launch</string>
     <string name="settings_biometric_on_launch_subtitle">Require biometric authentication when opening app</string>
     <string name="settings_biometric_unavailable">Biometric hardware not available</string>
+    <string name="settings_reauth_confirm">Confirm</string>
+    <string name="settings_biometric_lock_disable_reauth_title">Turn off app lock?</string>
+    <string name="settings_biometric_lock_disable_reauth_text">Disabling biometric-on-launch means the app no longer requires authentication when reopened. Confirm it\'s you.</string>
+    <string name="settings_biometric_timeout_reauth_title">Lengthen re-auth window?</string>
+    <string name="settings_biometric_timeout_reauth_text">A longer timeout lets the app skip re-authentication for more time. Confirm it\'s you.</string>
 </resources>
