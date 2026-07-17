@@ -97,7 +97,10 @@ class AndroidKeystoreStorage(
             decryptWithCipher(cipher, encryptedData)
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
-            sharePrefs.edit().clear().apply()
+            // Durably flush the wipe of the undecryptable entry before propagating, so a
+            // crash right after this cannot leave the corrupt prefs behind. Runs on a
+            // background FFI-callback thread (@Synchronized), so commit() won't jank the UI.
+            sharePrefs.edit().clear().commit()
             throw KeepMobileException.StorageException("No metadata stored")
         }
     }
