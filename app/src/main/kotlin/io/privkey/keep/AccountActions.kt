@@ -382,13 +382,12 @@ internal class AccountActions(
         }
     }
 
-    // NOTE: The Rust FFI `keepMobile.getSeedWords` returns a Kotlin String, which lives on
-    // the JVM heap and cannot be zeroed. We minimize the reference's lifetime here (single
-    // local, handed directly to onResult, no intermediate copies), but a full mitigation
-    // requires changing the FFI to return a CharArray/ByteArray that Kotlin can wipe.
+    // The Rust FFI returns the seed as a wipeable ByteArray; it is delivered to onResult
+    // (which decodes it into a wipeable buffer) and then zeroed unconditionally in the
+    // finally below, so no seed String lives on the JVM heap.
     fun viewSeedWords(
         account: AccountInfo,
-        onResult: (String?) -> Unit,
+        onResult: (ByteArray?) -> Unit,
         onDismiss: (Boolean) -> Unit
     ) {
         withBiometricAuth(
@@ -402,6 +401,7 @@ internal class AccountActions(
                 var pendingSet = false
                 var success = false
                 var delivered = false
+                var seedWords: ByteArray? = null
                 try {
                     val activeNow = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
                     if (activeNow != account.groupPubkeyHex) {
@@ -411,7 +411,7 @@ internal class AccountActions(
                     }
                     storage.setPendingCipher(requestId, authedCipher)
                     pendingSet = true
-                    val seedWords = withContext(Dispatchers.IO) {
+                    seedWords = withContext(Dispatchers.IO) {
                         storage.setRequestIdContext(requestId)
                         try {
                             keepMobile.getSeedWords(account.groupPubkeyHex)
@@ -431,6 +431,7 @@ internal class AccountActions(
                     logAndToast("View seed words failed", appContext.getString(R.string.account_view_seed_failed), e)
                     if (!delivered) onResult(null)
                 } finally {
+                    seedWords?.fill(0.toByte())
                     if (pendingSet) storage.clearPendingCipher(requestId)
                     onDismiss(success)
                 }

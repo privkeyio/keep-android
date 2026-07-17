@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,5 +39,32 @@ class SecureShareDataUtf8Test {
         val d = data("nsec1testtesttest")
         d.clear()
         assertTrue(d.toUtf8Bytes().isEmpty())
+    }
+
+    @Test
+    fun updateFromBytesRoundTripsThroughToUtf8Bytes() {
+        // Seed words returned from the FFI as bytes must decode into the buffer and come
+        // back out byte-identical (multi-byte content included).
+        val value = "münchen wörds 🔑 abandon about"
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        val d = SecureShareData(4096)
+        assertTrue(d.updateFromBytes(bytes))
+        assertArrayEquals(bytes, d.toUtf8Bytes())
+    }
+
+    @Test
+    fun updateFromBytesDoesNotWipeCallerBytes() {
+        // The caller owns the input bytes (and wipes them itself); updateFromBytes must
+        // not mutate them.
+        val bytes = "abandon about".toByteArray(Charsets.UTF_8)
+        val copy = bytes.copyOf()
+        SecureShareData(4096).updateFromBytes(bytes)
+        assertArrayEquals(copy, bytes)
+    }
+
+    @Test
+    fun updateFromBytesRejectsOverMax() {
+        val d = SecureShareData(4)
+        assertFalse(d.updateFromBytes("abcdefgh".toByteArray(Charsets.UTF_8)))
     }
 }
