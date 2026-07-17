@@ -34,6 +34,7 @@ import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerLogEvent
 import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.BunkerStatus
+import io.privkey.keep.uniffi.ConnectAuthorization
 import io.privkey.keep.uniffi.Nip46BunkerRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.CancellationException
@@ -410,11 +411,20 @@ class BunkerService : Service() {
                     return handleApprovalRequest(request)
                 }
 
-                override fun onConnect(pubkey: String, name: String) {
+                override fun onConnect(pubkey: String, name: String, authorization: ConnectAuthorization) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Bunker: app connected ${pubkey.take(8)}")
                     val safeName = sanitizeDisplayName(name)
                     logActivity(EventLogCategory.BUNKER, EventLogLevel.INFO, safeName.ifBlank { pubkey.take(8) }, "connected")
-                    authorizeClient(pubkey, safeName, safeRelays)
+                    // Persist authorization only when the signer core asserts explicit consent
+                    // (a matched connect secret or a user-approved prompt); an auto-approved
+                    // connect is not persisted as an authorized client. Authorization is driven
+                    // by an explicit assertion rather than the callback merely having fired.
+                    if (shouldPersistConnectAuthorization(authorization)) {
+                        authorizeClient(pubkey, safeName, safeRelays)
+                    } else {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Bunker: not persisting auto-approved connect ${pubkey.take(8)}")
+                        logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, safeName.ifBlank { pubkey.take(8) }, "connect not persisted (auto-approved)")
+                    }
                 }
             }
 
