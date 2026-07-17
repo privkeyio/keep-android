@@ -41,6 +41,7 @@ import io.privkey.keep.descriptor.WalletDescriptorScreen
 import io.privkey.keep.navigation.Route
 import io.privkey.keep.nip46.BunkerScreen
 import io.privkey.keep.nip46.BunkerService
+import io.privkey.keep.nip55.AUDIT_OP_ACCOUNT_DELETE
 import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.ConnectedAppsScreen
 import io.privkey.keep.nip55.EventLogScreen
@@ -443,6 +444,7 @@ fun MainScreen(
             appContext = appContext,
             onBiometricRequest = onBiometricRequest,
             onAccountSwitched = onAccountSwitched,
+            onAccountDeleted = { runCatching { permissionStore.logSelfEvent(AUDIT_OP_ACCOUNT_DELETE) } },
             onStateChanged = { state ->
                 hasShare = state.hasShare
                 shareInfo = state.shareInfo

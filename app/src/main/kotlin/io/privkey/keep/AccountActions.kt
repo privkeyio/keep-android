@@ -27,6 +27,7 @@ internal class AccountActions(
     private val appContext: Context,
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     private val onAccountSwitched: suspend () -> Unit,
+    private val onAccountDeleted: suspend () -> Unit,
     private val onStateChanged: (AccountState) -> Unit
 ) {
     data class AccountState(
@@ -165,6 +166,10 @@ internal class AccountActions(
                         keepMobile.deleteShareByKey(account.groupPubkeyHex)
                         runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
                             .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
+                        // Audit the deletion in the current chain. Deleting the active
+                        // account then switches to another (whose fresh chain records the
+                        // switch), so this entry persists for non-active deletes.
+                        onAccountDeleted()
                     }
                 } catch (e: Exception) {
                     logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)

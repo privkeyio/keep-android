@@ -198,7 +198,17 @@ class PermissionStore(private val database: Nip55Database) {
      * a real package name) and a fixed "allow" decision. Exporting a private key is
      * a high-sensitivity action that must always be audited.
      */
-    suspend fun logKeyExport(operation: String) {
+    suspend fun logKeyExport(operation: String) = logSelfEvent(operation)
+
+    /**
+     * Record a self-initiated, security-sensitive event (not an external NIP-55
+     * request) in the tamper-evident activity log, using the reserved [SELF_CALLER]
+     * sentinel and a fixed "allow" decision. [operation] names the event (see the
+     * AUDIT_OP_* constants). Used for key exports and for account-lifecycle events
+     * (switch, delete) so that operations leaving no NIP-55 request still leave an
+     * audit trail.
+     */
+    suspend fun logSelfEvent(operation: String) {
         val timestamp = System.currentTimeMillis()
         auditWriter.append({ previousHash ->
             Nip55AuditLog(
