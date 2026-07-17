@@ -31,7 +31,7 @@ private const val MAX_MNEMONIC_LENGTH = 1024
 @Composable
 fun MnemonicRecoveryScreen(
     keepMobile: KeepMobile,
-    onCreateAccount: (mnemonic: String, passphrase: String, name: String, cipher: Cipher) -> Unit,
+    onCreateAccount: (mnemonic: ByteArray, passphrase: String, name: String, cipher: Cipher) -> Unit,
     onGetCipher: () -> Cipher,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit,
@@ -228,7 +228,14 @@ fun MnemonicRecoveryScreen(
                     isValidating = true
                     scope.launch {
                         val isValid = try {
-                            withContext(Dispatchers.IO) { keepMobile.validateMnemonic(mnemonic) }
+                            withContext(Dispatchers.IO) {
+                                val mnemonicBytes = mnemonic.toByteArray(Charsets.UTF_8)
+                                try {
+                                    keepMobile.validateMnemonic(mnemonicBytes)
+                                } finally {
+                                    mnemonicBytes.fill(0)
+                                }
+                            }
                             true
                         } catch (e: Exception) {
                             if (BuildConfig.DEBUG) Log.e("MnemonicRecovery", "Mnemonic validation failed: ${e::class.simpleName}")
@@ -244,7 +251,7 @@ fun MnemonicRecoveryScreen(
                             val cipher = onGetCipher()
                             onBiometricAuth(cipher) { authedCipher ->
                                 if (authedCipher != null) {
-                                    onCreateAccount(mnemonicData.valueUnsafe(), "", name, authedCipher)
+                                    onCreateAccount(mnemonicData.toUtf8Bytes(), "", name, authedCipher)
                                 }
                             }
                         } catch (e: KeyPermanentlyInvalidatedException) {
