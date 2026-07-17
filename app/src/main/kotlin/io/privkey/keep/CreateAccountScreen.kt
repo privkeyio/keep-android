@@ -48,8 +48,12 @@ fun CreateAccountScreen(
         isGenerating = true
         generateError = false
         try {
-            val mnemonic = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
-            mnemonicData.update(mnemonic)
+            val mnemonicBytes = withContext(Dispatchers.IO) { keepMobile.generateMnemonic(12u) }
+            try {
+                mnemonicData.updateFromBytes(mnemonicBytes)
+            } finally {
+                mnemonicBytes.fill(0.toByte())
+            }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e("CreateAccount", "Failed to generate mnemonic: ${e::class.simpleName}")
             generateError = true
