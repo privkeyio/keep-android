@@ -138,6 +138,11 @@ object KeystoreEncryptedPrefs {
                 if (stored != null) {
                     val decrypted = decrypt(secretKey, stored)
                     val key = Base64.decode(decrypted, Base64.NO_WRAP)
+                    // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
+                    // rules out external tampering, so a wrong length here is an internal bug.
+                    // Fail fast: Mac/SecretKeySpec accept any key length and would otherwise
+                    // silently diverge the audit-chain HMACs and key-name hashes.
+                    check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
                     hmacKey = key
                     return key
                 }
