@@ -243,10 +243,11 @@ class MainActivity : FragmentActivity() {
                                     }
                                 }
                             },
-                            onBiometricAuth = { title, subtitle ->
+                            onBiometricAuth = { title, subtitle, forcePrompt ->
                                 biometricHelper?.authenticate(
                                     title = title,
-                                    subtitle = subtitle
+                                    subtitle = subtitle,
+                                    forcePrompt = forcePrompt
                                 ) ?: false
                             },
                             onAutoStartChanged = { enabled ->
@@ -303,7 +304,7 @@ fun MainScreen(
     onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     biometricStatus: BiometricHelper.BiometricStatus = BiometricHelper.BiometricStatus.NOT_AVAILABLE,
-    onBiometricAuth: (suspend (title: String, subtitle: String) -> Boolean)? = null,
+    onBiometricAuth: (suspend (title: String, subtitle: String, forcePrompt: Boolean) -> Boolean)? = null,
     onAutoStartChanged: (Boolean) -> Unit = {},
     onForegroundServiceChanged: (Boolean) -> Unit = {},
     onBunkerServiceChanged: (Boolean) -> Unit = {},
@@ -398,9 +399,12 @@ fun MainScreen(
             showKillSwitchConfirmDialog = true
         } else if (biometricAvailable) {
             coroutineScope.launch {
+                // Downgrade action: force a live prompt so an open biometric-timeout
+                // window can't be ridden to disable the kill switch silently.
                 val authenticated = onBiometricAuth?.invoke(
                     appContext.getString(R.string.main_disable_kill_switch_title),
                     appContext.getString(R.string.main_disable_kill_switch_subtitle),
+                    true,
                 ) ?: false
                 if (authenticated) {
                     val updated = withContext(Dispatchers.IO) {
@@ -424,7 +428,9 @@ fun MainScreen(
         { title, message, confirmLabel, action ->
             when {
                 biometricAvailable -> coroutineScope.launch {
-                    if (onBiometricAuth?.invoke(title, message) == true) action()
+                    // Downgrade gate (cert-pin clear/retire, app-lock weakening): force a
+                    // live prompt rather than accepting an open biometric-timeout window.
+                    if (onBiometricAuth?.invoke(title, message, true) == true) action()
                 }
                 pinEnabled -> {
                     authGateTitle = title
@@ -1104,9 +1110,13 @@ fun MainScreen(
                     onApproveRequest = { id ->
                         coroutineScope.launch {
                             val authed = if (biometricAvailable && onBiometricAuth != null) {
+                                // Signing approval, not a downgrade: respect the biometric-
+                                // timeout window (forcePrompt=false) so batch approvals work
+                                // as configured.
                                 onBiometricAuth.invoke(
                                     appContext.getString(R.string.cosign_request_label),
                                     appContext.getString(R.string.cosign_approve),
+                                    false,
                                 )
                             } else {
                                 true
