@@ -481,8 +481,13 @@ class KeepMobileApp : Application() {
     }
 
     private suspend fun runAccountSwitchCleanup(label: String, action: suspend () -> Unit) {
-        runCatching { action() }
-            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to $label on account switch", it) }
+        try {
+            action()
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to $label on account switch", t)
+        }
     }
 
     fun reconnectRelays() {
@@ -574,13 +579,6 @@ class KeepMobileApp : Application() {
             .take(10)
             .any { it is CancellationException }
 }
-
-data class ConnectionState(
-    val isConnected: Boolean = false,
-    val isConnecting: Boolean = false,
-    val error: String? = null,
-    val pinMismatch: PinMismatchInfo? = null
-)
 
 data class PinMismatchInfo(
     val hostname: String,
