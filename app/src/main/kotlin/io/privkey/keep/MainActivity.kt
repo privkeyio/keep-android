@@ -450,7 +450,15 @@ fun MainScreen(
             appContext = appContext,
             onBiometricRequest = onBiometricRequest,
             onAccountSwitched = onAccountSwitched,
-            onAccountDeleted = { runCatching { permissionStore.logSelfEvent(AUDIT_OP_ACCOUNT_DELETE) } },
+            onAccountDeleted = {
+                try {
+                    permissionStore.logSelfEvent(AUDIT_OP_ACCOUNT_DELETE)
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (_: Throwable) {
+                    // best-effort audit; a failed append must not block deletion
+                }
+            },
             onStateChanged = { state ->
                 hasShare = state.hasShare
                 shareInfo = state.shareInfo
