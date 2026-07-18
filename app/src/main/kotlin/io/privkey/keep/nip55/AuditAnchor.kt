@@ -55,6 +55,18 @@ internal fun resolveChainVerification(
  * Trust-on-first-use seed decision: only seed the anchor when there is none yet
  * (fresh/upgraded install) AND the Rust walk reports an intact chain, so a
  * corrupt chain is never baselined as the source of truth.
+ *
+ * [ChainVerificationResult.PartiallyVerified] (leading legacy/empty-hash rows) is
+ * intentionally seeded, NOT declined. Seeding pins the total count so any LATER
+ * prepend or truncation is caught by [resolveChainVerification]; declining would
+ * leave the anchor null and forfeit that forward protection. The only residual —
+ * legacy rows prepended BEFORE this first seed — is already excused-as-legacy by
+ * the Rust walk whether or not we seed, and is bounded to 1024 rows by the Rust
+ * leading-legacy cap (keep PR #842). PartiallyVerified is also effectively
+ * unreachable in the field: legacy rows are pruned at 30 days on every launch.
+ * If a strict chained-count guarantee is ever required, wire the Rust tip MAC
+ * (`nip55VerifyAuditChainWithTip`, already chained-count based) rather than
+ * reworking this total-count anchor. See keep-android-6mjx.
  */
 internal fun shouldSeed(anchor: AuditAnchor?, rustResult: ChainVerificationResult): Boolean =
     anchor == null &&
