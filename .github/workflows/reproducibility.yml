@@ -64,9 +64,11 @@ jobs:
                  && [ -n "$VERSION" ] && [ "$VERSION" != "null" ]; then
                 break
               fi
-              echo "releases/latest lookup failed (attempt $attempt/5); retrying in 15s..." >&2
               VERSION=""
-              sleep 15
+              if [ "$attempt" -lt 5 ]; then
+                echo "releases/latest lookup failed (attempt $attempt/5); retrying in 15s..." >&2
+                sleep 15
+              fi
             done
           fi
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
