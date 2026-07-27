@@ -48,11 +48,26 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT_NAME" = "push" ]; then
             VERSION="$REF_NAME"
           else
-            VERSION="$(curl -fsSL "https://api.github.com/repos/${REPOSITORY}/releases/latest" | jq -r .tag_name)"
+            # Authenticated + retried lookup. An unauthenticated api.github.com
+            # request shares the runner's egress IP and can hit the 60/hr limit,
+            # which -eo pipefail turns into an immediate step failure (the weekly
+            # cron went red this way). The workflow token raises the limit to
+            # 1000/hr, and the retry rides out any transient API blip.
+            VERSION=""
+            for attempt in 1 2 3 4 5; do
+              if VERSION="$(gh api "repos/${REPOSITORY}/releases/latest" --jq .tag_name)" \
+                 && [ -n "$VERSION" ] && [ "$VERSION" != "null" ]; then
+                break
+              fi
+              echo "releases/latest lookup failed (attempt $attempt/5); retrying in 15s..." >&2
+              VERSION=""
+              sleep 15
+            done
           fi
           if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
             echo "::error::could not determine release version to verify" >&2
