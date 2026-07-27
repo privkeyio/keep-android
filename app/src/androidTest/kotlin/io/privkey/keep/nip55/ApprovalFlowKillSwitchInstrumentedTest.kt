@@ -47,7 +47,7 @@ import org.junit.runner.RunWith
  *  - Biometric-authentication FAILURE and user CANCELLATION of the prompt are covered in
  *    BiometricHelperInstrumentedTest. Those branches live inside the
  *    [androidx.biometric.BiometricPrompt].AuthenticationCallback in BiometricHelper
- *    (onAuthenticationError -> AuthResult.FAILED/LOCKOUT; onAuthenticationError
+ *    (onAuthenticationError -> AuthResult.FAILED/LOCKOUT/LOCKOUT_PERMANENT; onAuthenticationError
  *    ERROR_USER_CANCELED / ERROR_NEGATIVE_BUTTON -> resume(null)); on BIOMETRIC_STRONG hardware
  *    with no PIN fallback and no emulator injection the real prompt fires them only from
  *    hardware, so BiometricHelper now exposes a BiometricAuthenticator seam that lets those
