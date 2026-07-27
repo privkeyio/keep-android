@@ -43,16 +43,15 @@ import org.junit.runner.RunWith
  * here. Since the switch fails CLOSED (only ever disables signing), that residual cannot
  * yield a rogue signature.
  *
- * Out of scope (documented, not faked), per the #388/#389 precedent:
- *  - Biometric-authentication FAILURE and user CANCELLATION of the prompt. On these
- *    physical devices biometric is BIOMETRIC_STRONG with no PIN fallback and cannot be
- *    software-injected (no emulator biometric injection is available either). The failure/
- *    cancellation decision logic lives inside the [androidx.biometric.BiometricPrompt]
- *    .AuthenticationCallback in BiometricHelper (onAuthenticationError ->
- *    AuthResult.FAILED/LOCKOUT; onAuthenticationError ERROR_USER_CANCELED /
- *    ERROR_NEGATIVE_BUTTON -> resume(null)); those callbacks are invoked only by the real
- *    hardware prompt, so there is no non-UI seam to drive them directly. Both branches are
- *    manual/out-of-scope here rather than stubbed into a hollow pass.
+ * Sibling coverage (gh #396):
+ *  - Biometric-authentication FAILURE and user CANCELLATION of the prompt are covered in
+ *    BiometricHelperInstrumentedTest. Those branches live inside the
+ *    [androidx.biometric.BiometricPrompt].AuthenticationCallback in BiometricHelper
+ *    (onAuthenticationError -> AuthResult.FAILED/LOCKOUT/LOCKOUT_PERMANENT; onAuthenticationError
+ *    ERROR_USER_CANCELED / ERROR_NEGATIVE_BUTTON -> resume(null)); on BIOMETRIC_STRONG hardware
+ *    with no PIN fallback and no emulator injection the real prompt fires them only from
+ *    hardware, so BiometricHelper now exposes a BiometricAuthenticator seam that lets those
+ *    tests drive the callbacks deterministically rather than stubbing a hollow pass.
  */
 @RunWith(AndroidJUnit4::class)
 class ApprovalFlowKillSwitchInstrumentedTest {
