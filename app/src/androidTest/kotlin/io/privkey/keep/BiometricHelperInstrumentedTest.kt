@@ -46,10 +46,7 @@ class BiometricHelperInstrumentedTest {
 
     @Test
     fun authenticateWithResult_genericError_mapsToFailed() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_TIMEOUT)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_TIMEOUT))
         val result = runBlocking { helper.authenticateWithResult(forcePrompt = true) }
         assertEquals(
             "A non-lockout authentication error must map to FAILED (auth not granted)",
@@ -60,50 +57,35 @@ class BiometricHelperInstrumentedTest {
 
     @Test
     fun authenticateWithResult_lockout_mapsToLockout() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT))
         val result = runBlocking { helper.authenticateWithResult(forcePrompt = true) }
         assertEquals(BiometricHelper.AuthResult.LOCKOUT, result)
     }
 
     @Test
     fun authenticateWithResult_permanentLockout_mapsToLockoutPermanent() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT_PERMANENT)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT_PERMANENT))
         val result = runBlocking { helper.authenticateWithResult(forcePrompt = true) }
         assertEquals(BiometricHelper.AuthResult.LOCKOUT_PERMANENT, result)
     }
 
     @Test
     fun authenticateWithCrypto_userCancellation_returnsNullWithoutKeyUse() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_USER_CANCELED)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_USER_CANCELED))
         val cipher = runBlocking { helper.authenticateWithCrypto(uninitializedCipher()) }
         assertNull("User cancellation must yield no cipher (key use gated)", cipher)
     }
 
     @Test
     fun authenticateWithCrypto_negativeButton_returnsNullWithoutKeyUse() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_NEGATIVE_BUTTON)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_NEGATIVE_BUTTON))
         val cipher = runBlocking { helper.authenticateWithCrypto(uninitializedCipher()) }
         assertNull("Negative-button cancellation must yield no cipher (key use gated)", cipher)
     }
 
     @Test
     fun authenticateWithCrypto_nonCancellationError_throwsWithoutKeyUse() = withActivity { activity ->
-        val helper = BiometricHelper(
-            activity,
-            authenticator = erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT)
-        )
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT))
         assertThrows(BiometricHelper.BiometricException::class.java) {
             runBlocking { helper.authenticateWithCrypto(uninitializedCipher()) }
         }

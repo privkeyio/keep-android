@@ -11,21 +11,28 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-class BiometricHelper(
+class BiometricHelper private constructor(
     private val activity: FragmentActivity,
-    private val timeoutStore: BiometricTimeoutStore? = null,
-    authenticator: BiometricAuthenticator? = null
+    private val timeoutStore: BiometricTimeoutStore?,
+    authenticator: BiometricAuthenticator?
 ) {
+    /** Production constructor: always uses the real [BiometricPrompt]. */
+    constructor(
+        activity: FragmentActivity,
+        timeoutStore: BiometricTimeoutStore? = null
+    ) : this(activity, timeoutStore, null)
+
     private val executor = ContextCompat.getMainExecutor(activity)
 
     /**
      * Seam over [BiometricPrompt] so the approval-flow failure and cancellation branches can be
      * driven deterministically in tests. On these devices biometric is BIOMETRIC_STRONG with no
      * PIN fallback and no emulator injection, so the real prompt's callbacks are otherwise only
-     * invoked by hardware. Production passes no authenticator and gets the default below, which is
-     * the prior inline behavior unchanged.
+     * invoked by hardware. `internal` so it stays off the public API: production never injects one
+     * (the public constructor above always uses the default), only same-module tests do via
+     * [withAuthenticator].
      */
-    fun interface BiometricAuthenticator {
+    internal fun interface BiometricAuthenticator {
         fun authenticate(
             promptInfo: BiometricPrompt.PromptInfo,
             cryptoObject: BiometricPrompt.CryptoObject?,
@@ -170,5 +177,12 @@ class BiometricHelper(
             if (status == BiometricStatus.AVAILABLE) return
             throw BiometricNotReadyException(getBiometricNotReadyMessage(context, status))
         }
+
+        /** Test-only seam: build a helper whose prompt callbacks are driven by [authenticator]. */
+        internal fun withAuthenticator(
+            activity: FragmentActivity,
+            timeoutStore: BiometricTimeoutStore?,
+            authenticator: BiometricAuthenticator
+        ): BiometricHelper = BiometricHelper(activity, timeoutStore, authenticator)
     }
 }
