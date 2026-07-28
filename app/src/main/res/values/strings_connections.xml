@@ -280,6 +280,8 @@
     <string name="connections_nip46_method_sign_event">Sign Event</string>
     <string name="connections_nip46_method_nip44_encrypt">Encrypt (NIP-44)</string>
     <string name="connections_nip46_method_nip44_decrypt">Decrypt (NIP-44)</string>
+    <string name="connections_nip46_method_nip44_v3_encrypt">Encrypt (NIP-44 v3)</string>
+    <string name="connections_nip46_method_nip44_v3_decrypt">Decrypt (NIP-44 v3)</string>
     <string name="connections_nip46_method_nip04_encrypt">Encrypt (NIP-04)</string>
     <string name="connections_nip46_method_nip04_decrypt">Decrypt (NIP-04)</string>
     <string name="connections_nip46_method_ping">Ping</string>
