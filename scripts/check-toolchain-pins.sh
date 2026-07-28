@@ -7,6 +7,9 @@ set -euo pipefail
 #   .github/workflows/ci.yml (RUST_VERSION, NDK_VERSION, CARGO_NDK_VERSION)
 #   .github/workflows/release.yml (RUST_VERSION, NDK_VERSION, CARGO_NDK_VERSION)
 #   keep/rust-toolchain.toml (channel, if present)
+#   keep/.github/workflows/ci.yml (NDK_VERSION, CARGO_NDK_VERSION -- the vendored
+#                            keep repo's Android toolchain, which must match this
+#                            repo's since keep-mobile is cross-compiled with it)
 #   build.gradle.kts         (expectedNdkVersion, expectedJavaMajor)
 #   .github/workflows/*.yml  (java-version in actions/setup-java steps)
 
@@ -141,6 +144,22 @@ if [ -f "$TOOLCHAIN_TOML" ]; then
     check_equal "rust-toolchain.toml channel" "$BR_RUST" "$TOML_CHANNEL"
 else
     echo "note: $TOOLCHAIN_TOML not present; skipping channel check."
+fi
+
+# Cross-check the vendored keep checkout's Android toolchain pins against this
+# repo's. keep-android cross-compiles keep-mobile with these NDK / cargo-ndk
+# versions against that exact keep source, so a bump in one repo that is not
+# mirrored in the other silently diverges the toolchain the shipped bindings are
+# built with. Enforced here so bumping keep.version to a keep commit with different
+# pins (or changing this repo's pins) fails CI instead of drifting.
+KEEP_CI_YML="$ROOT/keep/.github/workflows/ci.yml"
+if [ -f "$KEEP_CI_YML" ]; then
+    KEEP_NDK=$(yaml_env "$KEEP_CI_YML" NDK_VERSION "$NDK_VER")
+    KEEP_CARGO_NDK=$(yaml_env "$KEEP_CI_YML" CARGO_NDK_VERSION "$SEMVER")
+    check_equal "keep-repo ndk version"       "$CI_NDK"       "$KEEP_NDK"
+    check_equal "keep-repo cargo-ndk version" "$BR_CARGO_NDK" "$KEEP_CARGO_NDK"
+else
+    echo "note: $KEEP_CI_YML not present; skipping keep-repo cross-checks."
 fi
 
 echo "all toolchain pins consistent."
