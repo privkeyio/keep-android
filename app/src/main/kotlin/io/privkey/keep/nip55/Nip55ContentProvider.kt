@@ -60,6 +60,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
+        private const val MAX_EXTRA_LENGTH = 2048
         private const val OPERATION_TIMEOUT_MS = 5000L
 
         // Max IO threads orphaned (timed-out) FFI calls may occupy, so a run of
@@ -206,6 +207,8 @@ class Nip55ContentProvider : ContentProvider() {
             null
         }
         val v3Scope: String? = if (isV3) projection?.getOrNull(4) ?: "" else null
+        if (v3Scope != null && v3Scope.length > MAX_EXTRA_LENGTH)
+            return errorCursor("Invalid request", null)
 
         // Derive the kind with the same serde parse the Rust decision uses, so the
         // velocity bucket, permission-candidate lookup, and relay scope are keyed by the

@@ -55,7 +55,7 @@ class Nip44V3RequestInstrumentedTest {
 
     @Test
     fun eventKind_parsesSignEventContentAndIgnoresCarriedKind() {
-        assertEquals(1, request(Nip55RequestType.SIGN_EVENT, content = """{"kind":1}""").eventKind())
+        assertEquals(1, request(Nip55RequestType.SIGN_EVENT, content = """{"kind":1}""", kind = 99u).eventKind())
     }
 
     @Test

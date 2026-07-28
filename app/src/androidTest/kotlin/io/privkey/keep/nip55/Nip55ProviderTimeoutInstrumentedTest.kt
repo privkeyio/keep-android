@@ -69,7 +69,7 @@ class Nip55ProviderTimeoutInstrumentedTest {
         m.isAccessible = true
         return m.invoke(
             provider, app, store, handler, pkg, Nip55RequestType.SIGN_EVENT,
-            content, null, 1, null
+            content, null, 1, null, null, null
         ) as Cursor?
     }
 
