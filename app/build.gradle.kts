@@ -17,6 +17,11 @@ android {
         versionName = "1.1.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Reset the persisted kill switch to its disengaged baseline before every
+        // instrumented test, so a switch left engaged by a process death mid-test
+        // cannot fail-close signing tests in a later class (gh #397).
+        testInstrumentationRunnerArguments["listener"] =
+            "io.privkey.keep.KillSwitchResetRunListener"
         vectorDrawables {
             useSupportLibrary = true
         }
