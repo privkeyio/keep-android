@@ -37,11 +37,12 @@ import org.junit.runner.RunWith
  * @Before disengages the core switch to a known baseline before engaging it for the test, and
  * @After forces it back to disengaged unconditionally -- so this class both self-heals a switch
  * left engaged by a prior aborted run and never leaves the installed app kill-switched. The
- * single residual gap is process death strictly between setKillSwitch(true) and @After, which is
- * uncatchable in-process; a suite that must be hardened against that would need per-test
- * process isolation (Android Test Orchestrator), a module-wide execution change out of scope
- * here. Since the switch fails CLOSED (only ever disables signing), that residual cannot
- * yield a rogue signature.
+ * one residual gap was process death strictly between setKillSwitch(true) and @After, which is
+ * uncatchable in-process; that is now closed suite-wide by [io.privkey.keep.KillSwitchResetRunListener]
+ * (gh #397), which resets the switch to disengaged before every test, so a leaked engaged switch
+ * cannot poison a later class -- without the module-wide blast radius of Test Orchestrator +
+ * clearPackageData. Since the switch also fails CLOSED (only ever disables signing), that residual
+ * could never yield a rogue signature regardless.
  *
  * Sibling coverage (gh #396):
  *  - Biometric-authentication FAILURE and user CANCELLATION of the prompt are covered in
