@@ -26,6 +26,10 @@ class KillSwitchResetRunListener : RunListener() {
         val app = InstrumentationRegistry.getInstrumentation()
             .targetContext
             .applicationContext as? KeepMobileApp
-        app?.getKeepMobile()?.setKillSwitch(false)
+        // Best-effort: setKillSwitch is @Throws, and an exception escaping
+        // testStarted() would flake the very test this listener protects (JUnit
+        // turns it into a test failure). Swallow it -- a transient throw here is no
+        // worse than the pre-listener behavior.
+        runCatching { app?.getKeepMobile()?.setKillSwitch(false) }
     }
 }
