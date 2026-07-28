@@ -12,6 +12,7 @@ class SigningNotificationReceiver : BroadcastReceiver() {
             "get_public_key", "sign_event",
             "nip04_encrypt", "nip04_decrypt",
             "nip44_encrypt", "nip44_decrypt",
+            "nip44v3_encrypt", "nip44v3_decrypt",
             "decrypt_zap_event"
         )
 
