@@ -31,7 +31,7 @@ import io.privkey.keep.storage.KillSwitchStore
 import io.privkey.keep.storage.OnboardingStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayAuthWhitelistStore
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.ConnectionStatus
 import io.privkey.keep.uniffi.KeepLiveState
@@ -41,6 +41,7 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.PeerStatus
 import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
+import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.SigningAuditLog
 import io.privkey.keep.uniffi.SigningRateLimiter
 import kotlinx.coroutines.CancellationException
@@ -119,7 +120,7 @@ class KeepMobileApp : Application() {
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
             killSwitchStore = KillSwitchStore(this)
-            signPolicyStore = SignPolicyStore(this)
+            signPolicyStore = SignPolicyStore(SignPolicySelectionPrefs(this))
             relayAuthWhitelistStore = RelayAuthWhitelistStore(this)
             autoStartStore = AutoStartStore(this)
             foregroundServiceStore = ForegroundServiceStore(this)

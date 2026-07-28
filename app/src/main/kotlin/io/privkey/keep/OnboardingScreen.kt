@@ -32,11 +32,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import io.privkey.keep.storage.SignPolicy
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.ui.components.KeepCard
 import io.privkey.keep.ui.components.KeepScreenScaffold
 import io.privkey.keep.ui.components.SignPolicyOptionRow
 import io.privkey.keep.ui.theme.Dimens
+import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,7 +50,7 @@ fun OnboardingScreen(
     var userInteracted by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { signPolicyStore.getGlobalPolicy() }
+        val loaded = withContext(Dispatchers.IO) { signPolicyStore.globalPolicy().toSignPolicy() }
         if (!userInteracted) selectedPolicy = loaded
     }
 

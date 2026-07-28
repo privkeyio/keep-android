@@ -11,8 +11,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.toSelection
+import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.ui.components.SignPolicyOptionRow
+import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,7 +30,7 @@ fun SignPolicyScreen(
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { signPolicyStore.getGlobalPolicy() }
+        val loaded = withContext(Dispatchers.IO) { signPolicyStore.globalPolicy().toSignPolicy() }
         if (!userInteracted) selectedPolicy = loaded
     }
 
@@ -64,9 +66,16 @@ fun SignPolicyScreen(
                         userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
-                                signPolicyStore.setGlobalPolicy(policy)
+                            // Show what actually persisted. The core's storage trait
+                            // cannot report a write failure, so without this read-back a
+                            // failed commit would leave the screen claiming a policy the
+                            // signing path does not use -- including a tightening the
+                            // user believes took effect.
+                            val persisted = withContext(Dispatchers.IO) {
+                                signPolicyStore.setGlobalPolicy(policy.toSelection())
+                                signPolicyStore.globalPolicy().toSignPolicy()
                             }
+                            selectedPolicy = persisted
                         }
                     }
                 )

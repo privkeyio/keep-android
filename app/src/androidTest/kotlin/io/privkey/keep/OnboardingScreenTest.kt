@@ -10,8 +10,10 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.storage.SignPolicy
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.SignPolicySelectionPrefs
+import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import io.privkey.keep.uniffi.SignPolicyStore
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -44,13 +46,18 @@ class OnboardingScreenTest {
 
     @Before
     fun setup() {
-        context.deleteSharedPreferences(SIGN_POLICY_PREFS)
-        signPolicyStore = SignPolicyStore(context)
+        clearPrefs()
+        signPolicyStore = SignPolicyStore(SignPolicySelectionPrefs(context))
     }
 
     @After
     fun teardown() {
+        clearPrefs()
+    }
+
+    private fun clearPrefs() {
         context.deleteSharedPreferences(SIGN_POLICY_PREFS)
+        context.deleteSharedPreferences(SIGN_POLICY_SELECTION_PREFS)
     }
 
     private fun setContent(onDone: (SignPolicy) -> Unit) {
@@ -84,7 +91,7 @@ class OnboardingScreenTest {
 
         selectAuto()
 
-        assertEquals(SignPolicy.MANUAL, signPolicyStore.getGlobalPolicy())
+        assertEquals(SignPolicy.MANUAL, signPolicyStore.globalPolicy().toSignPolicy())
         assertNull(reported)
     }
 
@@ -101,10 +108,11 @@ class OnboardingScreenTest {
 
         assertEquals(SignPolicy.AUTO, reported)
         // The screen reports the choice; MainActivity performs the single write.
-        assertEquals(SignPolicy.MANUAL, signPolicyStore.getGlobalPolicy())
+        assertEquals(SignPolicy.MANUAL, signPolicyStore.globalPolicy().toSignPolicy())
     }
 
     private companion object {
         const val SIGN_POLICY_PREFS = "keep_sign_policy"
+        const val SIGN_POLICY_SELECTION_PREFS = "keep_sign_policy_selection"
     }
 }

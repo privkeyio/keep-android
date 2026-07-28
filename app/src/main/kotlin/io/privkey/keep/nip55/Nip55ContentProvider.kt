@@ -21,6 +21,7 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
 import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.storage.toSelection
 import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55DecisionInputs
 import io.privkey.keep.uniffi.Nip55Handler
@@ -271,19 +272,14 @@ class Nip55ContentProvider : ContentProvider() {
             }
         }
 
-        // Sign-policy precedence: per-app override -> global -> MANUAL default.
-        val effectivePolicy = runWithTimeout {
-            store.getAppSignPolicyOverride(callerPackage)?.let { SignPolicy.fromOrdinal(it) }
-                ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
-                ?: SignPolicy.MANUAL
-        } ?: SignPolicy.MANUAL
-        // Pass the selection through as-is. Collapsing BASIC onto AUTO here would
-        // discard the stricter Basic auto-approval band the core now enforces.
-        val policySelection = when (effectivePolicy) {
-            SignPolicy.MANUAL -> SignPolicySelection.MANUAL
-            SignPolicy.BASIC -> SignPolicySelection.BASIC
-            SignPolicy.AUTO -> SignPolicySelection.AUTO
-        }
+        // Sign-policy precedence: per-app override (Room) -> core-owned global -> MANUAL
+        // default. The selection passes through as-is; collapsing BASIC onto AUTO here
+        // would discard the stricter Basic auto-approval band the core now enforces.
+        val policySelection = runWithTimeout {
+            store.getAppSignPolicyOverride(callerPackage)?.let { SignPolicy.fromOrdinal(it).toSelection() }
+                ?: currentApp.getSignPolicyStore()?.globalPolicy()
+                ?: SignPolicySelection.MANUAL
+        } ?: SignPolicySelection.MANUAL
 
         val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
 
