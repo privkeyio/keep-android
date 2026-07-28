@@ -42,7 +42,9 @@ class Nip55ApprovalScreenTest {
         callbackUrl = null,
         id = "req-1",
         currentUser = null,
-        permissions = null
+        permissions = null,
+        kind = null,
+        scope = null
     )
 
     @Test

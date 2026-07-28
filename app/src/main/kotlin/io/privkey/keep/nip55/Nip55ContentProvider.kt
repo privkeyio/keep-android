@@ -54,6 +54,8 @@ class Nip55ContentProvider : ContentProvider() {
         private const val AUTHORITY_NIP04_DECRYPT = "io.privkey.keep.NIP04_DECRYPT"
         private const val AUTHORITY_NIP44_ENCRYPT = "io.privkey.keep.NIP44_ENCRYPT"
         private const val AUTHORITY_NIP44_DECRYPT = "io.privkey.keep.NIP44_DECRYPT"
+        private const val AUTHORITY_NIP44_V3_ENCRYPT = "io.privkey.keep.NIP44_V3_ENCRYPT"
+        private const val AUTHORITY_NIP44_V3_DECRYPT = "io.privkey.keep.NIP44_V3_DECRYPT"
         private const val AUTHORITY_DECRYPT_ZAP_EVENT = "io.privkey.keep.DECRYPT_ZAP_EVENT"
 
         private const val MAX_PUBKEY_LENGTH = 128
@@ -177,6 +179,8 @@ class Nip55ContentProvider : ContentProvider() {
             AUTHORITY_NIP04_DECRYPT -> Nip55RequestType.NIP04_DECRYPT
             AUTHORITY_NIP44_ENCRYPT -> Nip55RequestType.NIP44_ENCRYPT
             AUTHORITY_NIP44_DECRYPT -> Nip55RequestType.NIP44_DECRYPT
+            AUTHORITY_NIP44_V3_ENCRYPT -> Nip55RequestType.NIP44_V3_ENCRYPT
+            AUTHORITY_NIP44_V3_DECRYPT -> Nip55RequestType.NIP44_V3_DECRYPT
             AUTHORITY_DECRYPT_ZAP_EVENT -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Unexpected authority: $authority")
@@ -193,15 +197,30 @@ class Nip55ContentProvider : ContentProvider() {
         if (rawPubkey != null && rawPubkey.length > MAX_PUBKEY_LENGTH)
             return errorCursor("Invalid public key", null)
 
+        // NIP-44 v3 carries a kind (mandatory) and scope (optional, defaults to "").
+        // A v3 request with a missing/invalid kind fails closed: no signing, no prompt.
+        val isV3 = requestType.isNip44V3()
+        val v3Kind: UInt? = if (isV3) {
+            projection?.getOrNull(3)?.toUIntOrNull() ?: return errorCursor("Invalid request", null)
+        } else {
+            null
+        }
+        val v3Scope: String? = if (isV3) projection?.getOrNull(4) ?: "" else null
+
         // Derive the kind with the same serde parse the Rust decision uses, so the
         // velocity bucket, permission-candidate lookup, and relay scope are keyed by the
-        // exact kind the orchestrator classifies on (no parser-differential drift).
-        val eventKind = if (requestType == Nip55RequestType.SIGN_EVENT) nip55SignableEventKind(rawContent)?.toInt() else null
+        // exact kind the orchestrator classifies on (no parser-differential drift). For
+        // v3 the kind is carried explicitly, so the same plumbing is kind-scoped by it.
+        val eventKind = when {
+            requestType == Nip55RequestType.SIGN_EVENT -> nip55SignableEventKind(rawContent)?.toInt()
+            isV3 -> v3Kind?.toInt()
+            else -> null
+        }
 
         if (store == null) return errorCursor("Permission store is not available", null)
 
         return decideBackgroundRequest(
-            currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser
+            currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser, v3Kind, v3Scope
         )
     }
 
@@ -222,7 +241,9 @@ class Nip55ContentProvider : ContentProvider() {
         rawContent: String,
         rawPubkey: String?,
         eventKind: Int?,
-        currentUser: String?
+        currentUser: String?,
+        v3Kind: UInt?,
+        v3Scope: String?
     ): Cursor? {
         // Velocity: the check-and-record is atomic (one DB transaction), so it stays
         // in Kotlin and only its outcome is handed to the decision.
@@ -335,7 +356,7 @@ class Nip55ContentProvider : ContentProvider() {
 
         return when (val outcome = evaluateNip55Request(inputs)) {
             Nip55Outcome.AutoApprove ->
-                executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser)
+                executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser, v3Kind, v3Scope)
             is Nip55Outcome.Reject -> {
                 if (outcome.reason == "deny_expired") runWithTimeout { store.cleanupExpired() }
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, outcome.reason, wasAutomatic = true) }
@@ -356,7 +377,9 @@ class Nip55ContentProvider : ContentProvider() {
         pubkey: String?,
         id: String?,
         eventKind: Int?,
-        currentUser: String? = null
+        currentUser: String? = null,
+        v3Kind: UInt? = null,
+        v3Scope: String? = null
     ): Cursor {
         val request = Nip55Request(
             requestType = requestType,
@@ -367,7 +390,9 @@ class Nip55ContentProvider : ContentProvider() {
             callbackUrl = null,
             id = id,
             currentUser = currentUser,
-            permissions = null
+            permissions = null,
+            kind = v3Kind,
+            scope = v3Scope
         )
 
         val km = app.getKeepMobile()

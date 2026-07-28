@@ -379,9 +379,20 @@ class Nip55Activity : FragmentActivity() {
             "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
             "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
             "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+            "nip44v3_encrypt" -> Nip55RequestType.NIP44_V3_ENCRYPT
+            "nip44v3_decrypt" -> Nip55RequestType.NIP44_V3_DECRYPT
             "decrypt_zap_event" -> Nip55RequestType.DECRYPT_ZAP_EVENT
             else -> return null
         }
+        val isV3 = type.isNip44V3()
+        // v3 carries a mandatory kind and optional scope. A missing/invalid (incl.
+        // negative) kind on a v3 request fails closed (the caller maps null to
+        // finishWithError). Parsed as UInt to match the content-provider and Rust
+        // URI paths, so a negative value is rejected rather than wrapped.
+        val v3Kind = extras.getString("kind")?.toUIntOrNull()
+        if (isV3 && v3Kind == null) return null
+        val v3Scope = extras.getString("scope") ?: ""
+        if (v3Scope.length > MAX_EXTRA_LENGTH) return null
         val uriBody = android.net.Uri.parse(uri).schemeSpecificPart?.substringBefore('?') ?: ""
         val content = if (uriBody.isNotEmpty()) {
             uriBody
@@ -416,7 +427,9 @@ class Nip55Activity : FragmentActivity() {
             callbackUrl = callbackUrl,
             id = extras.getString("id")?.takeIf { it.length <= MAX_EXTRA_LENGTH },
             currentUser = currentUser,
-            permissions = permissions
+            permissions = permissions,
+            kind = if (isV3) v3Kind else null,
+            scope = if (isV3) v3Scope else null
         )
     }
 
@@ -644,7 +657,7 @@ class Nip55Activity : FragmentActivity() {
     ) {
         val permResult = runCatching {
             store?.grantPermission(callerId, req.requestType, eventKind, duration, relay)
-            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME) {
+            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME && !req.requestType.isNip44V3()) {
                 store?.grantPermission(callerId, req.requestType, null, duration)
             }
 

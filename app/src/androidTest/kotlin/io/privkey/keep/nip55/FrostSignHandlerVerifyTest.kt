@@ -60,7 +60,9 @@ class FrostSignHandlerVerifyTest {
             callbackUrl = null,
             id = "frost-sign-verify",
             currentUser = null,
-            permissions = null
+            permissions = null,
+            kind = null,
+            scope = null
         )
 
         // Pre-approve the local node's own participation so the coordinator's

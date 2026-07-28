@@ -180,7 +180,9 @@ class FrostSigningIntegrationTest {
             callbackUrl = null,
             id = "test-frost-pubkey",
             currentUser = null,
-            permissions = null
+            permissions = null,
+            kind = null,
+            scope = null
         )
 
         val response = handler.handleRequest(request, "io.privkey.keep.test")
@@ -205,7 +207,9 @@ class FrostSigningIntegrationTest {
             callbackUrl = null,
             id = "test-frost-pubkey-match",
             currentUser = null,
-            permissions = null
+            permissions = null,
+            kind = null,
+            scope = null
         )
 
         val response = handler.handleRequest(request, "io.privkey.keep.test")

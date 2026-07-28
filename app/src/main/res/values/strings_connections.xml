@@ -220,6 +220,8 @@
     <string name="connections_history_type_nip04_decrypt">NIP-04 decrypt</string>
     <string name="connections_history_type_nip44_encrypt">NIP-44 encrypt</string>
     <string name="connections_history_type_nip44_decrypt">NIP-44 decrypt</string>
+    <string name="connections_history_type_nip44_v3_encrypt">NIP-44 v3 encrypt</string>
+    <string name="connections_history_type_nip44_v3_decrypt">NIP-44 v3 decrypt</string>
     <string name="connections_history_type_disconnect">Disconnect</string>
     <string name="connections_history_type_kill_switch">Kill switch</string>
     <string name="connections_history_type_export_ncryptsec">Export private key (ncryptsec)</string>
@@ -230,6 +232,8 @@
     <string name="connections_nip55_type_sign_event">Sign Event</string>
     <string name="connections_nip55_type_nip44_encrypt">Encrypt (NIP-44)</string>
     <string name="connections_nip55_type_nip44_decrypt">Decrypt (NIP-44)</string>
+    <string name="connections_nip55_type_nip44_v3_encrypt">Encrypt (NIP-44 v3)</string>
+    <string name="connections_nip55_type_nip44_v3_decrypt">Decrypt (NIP-44 v3)</string>
     <string name="connections_nip55_type_nip04_encrypt">Encrypt (NIP-04)</string>
     <string name="connections_nip55_type_nip04_decrypt">Decrypt (NIP-04)</string>
     <string name="connections_nip55_type_decrypt_zap">Decrypt Zap Event</string>

@@ -438,6 +438,8 @@ private fun formatSigningRequestType(type: SigningRequestType): String =
         SigningRequestType.NIP04_DECRYPT -> stringResource(R.string.connections_history_type_nip04_decrypt)
         SigningRequestType.NIP44_ENCRYPT -> stringResource(R.string.connections_history_type_nip44_encrypt)
         SigningRequestType.NIP44_DECRYPT -> stringResource(R.string.connections_history_type_nip44_decrypt)
+        SigningRequestType.NIP44_V3_ENCRYPT -> stringResource(R.string.connections_history_type_nip44_v3_encrypt)
+        SigningRequestType.NIP44_V3_DECRYPT -> stringResource(R.string.connections_history_type_nip44_v3_decrypt)
         SigningRequestType.DISCONNECT -> stringResource(R.string.connections_history_type_disconnect)
         SigningRequestType.KILL_SWITCH -> stringResource(R.string.connections_history_type_kill_switch)
         SigningRequestType.EXPORT_NCRYPTSEC -> stringResource(R.string.connections_history_type_export_ncryptsec)
