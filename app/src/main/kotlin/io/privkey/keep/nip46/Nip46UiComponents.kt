@@ -93,6 +93,8 @@ internal fun formatNip46Method(method: String): String = when (method) {
     "sign_event" -> stringResource(R.string.connections_nip46_method_sign_event)
     "nip44_encrypt" -> stringResource(R.string.connections_nip46_method_nip44_encrypt)
     "nip44_decrypt" -> stringResource(R.string.connections_nip46_method_nip44_decrypt)
+    "nip44v3_encrypt" -> stringResource(R.string.connections_nip46_method_nip44_v3_encrypt)
+    "nip44v3_decrypt" -> stringResource(R.string.connections_nip46_method_nip44_v3_decrypt)
     "nip04_encrypt" -> stringResource(R.string.connections_nip46_method_nip04_encrypt)
     "nip04_decrypt" -> stringResource(R.string.connections_nip46_method_nip04_decrypt)
     "ping" -> stringResource(R.string.connections_nip46_method_ping)
@@ -111,6 +113,8 @@ internal fun mapMethodToNip55RequestType(method: String): Nip55RequestType? = wh
     "sign_event" -> Nip55RequestType.SIGN_EVENT
     "nip44_encrypt" -> Nip55RequestType.NIP44_ENCRYPT
     "nip44_decrypt" -> Nip55RequestType.NIP44_DECRYPT
+    "nip44v3_encrypt" -> Nip55RequestType.NIP44_V3_ENCRYPT
+    "nip44v3_decrypt" -> Nip55RequestType.NIP44_V3_DECRYPT
     "nip04_encrypt" -> Nip55RequestType.NIP04_ENCRYPT
     "nip04_decrypt" -> Nip55RequestType.NIP04_DECRYPT
     "get_public_key" -> Nip55RequestType.GET_PUBLIC_KEY
