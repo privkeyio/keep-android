@@ -38,6 +38,8 @@ internal fun Nip55RequestType.displayName(context: android.content.Context): Str
         Nip55RequestType.SIGN_EVENT -> R.string.connections_nip55_type_sign_event
         Nip55RequestType.NIP44_ENCRYPT -> R.string.connections_nip55_type_nip44_encrypt
         Nip55RequestType.NIP44_DECRYPT -> R.string.connections_nip55_type_nip44_decrypt
+        Nip55RequestType.NIP44_V3_ENCRYPT -> R.string.connections_nip55_type_nip44_v3_encrypt
+        Nip55RequestType.NIP44_V3_DECRYPT -> R.string.connections_nip55_type_nip44_v3_decrypt
         Nip55RequestType.NIP04_ENCRYPT -> R.string.connections_nip55_type_nip04_encrypt
         Nip55RequestType.NIP04_DECRYPT -> R.string.connections_nip55_type_nip04_decrypt
         Nip55RequestType.DECRYPT_ZAP_EVENT -> R.string.connections_nip55_type_decrypt_zap
@@ -48,8 +50,8 @@ internal fun Nip55RequestType.headerTitle(context: android.content.Context): Str
     when (this) {
         Nip55RequestType.GET_PUBLIC_KEY -> R.string.connections_nip55_header_public_key
         Nip55RequestType.SIGN_EVENT -> R.string.connections_nip55_header_signing
-        Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT -> R.string.connections_nip55_header_encryption
-        Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT -> R.string.connections_nip55_header_decryption
+        Nip55RequestType.NIP44_ENCRYPT, Nip55RequestType.NIP04_ENCRYPT, Nip55RequestType.NIP44_V3_ENCRYPT -> R.string.connections_nip55_header_encryption
+        Nip55RequestType.NIP44_DECRYPT, Nip55RequestType.NIP04_DECRYPT, Nip55RequestType.NIP44_V3_DECRYPT -> R.string.connections_nip55_header_decryption
         Nip55RequestType.DECRYPT_ZAP_EVENT -> R.string.connections_nip55_header_zap_decryption
     }
 )
@@ -69,8 +71,15 @@ internal fun parseEventKind(content: String): Int? = runCatching {
     }
 }.getOrNull()
 
+internal fun Nip55RequestType.isNip44V3(): Boolean =
+    this == Nip55RequestType.NIP44_V3_ENCRYPT || this == Nip55RequestType.NIP44_V3_DECRYPT
+
 internal fun Nip55Request.eventKind(): Int? =
-    if (requestType == Nip55RequestType.SIGN_EVENT) parseEventKind(content) else null
+    when (requestType) {
+        Nip55RequestType.SIGN_EVENT -> parseEventKind(content)
+        Nip55RequestType.NIP44_V3_ENCRYPT, Nip55RequestType.NIP44_V3_DECRYPT -> kind?.toInt()
+        else -> null
+    }
 
 internal data class EventPreview(
     val kind: Int,
