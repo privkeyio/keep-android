@@ -29,7 +29,7 @@ import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55VelocityCheck
-import io.privkey.keep.uniffi.PolicyMode
+import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.evaluateNip55Request
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import io.privkey.keep.uniffi.nip55SignableEventKind
@@ -277,9 +277,12 @@ class Nip55ContentProvider : ContentProvider() {
                 ?: currentApp.getSignPolicyStore()?.getGlobalPolicy()
                 ?: SignPolicy.MANUAL
         } ?: SignPolicy.MANUAL
-        val policyMode = when (effectivePolicy) {
-            SignPolicy.MANUAL -> PolicyMode.MANUAL
-            SignPolicy.AUTO, SignPolicy.BASIC -> PolicyMode.AUTO
+        // Pass the selection through as-is. Collapsing BASIC onto AUTO here would
+        // discard the stricter Basic auto-approval band the core now enforces.
+        val policySelection = when (effectivePolicy) {
+            SignPolicy.MANUAL -> SignPolicySelection.MANUAL
+            SignPolicy.BASIC -> SignPolicySelection.BASIC
+            SignPolicy.AUTO -> SignPolicySelection.AUTO
         }
 
         val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
@@ -343,7 +346,7 @@ class Nip55ContentProvider : ContentProvider() {
             velocityCheck = velocityCheck,
             relayWhitelist = relayWhitelist,
             relayWhitelistReadFailed = relayReadFailed,
-            policyMode = policyMode,
+            policySelection = policySelection,
             isOptedIn = isOptedIn,
             optInRateCheck = optInRateCheck,
             hasSignedKindBefore = hasSignedKindBefore,
