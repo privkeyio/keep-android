@@ -60,6 +60,11 @@ class Nip55ContentProvider : ContentProvider() {
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val OPERATION_TIMEOUT_MS = 5000L
 
+        // Max IO threads orphaned (timed-out) FFI calls may occupy, so a run of
+        // stuck calls cannot pin the whole shared Dispatchers.IO pool. Matches the
+        // request-concurrency cap (concurrentRequestSemaphore).
+        private const val ORPHAN_IO_PARALLELISM = 4
+
         private const val BACKGROUND_SIGNING_CHANNEL_ID = "background_signing"
 
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
@@ -80,9 +85,14 @@ class Nip55ContentProvider : ContentProvider() {
     // Scope for orphaned FFI work. A policy-store / rate-limiter call reaches a
     // blocking, non-cancellable UniFFI call (e.g. SigningRateLimiter.checkAndRecord,
     // a synchronous encrypted keystore write). If such a call overruns its wall-clock
-    // budget it is left to finish here, on the IO dispatcher, instead of pinning the
-    // caller. SupervisorJob so one orphaned failure cannot cancel the others.
-    private val orphanScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // budget it is left to finish here instead of pinning the caller. Bounded to a
+    // small view of the IO pool via limitedParallelism, so a run of stuck FFI calls
+    // stays confined to a few threads rather than starving the app-wide Dispatchers.IO;
+    // callers still fail closed at the timeout whether the orphan runs or queues.
+    // SupervisorJob so one orphaned failure cannot cancel the others.
+    private val orphanScope = CoroutineScope(
+        Dispatchers.IO.limitedParallelism(ORPHAN_IO_PARALLELISM) + SupervisorJob(),
+    )
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
@@ -276,7 +286,10 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         val hasSignedKindBefore = if (eventKind != null) {
-            runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: true
+            // Fail safe on timeout/contention: an unknown history is treated as
+            // "not signed before" so the first-kind risk factor is kept (biases the
+            // risk assessment toward more scrutiny, not auto-approval).
+            runWithTimeout { store.hasSignedKindBefore(callerPackage, eventKind) } ?: false
         } else {
             true
         }
