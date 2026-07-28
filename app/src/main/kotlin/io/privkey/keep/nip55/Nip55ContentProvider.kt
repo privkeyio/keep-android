@@ -34,7 +34,10 @@ import io.privkey.keep.uniffi.evaluateNip55Request
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import io.privkey.keep.uniffi.nip55SignableEventKind
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
@@ -74,13 +77,30 @@ class Nip55ContentProvider : ContentProvider() {
     private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(4)
 
+    // Scope for orphaned FFI work. A policy-store / rate-limiter call reaches a
+    // blocking, non-cancellable UniFFI call (e.g. SigningRateLimiter.checkAndRecord,
+    // a synchronous encrypted keystore write). If such a call overruns its wall-clock
+    // budget it is left to finish here, on the IO dispatcher, instead of pinning the
+    // caller. SupervisorJob so one orphaned failure cannot cancel the others.
+    private val orphanScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
 
-    private fun <T> runWithTimeout(block: suspend () -> T): T? {
+    // Run `block` under a real wall-clock bound. `block` may reach a blocking,
+    // non-cancellable FFI call, which `withTimeoutOrNull` cannot interrupt in place
+    // (there is no suspension point to cancel at). So the work runs on [orphanScope]
+    // -- deliberately NOT structured under the `runBlocking` below -- and we await it
+    // with a timeout: when the budget is exceeded the await is cancelled, releasing
+    // the caller's binder thread and the semaphore permit and failing closed (null),
+    // while the orphaned call finishes on its own IO thread rather than pinning both
+    // for its full, unbounded duration. Cancelling the await does not cancel the
+    // orphan (orphanScope owns it). `internal` only so the bound can be unit-tested.
+    internal fun <T> runWithTimeout(block: suspend () -> T): T? {
         if (!concurrentRequestSemaphore.tryAcquire()) return null
         return try {
-            runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(OPERATION_TIMEOUT_MS) { block() }
+            val deferred = orphanScope.async { block() }
+            runBlocking {
+                withTimeoutOrNull(OPERATION_TIMEOUT_MS) { deferred.await() }
             }
         } finally {
             concurrentRequestSemaphore.release()
