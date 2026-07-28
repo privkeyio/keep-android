@@ -65,7 +65,12 @@ class Nip55ProviderTimeoutInstrumentedTest {
 
     private fun invokeDecide(): Cursor? {
         val handler = Nip55Handler(NoHandle)
-        val m = Nip55ContentProvider::class.java.declaredMethods.first { it.name == "decideBackgroundRequest" }
+        // Kotlin mangles a method's JVM name when its signature carries a value-class
+        // parameter (here v3Kind: UInt?), appending "-<hash>". Match on the base name so
+        // the lookup survives that mangling.
+        val m = Nip55ContentProvider::class.java.declaredMethods.first {
+            it.name.substringBefore('-') == "decideBackgroundRequest"
+        }
         m.isAccessible = true
         return m.invoke(
             provider, app, store, handler, pkg, Nip55RequestType.SIGN_EVENT,
