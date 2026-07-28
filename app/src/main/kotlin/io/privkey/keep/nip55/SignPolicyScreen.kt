@@ -66,9 +66,16 @@ fun SignPolicyScreen(
                         userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
-                            withContext(Dispatchers.IO) {
+                            // Show what actually persisted. The core's storage trait
+                            // cannot report a write failure, so without this read-back a
+                            // failed commit would leave the screen claiming a policy the
+                            // signing path does not use -- including a tightening the
+                            // user believes took effect.
+                            val persisted = withContext(Dispatchers.IO) {
                                 signPolicyStore.setGlobalPolicy(policy.toSelection())
+                                signPolicyStore.globalPolicy().toSignPolicy()
                             }
+                            selectedPolicy = persisted
                         }
                     }
                 )

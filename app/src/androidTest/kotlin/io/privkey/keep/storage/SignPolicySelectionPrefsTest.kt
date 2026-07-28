@@ -32,6 +32,12 @@ class SignPolicySelectionPrefsTest {
     private fun clearPrefs() {
         context.deleteSharedPreferences(SELECTION_PREFS)
         context.deleteSharedPreferences(LEGACY_PREFS)
+        // Only our own one-shot marker; the marker file is shared with other
+        // migrations, so it must not be deleted wholesale.
+        context.getSharedPreferences(
+            SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        ).edit().remove(SignPolicySelectionPrefs.MIGRATION_MARKER).commit()
     }
 
     private fun writeLegacyOrdinal(ordinal: Int) {
@@ -59,6 +65,25 @@ class SignPolicySelectionPrefsTest {
         // A second construction re-runs the migration against a populated store.
         assertEquals(SignPolicySelection.AUTO, newStore().globalPolicy())
         assertEquals(SignPolicySelection.AUTO, newStore().globalPolicy())
+    }
+
+    @Test
+    fun migrationNeverResurrectsTheLegacySelectionAfterTheStoreIsLost() {
+        // The legacy value is kept on disk, and the encrypted-prefs layer reports an
+        // undecryptable value as absent, so gating the migration on "new value is
+        // absent" would re-run it and restore the old, possibly looser, selection.
+        // The one-shot marker must prevent that: losing the store falls back to
+        // MANUAL (strictest), never back to the legacy AUTO.
+        writeLegacyOrdinal(SignPolicy.AUTO.ordinal)
+        assertEquals(SignPolicySelection.AUTO, newStore().globalPolicy())
+
+        newStore().setGlobalPolicy(SignPolicySelection.MANUAL)
+        assertEquals(SignPolicySelection.MANUAL, newStore().globalPolicy())
+
+        // Simulate the stored selection becoming unreadable/lost.
+        context.deleteSharedPreferences(SELECTION_PREFS)
+
+        assertEquals(SignPolicySelection.MANUAL, newStore().globalPolicy())
     }
 
     @Test
