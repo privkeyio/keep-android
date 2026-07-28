@@ -58,7 +58,7 @@ import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.PinStore
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.toSelection
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.*
 import kotlinx.coroutines.CancellationException
@@ -188,7 +188,7 @@ class MainActivity : FragmentActivity() {
                             onDone = { policy ->
                                 onboardingScope.launch {
                                     withContext(Dispatchers.IO) {
-                                        safeSignPolicyStore.setGlobalPolicy(policy)
+                                        safeSignPolicyStore.setGlobalPolicy(policy.toSelection())
                                         safeOnboardingStore.setCompleted(true)
                                     }
                                     onboardingCompleted = true

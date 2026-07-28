@@ -29,8 +29,9 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip46.Nip46ClientStore
-import io.privkey.keep.storage.SignPolicyStore
+import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.uniffi.BunkerConfigInfo
+import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -264,7 +265,7 @@ private fun AppPermissionsListContent(
                     Column(modifier = Modifier.padding(16.dp)) {
                         AppSignPolicySelector(
                             currentOverride = appState.signPolicyOverride,
-                            globalPolicy = signPolicyStore.getGlobalPolicy(),
+                            globalPolicy = signPolicyStore.globalPolicy().toSignPolicy(),
                             onOverrideChange = { newOverride ->
                                 coroutineScope.launch {
                                     try {
