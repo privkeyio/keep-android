@@ -105,6 +105,41 @@ class KeystoreEncryptedPrefsLookupTest {
     }
 
     @Test
+    fun anOverwrittenFallbackEntryDoesNotResurrectAfterDeletion() {
+        // The dangerous shape: a stranded entry, then a write from a fresh
+        // instance, then a delete. If the stranded copy were merely remembered
+        // rather than moved, the write would land under the current name, the
+        // delete would remove only that one, and this read would hand back the
+        // superseded value. For a policy selection that is a setting the user
+        // replaced coming back, possibly the looser one.
+        writeUnderFallbackEpoch("counter", "hourly=7")
+
+        KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+            .edit().putString("counter", "hourly=99").commit()
+
+        assertTrue(
+            KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+                .edit().remove("counter").commit()
+        )
+
+        assertNull(
+            "a superseded value must not survive the delete",
+            KeystoreEncryptedPrefs.create(context, PREFS_NAME).getString("counter", null)
+        )
+    }
+
+    @Test
+    fun aFallbackEntryIsConsolidatedSoOnlyOneCopyRemains() {
+        writeUnderFallbackEpoch("counter", "hourly=7")
+
+        // Reading it moves it to the current name; the old location must not
+        // linger, or a later write and delete would leave it behind.
+        val before = raw().all.keys.size
+        assertEquals("hourly=7", KeystoreEncryptedPrefs.create(context, PREFS_NAME).getString("counter", null))
+        assertEquals("the entry should move, not duplicate", before, raw().all.keys.size)
+    }
+
+    @Test
     fun aKeyThatWasNeverWrittenIsStillAbsent() {
         KeystoreEncryptedPrefs.create(context, PREFS_NAME)
             .edit().putString("anchor", "0").commit()

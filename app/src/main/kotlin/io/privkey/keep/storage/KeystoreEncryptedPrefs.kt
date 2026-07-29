@@ -269,16 +269,39 @@ object KeystoreEncryptedPrefs {
             // presents as a package with no recorded usage, which restarts its
             // window; for a policy override it presents as no override at all.
             //
-            // Probe the fallback epoch before giving up, and remember where the
-            // entry actually lives so reads, writes and deletions for this key
-            // all agree on one location until the bulk re-hash moves it forward.
+            // Probe the fallback epoch before giving up, and move what it finds to
+            // the current name rather than remembering the old one.
+            //
+            // Remembering is not enough: the registry fold rewrites this cache
+            // with current-epoch names at the head of the next write, so the write
+            // lands at the current name while the stale copy survives. A later
+            // delete then removes only the new copy and the next read returns the
+            // pre-delete value. For a policy selection that resurrects a setting
+            // the user replaced, which can be the looser one.
+            //
+            // The registry is excluded: it is resolved directly elsewhere, and a
+            // relocation racing that lookup could leave readers and writers
+            // disagreeing about where the index lives.
+            if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
-            if (fallbackHash != hash && basePrefs.contains(fallbackHash)) {
-                keyCache[plainKey] = fallbackHash
-                reverseKeyCache[fallbackHash] = plainKey
-                return fallbackHash
+            if (fallbackHash == hash || !basePrefs.contains(fallbackHash)) return null
+
+            val relocated = synchronized(initLockFor(prefsName)) {
+                val value = basePrefs.getString(fallbackHash, null)
+                value != null &&
+                    basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
-            return null
+            return if (relocated) {
+                keyCache[plainKey] = hash
+                reverseKeyCache[hash] = plainKey
+                hash
+            } else {
+                // Consolidation did not stick. Report where the entry actually is
+                // so this lookup is still correct, but do not cache it: a cached
+                // old location would send the next write there and leave a second
+                // copy behind it.
+                fallbackHash
+            }
         }
 
         /// Fold the persisted registry into [keyCache] once per instance, so a
