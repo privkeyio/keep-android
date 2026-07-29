@@ -24,7 +24,7 @@ object KeystoreEncryptedPrefs {
 
     private val initLocks = ConcurrentHashMap<String, Any>()
     private fun initLockFor(prefsName: String): Any =
-        initLocks.getOrPut(prefsName) { Any() }
+        initLocks.computeIfAbsent(prefsName) { Any() }
 
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS_PREFIX = "keep_prefs_"
@@ -44,6 +44,16 @@ object KeystoreEncryptedPrefs {
     private const val HMAC_KEY_PREF = "__hmac_key__"
     private const val HMAC_KEY_LENGTH = 32
     private const val DETERMINISTIC_HMAC_SEED = "keystore_prefs_hmac_key"
+
+    /** Sanity bounds on a decoded registry, whose contents are not bound to its location. */
+    // Above anything production writes: the longest real names are a fixed
+    // prefix plus a 255-char package name. A legitimate key filtered here would
+    // be silently dropped from the list on the next rewrite.
+    private const val MAX_KEY_NAME_LENGTH = 512
+    private const val MAX_REGISTRY_ENTRIES = 4096
+
+    /** Refolds tolerated before an unreadable current registry stops being retried. */
+    private const val MAX_FOLD_ATTEMPTS = 3
 
     fun create(context: Context, prefsName: String): SharedPreferences {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
@@ -130,6 +140,30 @@ object KeystoreEncryptedPrefs {
         /// second writer proceed against a half-filled cache and persist the very
         /// truncation this exists to prevent.
         private var registrySeeded = false
+
+        /** Failed folds so far; bounds the retry so an unreadable copy cannot cost a decrypt per commit forever. */
+        private var foldAttempts = 0
+
+        /**
+         * Whether the current name's registry was absent or decoded cleanly.
+         *
+         * Rewriting the list is safe exactly then, because the cache covers
+         * everything that copy listed. If it was present and unreadable the
+         * rewrite would truncate it, so the rewrite is skipped.
+         */
+        private var currentRegistryReadable = false
+
+        /**
+         * Whether every registry copy found on disk decoded successfully.
+         *
+         * Only then may the stale copy be dropped: an undecodable copy may list
+         * keys held nowhere else, and deleting it destroys the one record of
+         * them. Kept separate from [currentRegistryReadable] on purpose. Gating
+         * the rewrite on this too would let a single planted value at the
+         * fallback name, which is derivable from the APK, stop the key list
+         * being maintained at all.
+         */
+        private var allRegistriesReadable = false
         @Volatile
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
@@ -288,7 +322,7 @@ object KeystoreEncryptedPrefs {
             // relocation racing that lookup could leave readers and writers
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
-            val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+            val fallbackHash = fallbackHashOf(plainKey)
             if (fallbackHash == hash || !basePrefs.contains(fallbackHash)) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
@@ -319,51 +353,212 @@ object KeystoreEncryptedPrefs {
         /// under one derivation key and hash its names under a newer one, caching
         /// hashes that point nowhere and writing cleared names back into the
         /// registry.
-        private fun ensureRegistrySeeded() {
+        /**
+         * @param countAttempt whether a failed fold counts toward the retry
+         *   bound. Only the commit path passes true: a read must not be able to
+         *   spend the budget and change what a later write is allowed to do.
+         */
+        private fun ensureRegistrySeeded(countAttempt: Boolean = false) {
             if (registrySeeded) return
             rebuildKeyCacheFromRegistry()
-            registrySeeded = true
+            if (currentRegistryReadable) {
+                registrySeeded = true
+                foldAttempts = 0
+                return
+            }
+            // Bound the cost, never the guard. An unreadable copy would
+            // otherwise buy a failing Keystore round trip on every commit, taken
+            // under this monitor on the signing path. Stop re-folding, but keep
+            // refusing to rewrite: forcing the rewrite here would truncate the
+            // very list this exists to protect, on an assumption the code cannot
+            // check, since a decrypt failure may be transient. A new instance
+            // folds again, so a transient fault still recovers on the next
+            // process rather than being made permanent now.
+            if (countAttempt && ++foldAttempts >= MAX_FOLD_ATTEMPTS) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable after $foldAttempts folds; stopping retries")
+                registrySeeded = true
+            }
         }
 
-        private fun rebuildKeyCacheFromRegistry() {
-            val registryHash = calculateKeyHash(KEY_REGISTRY)
-            val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return
-            try {
-                val decrypted = decrypt(secretKey, encryptedRegistry)
-                if (!decrypted.startsWith(PREFIX_STRING)) return
-                val registryContent = decrypted.removePrefix(PREFIX_STRING)
-                if (registryContent.isEmpty()) return
-                for (plainKey in registryContent.split(KEY_REGISTRY_DELIMITER)) {
-                    if (plainKey.isEmpty() || plainKey == KEY_REGISTRY) continue
-                    val hash = calculateKeyHash(plainKey)
-                    keyCache[plainKey] = hash
-                    reverseKeyCache[hash] = plainKey
+        private fun fallbackHashOf(plainKey: String): String =
+            hmacWithKey(plainKey, deterministicHmacKey())
+
+        /**
+         * The outcome of reading one registry copy.
+         *
+         * [Malformed] and [Unreadable] must not be conflated. A blob that
+         * decrypted but is not a registry is deterministically wrong, so
+         * replacing it loses nothing that could ever be read back. A blob that
+         * would not decrypt may be a transient Keystore fault, and overwriting
+         * it would destroy a list that was about to become readable again.
+         */
+        private sealed interface RegistryRead {
+            /** [complete] is false when entries were dropped as implausible, so the cache does not cover the copy. */
+            data class Decoded(val keys: List<String>, val complete: Boolean) : RegistryRead
+            object Malformed : RegistryRead
+            object Unreadable : RegistryRead
+        }
+
+        /**
+         * Decodes one registry copy.
+         *
+         * Decrypting successfully is not enough to trust the contents. Values
+         * carry no associated data, so any string value from this file decrypts
+         * here just as well, and the fallback copy's location is derivable from
+         * the APK. Without bounds, a transplanted value would have each of its
+         * fragments adopted as a key name and written into the real registry on
+         * the next commit, where nothing ever removes them.
+         */
+        private fun decodeRegistry(blob: String): RegistryRead = try {
+            val decrypted = decrypt(secretKey, blob)
+            if (!decrypted.startsWith(PREFIX_STRING)) {
+                RegistryRead.Malformed
+            } else {
+                val parts = decrypted.removePrefix(PREFIX_STRING)
+                    .split(KEY_REGISTRY_DELIMITER)
+                    .filter { it.isNotEmpty() && it != KEY_REGISTRY }
+                val kept = parts
+                    .filter { it.length <= MAX_KEY_NAME_LENGTH && it.none(Char::isISOControl) }
+                    .take(MAX_REGISTRY_ENTRIES)
+                if (kept.size != parts.size && BuildConfig.DEBUG) {
+                    Log.w("KeystoreEncryptedPrefs", "Dropped ${parts.size - kept.size} implausible registry entries")
                 }
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry corrupted, will rebuild as keys are accessed", e)
+                RegistryRead.Decoded(kept, complete = kept.size == parts.size)
             }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry copy could not be decrypted", e)
+            RegistryRead.Unreadable
         }
 
-        override fun getAll(): MutableMap<String, *> {
-            if (reverseKeyCache.isEmpty()) {
-                rebuildKeyCacheFromRegistry()
-            }
-            val result = mutableMapOf<String, Any?>()
-            for ((encKey, encValue) in basePrefs.all) {
-                val plainKey = reverseKeyCache[encKey] ?: continue
-                if (plainKey == KEY_REGISTRY) continue
-                try {
-                    val plainValue = when (encValue) {
-                        is String -> decryptValue(encValue)
-                        else -> encValue
+        /**
+         * Seeds the key cache from every registry copy on disk, unioning them.
+         *
+         * The migration off the previous derivation epoch runs only while no
+         * derivation key is persisted yet, so a registry written during a later
+         * fallback window keeps the old name and is never moved.
+         *
+         * Both names are read rather than preferring the current one, because
+         * the damaging state has a copy under each: a device that already
+         * performed the truncating write this fixes has a short list under the
+         * current name and the full list under the fallback. Reading only the
+         * current one would seed a partial cache and then authorize deleting the
+         * copy that still held the missing keys.
+         *
+         * Sets [currentRegistryReadable] and [allRegistriesReadable].
+         */
+        private fun rebuildKeyCacheFromRegistry() {
+            val currentHash = calculateKeyHash(KEY_REGISTRY)
+            val fallbackHash = fallbackHashOf(KEY_REGISTRY)
+            val names = if (fallbackHash == currentHash) listOf(currentHash) else listOf(currentHash, fallbackHash)
+
+            var found = false
+            var currentReadable = true
+            var allReadable = true
+            for (name in names) {
+                val blob = basePrefs.getString(name, null) ?: continue
+                found = true
+                when (val read = decodeRegistry(blob)) {
+                    is RegistryRead.Decoded -> {
+                        read.keys.forEach { cacheRegistryKey(it) }
+                        if (!read.complete) {
+                            // Entries were dropped, so the cache does not cover
+                            // what this copy listed. Rewriting from it now would
+                            // deregister them permanently.
+                            allReadable = false
+                            if (name == currentHash) currentReadable = false
+                        }
                     }
-                    result[plainKey] = plainValue
+                    // Decrypted but not a registry, which no retry can change.
+                    // Replacing it loses nothing that could ever be read back.
+                    RegistryRead.Malformed -> allReadable = false
+                    // May be a transient Keystore fault. Preserve it: a copy that
+                    // is about to become readable again must not be overwritten.
+                    RegistryRead.Unreadable -> {
+                        allReadable = false
+                        if (name == currentHash) currentReadable = false
+                    }
+                }
+            }
+
+            if (!found && names.size > 1) {
+                // A commit writes the current name and removes the fallback in one
+                // editor, so a read interleaved between the two lookups above can
+                // see neither. Re-read before concluding there is no registry:
+                // concluding that wrongly is what authorizes the truncating write.
+                basePrefs.getString(currentHash, null)?.let { blob ->
+                    when (val read = decodeRegistry(blob)) {
+                        is RegistryRead.Decoded -> {
+                            read.keys.forEach { cacheRegistryKey(it) }
+                            if (!read.complete) { currentReadable = false; allReadable = false }
+                        }
+                        RegistryRead.Malformed -> allReadable = false
+                        RegistryRead.Unreadable -> { currentReadable = false; allReadable = false }
+                    }
+                }
+            }
+            currentRegistryReadable = currentReadable
+            allRegistriesReadable = allReadable
+        }
+
+        /**
+         * Records a registry-listed key under its current-epoch name only.
+         *
+         * A fallback-epoch name is deliberately never admitted to the reverse
+         * cache. That table is trusted for resolution by enumeration and by the
+         * change listener, and the fallback name is derivable from the APK, so
+         * admitting it would let a transplanted ciphertext be served under
+         * another key's name. Stranded values are instead reached by probing
+         * forward from the plaintext key, which cannot be redirected.
+         */
+        private fun cacheRegistryKey(plainKey: String) {
+            val hash = calculateKeyHash(plainKey)
+            keyCache[plainKey] = hash
+            reverseKeyCache[hash] = plainKey
+        }
+
+        /**
+         * Enumerates by resolving each known key forward, the way the typed
+         * getters do, rather than mapping stored names back through a reverse
+         * table.
+         *
+         * Mapping backwards would have to trust whatever name is on disk. Values
+         * carry no associated data, so a ciphertext is not bound to the name it
+         * sits under, and the fallback-epoch name is derivable from the APK.
+         * Anyone able to write to the data directory could therefore copy an
+         * authentic ciphertext to the fallback name of another key and have
+         * enumeration hand it back for that key, while the typed getters, which
+         * recompute the hash from the plaintext, kept returning the real value.
+         * Resolving forward and preferring the current name removes that split.
+         *
+         * Runs under the per-file monitor because the fold publishes the gate
+         * flags that the commit path reads; the two must not interleave.
+         */
+        override fun getAll(): MutableMap<String, *> = synchronized(initLockFor(prefsName)) {
+            ensureRegistrySeeded()
+            val stored = basePrefs.all
+            val result = mutableMapOf<String, Any?>()
+            for (plainKey in keyCache.keys.toList()) {
+                if (plainKey == KEY_REGISTRY) continue
+                val currentName = calculateKeyHash(plainKey)
+                val name = when {
+                    stored.containsKey(currentName) -> currentName
+                    else -> fallbackHashOf(plainKey).takeIf { it != currentName && stored.containsKey(it) }
+                } ?: continue
+                // Only encrypted String entries. Anything else was never written
+                // by this class, and returning it verbatim would hand back
+                // unauthenticated data placed at a derivable name.
+                val encValue = stored[name] as? String ?: continue
+                try {
+                    result[plainKey] = decryptValue(encValue)
                 } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt value for key $encKey", e)
+                    // The stored name, not the plaintext one: these files key on
+                    // caller package names, which are hashed before logging
+                    // elsewhere, so logging them here would undo that.
+                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt value for stored key $name", e)
                     continue
                 }
             }
-            return result
+            result
         }
 
         private fun decryptValue(encrypted: String): Any? {
@@ -527,6 +722,18 @@ object KeystoreEncryptedPrefs {
                     keyCache.clear()
                     reverseKeyCache.clear()
                     hmacKey = null
+                    // Nothing on disk survives a clear, so the emptied cache is
+                    // the intended list rather than an incomplete read of an
+                    // older one. Without this a clear followed by a put in the
+                    // same editor would take the guard below and write no
+                    // registry at all, leaving the put unlisted.
+                    currentRegistryReadable = true
+                    allRegistriesReadable = true
+                    // Re-fold next time. If this clear's commit fails, every
+                    // entry is still on disk while the caches are empty, and a
+                    // stale latch here would let the next put rewrite the
+                    // registry from those empty caches and orphan the rest.
+                    registrySeeded = false
                 } else {
                     // Fold in what is already on disk before the registry is
                     // rewritten below from the in-memory cache. Without this, the
@@ -538,7 +745,7 @@ object KeystoreEncryptedPrefs {
                     // hash. For the rate-limiter store that means a package's
                     // usage counters and cooling-off entries silently stop being
                     // found, which reads as "no usage yet".
-                    ensureRegistrySeeded()
+                    ensureRegistrySeeded(countAttempt = true)
                 }
 
                 for (plainKey in pendingRemoves) {
@@ -575,19 +782,45 @@ object KeystoreEncryptedPrefs {
             /// policy selection means one the user replaced, possibly a looser one.
             private fun dropFallbackCopy(plainKey: String, currentName: String?) {
                 if (plainKey == KEY_REGISTRY) return
-                val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+                val fallbackHash = fallbackHashOf(plainKey)
                 if (fallbackHash == currentName || !basePrefs.contains(fallbackHash)) return
                 baseEditor.remove(fallbackHash)
                 reverseKeyCache.remove(fallbackHash)
             }
 
             private fun updateKeyRegistry() {
+                // Deliberately unfiltered. Narrowing the list here would persist
+                // a strict subset of what the read gate just certified the cache
+                // covers, silently deregistering the difference: the same bug
+                // this change exists to fix, through a second door. If a list
+                // ever exceeds the reader's bounds, the reader reports it
+                // incomplete and the rewrite is skipped, which is conservative.
                 val allKeys = keyCache.keys.filter { it != KEY_REGISTRY }.toSet()
                 if (allKeys.isEmpty() && clearRequested) return
+                // The current copy was present but could not be decoded, so the
+                // cache is not known to cover what it listed and rewriting from
+                // it would truncate. Leave it; the keys stay directly readable,
+                // and the next commit re-folds and can still recover.
+                if (!currentRegistryReadable) {
+                    // The queued puts still commit, so they exist on disk while
+                    // absent from every registry copy. They stay readable by
+                    // name, and this instance re-registers them once a fold
+                    // succeeds, but a restart before that leaves them unlisted.
+                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable; entries written now are unlisted")
+                    return
+                }
                 val registryContent = allKeys.joinToString(KEY_REGISTRY_DELIMITER)
                 val encKey = getEncryptedKeyName(KEY_REGISTRY)
                 val encValue = encryptValue(registryContent)
                 baseEditor.putString(encKey, encValue)
+                // The current name now carries the full list, so drop a registry
+                // stranded under the previous epoch. The read path falls back to
+                // that name, and leaving it would let a stale key list resurface
+                // the moment the current one became unreadable.
+                val fallbackHash = fallbackHashOf(KEY_REGISTRY)
+                if (allRegistriesReadable && fallbackHash != encKey && basePrefs.contains(fallbackHash)) {
+                    baseEditor.remove(fallbackHash)
+                }
             }
         }
     }
