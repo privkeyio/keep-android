@@ -138,9 +138,14 @@ object KeystoreEncryptedPrefs {
         // preference key names, not values (values are AES-GCM encrypted with Keystore).
         // Used only when the random HMAC key cannot be persisted or the registry is
         // unreadable. Once migration succeeds, the random key replaces this.
-        private fun deterministicHmacKey(): ByteArray =
+        // Pure function of the file name, and now consulted on every write and on
+        // every lookup miss, so derive it once.
+        private val deterministicKey: ByteArray by lazy {
             MessageDigest.getInstance("SHA-256")
                 .digest("$DETERMINISTIC_HMAC_SEED:$prefsName".toByteArray(Charsets.UTF_8))
+        }
+
+        private fun deterministicHmacKey(): ByteArray = deterministicKey
 
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
@@ -542,6 +547,7 @@ object KeystoreEncryptedPrefs {
                         baseEditor.remove(encKey)
                         reverseKeyCache.remove(encKey)
                     }
+                    dropFallbackCopy(plainKey, encKey)
                     // Drop the name even when nothing was found on disk, so a
                     // registry entry whose value is already gone is not carried
                     // forward forever now that the registry is seeded rather than
@@ -553,9 +559,26 @@ object KeystoreEncryptedPrefs {
                     val encKey = getEncryptedKeyName(plainKey)
                     val encValue = encryptValue(value)
                     baseEditor.putString(encKey, encValue)
+                    dropFallbackCopy(plainKey, encKey)
                 }
 
                 updateKeyRegistry()
+            }
+
+            /// Removes a copy stranded under the fallback derivation epoch, so a
+            /// write or delete leaves exactly one copy of [plainKey].
+            ///
+            /// Writes resolve names through the cache without probing the fallback
+            /// epoch, so without this a write lands under the current name while an
+            /// older value survives beneath it, and a later delete removes only the
+            /// new one. The next read then finds the superseded value, which for a
+            /// policy selection means one the user replaced, possibly a looser one.
+            private fun dropFallbackCopy(plainKey: String, currentName: String?) {
+                if (plainKey == KEY_REGISTRY) return
+                val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+                if (fallbackHash == currentName || !basePrefs.contains(fallbackHash)) return
+                baseEditor.remove(fallbackHash)
+                reverseKeyCache.remove(fallbackHash)
             }
 
             private fun updateKeyRegistry() {
