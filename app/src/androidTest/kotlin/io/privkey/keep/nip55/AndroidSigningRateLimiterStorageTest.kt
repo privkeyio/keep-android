@@ -141,15 +141,22 @@ class AndroidSigningRateLimiterStorageTest {
 
     @Test
     fun aPresentButUndecryptableEntryReadsUnavailableNotAbsent() {
+        // Identify the target by what a write adds, not by excluding known names:
+        // the registry is itself stored under a hash, so filtering on its
+        // plaintext name does not exclude it and the corruption can land on the
+        // registry instead, leaving the entry readable and the test green for the
+        // wrong reason.
+        val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        storage.save("com.example.anchor", "counter=0")
+        val before = raw.all.keys.toSet()
         storage.save("com.example.app", "counter=1")
+        val added = raw.all.keys.toSet() - before
+        assertEquals("expected exactly one new stored entry", 1, added.size)
 
         // Corrupt the stored ciphertext in place, leaving the key itself intact,
         // so the entry is still present but can no longer be decrypted. Reporting
         // Absent here would restart the package's window on every request.
-        val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val encryptedKey = raw.all.keys.firstOrNull { it != KEY_REGISTRY && it != HMAC_KEY }
-        assertTrue("expected a stored entry to corrupt", encryptedKey != null)
-        raw.edit().putString(encryptedKey, "not-valid-ciphertext").commit()
+        raw.edit().putString(added.first(), "not-valid-ciphertext").commit()
 
         assertEquals(
             StorageRead.Unavailable,
@@ -164,7 +171,5 @@ class AndroidSigningRateLimiterStorageTest {
 
     companion object {
         private const val PREFS_NAME = "nip55_rate_limiter"
-        private const val KEY_REGISTRY = "__keys__"
-        private const val HMAC_KEY = "__hmac_key__"
     }
 }

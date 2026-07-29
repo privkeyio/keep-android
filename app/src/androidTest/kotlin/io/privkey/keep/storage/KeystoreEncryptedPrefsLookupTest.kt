@@ -41,7 +41,12 @@ class KeystoreEncryptedPrefsLookupTest {
     @After
     fun teardown() = clear()
 
-    private fun clear() = context.deleteSharedPreferences(PREFS_NAME)
+    // Block body on purpose: an expression body here returns the delete's Boolean,
+    // which makes the @Before/@After methods non-void and JUnit refuses to
+    // instantiate the class at all.
+    private fun clear() {
+        context.deleteSharedPreferences(PREFS_NAME)
+    }
 
     private fun raw() = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
