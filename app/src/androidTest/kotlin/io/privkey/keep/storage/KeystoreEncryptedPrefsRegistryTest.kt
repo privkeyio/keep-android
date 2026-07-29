@@ -95,6 +95,41 @@ class KeystoreEncryptedPrefsRegistryTest {
         assertTrue(visible.contains("beta"))
     }
 
+    @Test
+    fun concurrentWritersDoNotDropEachOthersKeys() {
+        // Two writers racing on one instance. Each snapshots the shared cache to
+        // rewrite the registry, so without serialising the commit the later one
+        // can persist a registry that predates the other's key, stranding it.
+        val prefs = reopen()
+        val threads = (0 until 8).map { i ->
+            Thread { prefs.edit().putString("key$i", "v$i").commit() }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+
+        val visible = reopen().all.keys
+        for (i in 0 until 8) {
+            assertTrue("key$i must survive concurrent writers", visible.contains("key$i"))
+        }
+    }
+
+    @Test
+    fun aSecondInstanceWritingConcurrentlyDoesNotTruncateTheRegistry() {
+        // Separate wrappers over the same file, each seeding independently.
+        reopen().edit().putString("existing", "1").commit()
+
+        val a = reopen()
+        val b = reopen()
+        val t1 = Thread { a.edit().putString("fromA", "2").commit() }
+        val t2 = Thread { b.edit().putString("fromB", "3").commit() }
+        t1.start(); t2.start(); t1.join(); t2.join()
+
+        val visible = reopen().all.keys
+        assertTrue("pre-existing key must survive", visible.contains("existing"))
+        assertTrue(visible.contains("fromA"))
+        assertTrue(visible.contains("fromB"))
+    }
+
     companion object {
         private const val PREFS_NAME = "keystore_prefs_registry_test"
     }
