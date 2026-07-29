@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -63,7 +64,12 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
     private fun fallbackRegistryName(): String = fallbackHashOfKey(KEY_REGISTRY)
 
     /** The registry's stored name plus two real blobs: one listing alpha, one listing alpha and beta. */
-    private data class Registry(val name: String, val listingOne: String, val listingBoth: String)
+    private data class Registry(
+        val name: String,
+        val alphaName: String,
+        val listingOne: String,
+        val listingBoth: String
+    )
 
     /**
      * Writes alpha then beta and captures the registry across both commits.
@@ -87,7 +93,17 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         assertEquals("expected exactly one rewritten entry, the registry", 1, changed.size)
 
         val name = changed.first()
-        return Registry(name, before.getValue(name), after.getValue(name))
+        // Pin the epochs apart. If the derivation key ever failed to persist in
+        // the test environment the two names would collide, every stranding
+        // helper below would degenerate into a plain overwrite, and the whole
+        // class would pass without testing anything.
+        assertNotEquals("current and fallback registry names must differ", fallbackRegistryName(), name)
+
+        // Alpha's stored name, by elimination rather than by picking from an
+        // unordered key set: the only entries after the first write are the HMAC
+        // key under its literal name, alpha, and the registry.
+        val alphaName = (before.keys - name - HMAC_KEY_PREF).single()
+        return Registry(name, alphaName, before.getValue(name), after.getValue(name))
     }
 
     /** Leaves the full list under the fallback name and nothing under the current one. */
@@ -169,6 +185,14 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
             "the fallback copy is the only readable record of alpha and beta; it must not be dropped",
             raw().contains(fallbackRegistryName())
         )
+        // Assert the rewrite was blocked too. Without this the test passes with
+        // either guard reverted, because each one alone still prevents the drop,
+        // so neither is actually covered.
+        assertEquals(
+            "an unreadable current copy must not be overwritten from a cache that may not cover it",
+            "not-decodable",
+            raw().getString(registry.name, null)
+        )
     }
 
     @Test
@@ -233,10 +257,9 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         // current-epoch hash leaves enumeration matching nothing, because every
         // on-disk name is a fallback-epoch one.
         val registry = seedAndCaptureRegistry()
-        val alphaName = raw().all.keys.first { it != registry.name && raw().getString(it, null) != null }
-        val alphaValue = raw().getString(alphaName, null)!!
+        val alphaValue = raw().getString(registry.alphaName, null)!!
         raw().edit()
-            .remove(alphaName)
+            .remove(registry.alphaName)
             .putString(fallbackHashOfKey("alpha"), alphaValue)
             .remove(registry.name)
             .putString(fallbackRegistryName(), registry.listingBoth)
@@ -250,8 +273,9 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         // Both commit paths run the same apply logic; only commit() was covered.
         strandTheRegistry()
 
+        // apply() updates the in-memory map synchronously and the same cached
+        // instance is read back, so no wait is needed here.
         open().edit().putString("gamma", "3").apply()
-        Thread.sleep(500)
 
         val visible = open().all.keys
         assertTrue("alpha must survive an apply() against a stranded registry", visible.contains("alpha"))
@@ -262,5 +286,6 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         private const val PREFS_NAME = "keystore_prefs_registry_epoch_test"
         private const val DETERMINISTIC_SEED = "keystore_prefs_hmac_key"
         private const val KEY_REGISTRY = "__keys__"
+        private const val HMAC_KEY_PREF = "__hmac_key__"
     }
 }
