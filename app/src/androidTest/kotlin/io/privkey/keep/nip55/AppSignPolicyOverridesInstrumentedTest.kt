@@ -6,7 +6,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.SignPolicySelectionPrefs
+import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.SignPolicySelection
+import io.privkey.keep.uniffi.SignPolicySelectionStorage
 import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -68,11 +70,35 @@ class AppSignPolicyOverridesInstrumentedTest {
     private fun newCore() = SignPolicyStore(SignPolicySelectionPrefs(context))
 
     @Test
-    fun coreOverrideWinsWhenBothStoresHoldOne() = runBlocking {
+    fun stricterWinsWhenTheCoreIsLooserThanRoom() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
+
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
+    }
+
+    @Test
+    fun stricterWinsWhenRoomIsLooserThanTheCore() = runBlocking {
         core.setAppOverride(PKG, SignPolicySelection.MANUAL)
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
 
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
+    }
+
+    @Test
+    fun stricterWinsAcrossTheMiddleTier() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.BASIC.ordinal)
+
+        assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
+    }
+
+    @Test
+    fun agreeingStoresReturnThatValue() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+
+        assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
@@ -196,6 +222,42 @@ class AppSignPolicyOverridesInstrumentedTest {
         )
     }
 
+    /**
+     * With no core store there is nothing to clear and nothing to confirm, so a row
+     * carrying an override is deferred to a sweep that can confirm it rather than
+     * deleted into an override nothing can reach.
+     */
+    @Test
+    fun expirySweepWithoutACoreStoreDefersARowCarryingAnOverride() = runBlocking {
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = SignPolicy.MANUAL.ordinal,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = OTHER_PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        store.cleanupExpired()
+
+        assertNotNull(store.getAppSettings(PKG))
+        // A row with no override has no core counterpart, so it expires as it always did.
+        assertNull(store.getAppSettings(OTHER_PKG))
+    }
+
     @Test
     fun expirySweepLeavesAnUnexpiredOverrideAlone() = runBlocking {
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
@@ -224,16 +286,117 @@ class AppSignPolicyOverridesInstrumentedTest {
         )
     }
 
+    /**
+     * A session whose core store failed to construct writes to Room alone. The next
+     * session has a live core holding the STALE, looser value, and the migration skips
+     * the package because the core already knows it. Only stricter-wins keeps the
+     * tightening the user actually made.
+     */
     @Test
-    fun withoutACoreStoreTheOverrideStaysInRoom() = runBlocking {
-        AppSignPolicyOverrides.setOverride(null, store, PKG, SignPolicySelection.MANUAL)
+    fun aTighteningMadeWithoutACoreStoreOutranksTheStaleCoreValue() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
 
+        AppSignPolicyOverrides.setOverride(null, store, PKG, SignPolicySelection.MANUAL)
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
-        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(null, store, PKG))
+
+        val liveCore = newCore()
+        AppSignPolicyOverrides.migrateLegacyOverrides(liveCore, store)
+        assertEquals(SignPolicySelection.AUTO, liveCore.appOverride(PKG))
+
         assertEquals(
             SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.effectivePolicy(null, store, PKG)
+            AppSignPolicyOverrides.override(liveCore, store, PKG)
         )
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.effectivePolicy(liveCore, store, PKG)
+        )
+    }
+
+    /**
+     * An override whose mirror row is gone is invisible to the app-settings table, so
+     * the wipe has to reach it through another record of the package.
+     */
+    @Test
+    fun accountSwitchClearsACoreOverrideWithNoRoomRow() = runBlocking {
+        store.grantPermission(
+            callerPackage = PKG,
+            requestType = Nip55RequestType.SIGN_EVENT,
+            eventKind = 1,
+            duration = PermissionDuration.FOREVER
+        )
+        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        assertNull(store.getAppSettings(PKG))
+
+        store.clearAllAppSettings(core)
+
+        assertNull(core.appOverride(PKG))
+        assertNull(newCore().appOverride(PKG))
+    }
+
+    /**
+     * The storage backend swallows failures, so a clear that does not stick returns
+     * normally. The read-back has to catch it and the row has to stay, or the override
+     * is stranded where nothing can find it again.
+     */
+    @Test
+    fun accountSwitchKeepsRowsWhoseClearDoesNotVerify() = runBlocking {
+        val flaky = SignPolicyStore(UnremovableStorage(PKG))
+        AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL)
+        AppSignPolicyOverrides.setOverride(flaky, store, OTHER_PKG, SignPolicySelection.BASIC)
+
+        store.clearAllAppSettings(flaky)
+
+        // Unprocessed package: override intact and still indexed by its row.
+        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(flaky, store, PKG)
+        )
+        // The verified package is gone from both stores.
+        assertNull(flaky.appOverride(OTHER_PKG))
+        assertNull(store.getAppSettings(OTHER_PKG))
+    }
+
+    @Test
+    fun expirySweepKeepsARowWhoseClearDoesNotVerify() = runBlocking {
+        val flaky = SignPolicyStore(UnremovableStorage(PKG))
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = SignPolicy.MANUAL.ordinal,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+        flaky.setAppOverride(PKG, SignPolicySelection.MANUAL)
+
+        store.cleanupExpired(flaky)
+
+        assertNotNull(store.getAppSettings(PKG))
+        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+    }
+
+    /**
+     * A clear writes the mirror first, so a mirror failure aborts before the core is
+     * touched: both stores still hold the override and there is nothing to resurrect.
+     * The reverse order would leave the stale mirror as the only copy, and the next
+     * migration would copy it back into the core for good.
+     */
+    @Test
+    fun aClearWhoseMirrorWriteThrowsDoesNotResurrect() = runBlocking {
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
+        database.close()
+
+        runCatching { AppSignPolicyOverrides.setOverride(core, store, PKG, null) }
+
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
     }
 
     @Test
@@ -342,5 +505,28 @@ class AppSignPolicyOverridesInstrumentedTest {
         const val OTHER_PKG = "com.test.other"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
         const val LEGACY_PREFS = "keep_sign_policy"
+    }
+}
+
+/**
+ * A real backend for the real core store, not a stubbed uniffi type: it implements the
+ * same [SignPolicySelectionStorage] trait the production encrypted-prefs class does,
+ * and reproduces the failure mode that motivates the read-back checks. Removals for
+ * [unremovablePackage] are dropped and reported as success, exactly as the production
+ * backend does when it swallows an exception or `commit()` returns false.
+ */
+private class UnremovableStorage(private val unremovablePackage: String) : SignPolicySelectionStorage {
+
+    private val values = HashMap<String, String>()
+
+    override fun load(key: String): String? = values[key]
+
+    override fun save(key: String, value: String) {
+        values[key] = value
+    }
+
+    override fun remove(key: String) {
+        if (key.endsWith(unremovablePackage)) return
+        values.remove(key)
     }
 }

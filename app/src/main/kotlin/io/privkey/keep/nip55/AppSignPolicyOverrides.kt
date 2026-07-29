@@ -17,24 +17,47 @@ private const val TAG = "AppSignPolicyOverrides"
  * A per-app override is normally STRICTER than the global policy (an app pinned to
  * Manual while the global is Auto), so losing one silently drops that app onto the
  * looser global and auto-approves signing it should not get. Every path here is built
- * around that: reads consult both stores, a write only drops the legacy value once
- * the core has reported the new one back, and the migration never overwrites the core.
+ * around that: reads consult both stores and resolve a disagreement to the stricter
+ * side, a write only touches the second store once the first has confirmed, and the
+ * migration never overwrites the core.
  *
  * The content provider and the UI both go through here so the two cannot drift.
  */
 object AppSignPolicyOverrides {
 
     /**
-     * The override in force: the core store first, the legacy Room row as a fallback.
-     * Yields null only when neither store holds one, so an incomplete or failed
-     * migration can never drop an app onto the looser global policy.
+     * The override in force, read from both stores. Yields null only when neither
+     * holds one, so an incomplete or failed migration can never drop an app onto the
+     * looser global policy.
+     *
+     * When the two disagree the STRICTER value wins (Manual < Basic < Auto), not the
+     * core. The stores can only disagree because a write landed in one and not the
+     * other, and there is no way to tell which side is the newer intent: the core's
+     * prefs backend swallows write failures and discards `commit()`'s result, so a
+     * value can be current in memory and absent on disk, and a session where the core
+     * store failed to construct writes to Room alone (the migration then skips that
+     * package forever, because the core already "knows" it). Core-first would let a
+     * stale looser value win in every one of those cases. Picking the stricter side
+     * costs the user a re-pick at worst; picking the looser one silently auto-approves
+     * signing the app was pinned away from.
      */
     suspend fun override(
         core: SignPolicyStore?,
         permissions: PermissionStore,
         callerPackage: String
     ): SignPolicySelection? =
-        core?.appOverride(callerPackage) ?: legacyOverride(permissions, callerPackage)
+        stricter(core?.appOverride(callerPackage), legacyOverride(permissions, callerPackage))
+
+    private fun stricter(
+        first: SignPolicySelection?,
+        second: SignPolicySelection?
+    ): SignPolicySelection? {
+        if (first == null) return second
+        if (second == null) return first
+        // Via SignPolicy so the ordering goes through the checked mapping rather than
+        // assuming the FFI enum's declaration order.
+        return if (first.toSignPolicy().ordinal <= second.toSignPolicy().ordinal) first else second
+    }
 
     /**
      * Override -> global -> Manual, the precedence the signing path has always used.
@@ -64,11 +87,16 @@ object AppSignPolicyOverrides {
      * and [PermissionStore.clearAllAppSettings]). Clearing Room here instead would
      * make core overrides invisible to Kotlin and immortal.
      *
-     * Room is only touched once the core reports the new value back: the core's
-     * storage trait cannot signal a failed write, and mirroring a write that did not
-     * land would make the two stores disagree with the losing side (Room) holding the
-     * value the user thinks is in force. Leaving both untouched keeps the app on what
-     * it already had, never on something looser.
+     * On a SET the core goes first and Room is only touched once the core reports the
+     * new value back, because the core's storage trait cannot signal a failed write.
+     *
+     * On a CLEAR the order is reversed: the mirror goes first, and the core is left
+     * alone if that throws. Clearing the core first and then failing on the mirror
+     * would leave the stale override as the only copy, which [override] hands straight
+     * back and [migrateLegacyOverrides] then copies into the core permanently, since
+     * the core no longer holds anything to skip on. Mirror-first turns that into "the
+     * clear did not happen": both stores still agree on the old value, the caller sees
+     * the throw, and a re-read shows the override still in force.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
@@ -79,20 +107,31 @@ object AppSignPolicyOverrides {
         val ordinal = selection?.toSignPolicy()?.ordinal
         if (core == null) {
             // No core store this session (init failed). Keep Room authoritative
-            // rather than dropping the override on the floor.
+            // rather than dropping the override on the floor. The stricter-wins rule
+            // in [override] stops a stale core value from outranking this later.
             permissions.setAppSignPolicyOverride(callerPackage, ordinal)
             return
         }
-        core.setAppOverride(callerPackage, selection)
-        if (core.appOverride(callerPackage) == selection) {
-            permissions.setAppSignPolicyOverride(callerPackage, ordinal)
+        if (selection == null) {
+            permissions.setAppSignPolicyOverride(callerPackage, null)
+            core.setAppOverride(callerPackage, null)
+            return
         }
+        core.setAppOverride(callerPackage, selection)
+        if (core.appOverride(callerPackage) != selection) return
+        // A failed mirror write must not propagate: the core already holds the new
+        // value, so the write did take effect. The stores diverge until the next
+        // write, and stricter-wins bounds that to "no looser than either side".
+        runCatching { permissions.setAppSignPolicyOverride(callerPackage, ordinal) }
+            .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror write failed", it) }
     }
 
     /**
      * Best-effort copy of the legacy Room overrides into the core, run at startup.
      * Idempotent: a package the core already holds an override for is left alone, so
-     * a re-run can never clobber a newer choice with the stale Room value.
+     * a re-run can never clobber a newer choice with the stale Room value. Skipping
+     * those packages is safe precisely because [override] resolves a disagreement to
+     * the stricter side rather than to whatever the core happens to hold.
      *
      * The Room values stay on disk: [override] still falls back to them, and they are
      * the index the lifecycle sweeps use. A failure here is therefore harmless, it
