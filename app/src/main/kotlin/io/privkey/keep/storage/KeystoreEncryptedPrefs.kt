@@ -325,9 +325,31 @@ object KeystoreEncryptedPrefs {
             registrySeeded = true
         }
 
+        /**
+         * Reads the registry blob, falling back to the previous derivation
+         * epoch's name for it.
+         *
+         * The migration away from that epoch runs only while no derivation key
+         * is persisted yet, so a registry written during a later fallback window
+         * keeps the old name and is never moved. Resolving only the current name
+         * leaves the fold with nothing to read, which is not merely a listing
+         * gap: the next write rewrites the registry from a cache holding just
+         * the keys that write touched, dropping every other key from it for good.
+         */
+        private fun readRegistryBlob(): String? {
+            val currentHash = calculateKeyHash(KEY_REGISTRY)
+            basePrefs.getString(currentHash, null)?.let { return it }
+            val fallbackHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
+            if (fallbackHash == currentHash) return null
+            // Deliberately a read, not a relocation. The registry is the index
+            // every lookup resolves through, so moving it here could race a
+            // concurrent reader; the next commit rewrites it under the current
+            // name and drops this copy from inside the serialized commit path.
+            return basePrefs.getString(fallbackHash, null)
+        }
+
         private fun rebuildKeyCacheFromRegistry() {
-            val registryHash = calculateKeyHash(KEY_REGISTRY)
-            val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return
+            val encryptedRegistry = readRegistryBlob() ?: return
             try {
                 val decrypted = decrypt(secretKey, encryptedRegistry)
                 if (!decrypted.startsWith(PREFIX_STRING)) return
@@ -588,6 +610,14 @@ object KeystoreEncryptedPrefs {
                 val encKey = getEncryptedKeyName(KEY_REGISTRY)
                 val encValue = encryptValue(registryContent)
                 baseEditor.putString(encKey, encValue)
+                // The current name now carries the full list, so drop a registry
+                // stranded under the previous epoch. The read path falls back to
+                // that name, and leaving it would let a stale key list resurface
+                // the moment the current one became unreadable.
+                val fallbackHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
+                if (fallbackHash != encKey && basePrefs.contains(fallbackHash)) {
+                    baseEditor.remove(fallbackHash)
+                }
             }
         }
     }
