@@ -257,11 +257,28 @@ object KeystoreEncryptedPrefs {
                 if (basePrefs.contains(encKey)) return encKey
             }
             val hash = calculateKeyHash(plainKey)
-            return if (basePrefs.contains(hash)) {
+            if (basePrefs.contains(hash)) {
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
-                hash
-            } else null
+                return hash
+            }
+            // An entry written while the store was using its fallback derivation
+            // key stays hashed under that key after the store recovers, so a
+            // lookup under the current key misses it and the entry reads as if it
+            // had never been written. For the signer's rate-limiter store that
+            // presents as a package with no recorded usage, which restarts its
+            // window; for a policy override it presents as no override at all.
+            //
+            // Probe the fallback epoch before giving up, and remember where the
+            // entry actually lives so reads, writes and deletions for this key
+            // all agree on one location until the bulk re-hash moves it forward.
+            val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+            if (fallbackHash != hash && basePrefs.contains(fallbackHash)) {
+                keyCache[plainKey] = fallbackHash
+                reverseKeyCache[fallbackHash] = plainKey
+                return fallbackHash
+            }
+            return null
         }
 
         /// Fold the persisted registry into [keyCache] once per instance, so a
