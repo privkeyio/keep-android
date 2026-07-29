@@ -25,6 +25,9 @@ import javax.crypto.spec.SecretKeySpec
  * registry from a cache holding just the keys that write touched. The rest are
  * dropped from it permanently, which is silent: direct lookups still work, so
  * nothing surfaces until something enumerates or the re-hash migration runs.
+ *
+ * Tests here assert only registry-dependent behaviour. Value reads resolve a
+ * key's own name directly and would pass with or without the fix.
  */
 @RunWith(AndroidJUnit4::class)
 class KeystoreEncryptedPrefsRegistryEpochTest {
@@ -57,17 +60,21 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         )
     }
 
+    /** The registry's stored name plus two real blobs: one listing alpha, one listing alpha and beta. */
+    private data class Registry(val name: String, val listingOne: String, val listingBoth: String)
+
     /**
-     * Writes two keys, then moves the registry entry to the name the fallback
-     * epoch would have used.
+     * Writes alpha then beta and captures the registry across both commits.
      *
      * The registry cannot be identified by name from a test, because the
-     * derivation key is per-file and secret. It is identified by behaviour
-     * instead: it is the one pre-existing entry whose stored value changes when
-     * an unrelated key is added, since every commit rewrites the key list while
-     * the other values stay byte-identical.
+     * derivation key is per-file and secret. It is identified by behaviour: it
+     * is the one pre-existing entry whose stored value changes when an unrelated
+     * key is added, since every commit rewrites the key list while the other
+     * values stay byte-identical. Capturing the before and after values yields
+     * two genuine blobs, so a truncated registry can be staged later without
+     * having to forge ciphertext.
      */
-    private fun strandTheRegistry() {
+    private fun seedAndCaptureRegistry(): Registry {
         open().edit().putString("alpha", "1").commit()
         val before = raw().all.mapValues { it.value as String }
 
@@ -77,9 +84,32 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         val changed = before.keys.filter { after[it] != null && after[it] != before[it] }
         assertEquals("expected exactly one rewritten entry, the registry", 1, changed.size)
 
-        val registryName = changed.first()
-        val registryValue = after.getValue(registryName)
-        raw().edit().remove(registryName).putString(fallbackRegistryName(), registryValue).commit()
+        val name = changed.first()
+        return Registry(name, before.getValue(name), after.getValue(name))
+    }
+
+    /** Leaves the full list under the fallback name and nothing under the current one. */
+    private fun strandTheRegistry(): Registry {
+        val registry = seedAndCaptureRegistry()
+        raw().edit()
+            .remove(registry.name)
+            .putString(fallbackRegistryName(), registry.listingBoth)
+            .commit()
+        return registry
+    }
+
+    /**
+     * Leaves the full list under the fallback name and a shorter one under the
+     * current name: the state a device is already in once the truncating write
+     * has happened.
+     */
+    private fun strandWithTruncatedCurrent(): Registry {
+        val registry = seedAndCaptureRegistry()
+        raw().edit()
+            .putString(registry.name, registry.listingOne)
+            .putString(fallbackRegistryName(), registry.listingBoth)
+            .commit()
+        return registry
     }
 
     @Test
@@ -106,12 +136,37 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
     }
 
     @Test
-    fun valuesRemainReadableAfterTheRegistryIsRecovered() {
-        strandTheRegistry()
+    fun aTruncatedCurrentRegistryDoesNotDiscardTheFullFallbackCopy() {
+        // Preferring the current copy would seed a partial cache from the short
+        // list and then authorize deleting the copy that still held the rest,
+        // destroying the recovery data for an already-affected device.
+        val registry = strandWithTruncatedCurrent()
+        assertTrue("precondition: a distinct copy under each name", registry.listingOne != registry.listingBoth)
+        assertTrue("precondition: current copy present", raw().contains(registry.name))
+        assertTrue("precondition: fallback copy present", raw().contains(fallbackRegistryName()))
 
-        val reopened = open()
-        assertEquals("1", reopened.getString("alpha", null))
-        assertEquals("2", reopened.getString("beta", null))
+        open().edit().putString("gamma", "3").commit()
+
+        val visible = open().all.keys
+        assertTrue("beta is only in the fallback copy and must survive", visible.contains("beta"))
+        assertTrue(visible.contains("alpha"))
+        assertTrue(visible.contains("gamma"))
+    }
+
+    @Test
+    fun anUndecodableRegistryCopyBlocksBothTheRewriteAndTheDrop() {
+        // A copy that cannot be decoded means the cache is not known to cover
+        // what is stored, so a transient decrypt failure must not be allowed to
+        // truncate the list or destroy the other copy.
+        val registry = strandWithTruncatedCurrent()
+        raw().edit().putString(registry.name, "not-decodable").commit()
+
+        open().edit().putString("gamma", "3").commit()
+
+        assertTrue(
+            "the fallback copy is the only readable record of alpha and beta; it must not be dropped",
+            raw().contains(fallbackRegistryName())
+        )
     }
 
     @Test
@@ -127,6 +182,19 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         )
         val visible = open().all.keys
         assertTrue(visible.contains("alpha"))
+        assertTrue(visible.contains("gamma"))
+    }
+
+    @Test
+    fun applyRecoversTheRegistryTheSameWayCommitDoes() {
+        // Both commit paths run the same apply logic; only commit() was covered.
+        strandTheRegistry()
+
+        open().edit().putString("gamma", "3").apply()
+        Thread.sleep(500)
+
+        val visible = open().all.keys
+        assertTrue("alpha must survive an apply() against a stranded registry", visible.contains("alpha"))
         assertTrue(visible.contains("gamma"))
     }
 
