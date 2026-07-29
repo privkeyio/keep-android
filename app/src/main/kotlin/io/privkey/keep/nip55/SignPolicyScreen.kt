@@ -66,16 +66,28 @@ fun SignPolicyScreen(
                         userInteracted = true
                         selectedPolicy = policy
                         coroutineScope.launch {
-                            // Show what actually persisted. The core's storage trait
-                            // cannot report a write failure, so without this read-back a
-                            // failed commit would leave the screen claiming a policy the
-                            // signing path does not use -- including a tightening the
-                            // user believes took effect.
-                            val persisted = withContext(Dispatchers.IO) {
-                                signPolicyStore.setGlobalPolicy(policy.toSelection())
-                                signPolicyStore.globalPolicy().toSignPolicy()
+                            // The store now reports whether the write persisted, which
+                            // a read-back cannot establish: the preferences layer
+                            // updates its in-memory map before the disk write, so it
+                            // would hand back the new value even when the write failed.
+                            //
+                            // An unpersisted write is indeterminate rather than a
+                            // no-op, so re-assert the stricter of the two selections.
+                            // Overshooting toward the stricter tier costs the user a
+                            // prompt; leaving the looser one in place would silently
+                            // widen auto-approval.
+                            val shown = withContext(Dispatchers.IO) {
+                                val target = policy.toSelection()
+                                if (signPolicyStore.setGlobalPolicy(target)) {
+                                    target.toSignPolicy()
+                                } else {
+                                    val safest =
+                                        minOf(policy, selectedPolicy, compareBy { it.ordinal })
+                                    signPolicyStore.setGlobalPolicy(safest.toSelection())
+                                    safest
+                                }
                             }
-                            selectedPolicy = persisted
+                            selectedPolicy = shown
                         }
                     }
                 )

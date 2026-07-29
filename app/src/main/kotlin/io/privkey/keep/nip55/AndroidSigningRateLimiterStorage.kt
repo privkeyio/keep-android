@@ -40,6 +40,15 @@ class AndroidSigningRateLimiterStorage(context: Context) : SigningRateLimiterSto
             // be read". The backing store returns the default on a decrypt,
             // key-derivation, or decode failure, so without this check every
             // fault would masquerade as "no usage recorded".
+            //
+            // What it does NOT cover: the lookup hashes the key name with the
+            // current derivation key, so an entry written under a previous key
+            // epoch is invisible and still reports absent. Reaching that needs a
+            // write failure that drops the store to its fallback key, followed by
+            // recovery, and it resets one package's window rather than lifting
+            // the ceiling. Closing it belongs to the key-registry handling, not
+            // here. During the failure itself writes report false, so the core
+            // refuses regardless.
             if (!prefs.contains(key)) {
                 StorageRead.Absent
             } else {
