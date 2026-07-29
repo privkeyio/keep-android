@@ -34,15 +34,23 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
             .onFailure { warn("load failed for $key", it) }
             .getOrNull()
 
-    override fun save(key: String, value: String) {
+    // Both writes return the platform's own durable-write result. Reporting
+    // whether the call threw would say nothing, since a commit can return false
+    // without raising, and the core treats an unconfirmed write as indeterminate
+    // rather than assuming the previous value survived.
+    override fun save(key: String, value: String): Boolean =
         runCatching { prefs.edit().putString(key, value).commit() }
-            .onFailure { warn("save failed for $key", it) }
-    }
+            .getOrElse {
+                warn("save failed for $key", it)
+                false
+            }
 
-    override fun remove(key: String) {
+    override fun remove(key: String): Boolean =
         runCatching { prefs.edit().remove(key).commit() }
-            .onFailure { warn("remove failed for $key", it) }
-    }
+            .getOrElse {
+                warn("remove failed for $key", it)
+                false
+            }
 
     /**
      * One-time copy of the global selection the deleted Kotlin store wrote as an Int.
