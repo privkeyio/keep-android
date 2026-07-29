@@ -138,9 +138,14 @@ object KeystoreEncryptedPrefs {
         // preference key names, not values (values are AES-GCM encrypted with Keystore).
         // Used only when the random HMAC key cannot be persisted or the registry is
         // unreadable. Once migration succeeds, the random key replaces this.
-        private fun deterministicHmacKey(): ByteArray =
+        // Pure function of the file name, and now consulted on every write and on
+        // every lookup miss, so derive it once.
+        private val deterministicKey: ByteArray by lazy {
             MessageDigest.getInstance("SHA-256")
                 .digest("$DETERMINISTIC_HMAC_SEED:$prefsName".toByteArray(Charsets.UTF_8))
+        }
+
+        private fun deterministicHmacKey(): ByteArray = deterministicKey
 
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
@@ -257,11 +262,51 @@ object KeystoreEncryptedPrefs {
                 if (basePrefs.contains(encKey)) return encKey
             }
             val hash = calculateKeyHash(plainKey)
-            return if (basePrefs.contains(hash)) {
+            if (basePrefs.contains(hash)) {
+                keyCache[plainKey] = hash
+                reverseKeyCache[hash] = plainKey
+                return hash
+            }
+            // An entry written while the store was using its fallback derivation
+            // key stays hashed under that key after the store recovers, so a
+            // lookup under the current key misses it and the entry reads as if it
+            // had never been written. For the signer's rate-limiter store that
+            // presents as a package with no recorded usage, which restarts its
+            // window; for a policy override it presents as no override at all.
+            //
+            // Probe the fallback epoch before giving up, and move what it finds to
+            // the current name rather than remembering the old one.
+            //
+            // Remembering is not enough: the registry fold rewrites this cache
+            // with current-epoch names at the head of the next write, so the write
+            // lands at the current name while the stale copy survives. A later
+            // delete then removes only the new copy and the next read returns the
+            // pre-delete value. For a policy selection that resurrects a setting
+            // the user replaced, which can be the looser one.
+            //
+            // The registry is excluded: it is resolved directly elsewhere, and a
+            // relocation racing that lookup could leave readers and writers
+            // disagreeing about where the index lives.
+            if (plainKey == KEY_REGISTRY) return null
+            val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+            if (fallbackHash == hash || !basePrefs.contains(fallbackHash)) return null
+
+            val relocated = synchronized(initLockFor(prefsName)) {
+                val value = basePrefs.getString(fallbackHash, null)
+                value != null &&
+                    basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
+            }
+            return if (relocated) {
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
                 hash
-            } else null
+            } else {
+                // Consolidation did not stick. Report where the entry actually is
+                // so this lookup is still correct, but do not cache it: a cached
+                // old location would send the next write there and leave a second
+                // copy behind it.
+                fallbackHash
+            }
         }
 
         /// Fold the persisted registry into [keyCache] once per instance, so a
@@ -502,6 +547,7 @@ object KeystoreEncryptedPrefs {
                         baseEditor.remove(encKey)
                         reverseKeyCache.remove(encKey)
                     }
+                    dropFallbackCopy(plainKey, encKey)
                     // Drop the name even when nothing was found on disk, so a
                     // registry entry whose value is already gone is not carried
                     // forward forever now that the registry is seeded rather than
@@ -513,9 +559,26 @@ object KeystoreEncryptedPrefs {
                     val encKey = getEncryptedKeyName(plainKey)
                     val encValue = encryptValue(value)
                     baseEditor.putString(encKey, encValue)
+                    dropFallbackCopy(plainKey, encKey)
                 }
 
                 updateKeyRegistry()
+            }
+
+            /// Removes a copy stranded under the fallback derivation epoch, so a
+            /// write or delete leaves exactly one copy of [plainKey].
+            ///
+            /// Writes resolve names through the cache without probing the fallback
+            /// epoch, so without this a write lands under the current name while an
+            /// older value survives beneath it, and a later delete removes only the
+            /// new one. The next read then finds the superseded value, which for a
+            /// policy selection means one the user replaced, possibly a looser one.
+            private fun dropFallbackCopy(plainKey: String, currentName: String?) {
+                if (plainKey == KEY_REGISTRY) return
+                val fallbackHash = hmacWithKey(plainKey, deterministicHmacKey())
+                if (fallbackHash == currentName || !basePrefs.contains(fallbackHash)) return
+                baseEditor.remove(fallbackHash)
+                reverseKeyCache.remove(fallbackHash)
             }
 
             private fun updateKeyRegistry() {
