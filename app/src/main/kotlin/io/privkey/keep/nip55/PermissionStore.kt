@@ -9,6 +9,7 @@ import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
 import io.privkey.keep.uniffi.Nip55VelocityResult
+import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.nip55AuditEntryHash
 import io.privkey.keep.uniffi.nip55CheckVelocity
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
@@ -29,7 +30,17 @@ class PermissionStore(private val database: Nip55Database) {
 
     val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
 
-    suspend fun cleanupExpired() {
+    /**
+     * [signPolicyStore] lets the sweep take the core-owned sign-policy override down
+     * with the expiring row. Without it a per-app override would outlive its expiry
+     * window, since the core store has no expiry of its own.
+     *
+     * The core is cleared before the row that indexes it is deleted, so an
+     * interruption leaves the Room mirror behind and the override survives (safe). A
+     * core clear that fails leaves the app on the override it already had, which is
+     * never looser than what it had before.
+     */
+    suspend fun cleanupExpired(signPolicyStore: SignPolicyStore? = null) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
         auditWriter.prune(now - 30 * DAY_MS) {
@@ -38,6 +49,7 @@ class PermissionStore(private val database: Nip55Database) {
             val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
                 dao.deleteForCaller(pkg)
+                runCatching { signPolicyStore?.setAppOverride(pkg, null) }
             }
             appSettingsDao.deleteExpired(now, nowElapsed)
         }
@@ -423,7 +435,39 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun revokeAllPermissions() = dao.deleteAll()
 
-    suspend fun clearAllAppSettings() = appSettingsDao.deleteAll()
+    /**
+     * [signPolicyStore] clears each package's core-owned override before the rows
+     * that index them are dropped, so per-app overrides cannot leak across an account
+     * switch. Same ordering rationale as [cleanupExpired]: a failure leaves the
+     * override in force rather than silently loosening the app.
+     */
+    /**
+     * Wipe every app settings row, clearing each package's core sign-policy
+     * override first so no override survives an account switch.
+     *
+     * A row whose core clear failed is deliberately kept: the row is the only
+     * record that the package still holds a core override, so a later wipe can
+     * retry it. Deleting it regardless would strand an override that Kotlin can
+     * no longer see and could never clear again.
+     */
+    suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
+        if (signPolicyStore == null) {
+            appSettingsDao.deleteAll()
+            return
+        }
+        val rows = runCatching { appSettingsDao.getAll() }.getOrDefault(emptyList())
+        var allCleared = true
+        rows.forEach { settings ->
+            if (runCatching { signPolicyStore.setAppOverride(settings.callerPackage, null) }.isSuccess) {
+                runCatching { appSettingsDao.delete(settings.callerPackage) }
+            } else {
+                allCleared = false
+            }
+        }
+        // Only safe once every override is gone; also sweeps rows that appeared
+        // after the snapshot above.
+        if (allCleared) appSettingsDao.deleteAll()
+    }
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
@@ -452,6 +496,8 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: String,
         eventKind: Int?
     ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind ?: EVENT_KIND_GENERIC)
+
+    suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
