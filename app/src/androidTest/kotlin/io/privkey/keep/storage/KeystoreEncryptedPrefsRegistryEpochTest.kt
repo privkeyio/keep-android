@@ -265,7 +265,47 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
             .putString(fallbackRegistryName(), registry.listingBoth)
             .commit()
 
-        assertTrue("alpha's value must be enumerable at its stranded name", open().all.keys.contains("alpha"))
+        // Assert the value, not just the key. Presence proves some decrypt
+        // succeeded; it does not prove the right entry was resolved, which is
+        // the property forward resolution is supposed to guarantee.
+        assertEquals("alpha's value must resolve at its stranded name", "1", open().all["alpha"])
+    }
+
+    @Test
+    fun anUnreadableCurrentRegistryIsNeverReplacedHoweverManyCommitsFollow() {
+        // The retry bound exists to stop paying a failing decrypt per commit. It
+        // must bound the cost only. Relaxing the guard instead would overwrite a
+        // list that a transient Keystore fault made briefly unreadable, which is
+        // the truncation this whole change exists to prevent.
+        val registry = seedAndCaptureRegistry()
+        raw().edit().remove(fallbackRegistryName()).putString(registry.name, "not-decodable").commit()
+
+        repeat(MAX_FOLD_ATTEMPTS + 2) { i ->
+            open().edit().putString("k$i", "v$i").commit()
+        }
+
+        assertEquals(
+            "an unreadable registry must survive any number of commits",
+            "not-decodable",
+            raw().getString(registry.name, null)
+        )
+    }
+
+    @Test
+    fun enumerationAgreesWithDirectReads() {
+        // Enumeration used to resolve stored names through a reverse table while
+        // the typed getters recomputed the hash, so the two could disagree and
+        // enumeration could serve a superseded or transplanted entry. They must
+        // now resolve identically. This does not assert that a transplanted
+        // value is rejected: resolving a stranded entry by probing the previous
+        // epoch is deliberate, and binding a ciphertext to its key name is a
+        // separate change.
+        val registry = seedAndCaptureRegistry()
+        val alphaCiphertext = raw().getString(registry.alphaName, null)!!
+        raw().edit().putString(fallbackHashOfKey("beta"), alphaCiphertext).commit()
+
+        val prefs = open()
+        assertEquals("enumeration must not diverge from a direct read", prefs.getString("beta", null), prefs.all["beta"])
     }
 
     @Test
@@ -287,5 +327,6 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         private const val DETERMINISTIC_SEED = "keystore_prefs_hmac_key"
         private const val KEY_REGISTRY = "__keys__"
         private const val HMAC_KEY_PREF = "__hmac_key__"
+        private const val MAX_FOLD_ATTEMPTS = 3
     }
 }
