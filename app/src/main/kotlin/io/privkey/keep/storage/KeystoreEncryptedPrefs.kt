@@ -118,6 +118,13 @@ object KeystoreEncryptedPrefs {
 
         private val keyCache = ConcurrentHashMap<String, String>()
         private val reverseKeyCache = ConcurrentHashMap<String, String>()
+
+        /// Whether the persisted key registry has been folded into [keyCache] for
+        /// this instance. The registry is rewritten from that cache on every
+        /// commit, and the cache only holds keys this instance has touched, so
+        /// the first write after a process start would otherwise truncate the
+        /// registry to those keys and orphan the rest.
+        private val registrySeeded = java.util.concurrent.atomic.AtomicBoolean(false)
         @Volatile
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
@@ -250,6 +257,14 @@ object KeystoreEncryptedPrefs {
                 reverseKeyCache[hash] = plainKey
                 hash
             } else null
+        }
+
+        /// Fold the persisted registry into [keyCache] once per instance, so a
+        /// registry rewrite unions with what is already stored instead of
+        /// replacing it. Skipped when a clear is in flight, which legitimately
+        /// empties the registry.
+        private fun ensureRegistrySeeded() {
+            if (registrySeeded.compareAndSet(false, true)) rebuildKeyCacheFromRegistry()
         }
 
         private fun rebuildKeyCacheFromRegistry() {
@@ -460,6 +475,18 @@ object KeystoreEncryptedPrefs {
                     keyCache.clear()
                     reverseKeyCache.clear()
                     hmacKey = null
+                } else {
+                    // Fold in what is already on disk before the registry is
+                    // rewritten below from the in-memory cache. Without this, the
+                    // first write in a process drops every key this instance has
+                    // not touched: the entries survive on disk but disappear from
+                    // the registry, so `getAll` stops seeing them and the
+                    // deterministic-key migration, which only re-hashes
+                    // registry-listed keys, leaves them stranded under the old
+                    // hash. For the rate-limiter store that means a package's
+                    // usage counters and cooling-off entries silently stop being
+                    // found, which reads as "no usage yet".
+                    ensureRegistrySeeded()
                 }
 
                 for (plainKey in pendingRemoves) {
