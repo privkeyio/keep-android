@@ -1327,7 +1327,7 @@ fun MainScreen(
                     onSigningHistoryClick = { showHistoryScreen = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
-                            permissionStore.cleanupExpired()
+                            permissionStore.cleanupExpired(signPolicyStore)
                         }
                     }
                 )
