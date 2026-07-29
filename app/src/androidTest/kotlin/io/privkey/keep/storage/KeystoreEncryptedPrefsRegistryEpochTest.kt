@@ -48,17 +48,19 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
 
     private fun open() = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
-    /** Mirrors the store's fallback derivation so a test can name the registry the way that epoch would. */
-    private fun fallbackRegistryName(): String {
+    /** Mirrors the store's fallback derivation so a test can name an entry the way that epoch would. */
+    private fun fallbackHashOfKey(plainKey: String): String {
         val key = MessageDigest.getInstance("SHA-256")
             .digest("$DETERMINISTIC_SEED:$PREFS_NAME".toByteArray(Charsets.UTF_8))
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(key, "HmacSHA256"))
         return Base64.encodeToString(
-            mac.doFinal(KEY_REGISTRY.toByteArray(Charsets.UTF_8)),
+            mac.doFinal(plainKey.toByteArray(Charsets.UTF_8)),
             Base64.NO_WRAP or Base64.URL_SAFE
         )
     }
+
+    private fun fallbackRegistryName(): String = fallbackHashOfKey(KEY_REGISTRY)
 
     /** The registry's stored name plus two real blobs: one listing alpha, one listing alpha and beta. */
     private data class Registry(val name: String, val listingOne: String, val listingBoth: String)
@@ -183,6 +185,64 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         val visible = open().all.keys
         assertTrue(visible.contains("alpha"))
         assertTrue(visible.contains("gamma"))
+    }
+
+    @Test
+    fun aGarbageFallbackCopyDoesNotStopTheKeyListBeingMaintained() {
+        // The fallback name is derivable from the APK, so treating an
+        // undecodable copy there as a reason to stop maintaining the list hands
+        // anyone who can write to the data directory a way to freeze it. It must
+        // block only the deletion of that copy, not the rewrite.
+        seedAndCaptureRegistry()
+        raw().edit().putString(fallbackRegistryName(), "not-decodable").commit()
+
+        open().edit().putString("gamma", "3").commit()
+
+        val visible = open().all.keys
+        assertTrue("gamma must still be registered", visible.contains("gamma"))
+        assertTrue(visible.contains("alpha"))
+        assertTrue(
+            "the undecodable copy must be kept, since it may list keys held nowhere else",
+            raw().contains(fallbackRegistryName())
+        )
+    }
+
+    @Test
+    fun aFailedFoldIsRetriedRatherThanFreezingTheInstance() {
+        // Instances are long-lived, so latching a failed fold would disable
+        // registry maintenance for the rest of the process. Once the obstruction
+        // clears, the next commit must recover.
+        val registry = strandWithTruncatedCurrent()
+        raw().edit().putString(registry.name, "not-decodable").commit()
+
+        val prefs = open()
+        prefs.edit().putString("gamma", "3").commit()
+
+        // Same instance, obstruction gone: it must fold again rather than stay latched.
+        raw().edit().putString(registry.name, registry.listingBoth).commit()
+        prefs.edit().putString("delta", "4").commit()
+
+        val visible = open().all.keys
+        assertTrue("beta must be recovered once the fold can succeed", visible.contains("beta"))
+        assertTrue(visible.contains("delta"))
+    }
+
+    @Test
+    fun strandedValuesAreEnumerableNotJustTheRegistry() {
+        // A real fallback window strands the values too. Recording only the
+        // current-epoch hash leaves enumeration matching nothing, because every
+        // on-disk name is a fallback-epoch one.
+        val registry = seedAndCaptureRegistry()
+        val alphaName = raw().all.keys.first { it != registry.name && raw().getString(it, null) != null }
+        val alphaValue = raw().getString(alphaName, null)!!
+        raw().edit()
+            .remove(alphaName)
+            .putString(fallbackHashOfKey("alpha"), alphaValue)
+            .remove(registry.name)
+            .putString(fallbackRegistryName(), registry.listingBoth)
+            .commit()
+
+        assertTrue("alpha's value must be enumerable at its stranded name", open().all.keys.contains("alpha"))
     }
 
     @Test
