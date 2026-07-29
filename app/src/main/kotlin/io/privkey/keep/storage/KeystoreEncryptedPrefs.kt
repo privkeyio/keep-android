@@ -551,7 +551,10 @@ object KeystoreEncryptedPrefs {
                 try {
                     result[plainKey] = decryptValue(encValue)
                 } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt value for key $plainKey", e)
+                    // The stored name, not the plaintext one: these files key on
+                    // caller package names, which are hashed before logging
+                    // elsewhere, so logging them here would undo that.
+                    if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt value for stored key $name", e)
                     continue
                 }
             }
@@ -786,13 +789,13 @@ object KeystoreEncryptedPrefs {
             }
 
             private fun updateKeyRegistry() {
-                // Same bounds the reader enforces. Writing a list the reader
-                // would refuse to decode lets the store invalidate its own state.
-                val allKeys = keyCache.keys
-                    .filter { it != KEY_REGISTRY && it.length <= MAX_KEY_NAME_LENGTH && it.none(Char::isISOControl) }
-                    .sorted()
-                    .take(MAX_REGISTRY_ENTRIES)
-                    .toSet()
+                // Deliberately unfiltered. Narrowing the list here would persist
+                // a strict subset of what the read gate just certified the cache
+                // covers, silently deregistering the difference: the same bug
+                // this change exists to fix, through a second door. If a list
+                // ever exceeds the reader's bounds, the reader reports it
+                // incomplete and the rewrite is skipped, which is conservative.
+                val allKeys = keyCache.keys.filter { it != KEY_REGISTRY }.toSet()
                 if (allKeys.isEmpty() && clearRequested) return
                 // The current copy was present but could not be decoded, so the
                 // cache is not known to cover what it listed and rewriting from

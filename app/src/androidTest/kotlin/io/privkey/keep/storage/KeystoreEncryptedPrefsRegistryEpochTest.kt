@@ -280,8 +280,12 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         val registry = seedAndCaptureRegistry()
         raw().edit().remove(fallbackRegistryName()).putString(registry.name, "not-decodable").commit()
 
+        // One instance for every commit. foldAttempts is per-instance, so
+        // reopening each time would reset it and the bound would never be
+        // reached, leaving this green against the behaviour it exists to reject.
+        val prefs = open()
         repeat(MAX_FOLD_ATTEMPTS + 2) { i ->
-            open().edit().putString("k$i", "v$i").commit()
+            prefs.edit().putString("k$i", "v$i").commit()
         }
 
         assertEquals(
@@ -302,9 +306,13 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         // separate change.
         val registry = seedAndCaptureRegistry()
         val alphaCiphertext = raw().getString(registry.alphaName, null)!!
-        raw().edit().putString(fallbackHashOfKey("beta"), alphaCiphertext).commit()
+        // Beta's own entry has to go, or neither path ever reaches the fallback
+        // probe and the assertion holds trivially.
+        val betaName = (raw().all.keys - registry.name - registry.alphaName - HMAC_KEY_PREF).single()
+        raw().edit().remove(betaName).putString(fallbackHashOfKey("beta"), alphaCiphertext).commit()
 
         val prefs = open()
+        assertEquals("the stranded entry must resolve", "1", prefs.all["beta"])
         assertEquals("enumeration must not diverge from a direct read", prefs.getString("beta", null), prefs.all["beta"])
     }
 
