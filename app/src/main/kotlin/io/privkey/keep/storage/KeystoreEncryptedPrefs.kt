@@ -118,6 +118,18 @@ object KeystoreEncryptedPrefs {
 
         private val keyCache = ConcurrentHashMap<String, String>()
         private val reverseKeyCache = ConcurrentHashMap<String, String>()
+
+        /// Whether the persisted key registry has been folded into [keyCache] for
+        /// this instance. The registry is rewritten from that cache on every
+        /// commit, and the cache only holds keys this instance has touched, so
+        /// the first write after a process start would otherwise truncate the
+        /// registry to those keys and orphan the rest.
+        ///
+        /// Guarded by the per-file monitor, and set only once the fold has
+        /// finished. A flag published before the work completes would let a
+        /// second writer proceed against a half-filled cache and persist the very
+        /// truncation this exists to prevent.
+        private var registrySeeded = false
         @Volatile
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
@@ -250,6 +262,22 @@ object KeystoreEncryptedPrefs {
                 reverseKeyCache[hash] = plainKey
                 hash
             } else null
+        }
+
+        /// Fold the persisted registry into [keyCache] once per instance, so a
+        /// registry rewrite unions with what is already stored instead of
+        /// replacing it. Skipped when a clear is in flight, which legitimately
+        /// empties the registry.
+        ///
+        /// Callers hold the per-file monitor, which also serialises this against
+        /// a concurrent clear. Without that, the fold could read the registry
+        /// under one derivation key and hash its names under a newer one, caching
+        /// hashes that point nowhere and writing cleared names back into the
+        /// registry.
+        private fun ensureRegistrySeeded() {
+            if (registrySeeded) return
+            rebuildKeyCacheFromRegistry()
+            registrySeeded = true
         }
 
         private fun rebuildKeyCacheFromRegistry() {
@@ -431,25 +459,19 @@ object KeystoreEncryptedPrefs {
                 return this
             }
 
-            override fun commit(): Boolean {
-                if (clearRequested) {
-                    return synchronized(initLockFor(prefsName)) {
-                        applyChanges()
-                        baseEditor.commit()
-                    }
-                }
+            // Both paths take the per-file monitor, not just the clearing one.
+            // The registry is rewritten from a shared cache, so two concurrent
+            // writers could otherwise each snapshot it before the other's key was
+            // added and the later commit would persist a registry missing it,
+            // stranding that entry. Serialising also keeps the registry fold from
+            // tearing against a clear. The monitor is reentrant, so the nested
+            // derivation-key lookup is safe.
+            override fun commit(): Boolean = synchronized(initLockFor(prefsName)) {
                 applyChanges()
-                return baseEditor.commit()
+                baseEditor.commit()
             }
 
-            override fun apply() {
-                if (clearRequested) {
-                    synchronized(initLockFor(prefsName)) {
-                        applyChanges()
-                        baseEditor.apply()
-                    }
-                    return
-                }
+            override fun apply() = synchronized(initLockFor(prefsName)) {
                 applyChanges()
                 baseEditor.apply()
             }
@@ -460,15 +482,31 @@ object KeystoreEncryptedPrefs {
                     keyCache.clear()
                     reverseKeyCache.clear()
                     hmacKey = null
+                } else {
+                    // Fold in what is already on disk before the registry is
+                    // rewritten below from the in-memory cache. Without this, the
+                    // first write in a process drops every key this instance has
+                    // not touched: the entries survive on disk but disappear from
+                    // the registry, so `getAll` stops seeing them and the
+                    // deterministic-key migration, which only re-hashes
+                    // registry-listed keys, leaves them stranded under the old
+                    // hash. For the rate-limiter store that means a package's
+                    // usage counters and cooling-off entries silently stop being
+                    // found, which reads as "no usage yet".
+                    ensureRegistrySeeded()
                 }
 
                 for (plainKey in pendingRemoves) {
                     val encKey = findEncryptedKey(plainKey)
                     if (encKey != null) {
                         baseEditor.remove(encKey)
-                        keyCache.remove(plainKey)
                         reverseKeyCache.remove(encKey)
                     }
+                    // Drop the name even when nothing was found on disk, so a
+                    // registry entry whose value is already gone is not carried
+                    // forward forever now that the registry is seeded rather than
+                    // rebuilt from scratch each time.
+                    keyCache.remove(plainKey)
                 }
 
                 for ((plainKey, value) in pendingPuts) {
