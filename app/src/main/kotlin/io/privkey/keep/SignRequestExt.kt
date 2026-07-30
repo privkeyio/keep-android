@@ -14,11 +14,20 @@ fun SignRequest.describe(): String {
         ?: messagePreview.takeIf { it.isNotBlank() }
     val kind = m?.eventKind
     return buildString {
-        if (kind != null) append("kind $kind")
+        // Lead with the label. FROST signs the 32 bytes verbatim, so a nostr
+        // event digest and a Bitcoin taproot sighash are byte-identical, and
+        // this is the only thing telling them apart. It used to appear only when
+        // everything else was blank, which for a real request never happened,
+        // so the prompt showed a bare hash. The core sanitizes it before it gets
+        // here; it is what the requester claims, not proof of what the bytes are.
+        messageType.takeIf { it.isNotBlank() }?.let { append(it) }
+        if (kind != null) {
+            if (isNotEmpty()) append(" · ")
+            append("kind $kind")
+        }
         if (content != null) {
             if (isNotEmpty()) append(" · ")
             append(content)
         }
-        if (isEmpty()) append(messageType)
     }
 }
