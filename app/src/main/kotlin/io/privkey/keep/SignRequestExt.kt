@@ -20,13 +20,23 @@ fun SignRequest.describe(): String {
         // everything else was blank, which for a real request never happened,
         // so the prompt showed a bare hash.
         //
-        // Prefixed as a claim, and the prefix is ours and comes first, so a
-        // label chosen to look authoritative still reads as asserted. The label
-        // is not bound to the signed bytes: a peer can call a sighash anything
-        // it likes. The core strips control characters and bidi overrides from
-        // it before it reaches here, which makes it safe to render but says
-        // nothing about whether it is true.
-        messageType.takeIf { it.isNotBlank() }?.let { append("claimed: ").append(it) }
+        // Qualified only when nothing checked it. A request carrying a
+        // structured body has had its digest recomputed from that body and
+        // matched against the bytes being signed, so its label is established;
+        // one without is a bare claim. Marking both the same way trains people
+        // to ignore the marking.
+        //
+        // The wording stays narrow on purpose. What was verified is the message
+        // type, not the transaction: a verified Bitcoin sighash means these
+        // bytes really are a taproot key-spend sighash for the supplied
+        // transaction, not that it spends what the user expects or to whom.
+        // A bare "verified" here would claim far more than was checked.
+        //
+        // The qualifier is ours and comes first, so a label chosen to look
+        // authoritative still reads as asserted.
+        messageType.takeIf { it.isNotBlank() }?.let {
+            if (typeVerified) append(it) else append("claimed: ").append(it)
+        }
         if (kind != null) {
             if (isNotEmpty()) append(" · ")
             append("kind $kind")

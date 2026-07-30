@@ -164,7 +164,10 @@ tasks.register<Exec>("buildRust") {
     if (keepRepo.exists()) {
         inputs.files(
             fileTree(keepRepo) {
-                include("**/*.rs", "**/Cargo.toml", "**/Cargo.lock")
+                // The interface definition drives binding generation just as
+                // the sources do, so a change to it alone must not leave this
+                // task up to date with bindings that no longer match the library.
+                include("**/*.rs", "**/*.udl", "**/Cargo.toml", "**/Cargo.lock")
                 exclude("**/target/**", "**/.git/**")
             }
         ).withPathSensitivity(PathSensitivity.RELATIVE)
