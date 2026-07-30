@@ -16,10 +16,12 @@ class SignRequestDescribeTest {
         messageType: String = "nostr-event",
         messagePreview: String = "abcd1234abcd1234",
         metadata: SignRequestMetadata? = null,
+        typeVerified: Boolean = false,
     ) = SignRequest(
         id = "id",
         sessionId = ByteArray(0),
         messageType = messageType,
+        typeVerified = typeVerified,
         messagePreview = messagePreview,
         fromPeer = 2u,
         timestamp = 0uL,
@@ -46,6 +48,25 @@ class SignRequestDescribeTest {
         // way out of it.
         val summary = request(messageType = "verified bitcoin-sighash").describe()
         assertTrue("got: $summary", summary.startsWith("claimed: "))
+    }
+
+    @Test
+    fun `a verified label carries no qualifier`() {
+        // Its digest was recomputed from the supplied body and matched, so
+        // calling it a claim would be wrong and would dilute the qualifier on
+        // the requests that are only claims.
+        val summary = request(messageType = "bitcoin-sighash", typeVerified = true).describe()
+        assertTrue("got: $summary", summary.startsWith("bitcoin-sighash"))
+        assertTrue("a proven label must not be marked claimed: $summary", !summary.contains("claimed"))
+    }
+
+    @Test
+    fun `the qualifier is not a blanket prefix on every request`() {
+        // The point of the flag: the same label reads differently depending on
+        // whether anything checked it.
+        val claimed = request(messageType = "bitcoin-sighash", typeVerified = false).describe()
+        val proven = request(messageType = "bitcoin-sighash", typeVerified = true).describe()
+        assertTrue("got: $claimed", claimed != proven)
     }
 
     @Test
