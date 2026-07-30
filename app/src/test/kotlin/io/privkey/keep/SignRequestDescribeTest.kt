@@ -33,7 +33,19 @@ class SignRequestDescribeTest {
         // request, so the label never appeared and the prompt was a bare hash.
         val summary = request().describe()
         assertTrue("expected the label in: $summary", summary.contains("nostr-event"))
+        assertTrue(
+            "the label must read as asserted, not as established fact: $summary",
+            summary.contains("claimed"),
+        )
         assertTrue("expected the preview in: $summary", summary.contains("abcd1234abcd1234"))
+    }
+
+    @Test
+    fun `a label chosen to look authoritative still reads as claimed`() {
+        // The prefix is ours and comes first, so a requester cannot phrase their
+        // way out of it.
+        val summary = request(messageType = "verified bitcoin-sighash").describe()
+        assertTrue("got: $summary", summary.startsWith("claimed: "))
     }
 
     @Test
