@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -296,14 +297,18 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
     }
 
     @Test
-    fun enumerationAgreesWithDirectReads() {
+    fun enumerationAgreesWithDirectReadsAndBothRefuseATransplant() {
         // Enumeration used to resolve stored names through a reverse table while
         // the typed getters recomputed the hash, so the two could disagree and
-        // enumeration could serve a superseded or transplanted entry. They must
-        // now resolve identically. This does not assert that a transplanted
-        // value is rejected: resolving a stranded entry by probing the previous
-        // epoch is deliberate, and binding a ciphertext to its key name is a
-        // separate change.
+        // enumeration could serve a transplanted entry the typed getter refused.
+        // They must resolve identically.
+        //
+        // This previously asserted that alpha's value resolved under beta's
+        // name, because probing the previous epoch is deliberate and nothing
+        // bound a value to the key it was written for. Values are now bound, so
+        // the same setup must be refused by both paths instead. The stranded
+        // recovery this was guarding is still covered, by moving alpha's own
+        // value to alpha's fallback name where the binding still matches.
         val registry = seedAndCaptureRegistry()
         val alphaCiphertext = raw().getString(registry.alphaName, null)!!
         // Beta's own entry has to go, or neither path ever reaches the fallback
@@ -312,8 +317,8 @@ class KeystoreEncryptedPrefsRegistryEpochTest {
         raw().edit().remove(betaName).putString(fallbackHashOfKey("beta"), alphaCiphertext).commit()
 
         val prefs = open()
-        assertEquals("the stranded entry must resolve", "1", prefs.all["beta"])
-        assertEquals("enumeration must not diverge from a direct read", prefs.getString("beta", null), prefs.all["beta"])
+        assertNull("alpha's value must not resolve under beta's name", prefs.getString("beta", null))
+        assertTrue("enumeration must refuse it too: ${prefs.all}", !prefs.all.containsKey("beta"))
     }
 
     @Test
