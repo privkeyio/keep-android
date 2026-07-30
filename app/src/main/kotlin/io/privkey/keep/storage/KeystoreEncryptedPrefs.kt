@@ -98,25 +98,55 @@ object KeystoreEncryptedPrefs {
         return keyGenerator.generateKey()
     }
 
-    private fun encrypt(key: SecretKey, plaintext: String): String {
+    /// Marks a value whose ciphertext is bound to the key it is stored under.
+    ///
+    /// Values written before this existed carry no marker and are still read,
+    /// unbound, so upgrading loses nothing. They gain the binding when they are
+    /// next written. Until then a legacy value remains transplantable, which is
+    /// the pre-existing behaviour rather than a new weakness.
+    private const val BOUND_PREFIX = "v2:"
+
+    /// Encrypts `plaintext` bound to `aad`, the logical key name it is stored
+    /// under.
+    ///
+    /// Without this, authentication covers the value alone and says nothing
+    /// about where it belongs, so any ciphertext from this file can be copied
+    /// onto another entry's name and still decrypt and authenticate. That is
+    /// enough to grant a package auto-signing by copying another package's
+    /// stored `true` onto its name.
+    ///
+    /// Bound to the logical name rather than the stored one on purpose: the
+    /// same logical key legitimately moves between stored names when an entry
+    /// left under a previous derivation epoch is relocated, and binding to the
+    /// stored name would invalidate the value the moment it was recovered.
+    private fun encrypt(key: SecretKey, plaintext: String, aad: String): String {
         require(plaintext.isNotEmpty()) { "Plaintext must not be empty" }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
+        cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
         val iv = cipher.iv
         val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         val combined = ByteArray(iv.size + encrypted.size)
         System.arraycopy(iv, 0, combined, 0, iv.size)
         System.arraycopy(encrypted, 0, combined, iv.size, encrypted.size)
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return BOUND_PREFIX + Base64.encodeToString(combined, Base64.NO_WRAP)
     }
 
-    private fun decrypt(key: SecretKey, ciphertext: String): String {
+    private fun decrypt(key: SecretKey, ciphertext: String, aad: String): String {
         require(ciphertext.isNotEmpty()) { "Ciphertext must not be empty" }
-        val combined = Base64.decode(ciphertext, Base64.NO_WRAP)
+        val bound = ciphertext.startsWith(BOUND_PREFIX)
+        val body = if (bound) ciphertext.removePrefix(BOUND_PREFIX) else ciphertext
+        val combined = Base64.decode(body, Base64.NO_WRAP)
         val iv = combined.copyOfRange(0, GCM_IV_BYTES)
         val encrypted = combined.copyOfRange(GCM_IV_BYTES, combined.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+        // Only the marked format carries the binding. An unmarked value predates
+        // it and is read as it was written; authentication still covers the
+        // value itself, just not its location.
+        if (bound) {
+            cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
+        }
         return String(cipher.doFinal(encrypted), Charsets.UTF_8)
     }
 
@@ -187,7 +217,7 @@ object KeystoreEncryptedPrefs {
                 hmacKey?.let { return it }
                 val stored = basePrefs.getString(HMAC_KEY_PREF, null)
                 if (stored != null) {
-                    val decrypted = decrypt(secretKey, stored)
+                    val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
                     val key = Base64.decode(decrypted, Base64.NO_WRAP)
                     // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
                     // rules out external tampering, so a wrong length here is an internal bug.
@@ -199,7 +229,7 @@ object KeystoreEncryptedPrefs {
                 }
                 val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
                 val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
-                val encryptedHmacKey = encrypt(secretKey, encoded)
+                val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
                 val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
                 val hasExistingEntries = basePrefs.contains(registryHash)
                 val persisted = if (hasExistingEntries) {
@@ -228,7 +258,7 @@ object KeystoreEncryptedPrefs {
             val registryHash = hmacWithKey(KEY_REGISTRY, oldKey)
             val encryptedRegistry = basePrefs.getString(registryHash, null) ?: return null
             return try {
-                val decrypted = decrypt(secretKey, encryptedRegistry)
+                val decrypted = decrypt(secretKey, encryptedRegistry, KEY_REGISTRY)
                 if (!decrypted.startsWith(PREFIX_STRING)) return null
                 val registryContent = decrypted.removePrefix(PREFIX_STRING)
                 if (registryContent.isEmpty()) return emptyList()
@@ -410,7 +440,7 @@ object KeystoreEncryptedPrefs {
          * the next commit, where nothing ever removes them.
          */
         private fun decodeRegistry(blob: String): RegistryRead = try {
-            val decrypted = decrypt(secretKey, blob)
+            val decrypted = decrypt(secretKey, blob, KEY_REGISTRY)
             if (!decrypted.startsWith(PREFIX_STRING)) {
                 RegistryRead.Malformed
             } else {
@@ -549,7 +579,7 @@ object KeystoreEncryptedPrefs {
                 // unauthenticated data placed at a derivable name.
                 val encValue = stored[name] as? String ?: continue
                 try {
-                    result[plainKey] = decryptValue(encValue)
+                    result[plainKey] = decryptValue(encValue, plainKey)
                 } catch (e: Exception) {
                     // The stored name, not the plaintext one: these files key on
                     // caller package names, which are hashed before logging
@@ -561,8 +591,8 @@ object KeystoreEncryptedPrefs {
             result
         }
 
-        private fun decryptValue(encrypted: String): Any? {
-            val decrypted = decrypt(secretKey, encrypted)
+        private fun decryptValue(encrypted: String, plainKey: String): Any? {
+            val decrypted = decrypt(secretKey, encrypted, plainKey)
             return when {
                 decrypted.startsWith(PREFIX_STRING) -> decrypted.removePrefix(PREFIX_STRING)
                 decrypted.startsWith(PREFIX_INT) -> decrypted.removePrefix(PREFIX_INT).toIntOrNull()
@@ -574,7 +604,7 @@ object KeystoreEncryptedPrefs {
             }
         }
 
-        private fun encryptValue(value: Any?): String {
+        private fun encryptValue(value: Any?, plainKey: String): String {
             val prefixed = when (value) {
                 is String -> PREFIX_STRING + value
                 is Int -> PREFIX_INT + value
@@ -584,7 +614,7 @@ object KeystoreEncryptedPrefs {
                 is Set<*> -> PREFIX_STRING_SET + value.joinToString(STRING_SET_DELIMITER)
                 else -> throw IllegalArgumentException("Unsupported type: ${value?.javaClass}")
             }
-            return encrypt(secretKey, prefixed)
+            return encrypt(secretKey, prefixed, plainKey)
         }
 
         private inline fun <T> getTypedValue(
@@ -596,7 +626,7 @@ object KeystoreEncryptedPrefs {
             val encKey = findEncryptedKey(key) ?: return defValue
             val encValue = basePrefs.getString(encKey, null) ?: return defValue
             return try {
-                val decrypted = decrypt(secretKey, encValue)
+                val decrypted = decrypt(secretKey, encValue, key)
                 if (decrypted.startsWith(prefix)) parse(decrypted.removePrefix(prefix)) else defValue
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt typed value for key $key", e)
@@ -764,7 +794,7 @@ object KeystoreEncryptedPrefs {
 
                 for ((plainKey, value) in pendingPuts) {
                     val encKey = getEncryptedKeyName(plainKey)
-                    val encValue = encryptValue(value)
+                    val encValue = encryptValue(value, plainKey)
                     baseEditor.putString(encKey, encValue)
                     dropFallbackCopy(plainKey, encKey)
                 }
@@ -811,7 +841,7 @@ object KeystoreEncryptedPrefs {
                 }
                 val registryContent = allKeys.joinToString(KEY_REGISTRY_DELIMITER)
                 val encKey = getEncryptedKeyName(KEY_REGISTRY)
-                val encValue = encryptValue(registryContent)
+                val encValue = encryptValue(registryContent, KEY_REGISTRY)
                 baseEditor.putString(encKey, encValue)
                 // The current name now carries the full list, so drop a registry
                 // stranded under the previous epoch. The read path falls back to
