@@ -126,8 +126,7 @@ class KeystoreEncryptedPrefsBindingTest {
         // written before binding stopped decoding here, the whole file would
         // read as empty even though every entry was intact.
         open().edit().putString("alpha", "1").putString("beta", "2").commit()
-        val registryName = registryStoredName()
-        val plain = registryPlaintext()
+        val (registryName, plain) = registryNameAndPlaintext()
         raw().edit().putString(registryName, legacyBlob(plain)).commit()
         assertTrue(
             "precondition: the staged registry is unmarked",
@@ -168,16 +167,20 @@ class KeystoreEncryptedPrefsBindingTest {
         )
     }
 
-    /** The registry is the entry rewritten on every commit; identify it that way. */
-    private fun registryStoredName(): String {
+    /**
+     * The registry is the one pre-existing entry rewritten by every commit, so a
+     * write identifies it. Resolved in a single pass: probing twice would rewrite
+     * the first probe's own value under a fresh nonce, leaving two changed
+     * entries and no way to tell which is the registry. The probe key is unique
+     * for the same reason.
+     */
+    private fun registryNameAndPlaintext(): Pair<String, String> {
         val before = raw().all.mapValues { it.value as String }
-        open().edit().putString("probe", "x").commit()
+        open().edit().putString("probe-${System.nanoTime()}", "x").commit()
         val after = raw().all.mapValues { it.value as String }
-        return before.keys.single { after[it] != null && after[it] != before[it] }
+        val name = before.keys.single { after[it] != null && after[it] != before[it] }
+        return name to decryptWithAad(after.getValue(name), "__keys__")
     }
-
-    private fun registryPlaintext(): String =
-        decryptWithAad(raw().getString(registryStoredName(), null)!!, "__keys__")
 
     private fun keystoreKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
