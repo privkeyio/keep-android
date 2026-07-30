@@ -76,8 +76,8 @@ class KeystoreEncryptedPrefsBindingTest {
 
         val all = open().all
         assertTrue(
-            "enumeration must not serve the moved value: $all",
-            all["victim"] != "attacker-chosen"
+            "enumeration must refuse the moved value outright: $all",
+            !all.containsKey("victim")
         )
     }
 
@@ -119,6 +119,93 @@ class KeystoreEncryptedPrefsBindingTest {
         )
         assertEquals("written-after", open().getString("legacy", null))
     }
+
+    @Test
+    fun a_legacy_registry_still_decodes_so_every_key_stays_enumerable() {
+        // The registry is what makes keys visible after a restart. If a value
+        // written before binding stopped decoding here, the whole file would
+        // read as empty even though every entry was intact.
+        open().edit().putString("alpha", "1").putString("beta", "2").commit()
+        val registryName = registryStoredName()
+        val plain = registryPlaintext()
+        raw().edit().putString(registryName, legacyBlob(plain)).commit()
+        assertTrue(
+            "precondition: the staged registry is unmarked",
+            !raw().getString(registryName, null)!!.startsWith("v2:")
+        )
+
+        val visible = open().all.keys
+        assertTrue("alpha must survive a legacy registry: $visible", visible.contains("alpha"))
+        assertTrue("beta must survive a legacy registry: $visible", visible.contains("beta"))
+    }
+
+    @Test
+    fun a_legacy_derivation_key_still_decrypts() {
+        // This one is not a lost value, it is a lost file: every stored name is
+        // derived from this key, and a failure here throws out of the read path
+        // rather than returning a default.
+        open().edit().putString("alpha", "1").commit()
+        val stored = raw().getString("__hmac_key__", null)!!
+        val decoded = decryptWithAad(stored, "__hmac_key__")
+        raw().edit().putString("__hmac_key__", legacyBlobRaw(decoded)).commit()
+
+        assertEquals("1", open().getString("alpha", null))
+    }
+
+    @Test
+    fun stripping_the_marker_from_a_bound_value_fails_closed() {
+        // The format's security claim: a bound value must not become readable by
+        // deleting three characters.
+        val storedName = writeAndFindStoredName("alpha", "real")
+        val bound = raw().getString(storedName, null)!!
+        assertTrue("precondition: value is bound", bound.startsWith("v2:"))
+
+        raw().edit().putString(storedName, bound.removePrefix("v2:")).commit()
+
+        assertNull(
+            "a value must not read once its binding marker is removed",
+            open().getString("alpha", null)
+        )
+    }
+
+    /** The registry is the entry rewritten on every commit; identify it that way. */
+    private fun registryStoredName(): String {
+        val before = raw().all.mapValues { it.value as String }
+        open().edit().putString("probe", "x").commit()
+        val after = raw().all.mapValues { it.value as String }
+        return before.keys.single { after[it] != null && after[it] != before[it] }
+    }
+
+    private fun registryPlaintext(): String =
+        decryptWithAad(raw().getString(registryStoredName(), null)!!, "__keys__")
+
+    private fun keystoreKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        return keyStore.getKey("keep_prefs_$PREFS_NAME", null) as SecretKey
+    }
+
+    private fun decryptWithAad(value: String, aad: String): String {
+        val combined = Base64.decode(value.removePrefix("v2:"), Base64.NO_WRAP)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            keystoreKey(),
+            javax.crypto.spec.GCMParameterSpec(128, combined.copyOfRange(0, 12))
+        )
+        if (value.startsWith("v2:")) cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
+        return String(cipher.doFinal(combined.copyOfRange(12, combined.size)), Charsets.UTF_8)
+    }
+
+    /** Re-encrypts an already-prefixed plaintext the old way: no AAD, no marker. */
+    private fun legacyBlobRaw(plaintextWithPrefix: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())
+        val iv = cipher.iv
+        val body = cipher.doFinal(plaintextWithPrefix.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(iv + body, Base64.NO_WRAP)
+    }
+
+    private fun legacyBlob(plaintextWithPrefix: String): String = legacyBlobRaw(plaintextWithPrefix)
 
     /**
      * Builds a value the way it was written before binding existed: same

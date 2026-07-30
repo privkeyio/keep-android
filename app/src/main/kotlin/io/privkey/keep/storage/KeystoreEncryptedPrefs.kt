@@ -102,8 +102,22 @@ object KeystoreEncryptedPrefs {
     ///
     /// Values written before this existed carry no marker and are still read,
     /// unbound, so upgrading loses nothing. They gain the binding when they are
-    /// next written. Until then a legacy value remains transplantable, which is
-    /// the pre-existing behaviour rather than a new weakness.
+    /// next written.
+    ///
+    /// There is no convergence: a value that is never rewritten stays unbound
+    /// for the life of the install, and stays transplantable. That is the
+    /// pre-existing behaviour rather than a new weakness, but it means an
+    /// upgraded device keeps the exposure for exactly the entries that predate
+    /// the upgrade, which is where existing grants live. Closing it needs the
+    /// reader to re-encrypt a legacy value once it has decrypted it, and then a
+    /// per-file marker so unbound values stop being accepted at all. Deliberately
+    /// not done here: that adds a write to the read path in the file that holds
+    /// share material, and belongs in its own change.
+    ///
+    /// The delimiter is outside the Base64 alphabet on purpose. A marker made of
+    /// alphabet characters could occur at the start of a legacy value and would
+    /// make it decrypt as bound, which fails. No legacy value can contain a
+    /// colon at all.
     private const val BOUND_PREFIX = "v2:"
 
     /// Encrypts `plaintext` bound to `aad`, the logical key name it is stored
@@ -121,6 +135,9 @@ object KeystoreEncryptedPrefs {
     /// stored name would invalidate the value the moment it was recovered.
     private fun encrypt(key: SecretKey, plaintext: String, aad: String): String {
         require(plaintext.isNotEmpty()) { "Plaintext must not be empty" }
+        // An empty AAD is the same as no AAD to GCM, so it would produce a value
+        // that looks bound and carries no binding.
+        require(aad.isNotEmpty()) { "Associated data must not be empty" }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key)
         cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
