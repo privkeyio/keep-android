@@ -1,0 +1,1 @@
+Signing history entries can no longer be recorded with a time earlier than the entry before them, so a clock correction or a changed device clock cannot make one approval appear to precede another. Restoring a backup now keeps each share's recorded backed-up state instead of marking everything backed up, so the reminder to back up a share still appears when it should.
