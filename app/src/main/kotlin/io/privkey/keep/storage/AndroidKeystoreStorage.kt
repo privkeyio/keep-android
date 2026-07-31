@@ -635,22 +635,35 @@ class AndroidKeystoreStorage(
         val groupPubkeyHex = metadata.groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         if (groupPubkeyHex.isBlank()) return
 
-        val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        if (existingKeys.contains(groupPubkeyHex)) {
-            prefs.edit().clear().apply()
-            return
-        }
-
         val sharePrefs = getSharePrefs(groupPubkeyHex)
+
+        // The legacy copy is only ever discarded once the destination is holding
+        // the share. Being listed in the registry is not that proof: the list
+        // records which groups exist, not whether their data survived, so a
+        // group listed with empty share prefs would previously have had its only
+        // remaining copy erased here. Falling through instead re-copies it.
         if (sharePrefs.contains(KEY_SHARE_DATA)) {
             addKeyToRegistry(groupPubkeyHex)
             prefs.edit().clear().apply()
             return
         }
 
+        // Read into locals and refuse to proceed on a null. Encrypted prefs
+        // return the default when a value cannot be decrypted, so a failed read
+        // is indistinguishable from an absent one here, and writing null removes
+        // the destination key rather than storing nothing. The commit would then
+        // report success having written no share, and the clear below would
+        // destroy the only copy. This is the one failure in this file that
+        // cannot be recovered from.
+        val shareData = prefs.getString(KEY_SHARE_DATA, null)
+        val shareIv = prefs.getString(KEY_SHARE_IV, null)
+        if (shareData == null || shareIv == null) {
+            return
+        }
+
         val saved = sharePrefs.edit()
-            .putString(KEY_SHARE_DATA, prefs.getString(KEY_SHARE_DATA, null))
-            .putString(KEY_SHARE_IV, prefs.getString(KEY_SHARE_IV, null))
+            .putString(KEY_SHARE_DATA, shareData)
+            .putString(KEY_SHARE_IV, shareIv)
             .putString(KEY_SHARE_NAME, metadata.name)
             .putInt(KEY_SHARE_INDEX, metadata.identifier.toInt())
             .putInt(KEY_SHARE_THRESHOLD, metadata.threshold.toInt())
@@ -659,6 +672,12 @@ class AndroidKeystoreStorage(
             .putBoolean(KEY_SHARE_DID_BACKUP, metadata.didBackup)
             .commit()
         if (!saved) return
+
+        // Confirm the destination can be read back before the source is
+        // destroyed. A commit reports that the write reached disk, not that the
+        // value is retrievable, and the gap between those two is exactly where a
+        // share would be lost.
+        if (sharePrefs.getString(KEY_SHARE_DATA, null) == null) return
 
         addKeyToRegistry(groupPubkeyHex)
         if (getActiveShareKey() == null) {
