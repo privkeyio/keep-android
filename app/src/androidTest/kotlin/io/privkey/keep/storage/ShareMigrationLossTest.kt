@@ -133,7 +133,7 @@ class ShareMigrationLossTest {
     }
 
     @Test
-    fun a_destination_entry_that_cannot_be_decrypted_does_not_authorise_the_erase() {
+    fun a_destination_entry_that_cannot_be_decrypted_is_overwritten_not_trusted() {
         // A name resolving at the destination is not the share being there. This
         // stages an entry that exists and will not open, which a presence check
         // accepts and a read does not.
@@ -154,9 +154,15 @@ class ShareMigrationLossTest {
 
         AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
 
-        assertNotNull(
-            "an unreadable destination must not authorise erasing the source",
-            legacy().getString("share_data", null)
+        // The invariant is that the share survives, not that the legacy copy
+        // does. An unreadable destination must not authorise the erase on its
+        // own, and here it does not: the migration falls through, overwrites the
+        // unreadable entry with the real value, and only then clears the source.
+        // Asserting the legacy copy lingers would assert the fix had failed.
+        assertEquals(
+            "the share must be readable somewhere after the migration",
+            "legacy-share-bytes",
+            sharePrefs().getString("share_data", null)
         )
     }
 
