@@ -68,33 +68,23 @@ class ShareMigrationLossTest {
     }
 
     @Test
-    fun a_group_listed_in_the_registry_with_no_stored_share_does_not_lose_the_legacy_copy() {
+    fun a_group_listed_in_the_registry_with_no_stored_share_is_recovered_not_dropped() {
         // The registry records which groups exist, not whether their data
         // survived. Treating membership as proof of a copy erased the only
-        // remaining one.
-        seedLegacyShare()
-        multi().edit().putStringSet("all_share_keys", setOf(GROUP_HEX)).commit()
-
-        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
-
-        assertNotNull(
-            "the legacy share must survive when nothing else holds it",
-            legacy().getString("share_data", null)
-        )
-    }
-
-    @Test
-    fun a_group_listed_in_the_registry_is_recopied_rather_than_dropped() {
+        // remaining one. The share must end up somewhere readable; because the
+        // copy now succeeds, that somewhere is the per-group store and clearing
+        // the legacy copy afterwards is correct rather than a loss.
         seedLegacyShare()
         multi().edit().putStringSet("all_share_keys", setOf(GROUP_HEX)).commit()
 
         AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
 
         assertEquals(
-            "the share should reach per-group storage",
+            "the share must be recovered into per-group storage",
             "legacy-share-bytes",
             sharePrefs().getString("share_data", null)
         )
+        assertEquals("legacy-iv", sharePrefs().getString("share_iv", null))
     }
 
     @Test
@@ -149,9 +139,18 @@ class ShareMigrationLossTest {
         // accepts and a read does not.
         seedLegacyShare()
         val dest = context.getSharedPreferences(shareStoreName(), Context.MODE_PRIVATE)
+        // Identify share_data's entry by what writing it adds. Filtering on the
+        // value prefix would also match the derivation key and the registry, and
+        // corrupting the derivation key throws out of the read path instead of
+        // exercising the guard under test.
+        sharePrefs().edit().putString("anchor", "0").commit()
+        val before = dest.all.keys.toSet()
         sharePrefs().edit().putString("share_data", "placeholder").commit()
-        val storedName = dest.all.keys.first { dest.getString(it, null)?.startsWith("v2:") == true }
-        dest.edit().putString(storedName, "v2:not-decodable").commit()
+        val added = dest.all.keys.toSet() - before
+        assertEquals("expected exactly one new stored entry", 1, added.size)
+        // Keep it decodable as base64 so the failure is an authentication
+        // failure rather than a malformed-input throw.
+        dest.edit().putString(added.first(), "v2:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").commit()
 
         AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
 
