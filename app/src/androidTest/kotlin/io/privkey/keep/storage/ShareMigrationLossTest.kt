@@ -116,6 +116,51 @@ class ShareMigrationLossTest {
         )
     }
 
+    @Test
+    fun a_share_whose_iv_cannot_be_read_is_not_erased() {
+        // The defect this class was written about, which none of the tests
+        // above actually staged. A value that will not read back looks exactly
+        // like an absent one, and writing that absence removes the destination
+        // key, so the copy "succeeds" having written nothing and the source is
+        // erased. Staged by omitting the iv, which is the same shape as a read
+        // that failed.
+        legacy().edit()
+            .putString("share_data", "legacy-share-bytes")
+            .putString("share_name", "mine")
+            .putInt("share_index", 1)
+            .putInt("share_threshold", 2)
+            .putInt("share_total", 3)
+            .putString("share_group_pubkey", GROUP_B64)
+            .putBoolean("share_did_backup", false)
+            .commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertNotNull(
+            "an incomplete share must stay where it is rather than being erased",
+            legacy().getString("share_data", null)
+        )
+    }
+
+    @Test
+    fun a_destination_entry_that_cannot_be_decrypted_does_not_authorise_the_erase() {
+        // A name resolving at the destination is not the share being there. This
+        // stages an entry that exists and will not open, which a presence check
+        // accepts and a read does not.
+        seedLegacyShare()
+        val dest = context.getSharedPreferences(shareStoreName(), Context.MODE_PRIVATE)
+        sharePrefs().edit().putString("share_data", "placeholder").commit()
+        val storedName = dest.all.keys.first { dest.getString(it, null)?.startsWith("v2:") == true }
+        dest.edit().putString(storedName, "v2:not-decodable").commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertNotNull(
+            "an unreadable destination must not authorise erasing the source",
+            legacy().getString("share_data", null)
+        )
+    }
+
     companion object {
         private const val LEGACY_PREFS = "keep_secure_prefs"
         private const val MULTI_PREFS = "keep_multi_share_prefs"

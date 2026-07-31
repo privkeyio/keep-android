@@ -507,6 +507,13 @@ class AndroidKeystoreStorage(
 
     private fun addKeyToRegistry(key: String) {
         val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        // Already listed: do not rewrite. The read above returns the default
+        // when the registry cannot be decrypted, so a rewrite in that state
+        // would persist a set containing only this key and deregister every
+        // other group. Their share files would survive while becoming invisible
+        // to listing, the active-share lookup and the has-share check, none of
+        // which rebuild it.
+        if (existingKeys.contains(key)) return
         val registryUpdated = multiSharePrefs.edit()
             .putStringSet(KEY_ALL_SHARE_KEYS, existingKeys + key)
             .commit()
@@ -638,11 +645,20 @@ class AndroidKeystoreStorage(
         val sharePrefs = getSharePrefs(groupPubkeyHex)
 
         // The legacy copy is only ever discarded once the destination is holding
-        // the share. Being listed in the registry is not that proof: the list
-        // records which groups exist, not whether their data survived, so a
-        // group listed with empty share prefs would previously have had its only
-        // remaining copy erased here. Falling through instead re-copies it.
-        if (sharePrefs.contains(KEY_SHARE_DATA)) {
+        // the share, and "holding" means the values come back, not that their
+        // names resolve. Two weaker checks were used here before and both erased
+        // the source with nothing to show for it: the registry key list, which
+        // records that a group exists rather than that its data survived, and a
+        // presence check, which resolves a name without decrypting and is
+        // satisfied by an entry that will not open. Reading both values is the
+        // only test that means what the sentence above says.
+        //
+        // The iv is checked too because a share without it is unusable: the
+        // decryption path returns nothing when it is missing, so keeping the
+        // data alone would still lose the share.
+        if (sharePrefs.getString(KEY_SHARE_DATA, null) != null &&
+            sharePrefs.getString(KEY_SHARE_IV, null) != null
+        ) {
             addKeyToRegistry(groupPubkeyHex)
             prefs.edit().clear().apply()
             return
@@ -673,11 +689,13 @@ class AndroidKeystoreStorage(
             .commit()
         if (!saved) return
 
-        // Confirm the destination can be read back before the source is
-        // destroyed. A commit reports that the write reached disk, not that the
-        // value is retrievable, and the gap between those two is exactly where a
-        // share would be lost.
-        if (sharePrefs.getString(KEY_SHARE_DATA, null) == null) return
+        // Confirm the destination reads back before the source is destroyed. The
+        // commit reports that the write reached disk, not that what landed can
+        // be retrieved, and the gap between those two is where a share would be
+        // lost. Compared against what was written rather than merely non-null,
+        // and covering the iv, since data without it cannot be decrypted.
+        if (sharePrefs.getString(KEY_SHARE_DATA, null) != shareData) return
+        if (sharePrefs.getString(KEY_SHARE_IV, null) != shareIv) return
 
         addKeyToRegistry(groupPubkeyHex)
         if (getActiveShareKey() == null) {
