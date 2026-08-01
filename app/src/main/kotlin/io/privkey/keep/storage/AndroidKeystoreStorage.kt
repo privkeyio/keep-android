@@ -164,11 +164,16 @@ class AndroidKeystoreStorage(
 
     // Encryption and decryption are separate entry points on purpose, rather than
     // one function taking a mode and a nullable IV. Under AES-GCM, reusing an IV
-    // with the same key destroys both confidentiality and authenticity, and it
-    // does so silently: encryption succeeds and the ciphertext looks fine. Every
-    // caller happened to pass null on the encrypt path, but nothing stopped one
-    // from passing an IV. Splitting the functions makes that a compile error
-    // instead of a convention, and leaves the provider to draw a fresh IV.
+    // with one key destroys both confidentiality and authenticity.
+    //
+    // For these particular keys the platform is expected to catch it: Keystore
+    // keys are generated with randomized encryption required by default, which
+    // rejects a caller-supplied IV at init time. That is a runtime backstop from
+    // another component, it does not hold for a key that is not Keystore-backed,
+    // and it is not what a reader of this call site can see. Every caller
+    // happened to pass null on the encrypt path; nothing stopped one from
+    // passing an IV. Splitting the functions makes it a compile error here, and
+    // leaves the provider to draw a fresh IV.
     private fun initCipherForEncryption(key: SecretKey): Cipher = runCatching {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key)

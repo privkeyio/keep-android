@@ -66,7 +66,7 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
 # drive NIP-55 flows; it is not shipped.
 list_sources() {
   git ls-files '*.kt' '*.java' \
-    | grep -vE '(^|/)(test|androidTest|testFixtures|debug)/' \
+    | grep -vE '(^|/)(test|androidTest|testFixtures)/' \
     | grep -vE '^testharness/'
 }
 
@@ -88,20 +88,27 @@ preprocess() {
   local f rc out
   rc=0
   for f in $SOURCES; do
-    out=$(awk -v fname="$f" -v optout="$OPT_OUT" -v keepstrings="${1:-0}" '
+    out=$(awk -v fname="$f" -v optout="$OPT_OUT" -v keepstrings="${1:-0}" -v keepoptout="${2:-0}" '
       function strip(s,   out, i, c, d, n) {
         out = ""; cmt = ""; n = length(s)
         for (i = 1; i <= n; i++) {
           c = substr(s, i, 1); d = substr(s, i, 2)
           if (inblock) { if (d == "*/") { inblock = 0; i++ } else cmt = cmt c; continue }
-          if (instr)   { if (c == "\\") { i++; continue }
-                         if (c == quote) { instr = 0; out = out "\"\"" }
-                         continue }
+          if (instr)   {
+            if (c == "\\") { if (keepstrings) out = out c substr(s, i + 1, 1); i++; continue }
+            if (c == quote) { instr = 0; out = out (keepstrings ? c : "\"\"") ; continue }
+            if (keepstrings) out = out c
+            continue
+          }
           if (d == "/*") { inblock = 1; i++; continue }
           if (d == "//") { cmt = cmt substr(s, i + 2); break }
           if (c == "\"" || c == "'"'"'") {
-            if (keepstrings) { out = out c; continue }
-            instr = 1; quote = c; continue
+            # Even when literals are kept, string STATE must be tracked: a MIME
+            # wildcard "*/*" or a regex "^wss://" otherwise reads as a comment
+            # opener and hides the rest of the file from this pass.
+            instr = 1; quote = c
+            if (keepstrings) out = out c
+            continue
           }
           out = out c
         }
@@ -129,13 +136,13 @@ preprocess() {
 
         if (open > 0) {
           buf = buf " " code
-          if (marked) bufopt = 1
+          if (marked && !keepoptout) bufopt = 1
           open += count(code, "(") - count(code, ")")
           if (open <= 0) emit()
           next
         }
 
-        if (marked || blockopt) { blockopt = 0; next }
+        if (!keepoptout && (marked || blockopt)) { blockopt = 0; next }
         blockopt = 0
 
         buf = code; bufline = FNR; bufopt = 0
@@ -161,23 +168,38 @@ CODE_STR=$(preprocess 1) || {
   printf '\n\033[31mFAIL\033[0m the scanner itself failed; refusing to report a clean tree\n'
   exit 1
 }
+# Rule 3 has no opt-out, so it needs a stream where the marker was not honoured.
+# Reusing CODE would let `// rng-hygiene: ok - trust me` waive the one rule that
+# guards a catastrophic, silent failure.
+CODE_NOWAIVE=$(preprocess 0 1) || {
+  printf '\n\033[31mFAIL\033[0m the scanner itself failed; refusing to report a clean tree\n'
+  exit 1
+}
 if [ -z "$CODE" ] || [ -z "$CODE_STR" ]; then
   printf '\n\033[31mFAIL\033[0m preprocessor produced no code lines; the guard scanned nothing\n'
   exit 1
 fi
 
+# Both scanners abort the whole run on an awk failure. Without that, an ERE this
+# awk rejects (the BSD-awk case the header raises) yields an empty result, which
+# reads as "no violations" -- the guard printing OK while a violation is present.
 scan() { # $1 = ERE, matched against code with string literals blanked
   printf '%s\n' "$CODE" | awk -v pat="$1" '{
     line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
     if (line ~ pat) print $0
-  }'
+  }' || scanner_died
 }
 
 scan_with_strings() { # $1 = ERE, matched against code with literals intact
   printf '%s\n' "$CODE_STR" | awk -v pat="$1" '{
     line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
     if (line ~ pat) print $0
-  }'
+  }' || scanner_died
+}
+
+scanner_died() {
+  printf '\n\033[31mFAIL\033[0m the scanner itself failed; refusing to report a clean tree\n' >&2
+  exit 1
 }
 
 report() { # $1 = findings, $2 = headline, $3.. = hints
@@ -192,7 +214,10 @@ report() { # $1 = findings, $2 = headline, $3.. = hints
 # Match the RNG token, not a receiver shape: pinning `"0123..".random()` is
 # bypassed by hoisting the alphabet into a val, which is the same code one
 # refactor away.
-weak_rng=$(scan '(^|[^a-zA-Z0-9_.])(kotlin[.]random|java[.]util[.]Random|Math[.]random|Random[(]|Random[.]next|ThreadLocalRandom)|[.]random[(][)]')
+# The `(^|[^a-zA-Z0-9_.])` guard deliberately does NOT apply to the fully
+# qualified names: `java.util.concurrent.ThreadLocalRandom.current()` has a `.`
+# in front of the token, so anchoring it would make qualified use invisible.
+weak_rng=$(scan 'kotlin[.]random|java[.]util[.]Random|Math[.]random|ThreadLocalRandom|SplittableRandom|(^|[^a-zA-Z0-9_.])(Random[(]|Random[.]next)|[.]random[(][)]|SecureRandom[(][^)]')
 report "$weak_rng" "non-cryptographic randomness in production code:" \
   'use java.security.SecureRandom, or UUID.randomUUID() for correlation ids' \
   "or mark a deliberate non-crypto use: // $OPT_OUT - <reason>"
@@ -207,14 +232,44 @@ report "$weak_sr" "SecureRandom weakened at the call site:" \
   'and SHA1PRNG is a legacy algorithm with a history of weak seeding on Android'
 
 # ------------------------------------- 3. AES-GCM never encrypts with an IV --
-# The load-bearing rule. A GCM IV reused under one key is catastrophic and
-# silent, and the only structural defence is that the encrypt path never accepts
-# one. Statement-scoped, so a wrapped init() call is judged whole.
-gcm_bad=$(scan 'ENCRYPT_MODE[^;]*(GCMParameterSpec|IvParameterSpec|AlgorithmParameterSpec)')
-report "$gcm_bad" "AES-GCM cipher initialised for encryption with a caller-supplied IV:" \
-  'reusing a GCM IV under one key destroys confidentiality and authenticity, silently.' \
-  'Init encryption as cipher.init(ENCRYPT_MODE, key) and let the provider draw the IV;' \
-  'read it back from cipher.iv afterwards. Supply a spec only when decrypting.'
+# The load-bearing rule, and the only one with no opt-out: a GCM IV reused under
+# one key is catastrophic and silent, and there is no legitimate reason in this
+# app to hand a cipher an IV for encryption.
+#
+# Counted structurally rather than matched as a token pair. An earlier version
+# required `ENCRYPT_MODE` and the spec constructor in the same statement, which
+# the very code this repo removed did NOT satisfy -- `cipher.init(mode, key,
+# spec)` with both hoisted into variables passed clean, as did a numeric opmode.
+# The real invariant does not mention ENCRYPT at all: `Cipher.init` takes a spec
+# only when decrypting, so any init with three or more arguments has to be
+# provably a decrypt.
+gcm_bad=$(
+  printf '%s\n' "$CODE_NOWAIVE" | awk '
+    function args(s,   i, c, d, n) {
+      # Count top-level commas inside the first (...) group, so nested calls and
+      # generics do not inflate the count.
+      n = 1; d = 0
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "(") { d++; if (d == 1) continue }
+        else if (c == ")") { d--; if (d == 0) break }
+        else if (c == "," && d == 1) n++
+      }
+      return n
+    }
+    {
+      line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
+      if (line !~ /[.]init[ \t]*[(]/) next
+      if (line ~ /DECRYPT_MODE/) next
+      call = substr(line, index(line, ".init") + 5)
+      if (args(call) >= 3) print $0
+    }
+  ' || scanner_died
+)
+report "$gcm_bad" "Cipher.init with three or more arguments that is not provably a decrypt:" \
+  'under AES-GCM, reusing an IV with one key destroys confidentiality and authenticity.' \
+  'Init encryption as cipher.init(ENCRYPT_MODE, key) and read the IV back from cipher.iv;' \
+  'pass a parameter spec only on a call that names DECRYPT_MODE.'
 
 if [ "$status" -eq 0 ]; then
   echo "RNG hygiene: OK (no non-CSPRNG generators, SecureRandom unweakened, no GCM encryption with a supplied IV)"
