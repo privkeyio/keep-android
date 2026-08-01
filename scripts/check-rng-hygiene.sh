@@ -192,7 +192,7 @@ report() { # $1 = findings, $2 = headline, $3.. = hints
 # Match the RNG token, not a receiver shape: pinning `"0123..".random()` is
 # bypassed by hoisting the alphabet into a val, which is the same code one
 # refactor away.
-weak_rng=$(scan '(^|[^a-zA-Z0-9_.])(kotlin\.random|java\.util\.Random|Math\.random|Random\(|Random\.next|ThreadLocalRandom)|\.random\(\)')
+weak_rng=$(scan '(^|[^a-zA-Z0-9_.])(kotlin[.]random|java[.]util[.]Random|Math[.]random|Random[(]|Random[.]next|ThreadLocalRandom)|[.]random[(][)]')
 report "$weak_rng" "non-cryptographic randomness in production code:" \
   'use java.security.SecureRandom, or UUID.randomUUID() for correlation ids' \
   "or mark a deliberate non-crypto use: // $OPT_OUT - <reason>"
@@ -201,7 +201,7 @@ report "$weak_rng" "non-cryptographic randomness in production code:" \
 # SHA1PRNG is an argument value, so it only survives the strings-intact pass.
 weak_sr=$(printf '%s\n%s\n' \
   "$(scan_with_strings 'SHA1PRNG')" \
-  "$(scan 'setSeed[ \t]*\(')" | grep -v '^$' || true)
+  "$(scan 'setSeed[ \t]*[(]')" | grep -v '^$' || true)
 report "$weak_sr" "SecureRandom weakened at the call site:" \
   'drop the explicit provider and the seed; the platform default is seeded from the OS' \
   'and SHA1PRNG is a legacy algorithm with a history of weak seeding on Android'
