@@ -85,7 +85,7 @@ class AndroidKeystoreStorage(
 
     @Synchronized
     private fun storeMetadata(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
-        val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.ENCRYPT_MODE, null)
+        val cipher = initCipherForEncryption(getOrCreateMetadataKey())
         writeShareToPrefs(getSharePrefs(key), encryptWithCipher(cipher, data), cipher.iv, metadata)
     }
 
@@ -97,7 +97,7 @@ class AndroidKeystoreStorage(
         val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
             ?: throw KeepMobileException.StorageNotFound()
         return try {
-            val cipher = initCipherWithKey(getOrCreateMetadataKey(), Cipher.DECRYPT_MODE, ivBase64)
+            val cipher = initCipherForDecryption(getOrCreateMetadataKey(), ivBase64)
             decryptWithCipher(cipher, encryptedData)
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
@@ -149,37 +149,43 @@ class AndroidKeystoreStorage(
         }
     }
 
-    fun getCipherForEncryption(): Cipher = initCipher(Cipher.ENCRYPT_MODE, null)
+    fun getCipherForEncryption(): Cipher = initCipherForEncryption(getOrCreateKey())
 
     fun getCipherForDecryption(): Cipher? {
         val legacyIv = prefs.getString(KEY_SHARE_IV, null)
         val legacyData = prefs.getString(KEY_SHARE_DATA, null)
         if (legacyIv != null && legacyData != null) {
-            return initCipher(Cipher.DECRYPT_MODE, legacyIv)
+            return initCipherForDecryption(getOrCreateKey(), legacyIv)
         }
 
         val activeKey = getActiveShareKey() ?: return null
         return getCipherForShareDecryption(activeKey)
     }
 
-    private fun initCipher(mode: Int, ivBase64: String?): Cipher =
-        initCipherWithKey(getOrCreateKey(), mode, ivBase64)
-
-    private fun initCipherWithKey(key: SecretKey, mode: Int, ivBase64: String?): Cipher = runCatching {
+    // Encryption and decryption are separate entry points on purpose, rather than
+    // one function taking a mode and a nullable IV. Under AES-GCM, reusing an IV
+    // with the same key destroys both confidentiality and authenticity, and it
+    // does so silently: encryption succeeds and the ciphertext looks fine. Every
+    // caller happened to pass null on the encrypt path, but nothing stopped one
+    // from passing an IV. Splitting the functions makes that a compile error
+    // instead of a convention, and leaves the provider to draw a fresh IV.
+    private fun initCipherForEncryption(key: SecretKey): Cipher = runCatching {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        if (ivBase64 != null) {
-            val spec = GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP))
-            cipher.init(mode, key, spec)
-        } else {
-            cipher.init(mode, key)
-        }
+        cipher.init(Cipher.ENCRYPT_MODE, key)
         cipher
-    }.getOrElse { e ->
+    }.getOrElse { e -> throw cipherInitFailure(e, "encryption") }
+
+    private fun initCipherForDecryption(key: SecretKey, ivBase64: String): Cipher = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, Base64.decode(ivBase64, Base64.NO_WRAP)))
+        cipher
+    }.getOrElse { e -> throw cipherInitFailure(e, "decryption") }
+
+    private fun cipherInitFailure(e: Throwable, operation: String): KeepMobileException {
         if (e is KeyPermanentlyInvalidatedException) {
-            throw KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
+            return KeepMobileException.StorageException("Biometric enrollment changed - please re-import your share")
         }
-        val operation = if (mode == Cipher.ENCRYPT_MODE) "encryption" else "decryption"
-        throw KeepMobileException.StorageException("Failed to initialize cipher for $operation")
+        return KeepMobileException.StorageException("Failed to initialize cipher for $operation")
     }
 
     private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {
@@ -479,15 +485,13 @@ class AndroidKeystoreStorage(
             ?: throw KeepMobileException.StorageException("Key $alias is not a SecretKey")
     }
 
-    private fun initCipherForShare(key: String, mode: Int, ivBase64: String?): Cipher =
-        initCipherWithKey(getOrCreateKeyForShare(key), mode, ivBase64)
-
-    fun getCipherForShareEncryption(key: String): Cipher = initCipherForShare(key, Cipher.ENCRYPT_MODE, null)
+    fun getCipherForShareEncryption(key: String): Cipher =
+        initCipherForEncryption(getOrCreateKeyForShare(key))
 
     fun getCipherForShareDecryption(key: String): Cipher? {
         val sharePrefs = getSharePrefs(key)
         val iv = sharePrefs.getString(KEY_SHARE_IV, null) ?: return null
-        return initCipherForShare(key, Cipher.DECRYPT_MODE, iv)
+        return initCipherForDecryption(getOrCreateKeyForShare(key), iv)
     }
 
     fun storeShareByKeyWithCipher(cipher: Cipher, key: String, data: ByteArray, metadata: ShareMetadataInfo) {
