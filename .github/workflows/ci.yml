@@ -49,6 +49,12 @@ jobs:
       - name: Verify release changelogs exist for this versionCode
         run: ./scripts/check-release-changelogs.sh
 
+      # Assert the guard's rules before trusting them. A member access split
+      # after a trailing dot, and a class name assembled by concatenation, both
+      # walked past the scanner and nothing would have noticed.
+      - name: Self-test the RNG hygiene guard
+        run: ./scripts/test-rng-hygiene.sh
+
       - name: Check for silent RNG fallbacks and GCM IV reuse
         run: ./scripts/check-rng-hygiene.sh
 
