@@ -124,21 +124,28 @@ preprocess() {
       }
       function emit() {
         if (buf != "" && !bufopt) printf "%s:%d:%s\n", fname, bufline, buf
-        buf = ""; bufopt = 0; open = 0
+        buf = ""; bufopt = 0; open = 0; dotcont = 0
       }
 
-      BEGIN { inblock = 0; instr = 0; blockopt = 0; buf = ""; open = 0; bufopt = 0 }
+      BEGIN { inblock = 0; instr = 0; blockopt = 0; buf = ""; open = 0; bufopt = 0; dotcont = 0 }
       {
         code = trim(strip($0))
         marked = index(cmt, optout); cmt = ""
 
         if (code == "") { if (marked) blockopt = 1; next }
 
-        if (open > 0) {
-          buf = buf " " code
+        # A line ending in `.` continues a member access: Kotlin accepts
+        # `Math.` on one line and `random()` on the next as the same call, and a
+        # per-physical-line matcher sees neither half. Buffered like an
+        # unbalanced paren so the rules match the joined expression.
+        if (open > 0 || dotcont) {
+          # Join directly after a trailing dot: `Math.` + ` ` + `random()` would
+          # reassemble as `Math. random()`, which no longer matches `Math[.]random`.
+          buf = buf (dotcont ? "" : " ") code
           if (marked && !keepoptout) bufopt = 1
           open += count(code, "(") - count(code, ")")
-          if (open <= 0) emit()
+          dotcont = (code ~ /\.[ \t]*$/)
+          if (open <= 0 && !dotcont) emit()
           next
         }
 
@@ -147,7 +154,8 @@ preprocess() {
 
         buf = code; bufline = FNR; bufopt = 0
         open = count(code, "(") - count(code, ")")
-        if (open <= 0) emit()
+        dotcont = (code ~ /\.[ \t]*$/)
+        if (open <= 0 && !dotcont) emit()
       }
       END { if (open > 0) emit() }
     ' "$f") || rc=2
@@ -191,9 +199,16 @@ scan() { # $1 = ERE, matched against code with string literals blanked
 }
 
 scan_with_strings() { # $1 = ERE, matched against code with literals intact
+  # Concatenation is collapsed before matching: `"java.util." + "Random"` builds
+  # the same class name a literal match would catch, and Class.forName reaches
+  # the same PRNG. Reported against the raw line so output shows what was
+  # written, not the normalised form.
   printf '%s\n' "$CODE_STR" | awk -v pat="$1" '{
+    raw = $0
     line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
-    if (line ~ pat) print $0
+    norm = line
+    gsub(/"[ \t]*\+[ \t]*"/, "", norm)
+    if (line ~ pat || norm ~ pat) print raw
   }' || scanner_died
 }
 
@@ -216,6 +231,16 @@ report() { # $1 = findings, $2 = headline, $3.. = hints
 # refactor away.
 # The `(^|[^a-zA-Z0-9_.])` guard deliberately does NOT apply to the fully
 # qualified names: `java.util.concurrent.ThreadLocalRandom.current()` has a `.`
+# ------------------------------ reflection reaches a PRNG by name, not by token ----
+# `Class.forName("java.util." + "Random")` builds the banned name at runtime, so
+# no literal match can see it, and reflection can reach any generator this file
+# forbids by spelling. There is no legitimate use in this codebase today, so the
+# rule is: don't. A marker documents it if that ever changes.
+reflect_bad=$(scan '(Class[.]forName|[.]loadClass)[ \t]*[(]')
+report "$reflect_bad" "loads a class by name, which can reach a banned generator without naming it:" \
+  'construct the type directly so the rules above can see which one it is.' \
+  "Mark a deliberate use: // $OPT_OUT - <reason>"
+
 # in front of the token, so anchoring it would make qualified use invisible.
 weak_rng=$(scan 'kotlin[.]random|java[.]util[.]Random|Math[.]random|ThreadLocalRandom|SplittableRandom|(^|[^a-zA-Z0-9_.])(Random[(]|Random[.]next)|[.]random[(][)]|SecureRandom[(][^)]')
 report "$weak_rng" "non-cryptographic randomness in production code:" \
