@@ -169,18 +169,22 @@ class Nip46ApprovalActivity : FragmentActivity() {
         }
     }
 
-    private fun handleReject() {
-        respond(false, null)
+    private fun handleReject(duration: PermissionDuration) {
+        respond(false, duration)
     }
 
     private fun respond(approved: Boolean, duration: PermissionDuration?) {
         approveCompletionCallback?.invoke(approved)
         approveCompletionCallback = null
-        val remember = if (approved) {
-            mapPermissionDurationToRemember(duration)
-        } else {
-            BunkerRememberDuration.JUST_THIS_TIME
-        }
+        // The duration applies to whichever answer was given. A refusal
+        // carrying one is remembered by the signer and answers the retries, so
+        // a client that retries on failure stops re-prompting the user.
+        //
+        // Every internal caller passes null here: a kill switch, a failed
+        // biometric, a missing cipher, a back press. Those map to the one-shot
+        // duration, which records nothing. Only a refusal the user actually
+        // chose a duration for is remembered.
+        val remember = mapPermissionDurationToRemember(duration)
         requestId?.let {
             BunkerService.respondToApproval(it, approved, clientPubkey, remember)
         }
