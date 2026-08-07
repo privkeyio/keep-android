@@ -32,6 +32,23 @@ class Nip46RejectDurationTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    private fun connectScreen(onReject: (PermissionDuration) -> Unit) {
+        compose.setContent {
+            KeepAndroidTheme {
+                Nip46ApprovalScreen(
+                    appName = "agent",
+                    appPubkey = "abcd",
+                    method = "connect",
+                    eventKind = null,
+                    eventContent = null,
+                    isConnectRequest = true,
+                    onApprove = { _, _ -> },
+                    onReject = onReject
+                )
+            }
+        }
+    }
+
     private fun screen(onReject: (PermissionDuration) -> Unit) {
         compose.setContent {
             KeepAndroidTheme {
@@ -88,6 +105,27 @@ class Nip46RejectDurationTest {
         assertEquals(
             "a chosen duration must reach the refusal, or the selector is decorative",
             PermissionDuration.ONE_HOUR,
+            received
+        )
+    }
+
+    /**
+     * A connect request hides the selector and defaults it to Forever, so
+     * forwarding that value would record a decision from a control the user
+     * never saw. Harmless today only because Forever yields no window in
+     * another crate; this pins it locally so a future release that supports
+     * permanent refusals cannot turn a hidden default into a permanent block.
+     */
+    @Test
+    fun rejecting_a_connect_request_reports_just_this_time() {
+        var received: PermissionDuration? = null
+        connectScreen { received = it }
+
+        compose.onNodeWithText(context.getString(R.string.connections_nip46_reject)).performClick()
+
+        assertEquals(
+            "a hidden selector must not contribute a duration to a refusal",
+            PermissionDuration.JUST_THIS_TIME,
             received
         )
     }

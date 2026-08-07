@@ -200,7 +200,24 @@ fun Nip46ApprovalScreen(
                     // honouring what the label already promises; before this the
                     // choice was silently discarded on this branch, so a user who
                     // picked a duration and refused was asked again immediately.
-                    onClick = { onReject(selectedDuration) },
+                    //
+                    // Connect requests are excluded because their selector is
+                    // hidden and defaults to Forever, so forwarding it would
+                    // record a decision from a control the user never saw. That
+                    // is harmless today only because Forever yields no window
+                    // and nothing is stored, which is a property of a different
+                    // crate; relying on it would mean a future release that
+                    // supports permanent refusals silently converts a hidden
+                    // default into a permanent block. Stated here instead.
+                    onClick = {
+                        onReject(
+                            if (isConnectRequest) {
+                                PermissionDuration.JUST_THIS_TIME
+                            } else {
+                                selectedDuration
+                            }
+                        )
+                    },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.connections_nip46_reject))
