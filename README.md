@@ -68,6 +68,17 @@ git clone https://github.com/privkeyio/keep keep
 
 APK output: `app/build/outputs/apk/debug/app-debug.apk`. Gradle rebuilds the Rust libraries automatically when sources change. Set `KEEP_REPO` if the `keep` checkout lives elsewhere.
 
+## Typechecking against a changed core
+
+Changing keep-mobile's FFI leaves the generated Kotlin bindings stale, and regenerating them normally means a full Android cross-compile even though the Kotlin itself is platform independent. To refresh them from a plain host build instead:
+
+```bash
+KEEP_REPO=../keep ./scripts/refresh-bindings.sh
+./gradlew compileDebugKotlin
+```
+
+This needs no NDK, no `cargo-ndk` and no Android targets. It writes no `jniLibs`, so the app compiles but fails at runtime with an `UnsatisfiedLinkError` — use it while iterating on a core change, and `./gradlew assembleDebug` to run anything.
+
 Run `scripts/check-toolchain-pins.sh` to verify pinned versions are consistent across build scripts and CI workflows.
 
 # Contributing
