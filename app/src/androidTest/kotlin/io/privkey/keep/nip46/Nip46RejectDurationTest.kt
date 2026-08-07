@@ -76,7 +76,10 @@ class Nip46RejectDurationTest {
         var received: PermissionDuration? = null
         screen { received = it }
 
-        compose.onNodeWithText(context.getString(R.string.connections_nip46_remember_decision))
+        // The selector is an ExposedDropdownMenuBox: the menu opens from the
+        // read-only field showing the current selection, not from the label
+        // above it. Clicking the label finds nothing and the menu never opens.
+        compose.onNodeWithText(context.getString(R.string.permission_duration_just_this_time))
             .performClick()
         compose.onNodeWithText(context.getString(R.string.permission_duration_one_hour))
             .performClick()
