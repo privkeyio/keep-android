@@ -325,6 +325,7 @@ fun MainScreen(
     var activeAccountKey by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
+    var showCreateGroupScreen by remember { mutableStateOf(false) }
     var showImportNsecScreen by remember { mutableStateOf(false) }
     var showShareDetails by remember { mutableStateOf(false) }
     var showExportScreen by remember { mutableStateOf(false) }
@@ -334,6 +335,7 @@ fun MainScreen(
     var showSignPolicyScreen by remember { mutableStateOf(false) }
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
+    var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
     var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
@@ -935,6 +937,36 @@ fun MainScreen(
         return
     }
 
+    if (showCreateGroupScreen) {
+        val groupRelays = relays.ifEmpty {
+            runCatching { keepMobile.getRelayConfig(null).frostRelays }.getOrDefault(emptyList())
+        }
+        CreateGroupScreen(
+            relays = groupRelays,
+            onCreateGroup = { config, name, cipher ->
+                accountActions.createGroup(config, name, cipher) { createGroupState = it }
+            },
+            onGetCipher = {
+                requireBiometricReady()
+                storage.getCipherForEncryption()
+            },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest(
+                    appContext.getString(R.string.main_create_group_title),
+                    appContext.getString(R.string.main_create_group_subtitle),
+                    cipher,
+                    callback
+                )
+            },
+            onDismiss = {
+                showCreateGroupScreen = false
+                createGroupState = CreateGroupState.Idle
+            },
+            createGroupState = createGroupState
+        )
+        return
+    }
+
     if (showImportNsecScreen) {
         ImportNsecScreen(
             onImport = { nsec, name, cipher ->
@@ -1155,6 +1187,7 @@ fun MainScreen(
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
                     onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
+                    onCreateGroup = { showCreateGroupScreen = true },
                     onConnect = {
                         coroutineScope.launch {
                             val cipher = try {
@@ -1378,7 +1411,8 @@ fun MainScreen(
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
                     onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
-                    onRecoverNsec = { showRecoverNsec = true }
+                    onRecoverNsec = { showRecoverNsec = true },
+                    onCreateGroup = { showCreateGroupScreen = true }
                 )
             }
         }
@@ -1407,6 +1441,7 @@ private fun HomeTab(
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
     onRecoverMnemonic: () -> Unit,
+    onCreateGroup: () -> Unit,
     onConnect: () -> Unit,
     biometricAvailable: Boolean,
     pinEnabled: Boolean,
@@ -1504,7 +1539,8 @@ private fun HomeTab(
                 onImport = onImport,
                 onImportNsec = onImportNsec,
                 onCreateAccount = onCreateAccount,
-                onRecoverMnemonic = onRecoverMnemonic
+                onRecoverMnemonic = onRecoverMnemonic,
+                onCreateGroup = onCreateGroup
             )
         }
 
@@ -1727,7 +1763,8 @@ private fun AccountTab(
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
     onRecoverMnemonic: () -> Unit,
-    onRecoverNsec: () -> Unit
+    onRecoverNsec: () -> Unit,
+    onCreateGroup: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1840,7 +1877,8 @@ private fun AccountTab(
                 onImport = onImport,
                 onImportNsec = onImportNsec,
                 onCreateAccount = onCreateAccount,
-                onRecoverMnemonic = onRecoverMnemonic
+                onRecoverMnemonic = onRecoverMnemonic,
+                onCreateGroup = onCreateGroup
             )
         }
 

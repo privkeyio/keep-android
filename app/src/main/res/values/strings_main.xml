@@ -21,6 +21,8 @@
     <string name="main_import_nsec_subtitle">Authenticate to store key securely</string>
     <string name="main_create_account_title">Create Account</string>
     <string name="main_create_account_subtitle">Authenticate to store key securely</string>
+    <string name="main_create_group_title">Create Signing Group</string>
+    <string name="main_create_group_subtitle">Authenticate to store share securely</string>
     <string name="main_import_from_seed_words_title">Import from Seed Words</string>
     <string name="main_import_from_seed_words_subtitle">Authenticate to store key securely</string>
     <string name="main_confirm_backup_failed">Failed to confirm backup. Please try again.</string>

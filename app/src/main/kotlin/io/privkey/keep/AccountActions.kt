@@ -1,9 +1,14 @@
 package io.privkey.keep
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.uniffi.DkgConfig
+import io.privkey.keep.uniffi.DkgProgressCallback
+import io.privkey.keep.uniffi.DkgProgressUpdate
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -13,12 +18,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.security.SecureRandom
+import java.util.Arrays
 import java.util.UUID
 import javax.crypto.Cipher
 
 private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), emptyList())
 
 internal const val MAX_ACCOUNT_NAME_LENGTH = 64
+
+sealed class CreateGroupState {
+    object Idle : CreateGroupState()
+    data class Running(val update: DkgProgressUpdate) : CreateGroupState()
+    data class Success(val name: String, val groupPubkey: String) : CreateGroupState()
+    data class Error(val message: String) : CreateGroupState()
+}
 
 internal class AccountActions(
     private val keepMobile: KeepMobile,
@@ -384,6 +398,66 @@ internal class AccountActions(
         // key in-crate. Zero the bytes unconditionally once the async call has run.
         executeImport(cipher, onImportStateChanged, cleanup = { mnemonic.fill(0.toByte()) }) {
             keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
+        }
+    }
+
+    fun createGroup(
+        config: DkgConfig,
+        name: String,
+        cipher: Cipher,
+        onState: (CreateGroupState) -> Unit
+    ) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        val callback = object : DkgProgressCallback {
+            override fun onProgress(update: DkgProgressUpdate) {
+                mainHandler.post { onState(CreateGroupState.Running(update)) }
+            }
+        }
+        val passphraseChars = CharArray(64)
+        val random = ByteArray(32)
+        SecureRandom().nextBytes(random)
+        val hex = "0123456789abcdef"
+        for (i in random.indices) {
+            val b = random[i].toInt() and 0xFF
+            passphraseChars[i * 2] = hex[b ushr 4]
+            passphraseChars[i * 2 + 1] = hex[b and 0x0F]
+        }
+        Arrays.fill(random, 0.toByte())
+        val passphrase = String(passphraseChars)
+
+        onState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
+        coroutineScope.launch {
+            try {
+                accountMutex.withLock {
+                    val requestId = UUID.randomUUID().toString()
+                    var pendingSet = false
+                    try {
+                        storage.setPendingCipher(requestId, cipher)
+                        pendingSet = true
+                        val result = withContext(Dispatchers.IO) {
+                            storage.setRequestIdContext(requestId)
+                            try {
+                                keepMobile.frostRunDkg(config, name, passphrase, 180uL, callback)
+                            } finally {
+                                storage.clearRequestIdContext()
+                            }
+                        }
+                        onState(CreateGroupState.Success(result.name, result.groupPubkey))
+                        try {
+                            refreshAccountState()
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                        }
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
+                        onState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                    } finally {
+                        if (pendingSet) storage.clearPendingCipher(requestId)
+                    }
+                }
+            } finally {
+                Arrays.fill(passphraseChars, ' ')
+            }
         }
     }
 

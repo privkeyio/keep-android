@@ -113,6 +113,38 @@
     <string name="share_cards_import_seed">Import from Seed Words</string>
     <string name="share_cards_import_frost">Import FROST Share</string>
     <string name="share_cards_import_nsec">Import nsec</string>
+    <string name="share_cards_create_group">Create Signing Group</string>
+
+    <!-- CreateGroupScreen -->
+    <string name="create_group_title">Create Signing Group</string>
+    <string name="create_group_default_name">Signing Group</string>
+    <string name="create_group_mode_start">Start new</string>
+    <string name="create_group_mode_join">Join</string>
+    <string name="create_group_name_label">Group name</string>
+    <string name="create_group_threshold_label">Threshold: <xliff:g id="threshold" example="2">%1$d</xliff:g></string>
+    <string name="create_group_participants_label">Participants: <xliff:g id="participants" example="3">%1$d</xliff:g></string>
+    <string name="create_group_my_number_label">My number: <xliff:g id="number" example="2">%1$d</xliff:g></string>
+    <string name="create_group_create_invite">Create invite</string>
+    <string name="create_group_invite_qr_label">Invite</string>
+    <string name="create_group_creator_summary">You are participant 1 of <xliff:g id="participants" example="3">%1$d</xliff:g>. Have each other participant scan this and pick their number.</string>
+    <string name="create_group_joiner_summary">A <xliff:g id="threshold" example="2">%1$d</xliff:g>-of-<xliff:g id="participants" example="3">%2$d</xliff:g> signing group. Pick your participant number.</string>
+    <string name="create_group_join_instructions">Scan the invite QR from the group creator to join.</string>
+    <string name="create_group_scan_invite">Scan invite QR</string>
+    <string name="create_group_scan_title">Scan Group Invite</string>
+    <string name="create_group_start_dkg">Start DKG</string>
+    <string name="create_group_join_dkg">Join DKG</string>
+    <string name="create_group_stepper_minus">−</string>
+    <string name="create_group_stepper_plus">+</string>
+    <string name="create_group_cancel">Cancel</string>
+    <string name="create_group_back">Back</string>
+    <string name="create_group_done">Done</string>
+    <string name="create_group_no_relays">No FROST relays configured.</string>
+    <string name="create_group_failed">Group creation failed. Please try again.</string>
+    <string name="create_group_status_connecting">Connecting to relays…</string>
+    <string name="create_group_status_round1">Round 1: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
+    <string name="create_group_status_round2">Round 2: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
+    <string name="create_group_status_finalizing">Finalizing…</string>
+    <string name="create_group_success"><xliff:g id="name" example="Signing Group">%1$s</xliff:g> created (<xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g>).</string>
 
     <!-- ShareDetailsScreen -->
     <string name="share_details_share_of">Share <xliff:g id="index" example="1">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g></string>

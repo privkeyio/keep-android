@@ -79,7 +79,8 @@ fun NoShareCard(
     onImport: () -> Unit,
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
-    onRecoverMnemonic: () -> Unit
+    onRecoverMnemonic: () -> Unit,
+    onCreateGroup: () -> Unit
 ) {
     KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(
@@ -104,6 +105,10 @@ fun NoShareCard(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(onClick = onImportNsec, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.share_cards_import_nsec))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(onClick = onCreateGroup, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.share_cards_create_group))
             }
         }
     }
