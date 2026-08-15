@@ -141,9 +141,17 @@ tasks.register("verifyKeepVersion") {
             "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
         }
         if (statusOutput.isNotBlank()) {
+            val dirtyPaths = statusOutput.trim().lines().joinToString("\n") { "  $it" }
             throw GradleException(
-                "keep checkout at $keepPath has a dirty worktree, which bypasses SHA pinning. " +
-                "Fix: git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx"
+                "keep checkout at $keepPath has a dirty worktree, which bypasses SHA pinning.\n" +
+                "Dirty paths:\n$dirtyPaths\n" +
+                "If these are yours (scratch output, editor files), do NOT clean the checkout. " +
+                "Build against a throwaway worktree instead, which leaves your files alone:\n" +
+                "  git -C $keepPath worktree add --detach /tmp/keep-$pinnedSha $pinnedSha\n" +
+                "  KEEP_REPO=/tmp/keep-$pinnedSha ./gradlew <task>\n" +
+                "Only if the checkout is genuinely disposable: " +
+                "git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx " +
+                "(this DELETES every untracked file listed above)."
             )
         }
     }
