@@ -148,7 +148,9 @@ tasks.register("verifyKeepVersion") {
                 "If these are yours (scratch output, editor files), do NOT clean the checkout. " +
                 "Build against a throwaway worktree instead, which leaves your files alone:\n" +
                 "  git -C $keepPath worktree add --detach /tmp/keep-$pinnedSha $pinnedSha\n" +
-                "  KEEP_REPO=/tmp/keep-$pinnedSha ./gradlew <task>\n" +
+                // A literal <task> would be shell input redirection, so the line
+                // could not be pasted as-is. Name a real task instead.
+                "  KEEP_REPO=/tmp/keep-$pinnedSha ./gradlew assembleDebug\n" +
                 "Only if the checkout is genuinely disposable: " +
                 "git -C $keepPath reset --hard $pinnedSha && git -C $keepPath clean -fdx " +
                 "(this DELETES every untracked file listed above)."
