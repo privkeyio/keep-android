@@ -903,6 +903,10 @@ fun MainScreen(
                 showAccountSwitcher = false
                 showCreateAccountScreen = true
             },
+            onCreateGroup = {
+                showAccountSwitcher = false
+                showCreateGroupScreen = true
+            },
             onRecoverMnemonic = {
                 showAccountSwitcher = false
                 showMnemonicRecoveryScreen = true

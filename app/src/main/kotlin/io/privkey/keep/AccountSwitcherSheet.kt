@@ -72,6 +72,7 @@ fun AccountSwitcherSheet(
     onImportAccount: () -> Unit,
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
+    onCreateGroup: () -> Unit,
     onRecoverMnemonic: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -113,6 +114,15 @@ fun AccountSwitcherSheet(
                     .padding(horizontal = 16.dp)
             ) {
                 Text(stringResource(R.string.account_create))
+            }
+
+            TextButton(
+                onClick = onCreateGroup,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text(stringResource(R.string.share_cards_create_group))
             }
 
             TextButton(
