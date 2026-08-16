@@ -221,6 +221,11 @@ internal class FrameCollector {
 
         if (parsed.has("version") && parsed.has("encrypted_share")) return trimmed
 
+        // On-device DKG group-creation QRs (CreateGroupScreen) are single-frame
+        // v-tagged envelopes; hand them to the caller's validator, which gates
+        // the specific setup/subkey/roster shapes.
+        if (parsed.has("v") && parsed.has("k")) return trimmed
+
         return null
     }
 

@@ -946,6 +946,8 @@ fun MainScreen(
             onCreateGroup = { config, name, cipher ->
                 accountActions.createGroup(config, name, cipher) { createGroupState = it }
             },
+            onDkgBegin = { name -> accountActions.dkgBegin(name) },
+            onCancel = { accountActions.cancelDkg() },
             onGetCipher = {
                 requireBiometricReady()
                 storage.getCipherForEncryption()

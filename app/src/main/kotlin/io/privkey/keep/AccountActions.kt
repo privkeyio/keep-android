@@ -401,6 +401,18 @@ internal class AccountActions(
         }
     }
 
+    /**
+     * Mint (or re-mint) this device's per-group DKG signing subkey and return its
+     * pubkey hex. The secret stays in Rust memory keyed by [groupName]; each
+     * participant runs this, exchanges pubkeys out of band, and the coordinator
+     * assembles them into the roster that [createGroup] consumes. Must be called
+     * with the same [groupName] later passed as config.groupName.
+     */
+    fun dkgBegin(groupName: String): String = keepMobile.frostDkgBegin(groupName)
+
+    /** Signal a cancel to an in-flight [createGroup] DKG run. */
+    fun cancelDkg() = keepMobile.frostCancelDkg()
+
     fun createGroup(
         config: DkgConfig,
         name: String,
