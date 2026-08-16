@@ -3,6 +3,7 @@ package io.privkey.keep
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.atomic.AtomicBoolean
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -420,9 +421,18 @@ internal class AccountActions(
         onState: (CreateGroupState) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
+        // The DKG completes inside frost_run_dkg (share already persisted) before
+        // this coroutine resumes to post Success. Progress updates arrive on the
+        // main Handler while the coroutine resumes on the Compose dispatcher, and
+        // the two are not FIFO-ordered: a late Running(Finalizing) could otherwise
+        // overwrite the terminal state and freeze the UI on "Finalizing…". Route
+        // every state change through this one Handler and drop progress once
+        // terminal, so Success/Error always win.
+        val finished = AtomicBoolean(false)
+        fun postState(state: CreateGroupState) = mainHandler.post { onState(state) }
         val callback = object : DkgProgressCallback {
             override fun onProgress(update: DkgProgressUpdate) {
-                mainHandler.post { onState(CreateGroupState.Running(update)) }
+                mainHandler.post { if (!finished.get()) onState(CreateGroupState.Running(update)) }
             }
         }
         val passphraseChars = CharArray(64)
@@ -437,7 +447,7 @@ internal class AccountActions(
         Arrays.fill(random, 0.toByte())
         val passphrase = String(passphraseChars)
 
-        onState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
+        postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
         coroutineScope.launch {
             try {
                 accountMutex.withLock {
@@ -454,7 +464,8 @@ internal class AccountActions(
                                 storage.clearRequestIdContext()
                             }
                         }
-                        onState(CreateGroupState.Success(result.name, result.groupPubkey))
+                        finished.set(true)
+                        postState(CreateGroupState.Success(result.name, result.groupPubkey))
                         try {
                             refreshAccountState()
                         } catch (e: Exception) {
@@ -462,7 +473,8 @@ internal class AccountActions(
                         }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
-                        onState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                        finished.set(true)
+                        postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
                     } finally {
                         if (pendingSet) storage.clearPendingCipher(requestId)
                     }
