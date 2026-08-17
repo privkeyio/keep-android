@@ -708,16 +708,35 @@ private fun DkgRunView(
 
         when (state) {
             is CreateGroupState.Running -> {
+                // Cancel only signals Rust; a peer that finishes its round late can
+                // keep frost_run_dkg blocked past the request, so the spinner would
+                // otherwise trap the user. Once cancel is requested, surface a Leave
+                // affordance: the run continues on the account scope and a persisted
+                // share still lands, so exiting the screen is safe.
+                var cancelRequested by remember { mutableStateOf(false) }
                 CircularProgressIndicator()
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = dkgStatusText(state.update),
+                    text = if (cancelRequested) stringResource(R.string.create_group_canceling)
+                    else dkgStatusText(state.update),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(24.dp))
-                OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.create_group_cancel))
+                if (cancelRequested) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.create_group_leave))
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            cancelRequested = true
+                            onCancel()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(stringResource(R.string.create_group_cancel))
+                    }
                 }
             }
             is CreateGroupState.Success -> {

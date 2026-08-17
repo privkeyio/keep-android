@@ -162,6 +162,8 @@
     <string name="create_group_status_round2">Round 2: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
     <string name="create_group_status_confirming">Confirming group key: <xliff:g id="confirmed" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
     <string name="create_group_status_finalizing">Finalizing…</string>
+    <string name="create_group_canceling">Canceling… You can leave this screen; the group will finish or stop on its own.</string>
+    <string name="create_group_leave">Leave</string>
     <string name="create_group_success"><xliff:g id="name" example="Signing Group">%1$s</xliff:g> created (<xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g>).</string>
 
     <!-- ShareDetailsScreen -->
