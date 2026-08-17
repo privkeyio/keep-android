@@ -116,7 +116,7 @@
     <string name="share_cards_create_group">Create or Join Signing Group</string>
 
     <!-- CreateGroupScreen -->
-    <string name="create_group_title">Create Signing Group</string>
+    <string name="create_group_title">Create or Join Signing Group</string>
     <string name="create_group_default_name">Signing Group</string>
     <string name="create_group_mode_start">Start new</string>
     <string name="create_group_mode_join">Join</string>
