@@ -59,7 +59,7 @@ private fun relaysFromJson(obj: JSONObject): List<String> {
 // websocket endpoints, so bound the list and require a ws(s) scheme rather than
 // connecting to arbitrary attacker-supplied strings.
 private fun relaysValid(relays: List<String>): Boolean =
-    relays.size <= MAX_RELAYS &&
+    relays.isNotEmpty() && relays.size <= MAX_RELAYS &&
         relays.all { it.length <= MAX_RELAY_LENGTH && (it.startsWith("wss://") || it.startsWith("ws://")) }
 
 private fun kind(data: String): String? = try {

@@ -23,7 +23,7 @@ class CreateGroupValidationTest {
         n: Int = 3,
         v: Int = 2,
         k: String = "setup",
-        relays: String = "[]"
+        relays: String = """["wss://relay.example"]"""
     ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":$relays}"""
 
     private fun subkey(
@@ -40,7 +40,7 @@ class CreateGroupValidationTest {
         entries: String = """[{"i":1,"pk":"$hex64"},{"i":2,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""",
         v: Int = 2,
         k: String = "roster",
-        relays: String = "[]"
+        relays: String = """["wss://relay.example"]"""
     ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":$relays,"r":$entries}"""
 
     @Test
@@ -141,4 +141,10 @@ class CreateGroupValidationTest {
     @Test
     fun rosterRejectsNonWebsocketRelay() =
         assertFalse(isValidRoster(roster(relays = """["ftp://relay.example"]""")))
+
+    @Test
+    fun setupRejectsEmptyRelayList() = assertFalse(isValidSetup(setup(relays = "[]")))
+
+    @Test
+    fun rosterRejectsEmptyRelayList() = assertFalse(isValidRoster(roster(relays = "[]")))
 }
