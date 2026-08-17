@@ -145,11 +145,17 @@ internal fun isValidRoster(data: String): Boolean {
         if (participants !in MIN_THRESHOLD..MAX_PARTICIPANTS) return false
         if (threshold !in MIN_THRESHOLD..participants) return false
         if (entries.length() != participants) return false
+        val seenIdx = HashSet<Int>()
+        val seenPk = HashSet<String>()
         for (i in 0 until entries.length()) {
             val e = entries.optJSONObject(i) ?: return false
             val idx = e.optInt("i", -1)
-            if (idx !in 1..participants || !isHex64(e.optString("pk", ""))) return false
+            val pk = e.optString("pk", "")
+            if (idx !in 1..participants || !isHex64(pk)) return false
+            if (!seenIdx.add(idx) || !seenPk.add(pk)) return false
         }
+        // Unique indices in 1..participants filling all `participants` slots means
+        // the set is exactly {1..participants}, so index 1 (coordinator) is present.
         true
     } catch (_: Exception) {
         false
