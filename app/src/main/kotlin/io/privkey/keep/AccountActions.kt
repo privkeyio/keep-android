@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.DkgProgressUpdate
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -503,6 +504,8 @@ internal class AccountActions(
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
                     }
+                } catch (c: CancellationException) {
+                    throw c
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
                     finished.set(true)
