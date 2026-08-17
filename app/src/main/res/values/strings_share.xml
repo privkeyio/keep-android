@@ -138,6 +138,7 @@
     <string name="create_group_no_relays">No FROST relays configured.</string>
     <string name="create_group_failed">Group creation failed. Please try again.</string>
     <string name="create_group_begin_failed">Could not start the group. Please try again.</string>
+    <string name="create_group_in_progress">A group creation is still finishing. Please wait a moment and try again.</string>
 
     <!-- Coordinator ceremony -->
     <string name="create_group_setup_qr_label">Setup code</string>

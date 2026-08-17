@@ -66,6 +66,13 @@ internal class AccountActions(
 
     private val accountMutex = Mutex()
 
+    // Single-flight guard for the DKG. frostCancelDkg sets one process-wide flag
+    // with no run identity, so a second ceremony queued behind accountMutex (e.g.
+    // a double-tap on Start before the button hides) would let a cancel abort the
+    // run actually on the wire while the queued one proceeds. Reject duplicates
+    // synchronously so only ever one run is in flight for cancel to target.
+    private val dkgInProgress = AtomicBoolean(false)
+
     @Volatile
     private var currentRelays: List<String> = emptyList()
 
@@ -439,6 +446,14 @@ internal class AccountActions(
         // terminal, so Success/Error always win.
         val finished = AtomicBoolean(false)
         fun postState(state: CreateGroupState) = mainHandler.post { onState(state) }
+        // Reject a duplicate ceremony (e.g. a double-tap, or a retry while a run
+        // left running in the background is still finishing) before posting any
+        // Running state, so nothing queues behind the in-flight run and cancel
+        // can only target the one on the wire. Cleared when the run finishes.
+        if (!dkgInProgress.compareAndSet(false, true)) {
+            postState(CreateGroupState.Error(appContext.getString(R.string.create_group_in_progress)))
+            return
+        }
         val callback = object : DkgProgressCallback {
             override fun onProgress(update: DkgProgressUpdate) {
                 mainHandler.post { if (!finished.get()) onState(CreateGroupState.Running(update)) }
@@ -467,34 +482,41 @@ internal class AccountActions(
 
         postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
         coroutineScope.launch {
-            accountMutex.withLock {
-                val requestId = UUID.randomUUID().toString()
-                var pendingSet = false
-                try {
-                    storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
-                    pendingSet = true
-                    val result = withContext(Dispatchers.IO) {
-                        storage.setRequestIdContext(requestId)
-                        try {
-                            keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
-                        } finally {
-                            storage.clearRequestIdContext()
-                        }
-                    }
-                    finished.set(true)
-                    postState(CreateGroupState.Success(result.name, result.groupPubkey))
+            try {
+                accountMutex.withLock {
+                    val requestId = UUID.randomUUID().toString()
+                    var pendingSet = false
                     try {
-                        refreshAccountState()
+                        storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
+                        pendingSet = true
+                        val result = withContext(Dispatchers.IO) {
+                            storage.setRequestIdContext(requestId)
+                            try {
+                                keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
+                            } finally {
+                                storage.clearRequestIdContext()
+                            }
+                        }
+                        finished.set(true)
+                        postState(CreateGroupState.Success(result.name, result.groupPubkey))
+                        try {
+                            refreshAccountState()
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                        }
                     } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
+                        finished.set(true)
+                        postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                    } finally {
+                        if (pendingSet) storage.clearPendingCipher(requestId)
                     }
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
-                    finished.set(true)
-                    postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
-                } finally {
-                    if (pendingSet) storage.clearPendingCipher(requestId)
                 }
+            } finally {
+                // Release the single-flight guard on every exit path, including
+                // scope cancellation, so a later ceremony is not permanently
+                // blocked by a run that never posted a terminal state.
+                dkgInProgress.set(false)
             }
         }
     }
