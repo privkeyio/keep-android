@@ -162,6 +162,14 @@
     <string name="create_group_not_in_roster">Your code is not in that roster. Ask the coordinator to re-scan your code.</string>
     <string name="create_group_joiner_ready">Joining a <xliff:g id="threshold" example="2">%1$d</xliff:g>-of-<xliff:g id="participants" example="3">%2$d</xliff:g> group as participant <xliff:g id="index" example="2">%3$d</xliff:g>.</string>
 
+    <!-- Roster verification -->
+    <string name="create_group_verify_title">Compare before you start</string>
+    <string name="create_group_verify_instructions">Every participant must see the same fingerprint and the same members below. If anything differs on any device, stop and do not start the group.</string>
+    <string name="create_group_fingerprint_label">Group fingerprint</string>
+    <string name="create_group_roster_member"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g></string>
+    <string name="create_group_roster_member_you"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g> (you)</string>
+    <string name="create_group_verify_confirm">I compared the fingerprint and members with every participant.</string>
+
     <string name="create_group_status_connecting">Connecting to relays…</string>
     <string name="create_group_status_round1">Round 1: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
     <string name="create_group_status_round2">Round 2: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>

@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.util.Log
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,12 +14,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgParticipant
 import io.privkey.keep.uniffi.DkgProgressUpdate
+import io.privkey.keep.uniffi.truncateStr
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.MessageDigest
 import javax.crypto.Cipher
 
 private const val MAX_PARTICIPANTS = 8
@@ -221,6 +225,35 @@ private fun dkgConfig(roster: RosterPayload, ourIndex: Int): DkgConfig = DkgConf
     relays = roster.relays,
     roster = roster.roster.map { DkgParticipant(it.index.toUShort(), it.pubkey) }
 )
+
+// A short, human-comparable fingerprint of the finalized roster. Every device
+// holding the same name, threshold, and index-ordered members derives the same
+// string, so participants can read it aloud out of band. A coordinator who slips
+// an extra key they control into one device's roster (two of the n shares, so a
+// "2-of-3" they can sign alone) yields a different fingerprint on that device and
+// the mismatch is visible. Every variable-length field is length-prefixed so an
+// attacker-chosen name cannot absorb the first pubkey and collide two rosters.
+private fun rosterFingerprint(roster: RosterPayload): String {
+    fun be32(v: Int) = byteArrayOf(
+        (v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte()
+    )
+    val md = MessageDigest.getInstance("SHA-256")
+    md.update("keep-roster-fp-v1".toByteArray(Charsets.UTF_8))
+    val nameBytes = roster.name.toByteArray(Charsets.UTF_8)
+    md.update(be32(nameBytes.size))
+    md.update(nameBytes)
+    md.update(byteArrayOf(roster.threshold.toByte(), roster.participants.toByte()))
+    md.update(be32(roster.participants))
+    roster.roster.sortedBy { it.index }.forEach { entry ->
+        md.update(be32(entry.index))
+        val pk = entry.pubkey.toByteArray(Charsets.UTF_8)
+        md.update(be32(pk.size))
+        md.update(pk)
+    }
+    val digest = md.digest()
+    val hex = (0 until 8).joinToString("") { "%02X".format(digest[it].toInt() and 0xFF) }
+    return hex.chunked(4).joinToString(" ")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -491,6 +524,8 @@ private fun StartGroupMode(
             val roster = RosterPayload(name, threshold, participants, relays, entries)
             val rosterJson = buildRosterJson(roster)
 
+            var confirmed by remember { mutableStateOf(false) }
+
             QrCodeDisplay(
                 data = rosterJson,
                 label = stringResource(R.string.create_group_roster_qr_label)
@@ -506,6 +541,10 @@ private fun StartGroupMode(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            RosterReview(roster, ourIndex = 1, confirmed = confirmed) { confirmed = it }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             ErrorText(errorMessage)
 
             Button(
@@ -513,7 +552,8 @@ private fun StartGroupMode(
                     errorMessage = null
                     runDkg(dkgConfig(roster, 1), name) { errorMessage = it }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = confirmed
             ) {
                 Text(stringResource(R.string.create_group_start_dkg))
             }
@@ -638,6 +678,7 @@ private fun JoinGroupMode(
 
         JoinPhase.Ready -> {
             val currentRoster = roster!!
+            var confirmed by remember { mutableStateOf(false) }
             Text(
                 text = stringResource(
                     R.string.create_group_joiner_ready,
@@ -651,6 +692,10 @@ private fun JoinGroupMode(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            RosterReview(currentRoster, ourIndex = ourIndex, confirmed = confirmed) { confirmed = it }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             ErrorText(errorMessage)
 
             Button(
@@ -658,10 +703,73 @@ private fun JoinGroupMode(
                     errorMessage = null
                     runDkg(dkgConfig(currentRoster, ourIndex), currentRoster.name) { errorMessage = it }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = confirmed
             ) {
                 Text(stringResource(R.string.create_group_join_dkg))
             }
+        }
+    }
+}
+
+@Composable
+private fun RosterReview(
+    roster: RosterPayload,
+    ourIndex: Int,
+    confirmed: Boolean,
+    onConfirmedChange: (Boolean) -> Unit
+) {
+    val fingerprint = remember(roster) { rosterFingerprint(roster) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.create_group_verify_title),
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.create_group_verify_instructions),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.create_group_fingerprint_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = fingerprint,
+            style = MaterialTheme.typography.titleLarge,
+            fontFamily = FontFamily.Monospace
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        roster.roster.sortedBy { it.index }.forEach { entry ->
+            val label = truncateStr(entry.pubkey, 8u, 6u)
+            Text(
+                text = if (entry.index == ourIndex)
+                    stringResource(R.string.create_group_roster_member_you, entry.index, label)
+                else
+                    stringResource(R.string.create_group_roster_member, entry.index, label),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onConfirmedChange(!confirmed) }
+        ) {
+            Checkbox(checked = confirmed, onCheckedChange = onConfirmedChange)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.create_group_verify_confirm),
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
