@@ -325,6 +325,7 @@ fun MainScreen(
     var activeAccountKey by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
+    var showCreateGroupScreen by remember { mutableStateOf(false) }
     var showImportNsecScreen by remember { mutableStateOf(false) }
     var showShareDetails by remember { mutableStateOf(false) }
     var showExportScreen by remember { mutableStateOf(false) }
@@ -334,6 +335,8 @@ fun MainScreen(
     var showSignPolicyScreen by remember { mutableStateOf(false) }
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
+    var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
+    var createGroupRun by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
     var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
@@ -901,6 +904,10 @@ fun MainScreen(
                 showAccountSwitcher = false
                 showCreateAccountScreen = true
             },
+            onCreateGroup = {
+                showAccountSwitcher = false
+                showCreateGroupScreen = true
+            },
             onRecoverMnemonic = {
                 showAccountSwitcher = false
                 showMnemonicRecoveryScreen = true
@@ -931,6 +938,49 @@ fun MainScreen(
                 importState = ImportState.Idle
             },
             importState = importState
+        )
+        return
+    }
+
+    if (showCreateGroupScreen) {
+        // Cache the fallback lookup so the getRelayConfig FFI is not re-run on every
+        // recomposition; recompute only when the preferred relays change.
+        val groupRelays = remember(relays) {
+            relays.ifEmpty {
+                runCatching { keepMobile.getRelayConfig(null).frostRelays }.getOrDefault(emptyList())
+            }
+        }
+        CreateGroupScreen(
+            relays = groupRelays,
+            onCreateGroup = { config, name, cipher ->
+                // Tag each run; a callback from a dismissed run is dropped so it
+                // cannot publish Success/Error into a later-reopened screen.
+                createGroupRun += 1
+                val run = createGroupRun
+                accountActions.createGroup(config, name, cipher) { state ->
+                    if (run == createGroupRun) createGroupState = state
+                }
+            },
+            onDkgBegin = { name -> accountActions.dkgBegin(name) },
+            onCancel = { accountActions.cancelDkg() },
+            onGetCipher = {
+                requireBiometricReady()
+                storage.getCipherForEncryption()
+            },
+            onBiometricAuth = { cipher, callback ->
+                onBiometricRequest(
+                    appContext.getString(R.string.main_create_group_title),
+                    appContext.getString(R.string.main_create_group_subtitle),
+                    cipher,
+                    callback
+                )
+            },
+            onDismiss = {
+                createGroupRun += 1
+                showCreateGroupScreen = false
+                createGroupState = CreateGroupState.Idle
+            },
+            createGroupState = createGroupState
         )
         return
     }
@@ -1155,6 +1205,7 @@ fun MainScreen(
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
                     onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
+                    onCreateGroup = { showCreateGroupScreen = true },
                     onConnect = {
                         coroutineScope.launch {
                             val cipher = try {
@@ -1378,7 +1429,8 @@ fun MainScreen(
                     onImportNsec = { showImportNsecScreen = true },
                     onCreateAccount = { showCreateAccountScreen = true },
                     onRecoverMnemonic = { showMnemonicRecoveryScreen = true },
-                    onRecoverNsec = { showRecoverNsec = true }
+                    onRecoverNsec = { showRecoverNsec = true },
+                    onCreateGroup = { showCreateGroupScreen = true }
                 )
             }
         }
@@ -1407,6 +1459,7 @@ private fun HomeTab(
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
     onRecoverMnemonic: () -> Unit,
+    onCreateGroup: () -> Unit,
     onConnect: () -> Unit,
     biometricAvailable: Boolean,
     pinEnabled: Boolean,
@@ -1504,7 +1557,8 @@ private fun HomeTab(
                 onImport = onImport,
                 onImportNsec = onImportNsec,
                 onCreateAccount = onCreateAccount,
-                onRecoverMnemonic = onRecoverMnemonic
+                onRecoverMnemonic = onRecoverMnemonic,
+                onCreateGroup = onCreateGroup
             )
         }
 
@@ -1727,7 +1781,8 @@ private fun AccountTab(
     onImportNsec: () -> Unit,
     onCreateAccount: () -> Unit,
     onRecoverMnemonic: () -> Unit,
-    onRecoverNsec: () -> Unit
+    onRecoverNsec: () -> Unit,
+    onCreateGroup: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1840,7 +1895,8 @@ private fun AccountTab(
                 onImport = onImport,
                 onImportNsec = onImportNsec,
                 onCreateAccount = onCreateAccount,
-                onRecoverMnemonic = onRecoverMnemonic
+                onRecoverMnemonic = onRecoverMnemonic,
+                onCreateGroup = onCreateGroup
             )
         }
 

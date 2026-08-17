@@ -1,24 +1,49 @@
 package io.privkey.keep
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.atomic.AtomicBoolean
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
+import io.privkey.keep.uniffi.DkgConfig
+import io.privkey.keep.uniffi.DkgProgressCallback
+import io.privkey.keep.uniffi.DkgProgressUpdate
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.security.SecureRandom
+import java.util.Arrays
 import java.util.UUID
 import javax.crypto.Cipher
 
 private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), emptyList())
 
 internal const val MAX_ACCOUNT_NAME_LENGTH = 64
+
+// Per-round timeout for the DKG. The ceremony has three blocking network rounds
+// (Round1, Round2, Confirming), so the whole run can approach 3x this before the
+// share is persisted.
+private const val DKG_ROUND_TIMEOUT_SECS = 180L
+// The biometric cipher is consumed only at the final persist step, so it must
+// outlive the whole ceremony. Cover all three rounds plus relay/biometric slack;
+// the run is deterministically cleared in the finally below regardless.
+private const val DKG_CIPHER_TIMEOUT_MS = DKG_ROUND_TIMEOUT_SECS * 4 * 1000L
+
+sealed class CreateGroupState {
+    object Idle : CreateGroupState()
+    data class Running(val update: DkgProgressUpdate) : CreateGroupState()
+    data class Success(val name: String, val groupPubkey: String) : CreateGroupState()
+    data class Error(val message: String) : CreateGroupState()
+}
 
 internal class AccountActions(
     private val keepMobile: KeepMobile,
@@ -41,6 +66,13 @@ internal class AccountActions(
     )
 
     private val accountMutex = Mutex()
+
+    // Single-flight guard for the DKG. frostCancelDkg sets one process-wide flag
+    // with no run identity, so a second ceremony queued behind accountMutex (e.g.
+    // a double-tap on Start before the button hides) would let a cancel abort the
+    // run actually on the wire while the queued one proceeds. Reject duplicates
+    // synchronously so only ever one run is in flight for cancel to target.
+    private val dkgInProgress = AtomicBoolean(false)
 
     @Volatile
     private var currentRelays: List<String> = emptyList()
@@ -385,6 +417,109 @@ internal class AccountActions(
         executeImport(cipher, onImportStateChanged, cleanup = { mnemonic.fill(0.toByte()) }) {
             keepMobile.createAccountFromMnemonic(mnemonic, passphrase, name)
         }
+    }
+
+    /**
+     * Mint (or re-mint) this device's per-group DKG signing subkey and return its
+     * pubkey hex. The secret stays in Rust memory keyed by [groupName]; each
+     * participant runs this, exchanges pubkeys out of band, and the coordinator
+     * assembles them into the roster that [createGroup] consumes. Must be called
+     * with the same [groupName] later passed as config.groupName.
+     */
+    fun dkgBegin(groupName: String): String = keepMobile.frostDkgBegin(groupName)
+
+    /** Signal a cancel to an in-flight [createGroup] DKG run. */
+    fun cancelDkg() = keepMobile.frostCancelDkg()
+
+    fun createGroup(
+        config: DkgConfig,
+        name: String,
+        cipher: Cipher,
+        onState: (CreateGroupState) -> Unit
+    ) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        // The DKG completes inside frost_run_dkg (share already persisted) before
+        // this coroutine resumes to post Success. Progress updates arrive on the
+        // main Handler while the coroutine resumes on the Compose dispatcher, and
+        // the two are not FIFO-ordered: a late Running(Finalizing) could otherwise
+        // overwrite the terminal state and freeze the UI on "Finalizing…". Route
+        // every state change through this one Handler and drop progress once
+        // terminal, so Success/Error always win.
+        val finished = AtomicBoolean(false)
+        fun postState(state: CreateGroupState) = mainHandler.post { onState(state) }
+        // Reject a duplicate ceremony (e.g. a double-tap, or a retry while a run
+        // left running in the background is still finishing) before posting any
+        // Running state, so nothing queues behind the in-flight run and cancel
+        // can only target the one on the wire. Cleared when the run finishes.
+        if (!dkgInProgress.compareAndSet(false, true)) {
+            postState(CreateGroupState.Error(appContext.getString(R.string.create_group_in_progress)))
+            return
+        }
+        val callback = object : DkgProgressCallback {
+            override fun onProgress(update: DkgProgressUpdate) {
+                mainHandler.post { if (!finished.get()) onState(CreateGroupState.Running(update)) }
+            }
+        }
+        val passphraseChars = CharArray(64)
+        val random = ByteArray(32)
+        SecureRandom().nextBytes(random)
+        val hex = "0123456789abcdef"
+        for (i in random.indices) {
+            val b = random[i].toInt() and 0xFF
+            passphraseChars[i * 2] = hex[b ushr 4]
+            passphraseChars[i * 2 + 1] = hex[b and 0x0F]
+        }
+        Arrays.fill(random, 0.toByte())
+        // frostRunDkg takes a String, so this copies the passphrase into an
+        // immutable JVM object that cannot be wiped and lives until GC. The value
+        // is a freshly generated ephemeral key, not user-derived; the char array
+        // and entropy bytes above are still zeroed to limit their lifetime.
+        val passphrase = String(passphraseChars)
+        // Wipe synchronously here rather than in a finally inside the launch:
+        // the coroutine body (and its finally) never runs if the scope is
+        // already cancelled, stranding the passphrase bytes in the array until
+        // GC. The ceremony only needs the immutable `passphrase` copy above.
+        Arrays.fill(passphraseChars, '\u0000')
+
+        postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
+        val job = coroutineScope.launch {
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                try {
+                    storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
+                    pendingSet = true
+                    val result = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    finished.set(true)
+                    postState(CreateGroupState.Success(result.name, result.groupPubkey))
+                    try {
+                        refreshAccountState()
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                    }
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
+                    finished.set(true)
+                    postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
+                }
+            }
+        }
+        // Release the single-flight guard via completion rather than a finally in
+        // the body: a coroutine launched into an already-cancelled scope never runs
+        // its body, but invokeOnCompletion still fires (synchronously here), so the
+        // guard cannot be stranded true and permanently block later ceremonies.
+        job.invokeOnCompletion { dkgInProgress.set(false) }
     }
 
     // The Rust FFI returns the seed as a wipeable ByteArray; it is delivered to onResult

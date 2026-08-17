@@ -113,6 +113,72 @@
     <string name="share_cards_import_seed">Import from Seed Words</string>
     <string name="share_cards_import_frost">Import FROST Share</string>
     <string name="share_cards_import_nsec">Import nsec</string>
+    <string name="share_cards_create_group">Create or Join Signing Group</string>
+
+    <!-- CreateGroupScreen -->
+    <string name="create_group_title">Create or Join Signing Group</string>
+    <string name="create_group_default_name">Signing Group</string>
+    <string name="create_group_mode_start">Start new</string>
+    <string name="create_group_mode_join">Join</string>
+    <string name="create_group_name_label">Group name</string>
+    <string name="create_group_threshold_label">Threshold: <xliff:g id="threshold" example="2">%1$d</xliff:g></string>
+    <string name="create_group_participants_label">Participants: <xliff:g id="participants" example="3">%1$d</xliff:g></string>
+    <string name="create_group_begin">Begin</string>
+    <string name="create_group_start_dkg">Start DKG</string>
+    <string name="create_group_join_dkg">Join DKG</string>
+    <string name="create_group_stepper_minus">−</string>
+    <string name="create_group_stepper_plus">+</string>
+    <string name="create_group_threshold_decrement">Decrease threshold</string>
+    <string name="create_group_threshold_increment">Increase threshold</string>
+    <string name="create_group_participants_decrement">Decrease participants</string>
+    <string name="create_group_participants_increment">Increase participants</string>
+    <string name="create_group_cancel">Cancel</string>
+    <string name="create_group_back">Back</string>
+    <string name="create_group_done">Done</string>
+    <string name="create_group_no_relays">No FROST relays configured.</string>
+    <string name="create_group_failed">Group creation failed. Please try again.</string>
+    <string name="create_group_begin_failed">Could not start the group. Please try again.</string>
+    <string name="create_group_in_progress">A group creation is still finishing. Please wait a moment and try again.</string>
+
+    <!-- Coordinator ceremony -->
+    <string name="create_group_setup_qr_label">Setup code</string>
+    <string name="create_group_collect_instructions">Have each participant scan this setup code, then scan their code back here.</string>
+    <string name="create_group_collect_progress">Collected <xliff:g id="have" example="1">%1$d</xliff:g> of <xliff:g id="need" example="2">%2$d</xliff:g> participant codes.</string>
+    <string name="create_group_scan_participant">Scan participant code</string>
+    <string name="create_group_scan_participant_title">Scan Participant Code</string>
+    <string name="create_group_roster_qr_label">Group roster</string>
+    <string name="create_group_show_roster">Show group roster</string>
+    <string name="create_group_roster_ready">All codes collected. Have everyone scan this roster, then everyone taps Start DKG together.</string>
+    <string name="create_group_wrong_group">That code is for a different group.</string>
+    <string name="create_group_duplicate_participant">That participant code was already added.</string>
+
+    <!-- Joiner ceremony -->
+    <string name="create_group_join_scan_setup">Scan the coordinator\'s setup code to join.</string>
+    <string name="create_group_scan_setup">Scan setup code</string>
+    <string name="create_group_scan_setup_title">Scan Setup Code</string>
+    <string name="create_group_subkey_qr_label">Your code</string>
+    <string name="create_group_show_subkey">Show this to the coordinator. When they share the group roster, scan it.</string>
+    <string name="create_group_scan_roster">Scan group roster</string>
+    <string name="create_group_scan_roster_title">Scan Group Roster</string>
+    <string name="create_group_not_in_roster">Your code is not in that roster. Ask the coordinator to re-scan your code.</string>
+    <string name="create_group_joiner_ready">Joining a <xliff:g id="threshold" example="2">%1$d</xliff:g>-of-<xliff:g id="participants" example="3">%2$d</xliff:g> group as participant <xliff:g id="index" example="2">%3$d</xliff:g>.</string>
+
+    <!-- Roster verification -->
+    <string name="create_group_verify_title">Compare before you start</string>
+    <string name="create_group_verify_instructions">Every participant must see the same fingerprint and the same members below. If anything differs on any device, stop and do not start the group.</string>
+    <string name="create_group_fingerprint_label">Group fingerprint</string>
+    <string name="create_group_roster_member"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g></string>
+    <string name="create_group_roster_member_you"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g> (you)</string>
+    <string name="create_group_verify_confirm">I compared the fingerprint and members with every participant.</string>
+
+    <string name="create_group_status_connecting">Connecting to relays…</string>
+    <string name="create_group_status_round1">Round 1: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
+    <string name="create_group_status_round2">Round 2: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
+    <string name="create_group_status_confirming">Confirming group key: <xliff:g id="confirmed" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
+    <string name="create_group_status_finalizing">Finalizing…</string>
+    <string name="create_group_canceling">Canceling… You can leave this screen; the group will finish or stop on its own.</string>
+    <string name="create_group_leave">Leave</string>
+    <string name="create_group_success"><xliff:g id="name" example="Signing Group">%1$s</xliff:g> created (<xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g>).</string>
 
     <!-- ShareDetailsScreen -->
     <string name="share_details_share_of">Share <xliff:g id="index" example="1">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g></string>

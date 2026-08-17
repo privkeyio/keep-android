@@ -217,6 +217,11 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     implementation("net.zetetic:sqlcipher-android:4.17.0")
     implementation("androidx.biometric:biometric:1.1.0")
+    // biometric:1.1.0 drags in fragment 1.2.5, whose FragmentActivity still enforces
+    // the legacy <=16-bit permission request-code validator and crashes the
+    // activity-result permission launcher (large request codes). Align fragment with
+    // the modern activity stack, where that validator is gone.
+    implementation("androidx.fragment:fragment:1.8.9")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("androidx.camera:camera-camera2:1.6.1")
     implementation("androidx.camera:camera-lifecycle:1.6.1")
@@ -228,6 +233,9 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    // Real org.json on the unit-test classpath; the android.jar stub is a no-op
+    // under unitTests.isReturnDefaultValues, which would break JSON-parsing tests.
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
