@@ -28,6 +28,15 @@ private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), empty
 
 internal const val MAX_ACCOUNT_NAME_LENGTH = 64
 
+// Per-round timeout for the DKG. The ceremony has three blocking network rounds
+// (Round1, Round2, Confirming), so the whole run can approach 3x this before the
+// share is persisted.
+private const val DKG_ROUND_TIMEOUT_SECS = 180L
+// The biometric cipher is consumed only at the final persist step, so it must
+// outlive the whole ceremony. Cover all three rounds plus relay/biometric slack;
+// the run is deterministically cleared in the finally below regardless.
+private const val DKG_CIPHER_TIMEOUT_MS = DKG_ROUND_TIMEOUT_SECS * 4 * 1000L
+
 sealed class CreateGroupState {
     object Idle : CreateGroupState()
     data class Running(val update: DkgProgressUpdate) : CreateGroupState()
@@ -458,12 +467,12 @@ internal class AccountActions(
                     val requestId = UUID.randomUUID().toString()
                     var pendingSet = false
                     try {
-                        storage.setPendingCipher(requestId, cipher)
+                        storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
                         pendingSet = true
                         val result = withContext(Dispatchers.IO) {
                             storage.setRequestIdContext(requestId)
                             try {
-                                keepMobile.frostRunDkg(config, name, passphrase, 180uL, callback)
+                                keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
                             } finally {
                                 storage.clearRequestIdContext()
                             }

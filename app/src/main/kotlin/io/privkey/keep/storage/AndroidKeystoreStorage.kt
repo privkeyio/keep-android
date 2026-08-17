@@ -62,6 +62,7 @@ class AndroidKeystoreStorage(
         val role: CipherRole?,
         val creatingThreadId: Long,
         val createdAtMs: Long,
+        val timeoutMs: Long,
         val onConsumed: (() -> Unit)?
     )
     private val pendingCiphers = ConcurrentHashMap<String, ArrayDeque<PendingCipherData>>()
@@ -224,6 +225,7 @@ class AndroidKeystoreStorage(
         requestId: String,
         cipher: Cipher,
         role: CipherRole? = null,
+        timeoutMs: Long = PENDING_CIPHER_TIMEOUT_MS,
         onConsumed: (() -> Unit)? = null,
     ) {
         cleanupExpiredCiphers()
@@ -232,6 +234,7 @@ class AndroidKeystoreStorage(
             role = role,
             creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime(),
+            timeoutMs = timeoutMs,
             onConsumed = onConsumed
         )
         while (true) {
@@ -254,7 +257,7 @@ class AndroidKeystoreStorage(
         pendingCiphers.entries.forEach { entry ->
             synchronized(entry.value) {
                 // Drop only the stale entries, preserving fresh ones that may sit behind them.
-                entry.value.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+                entry.value.removeAll { now - it.createdAtMs > it.timeoutMs }
                 if (entry.value.isEmpty()) {
                     pendingCiphers.remove(entry.key, entry.value)
                 }
@@ -284,7 +287,7 @@ class AndroidKeystoreStorage(
             val now = SystemClock.elapsedRealtime()
             // Strip stale entries before popping so a stale head does not mask fresh followers
             // and stale tails do not linger past their expiry.
-            queue.removeAll { now - it.createdAtMs > PENDING_CIPHER_TIMEOUT_MS }
+            queue.removeAll { now - it.createdAtMs > it.timeoutMs }
             if (queue.isEmpty()) {
                 pendingCiphers.remove(requestId, queue)
                 return null
