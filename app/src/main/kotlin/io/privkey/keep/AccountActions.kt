@@ -459,41 +459,42 @@ internal class AccountActions(
         // is a freshly generated ephemeral key, not user-derived; the char array
         // and entropy bytes above are still zeroed to limit their lifetime.
         val passphrase = String(passphraseChars)
+        // Wipe synchronously here rather than in a finally inside the launch:
+        // the coroutine body (and its finally) never runs if the scope is
+        // already cancelled, stranding the passphrase bytes in the array until
+        // GC. The ceremony only needs the immutable `passphrase` copy above.
+        Arrays.fill(passphraseChars, '\u0000')
 
         postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
         coroutineScope.launch {
-            try {
-                accountMutex.withLock {
-                    val requestId = UUID.randomUUID().toString()
-                    var pendingSet = false
-                    try {
-                        storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
-                        pendingSet = true
-                        val result = withContext(Dispatchers.IO) {
-                            storage.setRequestIdContext(requestId)
-                            try {
-                                keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
-                            } finally {
-                                storage.clearRequestIdContext()
-                            }
-                        }
-                        finished.set(true)
-                        postState(CreateGroupState.Success(result.name, result.groupPubkey))
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                try {
+                    storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
+                    pendingSet = true
+                    val result = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
                         try {
-                            refreshAccountState()
-                        } catch (e: Exception) {
-                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                            keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
+                        } finally {
+                            storage.clearRequestIdContext()
                         }
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
-                        finished.set(true)
-                        postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
-                    } finally {
-                        if (pendingSet) storage.clearPendingCipher(requestId)
                     }
+                    finished.set(true)
+                    postState(CreateGroupState.Success(result.name, result.groupPubkey))
+                    try {
+                        refreshAccountState()
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                    }
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
+                    finished.set(true)
+                    postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
                 }
-            } finally {
-                Arrays.fill(passphraseChars, ' ')
             }
         }
     }
