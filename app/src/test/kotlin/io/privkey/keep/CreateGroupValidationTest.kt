@@ -128,15 +128,35 @@ class CreateGroupValidationTest {
 
     @Test
     fun setupAcceptsWebsocketRelays() =
-        assertTrue(isValidSetup(setup(relays = """["wss://relay.example","ws://localhost:7000"]""")))
+        assertTrue(isValidSetup(setup(relays = """["wss://relay.example","wss://relay2.example"]""")))
 
     @Test
     fun setupRejectsNonWebsocketRelay() =
         assertFalse(isValidSetup(setup(relays = """["https://relay.example"]""")))
 
     @Test
+    fun setupRejectsPlaintextWsRelay() =
+        assertFalse(isValidSetup(setup(relays = """["wss://relay.example","ws://localhost:7000"]""")))
+
+    @Test
+    fun setupRejectsOverlongRelay() =
+        assertFalse(isValidSetup(setup(relays = """["wss://${"a".repeat(260)}"]""")))
+
+    @Test
     fun setupRejectsTooManyRelays() =
-        assertFalse(isValidSetup(setup(relays = (1..17).joinToString(",", "[", "]") { "\"wss://r$it\"" })))
+        assertFalse(isValidSetup(setup(relays = (1..11).joinToString(",", "[", "]") { "\"wss://r$it\"" })))
+
+    @Test
+    fun setupRejectsOverlongName() = assertFalse(isValidSetup(setup(name = "x".repeat(65))))
+
+    @Test
+    fun setupRejectsBidiOverrideName() = assertFalse(isValidSetup(setup(name = "a\u202Eb")))
+
+    @Test
+    fun rosterRejectsOverlongName() = assertFalse(isValidRoster(roster(name = "x".repeat(65))))
+
+    @Test
+    fun rosterRejectsBidiOverrideName() = assertFalse(isValidRoster(roster(name = "a\u202Eb")))
 
     @Test
     fun rosterRejectsNonWebsocketRelay() =

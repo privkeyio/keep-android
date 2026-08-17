@@ -29,13 +29,24 @@ private const val MAX_PARTICIPANTS = 8
 private const val MIN_THRESHOLD = 2
 private const val MAX_QR_LENGTH = 8192
 private const val INVITE_VERSION = 2
-private const val MAX_RELAYS = 16
-private const val MAX_RELAY_LENGTH = 512
+// Mirror keep-core/src/relay.rs: MAX_RELAYS and MAX_RELAY_URL_LENGTH. Matching
+// them lets a bad relay fail at the scan instead of deep inside frost_run_dkg.
+private const val MAX_RELAYS = 10
+private const val MAX_RELAY_LENGTH = 256
 
 // Per-group signing subkey pubkeys are nostr x-only pubkeys rendered as 64-char
 // lowercase hex by frost_dkg_begin.
 private fun isHex64(s: String): Boolean =
     s.length == 64 && s.all { it in '0'..'9' || it in 'a'..'f' }
+
+// Group names arrive from scanned QR payloads and become this device's account
+// label (via frost_dkg_begin). Rust's validate_share_name only caps length at
+// MAX_ACCOUNT_NAME_LENGTH, so reject control characters and Unicode bidi
+// overrides/isolates here too: a scanned name must not carry an RTL override
+// that spoofs how the label renders or inject control characters into it.
+private fun isValidGroupName(name: String): Boolean =
+    name.isNotEmpty() && name.length <= MAX_ACCOUNT_NAME_LENGTH &&
+        name.none { it.isISOControl() || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' }
 
 private data class SetupPayload(
     val name: String,
@@ -60,11 +71,13 @@ private fun relaysFromJson(obj: JSONObject): List<String> {
 }
 
 // Relay URLs come from scanned payloads and are handed to frost_run_dkg as
-// websocket endpoints, so bound the list and require a ws(s) scheme rather than
-// connecting to arbitrary attacker-supplied strings.
+// websocket endpoints, so bound the list and require the encrypted wss:// scheme
+// rather than connecting to arbitrary attacker-supplied strings. Plaintext ws://
+// is rejected in production Rust, so reject it here instead of minting a subkey
+// and walking the whole flow only to die inside frost_run_dkg.
 private fun relaysValid(relays: List<String>): Boolean =
     relays.isNotEmpty() && relays.size <= MAX_RELAYS &&
-        relays.all { it.length <= MAX_RELAY_LENGTH && (it.startsWith("wss://") || it.startsWith("ws://")) }
+        relays.all { it.length <= MAX_RELAY_LENGTH && it.startsWith("wss://") }
 
 private fun kind(data: String): String? = try {
     val obj = JSONObject(data.trim())
@@ -84,7 +97,7 @@ internal fun isValidSetup(data: String): Boolean {
         val obj = JSONObject(data.trim())
         val participants = obj.optInt("n", -1)
         val threshold = obj.optInt("th", -1)
-        obj.optString("name", "").isNotEmpty() &&
+        isValidGroupName(obj.optString("name", "")) &&
             participants in MIN_THRESHOLD..MAX_PARTICIPANTS &&
             threshold in MIN_THRESHOLD..participants &&
             relaysValid(relaysFromJson(obj))
@@ -157,7 +170,7 @@ internal fun isValidRoster(data: String): Boolean {
         val participants = obj.optInt("n", -1)
         val threshold = obj.optInt("th", -1)
         val entries = obj.optJSONArray("r") ?: return false
-        if (obj.optString("name", "").isEmpty()) return false
+        if (!isValidGroupName(obj.optString("name", ""))) return false
         if (participants !in MIN_THRESHOLD..MAX_PARTICIPANTS) return false
         if (threshold !in MIN_THRESHOLD..participants) return false
         if (!relaysValid(relaysFromJson(obj))) return false
