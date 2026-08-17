@@ -113,7 +113,7 @@
     <string name="share_cards_import_seed">Import from Seed Words</string>
     <string name="share_cards_import_frost">Import FROST Share</string>
     <string name="share_cards_import_nsec">Import nsec</string>
-    <string name="share_cards_create_group">Create Signing Group</string>
+    <string name="share_cards_create_group">Create or Join Signing Group</string>
 
     <!-- CreateGroupScreen -->
     <string name="create_group_title">Create Signing Group</string>
