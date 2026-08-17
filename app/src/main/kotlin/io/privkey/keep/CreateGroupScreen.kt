@@ -11,6 +11,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgParticipant
@@ -23,6 +25,8 @@ private const val MAX_PARTICIPANTS = 8
 private const val MIN_THRESHOLD = 2
 private const val MAX_QR_LENGTH = 8192
 private const val INVITE_VERSION = 2
+private const val MAX_RELAYS = 16
+private const val MAX_RELAY_LENGTH = 512
 
 // Per-group signing subkey pubkeys are nostr x-only pubkeys rendered as 64-char
 // lowercase hex by frost_dkg_begin.
@@ -51,6 +55,13 @@ private fun relaysFromJson(obj: JSONObject): List<String> {
     return (0 until arr.length()).mapNotNull { arr.optString(it, null) }
 }
 
+// Relay URLs come from scanned payloads and are handed to frost_run_dkg as
+// websocket endpoints, so bound the list and require a ws(s) scheme rather than
+// connecting to arbitrary attacker-supplied strings.
+private fun relaysValid(relays: List<String>): Boolean =
+    relays.size <= MAX_RELAYS &&
+        relays.all { it.length <= MAX_RELAY_LENGTH && (it.startsWith("wss://") || it.startsWith("ws://")) }
+
 private fun kind(data: String): String? = try {
     val obj = JSONObject(data.trim())
     if (obj.optInt("v", -1) == INVITE_VERSION) obj.optString("k", "") else null
@@ -71,7 +82,8 @@ internal fun isValidSetup(data: String): Boolean {
         val threshold = obj.optInt("th", -1)
         obj.optString("name", "").isNotEmpty() &&
             participants in MIN_THRESHOLD..MAX_PARTICIPANTS &&
-            threshold in MIN_THRESHOLD..participants
+            threshold in MIN_THRESHOLD..participants &&
+            relaysValid(relaysFromJson(obj))
     } catch (_: Exception) {
         false
     }
@@ -144,6 +156,7 @@ internal fun isValidRoster(data: String): Boolean {
         if (obj.optString("name", "").isEmpty()) return false
         if (participants !in MIN_THRESHOLD..MAX_PARTICIPANTS) return false
         if (threshold !in MIN_THRESHOLD..participants) return false
+        if (!relaysValid(relaysFromJson(obj))) return false
         if (entries.length() != participants) return false
         val seenIdx = HashSet<Int>()
         val seenPk = HashSet<String>()
@@ -365,6 +378,8 @@ private fun StartGroupMode(
 
             Stepper(
                 label = stringResource(R.string.create_group_threshold_label, threshold),
+                decrementDescription = stringResource(R.string.create_group_threshold_decrement),
+                incrementDescription = stringResource(R.string.create_group_threshold_increment),
                 onDecrement = { if (threshold > MIN_THRESHOLD) threshold-- },
                 onIncrement = { if (threshold < participants) threshold++ },
                 canDecrement = threshold > MIN_THRESHOLD,
@@ -375,6 +390,8 @@ private fun StartGroupMode(
 
             Stepper(
                 label = stringResource(R.string.create_group_participants_label, participants),
+                decrementDescription = stringResource(R.string.create_group_participants_decrement),
+                incrementDescription = stringResource(R.string.create_group_participants_increment),
                 onDecrement = {
                     if (participants > MIN_THRESHOLD) {
                         participants--
@@ -454,7 +471,7 @@ private fun StartGroupMode(
                     onClick = { phase = CoordPhase.Ready },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(stringResource(R.string.create_group_roster_qr_label))
+                    Text(stringResource(R.string.create_group_show_roster))
                 }
             } else {
                 Button(
@@ -562,7 +579,8 @@ private fun JoinGroupMode(
                     parsed == null || currentSetup == null || mine == null -> {}
                     parsed.name != currentSetup.name ||
                         parsed.threshold != currentSetup.threshold ||
-                        parsed.participants != currentSetup.participants ->
+                        parsed.participants != currentSetup.participants ||
+                        parsed.relays != currentSetup.relays ->
                         errorMessage = wrongGroupMessage
                     idx == null -> errorMessage = notInRosterMessage
                     else -> {
@@ -663,6 +681,8 @@ private fun ErrorText(message: String?) {
 @Composable
 private fun Stepper(
     label: String,
+    decrementDescription: String,
+    incrementDescription: String,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit,
     canDecrement: Boolean,
@@ -675,10 +695,18 @@ private fun Stepper(
     ) {
         Text(text = label, style = MaterialTheme.typography.bodyLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onDecrement, enabled = canDecrement) {
+            OutlinedButton(
+                onClick = onDecrement,
+                enabled = canDecrement,
+                modifier = Modifier.semantics { contentDescription = decrementDescription }
+            ) {
                 Text(stringResource(R.string.create_group_stepper_minus))
             }
-            OutlinedButton(onClick = onIncrement, enabled = canIncrement) {
+            OutlinedButton(
+                onClick = onIncrement,
+                enabled = canIncrement,
+                modifier = Modifier.semantics { contentDescription = incrementDescription }
+            ) {
                 Text(stringResource(R.string.create_group_stepper_plus))
             }
         }

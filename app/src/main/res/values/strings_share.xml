@@ -128,6 +128,10 @@
     <string name="create_group_join_dkg">Join DKG</string>
     <string name="create_group_stepper_minus">−</string>
     <string name="create_group_stepper_plus">+</string>
+    <string name="create_group_threshold_decrement">Decrease threshold</string>
+    <string name="create_group_threshold_increment">Increase threshold</string>
+    <string name="create_group_participants_decrement">Decrease participants</string>
+    <string name="create_group_participants_increment">Increase participants</string>
     <string name="create_group_cancel">Cancel</string>
     <string name="create_group_back">Back</string>
     <string name="create_group_done">Done</string>
@@ -142,6 +146,7 @@
     <string name="create_group_scan_participant">Scan participant code</string>
     <string name="create_group_scan_participant_title">Scan Participant Code</string>
     <string name="create_group_roster_qr_label">Group roster</string>
+    <string name="create_group_show_roster">Show group roster</string>
     <string name="create_group_roster_ready">All codes collected. Have everyone scan this roster, then everyone taps Start DKG together.</string>
     <string name="create_group_wrong_group">That code is for a different group.</string>
     <string name="create_group_duplicate_participant">That participant code was already added.</string>

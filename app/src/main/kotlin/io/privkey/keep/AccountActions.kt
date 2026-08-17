@@ -445,6 +445,10 @@ internal class AccountActions(
             passphraseChars[i * 2 + 1] = hex[b and 0x0F]
         }
         Arrays.fill(random, 0.toByte())
+        // frostRunDkg takes a String, so this copies the passphrase into an
+        // immutable JVM object that cannot be wiped and lives until GC. The value
+        // is a freshly generated ephemeral key, not user-derived; the char array
+        // and entropy bytes above are still zeroed to limit their lifetime.
         val passphrase = String(passphraseChars)
 
         postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))

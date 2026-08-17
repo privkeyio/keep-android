@@ -22,8 +22,9 @@ class CreateGroupValidationTest {
         th: Int = 2,
         n: Int = 3,
         v: Int = 2,
-        k: String = "setup"
-    ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":[]}"""
+        k: String = "setup",
+        relays: String = "[]"
+    ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":$relays}"""
 
     private fun subkey(
         name: String = "Group",
@@ -38,8 +39,9 @@ class CreateGroupValidationTest {
         n: Int = 3,
         entries: String = """[{"i":1,"pk":"$hex64"},{"i":2,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""",
         v: Int = 2,
-        k: String = "roster"
-    ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":[],"r":$entries}"""
+        k: String = "roster",
+        relays: String = "[]"
+    ) = """{"v":$v,"k":"$k","name":"$name","th":$th,"n":$n,"relays":$relays,"r":$entries}"""
 
     @Test
     fun validSetupAccepted() = assertTrue(isValidSetup(setup()))
@@ -123,4 +125,20 @@ class CreateGroupValidationTest {
     @Test
     fun rosterRejectsMissingCoordinatorIndex() =
         assertFalse(isValidRoster(roster(entries = """[{"i":2,"pk":"$hex64"},{"i":3,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""")))
+
+    @Test
+    fun setupAcceptsWebsocketRelays() =
+        assertTrue(isValidSetup(setup(relays = """["wss://relay.example","ws://localhost:7000"]""")))
+
+    @Test
+    fun setupRejectsNonWebsocketRelay() =
+        assertFalse(isValidSetup(setup(relays = """["https://relay.example"]""")))
+
+    @Test
+    fun setupRejectsTooManyRelays() =
+        assertFalse(isValidSetup(setup(relays = (1..17).joinToString(",", "[", "]") { "\"wss://r$it\"" })))
+
+    @Test
+    fun rosterRejectsNonWebsocketRelay() =
+        assertFalse(isValidRoster(roster(relays = """["ftp://relay.example"]""")))
 }

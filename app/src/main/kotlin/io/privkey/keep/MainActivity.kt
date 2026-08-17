@@ -336,6 +336,7 @@ fun MainScreen(
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
+    var createGroupRun by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
     var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
@@ -942,13 +943,23 @@ fun MainScreen(
     }
 
     if (showCreateGroupScreen) {
-        val groupRelays = relays.ifEmpty {
-            runCatching { keepMobile.getRelayConfig(null).frostRelays }.getOrDefault(emptyList())
+        // Cache the fallback lookup so the getRelayConfig FFI is not re-run on every
+        // recomposition; recompute only when the preferred relays change.
+        val groupRelays = remember(relays) {
+            relays.ifEmpty {
+                runCatching { keepMobile.getRelayConfig(null).frostRelays }.getOrDefault(emptyList())
+            }
         }
         CreateGroupScreen(
             relays = groupRelays,
             onCreateGroup = { config, name, cipher ->
-                accountActions.createGroup(config, name, cipher) { createGroupState = it }
+                // Tag each run; a callback from a dismissed run is dropped so it
+                // cannot publish Success/Error into a later-reopened screen.
+                createGroupRun += 1
+                val run = createGroupRun
+                accountActions.createGroup(config, name, cipher) { state ->
+                    if (run == createGroupRun) createGroupState = state
+                }
             },
             onDkgBegin = { name -> accountActions.dkgBegin(name) },
             onCancel = { accountActions.cancelDkg() },
@@ -965,6 +976,7 @@ fun MainScreen(
                 )
             },
             onDismiss = {
+                createGroupRun += 1
                 showCreateGroupScreen = false
                 createGroupState = CreateGroupState.Idle
             },
