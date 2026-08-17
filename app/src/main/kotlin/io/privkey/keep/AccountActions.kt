@@ -481,44 +481,42 @@ internal class AccountActions(
         Arrays.fill(passphraseChars, '\u0000')
 
         postState(CreateGroupState.Running(DkgProgressUpdate.Connecting))
-        coroutineScope.launch {
-            try {
-                accountMutex.withLock {
-                    val requestId = UUID.randomUUID().toString()
-                    var pendingSet = false
-                    try {
-                        storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
-                        pendingSet = true
-                        val result = withContext(Dispatchers.IO) {
-                            storage.setRequestIdContext(requestId)
-                            try {
-                                keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
-                            } finally {
-                                storage.clearRequestIdContext()
-                            }
-                        }
-                        finished.set(true)
-                        postState(CreateGroupState.Success(result.name, result.groupPubkey))
+        val job = coroutineScope.launch {
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                try {
+                    storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
+                    pendingSet = true
+                    val result = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
                         try {
-                            refreshAccountState()
-                        } catch (e: Exception) {
-                            if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                            keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
+                        } finally {
+                            storage.clearRequestIdContext()
                         }
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
-                        finished.set(true)
-                        postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
-                    } finally {
-                        if (pendingSet) storage.clearPendingCipher(requestId)
                     }
+                    finished.set(true)
+                    postState(CreateGroupState.Success(result.name, result.groupPubkey))
+                    try {
+                        refreshAccountState()
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.e("AccountActions", "Post-DKG refresh failed: ${e::class.simpleName}")
+                    }
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG failed: ${e::class.simpleName}")
+                    finished.set(true)
+                    postState(CreateGroupState.Error(appContext.getString(R.string.create_group_failed)))
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
                 }
-            } finally {
-                // Release the single-flight guard on every exit path, including
-                // scope cancellation, so a later ceremony is not permanently
-                // blocked by a run that never posted a terminal state.
-                dkgInProgress.set(false)
             }
         }
+        // Release the single-flight guard via completion rather than a finally in
+        // the body: a coroutine launched into an already-cancelled scope never runs
+        // its body, but invokeOnCompletion still fires (synchronously here), so the
+        // guard cannot be stranded true and permanently block later ceremonies.
+        job.invokeOnCompletion { dkgInProgress.set(false) }
     }
 
     // The Rust FFI returns the seed as a wipeable ByteArray; it is delivered to onResult
