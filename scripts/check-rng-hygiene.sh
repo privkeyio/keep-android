@@ -286,6 +286,12 @@ gcm_bad=$(
       line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
       if (line !~ /[.]init[ \t]*[(]/) next
       if (line ~ /DECRYPT_MODE/) next
+      # RSA-OAEP encryption legitimately passes an OAEPParameterSpec to init to
+      # pin the MGF1 digest across providers. That spec is an asymmetric padding
+      # parameter, not a symmetric IV, so it carries none of the GCM IV-reuse
+      # hazard this rule targets. Recognise it the way DECRYPT_MODE is: a GCM
+      # encrypt init never names OAEP, so this cannot mask the case that matters.
+      if (line ~ /[Oo][Aa][Ee][Pp]/) next
       call = substr(line, index(line, ".init") + 5)
       if (args(call) >= 3) print $0
     }
