@@ -792,6 +792,10 @@ class AndroidKeystoreStorage(
                 .setKeySize(2048)
                 .setDigests(KeyProperties.DIGEST_SHA256)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+                // Authorize MGF1-SHA256 explicitly: AndroidKeyStore otherwise
+                // authorizes only MGF1-SHA1, so an unwrap with the SHA-256 MGF1
+                // spec used on both sides would fail at init on API 31+.
+                .setMgf1Digests(KeyProperties.DIGEST_SHA256)
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
                 .setInvalidatedByBiometricEnrollment(true)
@@ -897,7 +901,9 @@ class AndroidKeystoreStorage(
 
     @Synchronized
     private fun deleteDkgSecret() {
-        dkgSecretPrefs.edit().clear().commit()
+        if (!dkgSecretPrefs.edit().clear().commit()) {
+            throw KeepMobileException.StorageException("Failed to clear DKG secret")
+        }
         try {
             if (keyStore.containsAlias(DKG_SECRET_ALIAS)) {
                 keyStore.deleteEntry(DKG_SECRET_ALIAS)
