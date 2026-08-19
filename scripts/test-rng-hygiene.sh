@@ -132,6 +132,11 @@ run_probe $SRC/ProbeOaepLabel.kt 'val gcm = Cipher.getInstance("AES/GCM/NoPaddin
 gcm.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, oaepLabel))
 ' fail "AES-GCM encrypt init is still caught when an unrelated identifier contains oaep"
 
+run_probe $SRC/ProbeOaepHoistedSpec.kt 'val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+val oaepLabelSpec = GCMParameterSpec(128, iv)
+gcm.init(Cipher.ENCRYPT_MODE, key, oaepLabelSpec)
+' fail "AES-GCM encrypt init is caught when a GCM spec is hoisted into an oaep-named variable"
+
 run_probe $SRC/ProbeComment.kt '// Math.random() is named here in prose only
 val x = 1
 ' pass "a banned token inside a comment is not code"

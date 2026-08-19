@@ -268,8 +268,33 @@ report "$weak_sr" "SecureRandom weakened at the call site:" \
 # The real invariant does not mention ENCRYPT at all: `Cipher.init` takes a spec
 # only when decrypting, so any init with three or more arguments has to be
 # provably a decrypt.
+# Receivers provably built as RSA-OAEP ciphers, emitted as "file<TAB>var".
+# Built from CODE_STR because CODE_NOWAIVE blanks string literals, and the proof
+# is the transformation naming OAEP. Resolves a named constant too, since a
+# transformation is rarely inlined at the getInstance call.
+oaep_recv=$(
+  printf '%s\n' "$CODE_STR" | awk '
+    {
+      file = $0; sub(/:.*$/, "", file)
+      body = $0; sub(/^[^:]*:[0-9]+:/, "", body)
+      if (!match(body, /(val|var)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) next
+      v = substr(body, RSTART, RLENGTH); sub(/^(val|var)[ \t]+/, "", v)
+      if (body ~ /=[ \t]*"[^"]*OAEP/) { oaep_const[file, v] = 1; next }
+      if (body !~ /Cipher[.]getInstance[ \t]*[(]/) next
+      arg = body
+      sub(/^.*Cipher[.]getInstance[ \t]*[(]/, "", arg); sub(/[)].*$/, "", arg)
+      gsub(/[ \t"]/, "", arg)
+      if (arg ~ /OAEP/ || (file, arg) in oaep_const) print file "\t" v
+    }
+  ' || scanner_died
+)
+
 gcm_bad=$(
-  printf '%s\n' "$CODE_NOWAIVE" | awk '
+  printf '%s\n' "$CODE_NOWAIVE" | awk -v recvlist="$oaep_recv" '
+    BEGIN {
+      nr = split(recvlist, rl, "\n")
+      for (ri = 1; ri <= nr; ri++) if (rl[ri] != "") oaep_recv[rl[ri]] = 1
+    }
     function args(s,   i, c, d, n) {
       # Count top-level commas inside the first (...) group, so nested calls and
       # generics do not inflate the count.
@@ -286,20 +311,22 @@ gcm_bad=$(
       line = $0; sub(/^[^:]*:[0-9]+:/, "", line)
       if (line !~ /[.]init[ \t]*[(]/) next
       if (line ~ /DECRYPT_MODE/) next
-      call = substr(line, index(line, ".init") + 5)
       # RSA-OAEP encryption legitimately passes an OAEPParameterSpec to init to
-      # pin the MGF1 digest across providers. That spec is an asymmetric padding
+      # pin the MGF1 digest across providers. That is an asymmetric padding
       # parameter, not a symmetric IV, so it carries none of the GCM IV-reuse
       # hazard this rule targets.
       #
-      # Exempt it narrowly. An earlier version skipped any line containing
-      # "oaep" anywhere, which let an unrelated identifier (`oaepLabel`) waved
-      # past a genuine AES-GCM encrypt on the same line. Two guards now:
-      # the exemption is scoped to the init arguments rather than the whole
-      # line, and it never applies when those arguments carry a symmetric IV
-      # spec, which is the precise hazard this rule exists to catch.
-      if (call !~ /GCMParameterSpec|IvParameterSpec/ &&
-          call ~ /[Oo][Aa][Ee][Pp][A-Za-z0-9_]*Spec/) next
+      # The exemption binds to the receiver being a cipher built from a
+      # transformation that names OAEP, never to how anything is spelled at the
+      # call site. Spelling rules do not survive hoisting: matching "oaep"
+      # anywhere let an unrelated oaepLabel through, and narrowing to
+      # oaep...Spec still let a GCMParameterSpec hoisted into oaepLabelSpec
+      # through. That is the same reason this check ignores ENCRYPT_MODE.
+      file = $0; sub(/:.*$/, "", file)
+      recv = line; sub(/[.]init[ \t]*[(].*$/, "", recv)
+      sub(/^.*[^A-Za-z0-9_]/, "", recv)
+      if (recv != "" && (file "\t" recv) in oaep_recv) next
+      call = substr(line, index(line, ".init") + 5)
       if (args(call) >= 3) print $0
     }
   ' || scanner_died
