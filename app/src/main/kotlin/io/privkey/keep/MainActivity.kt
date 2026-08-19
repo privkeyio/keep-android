@@ -336,6 +336,7 @@ fun MainScreen(
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
     var pendingDkgShare by remember { mutableStateOf<PendingShareInfo?>(null) }
     var showDiscardDkgConfirm by remember { mutableStateOf(false) }
+    var dkgDiscardInProgress by remember { mutableStateOf(false) }
     var dkgRecoveryInProgress by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
@@ -1142,18 +1143,46 @@ fun MainScreen(
     val pendingDkgRecoverSubtitle = stringResource(R.string.main_pending_dkg_recover_subtitle)
     val pendingDkgRecoveredMessage = stringResource(R.string.main_pending_dkg_recovered)
     val pendingDkgRecoverFailedMessage = stringResource(R.string.main_pending_dkg_recover_failed)
+    val pendingDkgDiscardAuthTitle = stringResource(R.string.main_pending_dkg_discard_auth_title)
+    val pendingDkgDiscardAuthSubtitle = stringResource(R.string.main_pending_dkg_discard_auth_subtitle)
+    val pendingDkgDiscardLabel = stringResource(R.string.main_pending_dkg_discard)
+    val pendingDkgDiscardFailedMessage = stringResource(R.string.main_pending_dkg_discard_failed)
 
     pendingDkgShare?.let { pending ->
         if (showDiscardDkgConfirm) {
             DiscardPendingDkgDialog(
                 onConfirm = {
-                    coroutineScope.launch {
-                        withContext(Dispatchers.IO) { accountActions.discardPendingDkgShare() }
-                        pendingDkgShare = null
-                        showDiscardDkgConfirm = false
+                    // Single-flight: a double-tap must not launch two concurrent discards
+                    // (the native call takes no lock of its own).
+                    if (!dkgDiscardInProgress) {
+                        dkgDiscardInProgress = true
+                        // Destructive: gate behind a verified auth factor. Uses the auth-only
+                        // prompt (not the DKG vault cipher) so discard still works when the
+                        // stash is unrecoverable -- its whole reason to exist.
+                        requireAuthThen(
+                            pendingDkgDiscardAuthTitle,
+                            pendingDkgDiscardAuthSubtitle,
+                            pendingDkgDiscardLabel
+                        ) {
+                            val ok = withContext(Dispatchers.IO) {
+                                runCatching { accountActions.discardPendingDkgShare() }.isSuccess
+                            }
+                            if (ok) {
+                                pendingDkgShare = null
+                            } else {
+                                Toast.makeText(appContext, pendingDkgDiscardFailedMessage, Toast.LENGTH_LONG).show()
+                            }
+                            showDiscardDkgConfirm = false
+                            dkgDiscardInProgress = false
+                        }
                     }
                 },
-                onDismiss = { showDiscardDkgConfirm = false }
+                onDismiss = {
+                    // Also clears the guard if the user backed out after an auth cancel;
+                    // requireAuthThen has no failure callback to reset it otherwise.
+                    dkgDiscardInProgress = false
+                    showDiscardDkgConfirm = false
+                }
             )
         } else if (!dkgRecoveryInProgress) {
             PendingDkgShareDialog(
