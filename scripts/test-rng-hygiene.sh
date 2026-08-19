@@ -137,6 +137,21 @@ val oaepLabelSpec = GCMParameterSpec(128, iv)
 gcm.init(Cipher.ENCRYPT_MODE, key, oaepLabelSpec)
 ' fail "AES-GCM encrypt init is caught when a GCM spec is hoisted into an oaep-named variable"
 
+run_probe $SRC/ProbeOaepSameName.kt 'fun wrap() {
+    val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+    cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
+}
+fun seal() {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+}
+' fail "a same-named AES-GCM receiver in another function is not exempted by an earlier OAEP one"
+
+run_probe $SRC/ProbeOaepReassigned.kt 'var cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+cipher = Cipher.getInstance("AES/GCM/NoPadding")
+cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+' fail "a receiver reassigned from RSA-OAEP to AES-GCM loses the exemption"
+
 run_probe $SRC/ProbeComment.kt '// Math.random() is named here in prose only
 val x = 1
 ' pass "a banned token inside a comment is not code"

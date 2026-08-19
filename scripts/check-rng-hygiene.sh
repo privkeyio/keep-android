@@ -268,7 +268,16 @@ report "$weak_sr" "SecureRandom weakened at the call site:" \
 # The real invariant does not mention ENCRYPT at all: `Cipher.init` takes a spec
 # only when decrypting, so any init with three or more arguments has to be
 # provably a decrypt.
-# Receivers provably built as RSA-OAEP ciphers, emitted as "file<TAB>var".
+# Every cipher binding, emitted as "file<TAB>var<TAB>line<TAB>isoaep", so the
+# exemption below can ask which binding was in effect at a given call rather
+# than whether the name was ever an OAEP cipher anywhere in the file.
+#
+# Name alone is not identity: two functions can each declare a local `cipher`,
+# and a `var` can be reassigned from RSA-OAEP to AES-GCM. Either would let a
+# file-scoped set exempt a genuine GCM encrypt. Recording the line of every
+# binding, including bare reassignment, lets the check use the nearest preceding
+# one and fail closed whenever that binding is not provably OAEP.
+#
 # Built from CODE_STR because CODE_NOWAIVE blanks string literals, and the proof
 # is the transformation naming OAEP. Resolves a named constant too, since a
 # transformation is rarely inlined at the getInstance call.
@@ -276,15 +285,26 @@ oaep_recv=$(
   printf '%s\n' "$CODE_STR" | awk '
     {
       file = $0; sub(/:.*$/, "", file)
+      lno = $0; sub(/^[^:]*:/, "", lno); sub(/:.*$/, "", lno)
       body = $0; sub(/^[^:]*:[0-9]+:/, "", body)
-      if (!match(body, /(val|var)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) next
-      v = substr(body, RSTART, RLENGTH); sub(/^(val|var)[ \t]+/, "", v)
-      if (body ~ /=[ \t]*"[^"]*OAEP/) { oaep_const[file, v] = 1; next }
+      if (body ~ /(val|var)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(:[^=]*)?=[ \t]*"[^"]*OAEP/ &&
+          match(body, /(val|var)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) {
+        cv = substr(body, RSTART, RLENGTH); sub(/^(val|var)[ \t]+/, "", cv)
+        oaep_const[file, cv] = 1
+        next
+      }
       if (body !~ /Cipher[.]getInstance[ \t]*[(]/) next
+      # Declaration or bare reassignment; both rebind the name at this line.
+      if (match(body, /(val|var)[ \t]+[A-Za-z_][A-Za-z0-9_]*/)) {
+        v = substr(body, RSTART, RLENGTH); sub(/^(val|var)[ \t]+/, "", v)
+      } else if (match(body, /[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*Cipher[.]getInstance/)) {
+        v = substr(body, RSTART, RLENGTH); sub(/[ \t]*=.*$/, "", v)
+      } else next
       arg = body
       sub(/^.*Cipher[.]getInstance[ \t]*[(]/, "", arg); sub(/[)].*$/, "", arg)
       gsub(/[ \t"]/, "", arg)
-      if (arg ~ /OAEP/ || (file, arg) in oaep_const) print file "\t" v
+      isoaep = (arg ~ /OAEP/ || (file, arg) in oaep_const) ? 1 : 0
+      print file "\t" v "\t" lno "\t" isoaep
     }
   ' || scanner_died
 )
@@ -293,7 +313,23 @@ gcm_bad=$(
   printf '%s\n' "$CODE_NOWAIVE" | awk -v recvlist="$oaep_recv" '
     BEGIN {
       nr = split(recvlist, rl, "\n")
-      for (ri = 1; ri <= nr; ri++) if (rl[ri] != "") oaep_recv[rl[ri]] = 1
+      for (ri = 1; ri <= nr; ri++) {
+        if (rl[ri] == "") continue
+        split(rl[ri], b, "\t")
+        bk = b[1] SUBSEP b[2]
+        bcount[bk]++
+        bline[bk, bcount[bk]] = b[3] + 0
+        boaep[bk, bcount[bk]] = b[4] + 0
+      }
+    }
+    # The binding in effect at `lno`: the latest one at or before it. Absent any
+    # preceding binding, there is nothing proven and the exemption must not apply.
+    function bound_oaep(f, v, lno,   k, i, best, res) {
+      k = f SUBSEP v; best = -1; res = 0
+      for (i = 1; i <= bcount[k]; i++) {
+        if (bline[k, i] <= lno && bline[k, i] > best) { best = bline[k, i]; res = boaep[k, i] }
+      }
+      return (best >= 0) ? res : 0
     }
     function args(s,   i, c, d, n) {
       # Count top-level commas inside the first (...) group, so nested calls and
@@ -323,9 +359,10 @@ gcm_bad=$(
       # oaep...Spec still let a GCMParameterSpec hoisted into oaepLabelSpec
       # through. That is the same reason this check ignores ENCRYPT_MODE.
       file = $0; sub(/:.*$/, "", file)
+      lno = $0; sub(/^[^:]*:/, "", lno); sub(/:.*$/, "", lno)
       recv = line; sub(/[.]init[ \t]*[(].*$/, "", recv)
       sub(/^.*[^A-Za-z0-9_]/, "", recv)
-      if (recv != "" && (file "\t" recv) in oaep_recv) next
+      if (recv != "" && bound_oaep(file, recv, lno + 0)) next
       call = substr(line, index(line, ".init") + 5)
       if (args(call) >= 3) print $0
     }
