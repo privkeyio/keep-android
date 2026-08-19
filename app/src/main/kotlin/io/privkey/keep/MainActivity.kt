@@ -339,6 +339,13 @@ fun MainScreen(
     // same error, so collapsing it to null blocks group creation while hiding the only
     // control that can clear the block.
     var pendingDkgUnreadable by remember { mutableStateOf(false) }
+    // Bumped on every local mutation of the marker state. A poll captures it before its
+    // read and drops the result if it changed, so a read that started before a discard
+    // can't land afterward and resurrect the marker it just cleared. A plain
+    // in-progress flag can't cover this: the flag is already false by the time the
+    // stale result applies.
+    var pendingDkgEpoch by remember { mutableIntStateOf(0) }
+    var pendingDkgDeferred by remember { mutableStateOf(false) }
     var showDiscardDkgConfirm by remember { mutableStateOf(false) }
     var dkgDiscardInProgress by remember { mutableStateOf(false) }
     var dkgRecoveryInProgress by remember { mutableStateOf(false) }
@@ -548,6 +555,7 @@ fun MainScreen(
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
+                val dkgEpochAtRead = pendingDkgEpoch
                 val pollResult = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
@@ -574,7 +582,7 @@ fun MainScreen(
                 activeDidBackup = pollResult.activeDidBackup
                 // Don't clobber the dialog state mid-recovery: an in-flight biometric
                 // chain hasn't cleared the marker yet, so a poll would re-show it.
-                if (!dkgRecoveryInProgress) {
+                if (!dkgRecoveryInProgress && !dkgDiscardInProgress && pendingDkgEpoch == dkgEpochAtRead) {
                     // Keep the last known marker on a read failure rather than clearing it.
                     pollResult.pendingDkgShare
                         .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
@@ -1199,6 +1207,7 @@ fun MainScreen(
             if (ok) {
                 pendingDkgShare = null
                 pendingDkgUnreadable = false
+                pendingDkgEpoch++
             } else {
                 Toast.makeText(appContext, pendingDkgDiscardFailedMessage, Toast.LENGTH_LONG).show()
             }
@@ -1236,6 +1245,7 @@ fun MainScreen(
                                 if (info != null) {
                                     pendingDkgShare = null
                                     pendingDkgUnreadable = false
+                                    pendingDkgEpoch++
                                     Toast.makeText(appContext, pendingDkgRecoveredMessage, Toast.LENGTH_SHORT).show()
                                 } else {
                                     Toast.makeText(appContext, pendingDkgRecoverFailedMessage, Toast.LENGTH_LONG).show()
@@ -1256,12 +1266,13 @@ fun MainScreen(
                 onDiscard = { showDiscardDkgConfirm = true }
             )
         }
-        pendingDkgUnreadable -> {
+        pendingDkgUnreadable && !pendingDkgDeferred -> {
             PendingDkgUnreadableDialog(
+                onLater = { pendingDkgDeferred = true },
                 onRetry = {
                     coroutineScope.launch {
                         withContext(Dispatchers.IO) { runCatching { keepMobile.pendingDkgShare() } }
-                            .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
+                            .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false; pendingDkgEpoch++ }
                             .onFailure {
                                 Toast.makeText(appContext, pendingDkgStillUnreadableMessage, Toast.LENGTH_LONG).show()
                             }
@@ -2133,18 +2144,25 @@ private fun PendingDkgShareDialog(
 
 @Composable
 private fun PendingDkgUnreadableDialog(
+    onLater: () -> Unit,
     onRetry: () -> Unit,
     onDiscard: () -> Unit
 ) {
+    // Storage being unreadable must not corner the user into the destructive option to
+    // get their app back. Dismissing only hides the dialog for the session; the Rust
+    // still fail-closes group creation, so nothing unsafe is unlocked by deferring.
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = onLater,
         title = { Text(stringResource(R.string.main_pending_dkg_unreadable_title)) },
         text = { Text(stringResource(R.string.main_pending_dkg_unreadable_text)) },
         confirmButton = {
             TextButton(onClick = onRetry) { Text(stringResource(R.string.main_pending_dkg_retry)) }
         },
         dismissButton = {
-            TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+            Row {
+                TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+                TextButton(onClick = onLater) { Text(stringResource(R.string.main_pending_dkg_later)) }
+            }
         }
     )
 }
