@@ -334,6 +334,9 @@ fun MainScreen(
     var showHistoryScreen by remember { mutableStateOf(false) }
     var showSignPolicyScreen by remember { mutableStateOf(false) }
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
+    var pendingDkgShare by remember { mutableStateOf<PendingShareInfo?>(null) }
+    var showDiscardDkgConfirm by remember { mutableStateOf(false) }
+    var dkgRecoveryInProgress by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
     var createGroupRun by remember { mutableStateOf(0) }
@@ -504,12 +507,14 @@ fun MainScreen(
                 ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
             val r = config.frostRelays
             val pr = config.profileRelays
-            AccountInitial(a, k, r, pr)
+            val pdkg = runCatching { keepMobile.pendingDkgShare() }.getOrNull()
+            AccountInitial(a, k, r, pr, pdkg)
         }
         allAccounts = initial.accounts
         activeAccountKey = initial.activeKey
         relays = initial.relays
         profileRelays = initial.profileRelays
+        pendingDkgShare = initial.pendingDkgShare
     }
 
     LaunchedEffect(Unit) {
@@ -541,7 +546,11 @@ fun MainScreen(
                     val db = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
                         .onFailure { if (it is CancellationException) throw it }
                         .getOrNull()
-                    PollResult(h, s, a, k, dc, db)
+                    // Marker-only read, no biometric; safe to poll.
+                    val pdkg = runCatching { keepMobile.pendingDkgShare() }
+                        .onFailure { if (it is CancellationException) throw it }
+                        .getOrNull()
+                    PollResult(h, s, a, k, dc, db, pdkg)
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
@@ -549,6 +558,9 @@ fun MainScreen(
                 activeAccountKey = pollResult.activeAccountKey
                 descriptorCount = pollResult.descriptorCount
                 activeDidBackup = pollResult.activeDidBackup
+                // Don't clobber the dialog state mid-recovery: an in-flight biometric
+                // chain hasn't cleared the marker yet, so a poll would re-show it.
+                if (!dkgRecoveryInProgress) pendingDkgShare = pollResult.pendingDkgShare
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(pollResult.activeAccountKey) }
                 delay(10_000)
@@ -1125,6 +1137,53 @@ fun MainScreen(
     val initEncryptionFailedMessage = stringResource(R.string.main_init_encryption_failed)
     val connectRelaysTitle = stringResource(R.string.main_connect_relays_title)
     val connectRelaysSubtitle = stringResource(R.string.main_connect_relays_subtitle)
+
+    val pendingDkgRecoverTitle = stringResource(R.string.main_pending_dkg_recover_title)
+    val pendingDkgRecoverSubtitle = stringResource(R.string.main_pending_dkg_recover_subtitle)
+    val pendingDkgRecoveredMessage = stringResource(R.string.main_pending_dkg_recovered)
+    val pendingDkgRecoverFailedMessage = stringResource(R.string.main_pending_dkg_recover_failed)
+
+    pendingDkgShare?.let { pending ->
+        if (showDiscardDkgConfirm) {
+            DiscardPendingDkgDialog(
+                onConfirm = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { accountActions.discardPendingDkgShare() }
+                        pendingDkgShare = null
+                        showDiscardDkgConfirm = false
+                    }
+                },
+                onDismiss = { showDiscardDkgConfirm = false }
+            )
+        } else if (!dkgRecoveryInProgress) {
+            PendingDkgShareDialog(
+                groupName = pending.name,
+                onRecover = {
+                    try {
+                        requireBiometricReady()
+                        dkgRecoveryInProgress = true
+                        accountActions.recoverPendingDkgShare(
+                            title = pendingDkgRecoverTitle,
+                            subtitle = pendingDkgRecoverSubtitle,
+                            onResult = { info ->
+                                dkgRecoveryInProgress = false
+                                if (info != null) {
+                                    pendingDkgShare = null
+                                    Toast.makeText(appContext, pendingDkgRecoveredMessage, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(appContext, pendingDkgRecoverFailedMessage, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            onDismiss = { dkgRecoveryInProgress = false }
+                        )
+                    } catch (e: BiometricHelper.BiometricNotReadyException) {
+                        Toast.makeText(appContext, e.message ?: biometricUnavailableMessage, Toast.LENGTH_LONG).show()
+                    }
+                },
+                onDiscard = { showDiscardDkgConfirm = true }
+            )
+        }
+    }
 
     val navController = rememberNavController()
 
@@ -1908,7 +1967,8 @@ private data class AccountInitial(
     val accounts: List<AccountInfo>,
     val activeKey: String?,
     val relays: List<String>,
-    val profileRelays: List<String>
+    val profileRelays: List<String>,
+    val pendingDkgShare: PendingShareInfo?
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1943,7 +2003,8 @@ private data class PollResult(
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
     val descriptorCount: Int,
-    val activeDidBackup: Boolean?
+    val activeDidBackup: Boolean?,
+    val pendingDkgShare: PendingShareInfo?
 )
 
 @Composable
@@ -1957,6 +2018,48 @@ private fun KillSwitchConfirmDialog(
         text = { Text(stringResource(R.string.main_kill_switch_dialog_text)) },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text(stringResource(R.string.main_enable)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
+        }
+    )
+}
+
+@Composable
+private fun PendingDkgShareDialog(
+    groupName: String,
+    onRecover: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.main_pending_dkg_title)) },
+        text = { Text(stringResource(R.string.main_pending_dkg_text, groupName)) },
+        confirmButton = {
+            TextButton(onClick = onRecover) { Text(stringResource(R.string.main_pending_dkg_recover)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+        }
+    )
+}
+
+@Composable
+private fun DiscardPendingDkgDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.main_pending_dkg_discard_confirm_title)) },
+        text = { Text(stringResource(R.string.main_pending_dkg_discard_confirm_text)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    stringResource(R.string.main_pending_dkg_discard),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
