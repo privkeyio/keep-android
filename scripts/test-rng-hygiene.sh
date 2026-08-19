@@ -110,10 +110,47 @@ run_probe $SRC/ProbeSeed.kt 'val r = java.security.SecureRandom(); r.setSeed(1L)
 run_probe $SRC/ProbeTlr.kt 'val x = ThreadLocalRandom.current().nextInt()
 ' fail "ThreadLocalRandom"
 
+run_probe $SRC/ProbeGcmIv.kt 'val c = Cipher.getInstance("AES/GCM/NoPadding")
+c.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+' fail "AES-GCM encrypt init with a caller-supplied IV"
+
+run_probe $SRC/ProbeGcmHoist.kt 'val mode = Cipher.ENCRYPT_MODE
+val spec = GCMParameterSpec(128, iv)
+c.init(mode, key, spec)
+' fail "AES-GCM encrypt init with hoisted mode and spec variables"
+
 echo "== accepts what it must accept =="
 
 run_probe $SRC/ProbeClean.kt 'val x = 1
 ' pass "ordinary code"
+
+run_probe $SRC/ProbeOaep.kt 'val rsa = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+rsa.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
+' pass "RSA-OAEP encrypt init passing an OAEP parameter spec"
+
+run_probe $SRC/ProbeOaepLabel.kt 'val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+gcm.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, oaepLabel))
+' fail "AES-GCM encrypt init is still caught when an unrelated identifier contains oaep"
+
+run_probe $SRC/ProbeOaepHoistedSpec.kt 'val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+val oaepLabelSpec = GCMParameterSpec(128, iv)
+gcm.init(Cipher.ENCRYPT_MODE, key, oaepLabelSpec)
+' fail "AES-GCM encrypt init is caught when a GCM spec is hoisted into an oaep-named variable"
+
+run_probe $SRC/ProbeOaepSameName.kt 'fun wrap() {
+    val cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+    cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
+}
+fun seal() {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+}
+' fail "a same-named AES-GCM receiver in another function is not exempted by an earlier OAEP one"
+
+run_probe $SRC/ProbeOaepReassigned.kt 'var cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+cipher = Cipher.getInstance("AES/GCM/NoPadding")
+cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, iv))
+' fail "a receiver reassigned from RSA-OAEP to AES-GCM loses the exemption"
 
 run_probe $SRC/ProbeComment.kt '// Math.random() is named here in prose only
 val x = 1

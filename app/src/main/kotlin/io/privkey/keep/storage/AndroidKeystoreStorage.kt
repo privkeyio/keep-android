@@ -15,15 +15,22 @@ import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.KeyFactory
+import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.ProviderException
+import java.security.spec.MGF1ParameterSpec
+import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.OAEPParameterSpec
+import javax.crypto.spec.PSource
+import javax.crypto.spec.SecretKeySpec
 
 class AndroidKeystoreStorage(
     private val context: Context,
@@ -52,6 +59,24 @@ class AndroidKeystoreStorage(
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
         private const val METADATA_KEY_ALIAS = "keep_metadata"
         private const val METADATA_KEY_PREFIX = "__keep_"
+
+        // Pending-DKG secret: its own auth-gated (requireUserAuth) alias, distinct
+        // from the non-auth metadata namespace above and from the per-share AES
+        // path. It is an RSA keypair so the completed-ceremony stash can be written
+        // headlessly (public-key encrypt needs no auth) yet read only behind a
+        // biometric (private-key decrypt is auth-gated), keeping the ephemeral
+        // ceremony passphrase inside it non-app-uid-readable at rest (keep-6ik).
+        private const val DKG_SECRET_STORAGE_KEY = "__keep_dkg_secret_v1"
+        private const val DKG_SECRET_ALIAS = "keep_dkg_secret"
+        private const val DKG_SECRET_PREFS = "keep_dkg_secret_prefs"
+        private const val KEY_DKG_WRAPPED = "dkg_wrapped_key"
+        private const val KEY_DKG_IV = "dkg_iv"
+        private const val KEY_DKG_DATA = "dkg_data"
+        // Non-sensitive marker written by the Rust layer; keeping it (and the secret)
+        // intact on a decrypt failure is what makes a live pending share survive a
+        // transient read error instead of being wiped (INVARIANTS #1).
+        private const val DKG_MARKER_STORAGE_KEY = "__keep_dkg_pending_v1"
+        private const val RSA_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     }
 
     /** The operation a pending [Cipher] is for, so it is consumed by the matching callback. */
@@ -102,13 +127,26 @@ class AndroidKeystoreStorage(
             decryptWithCipher(cipher, encryptedData)
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
-            // Durably flush the wipe of the undecryptable entry before propagating, so a
-            // crash right after this cannot leave the corrupt prefs behind. Runs on a
-            // background FFI-callback thread (@Synchronized), so commit() won't jank the UI.
-            sharePrefs.edit().clear().commit()
+            // For a pending-DKG stash a decrypt failure may be transient (e.g. the
+            // metadata key is momentarily unavailable), and the marker points at a
+            // completed share the peers already treat as live. Wiping it here would
+            // destroy the only record that recovery is owed (INVARIANTS #1), so
+            // preserve it and let the caller retry. Other metadata is
+            // reconstructible, so the corrupt entry is still flushed to unblock reads.
+            if (!shouldPreserveOnDecryptFailure(key)) {
+                // Durably flush the wipe of the undecryptable entry before propagating, so a
+                // crash right after this cannot leave the corrupt prefs behind. Runs on a
+                // background FFI-callback thread (@Synchronized), so commit() won't jank the UI.
+                sharePrefs.edit().clear().commit()
+            }
             throw KeepMobileException.StorageException("No metadata stored")
         }
     }
+
+    private fun shouldPreserveOnDecryptFailure(key: String): Boolean =
+        key == DKG_MARKER_STORAGE_KEY
+
+    private fun isDkgSecretKey(key: String): Boolean = key == DKG_SECRET_STORAGE_KEY
 
     private fun sanitizeKey(key: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -537,6 +575,10 @@ class AndroidKeystoreStorage(
     override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         require(key.isNotBlank()) { "Share key must not be blank" }
         require(data.isNotEmpty()) { "Share data must not be empty" }
+        if (isDkgSecretKey(key)) {
+            storeDkgSecret(data)
+            return
+        }
         if (isMetadataKey(key)) {
             storeMetadata(key, data, metadata)
             return
@@ -550,6 +592,9 @@ class AndroidKeystoreStorage(
 
     override fun loadShareByKey(key: String): ByteArray {
         require(key.isNotBlank()) { "Share key must not be blank" }
+        if (isDkgSecretKey(key)) {
+            return loadDkgSecret()
+        }
         if (isMetadataKey(key)) {
             return loadMetadata(key)
         }
@@ -573,6 +618,10 @@ class AndroidKeystoreStorage(
 
     override fun deleteShareByKey(key: String) {
         require(key.isNotBlank()) { "Share key must not be blank" }
+        if (isDkgSecretKey(key)) {
+            deleteDkgSecret()
+            return
+        }
         if (isMetadataKey(key)) {
             val cleared = getSharePrefs(key).edit().clear().commit()
             if (!cleared) {
@@ -714,5 +763,158 @@ class AndroidKeystoreStorage(
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
         }
         prefs.edit().clear().apply()
+    }
+
+    // ---- Pending-DKG secret: auth-gated RSA hybrid envelope --------------------
+    //
+    // The secret is written during the headless ceremony (no biometric on hand)
+    // yet must only be read behind one. A single AES key with requireUserAuth
+    // can't express that — it gates encrypt too — so the alias is an RSA keypair:
+    // the public key hybrid-wraps a fresh AES key (headless), and only the
+    // private-key unwrap is auth-gated. The larger share+passphrase blob rides
+    // under AES-GCM, whose key is the only thing RSA-wrapped (RSA-OAEP can't span
+    // it directly).
+
+    private val dkgSecretPrefs: SharedPreferences by lazy { createEncryptedPrefs(DKG_SECRET_PREFS) }
+
+    @Synchronized
+    private fun getOrCreateDkgSecretKeypair() {
+        if (keyStore.containsAlias(DKG_SECRET_ALIAS)) return
+        val generator = KeyPairGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_RSA,
+            "AndroidKeyStore"
+        )
+        generator.initialize(
+            KeyGenParameterSpec.Builder(
+                DKG_SECRET_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setKeySize(2048)
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+                .setUserAuthenticationRequired(true)
+                .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
+                .setInvalidatedByBiometricEnrollment(true)
+                .build()
+        )
+        generator.generateKeyPair()
+    }
+
+    // OAEP digest SHA-256 with an MGF1-SHA1 mask. AndroidKeyStore authorizes only
+    // MGF1-SHA1 for an OAEP key unless `setMgf1Digests` says otherwise, and that
+    // setter is API 35 while `minSdk` is 33 — calling it throws NoSuchMethodError
+    // on 33/34, and gating it by version would instead desync the two halves,
+    // since the authorized digest is fixed when the key is generated and does not
+    // change if the device later upgrades. Matching AndroidKeyStore's default on
+    // every API level keeps generation and cipher init consistent for the life of
+    // the key. RFC 8017 permits a different hash for the mask function, and
+    // MGF1-SHA1 is not a weakness in OAEP.
+    private fun oaepSpec(): OAEPParameterSpec =
+        OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT)
+
+    /** Headless write: hybrid-encrypt under the RSA public key. No auth required. */
+    @Synchronized
+    private fun storeDkgSecret(data: ByteArray) {
+        getOrCreateDkgSecretKeypair()
+        // The Keystore-returned public key carries the auth restriction, which some
+        // OEM providers reject at encrypt-init. Reconstruct an unrestricted public
+        // key from its encoding so the headless wrap always succeeds.
+        val certKey = keyStore.getCertificate(DKG_SECRET_ALIAS)?.publicKey
+            ?: throw KeepMobileException.StorageException("No DKG secret key available")
+        val publicKey = KeyFactory.getInstance(certKey.algorithm)
+            .generatePublic(X509EncodedKeySpec(certKey.encoded))
+
+        val aesKey = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+        gcm.init(Cipher.ENCRYPT_MODE, SecretKeySpec(aesKey, "AES"))
+        val ciphertext = gcm.doFinal(data)
+        val iv = gcm.iv
+
+        val rsa = Cipher.getInstance(RSA_TRANSFORMATION)
+        rsa.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
+        val wrapped = runCatching { rsa.doFinal(aesKey) }
+            .getOrElse { throw KeepMobileException.StorageException("Failed to wrap DKG secret") }
+        java.util.Arrays.fill(aesKey, 0)
+
+        val saved = dkgSecretPrefs.edit()
+            .putString(KEY_DKG_WRAPPED, Base64.encodeToString(wrapped, Base64.NO_WRAP))
+            .putString(KEY_DKG_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+            .putString(KEY_DKG_DATA, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            .commit()
+        if (!saved) {
+            throw KeepMobileException.StorageException("Failed to save DKG secret")
+        }
+    }
+
+    /**
+     * Auth-gated read: unwrap the AES key with the biometric-authorized RSA
+     * private-key [Cipher] queued for this request, then AES-GCM decrypt. The
+     * cipher must be produced by [getDkgSecretDecryptCipher] behind a
+     * BiometricPrompt and queued via [setPendingCipher] (role DECRYPT), the same
+     * shape as the per-share path but on the dedicated DKG alias.
+     */
+    private fun loadDkgSecret(): ByteArray {
+        val requestId = requestIdContext.get()
+            ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        val rsa = consumePendingCipher(requestId, CipherRole.DECRYPT)
+            ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
+
+        val wrapped = dkgSecretPrefs.getString(KEY_DKG_WRAPPED, null)
+            ?: throw KeepMobileException.StorageNotFound()
+        val ivB64 = dkgSecretPrefs.getString(KEY_DKG_IV, null)
+            ?: throw KeepMobileException.StorageNotFound()
+        val dataB64 = dkgSecretPrefs.getString(KEY_DKG_DATA, null)
+            ?: throw KeepMobileException.StorageNotFound()
+
+        val aesKey = runCatching { rsa.doFinal(Base64.decode(wrapped, Base64.NO_WRAP)) }
+            .getOrElse { throw KeepMobileException.StorageException("Failed to unwrap DKG secret") }
+        return try {
+            val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+            gcm.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(aesKey, "AES"),
+                GCMParameterSpec(128, Base64.decode(ivB64, Base64.NO_WRAP))
+            )
+            gcm.doFinal(Base64.decode(dataB64, Base64.NO_WRAP))
+        } catch (e: Exception) {
+            // A decrypt failure here is not proof of corruption (e.g. a spent
+            // cipher). Never wipe the stash on a read error — it guards a live
+            // share (INVARIANTS #1); the caller retries or discards explicitly.
+            throw KeepMobileException.StorageException("Failed to decrypt DKG secret")
+        } finally {
+            java.util.Arrays.fill(aesKey, 0)
+        }
+    }
+
+    /**
+     * A biometric-bindable RSA-decrypt [Cipher] for the pending-DKG secret, to be
+     * wrapped in a BiometricPrompt.CryptoObject and, once authorized, queued via
+     * [setPendingCipher] before calling `recoverDkgShare`. Null when no secret is
+     * stored, so the UI can skip the prompt.
+     */
+    fun getDkgSecretDecryptCipher(): Cipher? {
+        if (!dkgSecretPrefs.contains(KEY_DKG_WRAPPED)) return null
+        if (!keyStore.containsAlias(DKG_SECRET_ALIAS)) return null
+        val privateKey = keyStore.getKey(DKG_SECRET_ALIAS, null)
+            ?: throw KeepMobileException.StorageException("DKG secret key missing")
+        return runCatching {
+            Cipher.getInstance(RSA_TRANSFORMATION).apply {
+                init(Cipher.DECRYPT_MODE, privateKey, oaepSpec())
+            }
+        }.getOrElse { e -> throw cipherInitFailure(e, "decryption") }
+    }
+
+    @Synchronized
+    private fun deleteDkgSecret() {
+        if (!dkgSecretPrefs.edit().clear().commit()) {
+            throw KeepMobileException.StorageException("Failed to clear DKG secret")
+        }
+        try {
+            if (keyStore.containsAlias(DKG_SECRET_ALIAS)) {
+                keyStore.deleteEntry(DKG_SECRET_ALIAS)
+            }
+        } catch (e: Exception) {
+            throw KeepMobileException.StorageException("Failed to delete DKG secret key")
+        }
     }
 }

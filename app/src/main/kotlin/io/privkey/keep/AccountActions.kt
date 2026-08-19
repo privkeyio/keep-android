@@ -11,6 +11,7 @@ import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgProgressCallback
 import io.privkey.keep.uniffi.DkgProgressUpdate
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.PendingShareInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
@@ -520,6 +521,124 @@ internal class AccountActions(
         // its body, but invokeOnCompletion still fires (synchronously here), so the
         // guard cannot be stranded true and permanently block later ceremonies.
         job.invokeOnCompletion { dkgInProgress.set(false) }
+    }
+
+    /**
+     * The DKG share (if any) that completed its ceremony but whose import into
+     * share storage was never confirmed, e.g. after a storage failure or a crash
+     * mid-import. Reads only the non-auth marker, so it needs no biometric.
+     * `null` when nothing is pending.
+     */
+    suspend fun pendingDkgShare(): PendingShareInfo? = withContext(Dispatchers.IO) {
+        runCatching { keepMobile.pendingDkgShare() }.getOrNull()
+    }
+
+    /**
+     * Permanently abandon a pending DKG share, re-enabling group creation when a
+     * stash can't be recovered (its record is corrupt, or the vault won't unlock).
+     * Destructive: the caller must gate this behind an explicit confirmation.
+     */
+    suspend fun discardPendingDkgShare() = withContext(Dispatchers.IO) {
+        keepMobile.discardPendingDkgShare()
+        runCatching { refreshAccountState() }
+        Unit
+    }
+
+    /**
+     * Finish importing a vault-protected pending DKG share. Two authorized ciphers
+     * are needed and gathered in one biometric chain (like [renameShare]): an RSA
+     * decrypt cipher to unwrap the auth-gated secret, then an AES encrypt cipher to
+     * store the recovered share. The ephemeral ceremony passphrase rides inside the
+     * secret, so no passphrase is asked of the user. [onResult] receives the stored
+     * share, or null on any failure/cancel.
+     */
+    fun recoverPendingDkgShare(
+        title: String,
+        subtitle: String,
+        onResult: (ShareInfo?) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        coroutineScope.launch {
+            val pending = pendingDkgShare()
+            if (pending == null || !pending.vaultProtected) {
+                onDismiss()
+                return@launch
+            }
+            val decryptCipher = withContext(Dispatchers.IO) {
+                runCatching { storage.getDkgSecretDecryptCipher() }.getOrNull()
+            }
+            if (decryptCipher == null) {
+                onDismiss()
+                return@launch
+            }
+            onBiometricRequest(title, subtitle, decryptCipher) { authedDecrypt ->
+                if (authedDecrypt == null) {
+                    onDismiss()
+                    return@onBiometricRequest
+                }
+                requestEncryptCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
+            }
+        }
+    }
+
+    private fun requestEncryptCipherAndRecover(
+        groupPubkeyHex: String,
+        title: String,
+        subtitle: String,
+        authedDecrypt: Cipher,
+        onResult: (ShareInfo?) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        coroutineScope.launch {
+            val encryptCipher = withContext(Dispatchers.IO) {
+                runCatching { storage.getCipherForShareEncryption(groupPubkeyHex) }.getOrNull()
+            }
+            if (encryptCipher == null) {
+                onDismiss()
+                return@launch
+            }
+            onBiometricRequest(title, subtitle, encryptCipher) { authedEncrypt ->
+                if (authedEncrypt == null) {
+                    onDismiss()
+                    return@onBiometricRequest
+                }
+                finishRecoverDkgShare(authedDecrypt, authedEncrypt, onResult)
+            }
+        }
+    }
+
+    private fun finishRecoverDkgShare(
+        authedDecrypt: Cipher,
+        authedEncrypt: Cipher,
+        onResult: (ShareInfo?) -> Unit
+    ) {
+        coroutineScope.launch {
+            accountMutex.withLock {
+                val requestId = UUID.randomUUID().toString()
+                var pendingSet = false
+                try {
+                    storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
+                    pendingSet = true
+                    storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
+                    val info = withContext(Dispatchers.IO) {
+                        storage.setRequestIdContext(requestId)
+                        try {
+                            // Vault-protected: the passphrase is stashed in the secret.
+                            keepMobile.recoverDkgShare(null)
+                        } finally {
+                            storage.clearRequestIdContext()
+                        }
+                    }
+                    runCatching { refreshAccountState() }
+                    onResult(info)
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG recovery failed: ${e::class.simpleName}")
+                    onResult(null)
+                } finally {
+                    if (pendingSet) storage.clearPendingCipher(requestId)
+                }
+            }
+        }
     }
 
     // The Rust FFI returns the seed as a wipeable ByteArray; it is delivered to onResult
