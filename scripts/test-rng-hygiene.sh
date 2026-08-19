@@ -128,6 +128,10 @@ run_probe $SRC/ProbeOaep.kt 'val rsa = Cipher.getInstance("RSA/ECB/OAEPWithSHA-2
 rsa.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec())
 ' pass "RSA-OAEP encrypt init passing an OAEP parameter spec"
 
+run_probe $SRC/ProbeOaepLabel.kt 'val gcm = Cipher.getInstance("AES/GCM/NoPadding")
+gcm.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, oaepLabel))
+' fail "AES-GCM encrypt init is still caught when an unrelated identifier contains oaep"
+
 run_probe $SRC/ProbeComment.kt '// Math.random() is named here in prose only
 val x = 1
 ' pass "a banned token inside a comment is not code"
