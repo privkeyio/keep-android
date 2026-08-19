@@ -364,6 +364,8 @@ fun MainScreen(
     // Re-auth gate for security-downgrade actions (e.g. clearing/removing a certificate
     // pin, which re-opens trust-on-first-use for that host).
     var pendingAuthGateAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    // Runs when the pin gate is dismissed without a verified pin; neutralized on success.
+    var pendingAuthGateCancel by remember { mutableStateOf<() -> Unit>({}) }
     var authGateTitle by remember { mutableStateOf("") }
     var authGateMessage by remember { mutableStateOf("") }
     var authGateConfirm by remember { mutableStateOf("") }
@@ -431,23 +433,29 @@ fun MainScreen(
     // Runs [action] only after a verified auth factor: biometric when available, else a
     // PIN prompt, else (no factor configured) immediately, consistent with the rest of the
     // app in that config. Used to gate security-downgrade actions like clearing a cert pin.
-    val requireAuthThen: (String, String, String, suspend () -> Unit) -> Unit =
-        { title, message, confirmLabel, action ->
-            when {
-                biometricAvailable -> coroutineScope.launch {
-                    // Downgrade gate (cert-pin clear/retire, app-lock weakening): force a
-                    // live prompt rather than accepting an open biometric-timeout window.
-                    if (onBiometricAuth?.invoke(title, message, true) == true) action()
-                }
-                pinEnabled -> {
-                    authGateTitle = title
-                    authGateMessage = message
-                    authGateConfirm = confirmLabel
-                    pendingAuthGateAction = action
-                }
-                else -> coroutineScope.launch { action() }
+    fun requireAuthThen(
+        title: String,
+        message: String,
+        confirmLabel: String,
+        onCancel: () -> Unit = {},
+        action: suspend () -> Unit
+    ) {
+        when {
+            biometricAvailable -> coroutineScope.launch {
+                // Downgrade gate (cert-pin clear/retire, app-lock weakening): force a
+                // live prompt rather than accepting an open biometric-timeout window.
+                if (onBiometricAuth?.invoke(title, message, true) == true) action() else onCancel()
             }
+            pinEnabled -> {
+                authGateTitle = title
+                authGateMessage = message
+                authGateConfirm = confirmLabel
+                pendingAuthGateCancel = onCancel
+                pendingAuthGateAction = action
+            }
+            else -> coroutineScope.launch { action() }
         }
+    }
 
     val accountActions = remember {
         AccountActions(
@@ -621,13 +629,19 @@ fun MainScreen(
             onVerify = { pin ->
                 val verified = withContext(Dispatchers.IO) { pinStore.verifyPin(pin) }
                 if (verified) {
+                    // Success dismisses the dialog too; drop the cancel so it doesn't fire.
+                    pendingAuthGateCancel = {}
                     action()
                     true
                 } else {
                     false
                 }
             },
-            onDismiss = { pendingAuthGateAction = null }
+            onDismiss = {
+                pendingAuthGateCancel()
+                pendingAuthGateCancel = {}
+                pendingAuthGateAction = null
+            }
         )
     }
 
@@ -665,7 +679,7 @@ fun MainScreen(
                         appContext.getString(R.string.settings_biometric_timeout_reauth_title),
                         appContext.getString(R.string.settings_biometric_timeout_reauth_text),
                         appContext.getString(R.string.settings_reauth_confirm),
-                        applyTimeout,
+                        action = applyTimeout,
                     )
                 } else {
                     coroutineScope.launch { applyTimeout() }
@@ -683,7 +697,7 @@ fun MainScreen(
                         appContext.getString(R.string.settings_biometric_lock_disable_reauth_title),
                         appContext.getString(R.string.settings_biometric_lock_disable_reauth_text),
                         appContext.getString(R.string.settings_reauth_confirm),
-                        applyLockOnLaunch,
+                        action = applyLockOnLaunch,
                     )
                 } else {
                     coroutineScope.launch { applyLockOnLaunch() }
@@ -1162,7 +1176,8 @@ fun MainScreen(
                         requireAuthThen(
                             pendingDkgDiscardAuthTitle,
                             pendingDkgDiscardAuthSubtitle,
-                            pendingDkgDiscardLabel
+                            pendingDkgDiscardLabel,
+                            onCancel = { dkgDiscardInProgress = false }
                         ) {
                             val ok = withContext(Dispatchers.IO) {
                                 runCatching { accountActions.discardPendingDkgShare() }.isSuccess
@@ -1178,8 +1193,8 @@ fun MainScreen(
                     }
                 },
                 onDismiss = {
-                    // Also clears the guard if the user backed out after an auth cancel;
-                    // requireAuthThen has no failure callback to reset it otherwise.
+                    // Backing out of the confirm dialog itself; auth-cancel is handled by
+                    // requireAuthThen's onCancel above.
                     dkgDiscardInProgress = false
                     showDiscardDkgConfirm = false
                 }
@@ -1188,7 +1203,8 @@ fun MainScreen(
             PendingDkgShareDialog(
                 groupName = pending.name,
                 onRecover = {
-                    try {
+                    // Single-flight: a same-frame double-tap must not start two recoveries.
+                    if (!dkgRecoveryInProgress) try {
                         requireBiometricReady()
                         dkgRecoveryInProgress = true
                         accountActions.recoverPendingDkgShare(
