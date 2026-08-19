@@ -792,10 +792,6 @@ class AndroidKeystoreStorage(
                 .setKeySize(2048)
                 .setDigests(KeyProperties.DIGEST_SHA256)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
-                // Authorize MGF1-SHA256 explicitly: AndroidKeyStore otherwise
-                // authorizes only MGF1-SHA1, so an unwrap with the SHA-256 MGF1
-                // spec used on both sides would fail at init on API 31+.
-                .setMgf1Digests(KeyProperties.DIGEST_SHA256)
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
                 .setInvalidatedByBiometricEnrollment(true)
@@ -804,8 +800,17 @@ class AndroidKeystoreStorage(
         generator.generateKeyPair()
     }
 
+    // OAEP digest SHA-256 with an MGF1-SHA1 mask. AndroidKeyStore authorizes only
+    // MGF1-SHA1 for an OAEP key unless `setMgf1Digests` says otherwise, and that
+    // setter is API 35 while `minSdk` is 33 — calling it throws NoSuchMethodError
+    // on 33/34, and gating it by version would instead desync the two halves,
+    // since the authorized digest is fixed when the key is generated and does not
+    // change if the device later upgrades. Matching AndroidKeyStore's default on
+    // every API level keeps generation and cipher init consistent for the life of
+    // the key. RFC 8017 permits a different hash for the mask function, and
+    // MGF1-SHA1 is not a weakness in OAEP.
     private fun oaepSpec(): OAEPParameterSpec =
-        OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
+        OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT)
 
     /** Headless write: hybrid-encrypt under the RSA public key. No auth required. */
     @Synchronized
