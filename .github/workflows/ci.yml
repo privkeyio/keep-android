@@ -65,7 +65,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-linux-android
@@ -88,7 +88,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-aarch64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
@@ -141,7 +141,7 @@ jobs:
         run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-linux-android
@@ -162,7 +162,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-x86_64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        uses: taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
