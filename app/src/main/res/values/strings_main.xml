@@ -78,6 +78,7 @@
     <string name="main_pending_dkg_later">Later</string>
     <string name="main_pending_dkg_still_unreadable">Still can\'t read the pending share.</string>
     <string name="main_pending_dkg_discard_failed">Couldn\'t discard the share. Please try again.</string>
+    <string name="main_pending_dkg_blocks_create_group">Recover or discard your pending signing group share before creating a new group.</string>
     <string name="main_pin_mismatch_title">Certificate Pin Mismatch</string>
     <string name="main_pin_mismatch_text">The certificate for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> has changed. This could indicate a security issue or a legitimate certificate rotation.</string>
     <string name="main_clear_pin_and_retry">Clear Pin &amp; Retry</string>
