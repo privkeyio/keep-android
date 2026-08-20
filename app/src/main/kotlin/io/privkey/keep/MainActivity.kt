@@ -334,6 +334,21 @@ fun MainScreen(
     var showHistoryScreen by remember { mutableStateOf(false) }
     var showSignPolicyScreen by remember { mutableStateOf(false) }
     var showRelayAuthWhitelistScreen by remember { mutableStateOf(false) }
+    var pendingDkgShare by remember { mutableStateOf<PendingShareInfo?>(null) }
+    // A failed marker read is NOT "nothing pending": frost_run_dkg fail-closes on the
+    // same error, so collapsing it to null blocks group creation while hiding the only
+    // control that can clear the block.
+    var pendingDkgUnreadable by remember { mutableStateOf(false) }
+    // Bumped on every local mutation of the marker state. A poll captures it before its
+    // read and drops the result if it changed, so a read that started before a discard
+    // can't land afterward and resurrect the marker it just cleared. A plain
+    // in-progress flag can't cover this: the flag is already false by the time the
+    // stale result applies.
+    var pendingDkgEpoch by remember { mutableIntStateOf(0) }
+    var pendingDkgDeferred by remember { mutableStateOf(false) }
+    var showDiscardDkgConfirm by remember { mutableStateOf(false) }
+    var dkgDiscardInProgress by remember { mutableStateOf(false) }
+    var dkgRecoveryInProgress by remember { mutableStateOf(false) }
     var importState by remember { mutableStateOf<ImportState>(ImportState.Idle) }
     var createGroupState by remember { mutableStateOf<CreateGroupState>(CreateGroupState.Idle) }
     var createGroupRun by remember { mutableStateOf(0) }
@@ -360,6 +375,8 @@ fun MainScreen(
     // Re-auth gate for security-downgrade actions (e.g. clearing/removing a certificate
     // pin, which re-opens trust-on-first-use for that host).
     var pendingAuthGateAction by remember { mutableStateOf<(suspend () -> Unit)?>(null) }
+    // Runs when the pin gate is dismissed without a verified pin; neutralized on success.
+    var pendingAuthGateCancel by remember { mutableStateOf<() -> Unit>({}) }
     var authGateTitle by remember { mutableStateOf("") }
     var authGateMessage by remember { mutableStateOf("") }
     var authGateConfirm by remember { mutableStateOf("") }
@@ -427,23 +444,29 @@ fun MainScreen(
     // Runs [action] only after a verified auth factor: biometric when available, else a
     // PIN prompt, else (no factor configured) immediately, consistent with the rest of the
     // app in that config. Used to gate security-downgrade actions like clearing a cert pin.
-    val requireAuthThen: (String, String, String, suspend () -> Unit) -> Unit =
-        { title, message, confirmLabel, action ->
-            when {
-                biometricAvailable -> coroutineScope.launch {
-                    // Downgrade gate (cert-pin clear/retire, app-lock weakening): force a
-                    // live prompt rather than accepting an open biometric-timeout window.
-                    if (onBiometricAuth?.invoke(title, message, true) == true) action()
-                }
-                pinEnabled -> {
-                    authGateTitle = title
-                    authGateMessage = message
-                    authGateConfirm = confirmLabel
-                    pendingAuthGateAction = action
-                }
-                else -> coroutineScope.launch { action() }
+    fun requireAuthThen(
+        title: String,
+        message: String,
+        confirmLabel: String,
+        onCancel: () -> Unit = {},
+        action: suspend () -> Unit
+    ) {
+        when {
+            biometricAvailable -> coroutineScope.launch {
+                // Downgrade gate (cert-pin clear/retire, app-lock weakening): force a
+                // live prompt rather than accepting an open biometric-timeout window.
+                if (onBiometricAuth?.invoke(title, message, true) == true) action() else onCancel()
             }
+            pinEnabled -> {
+                authGateTitle = title
+                authGateMessage = message
+                authGateConfirm = confirmLabel
+                pendingAuthGateCancel = onCancel
+                pendingAuthGateAction = action
+            }
+            else -> coroutineScope.launch { action() }
         }
+    }
 
     val accountActions = remember {
         AccountActions(
@@ -504,12 +527,16 @@ fun MainScreen(
                 ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
             val r = config.frostRelays
             val pr = config.profileRelays
-            AccountInitial(a, k, r, pr)
+            val pdkg = runCatching { keepMobile.pendingDkgShare() }
+            AccountInitial(a, k, r, pr, pdkg)
         }
         allAccounts = initial.accounts
         activeAccountKey = initial.activeKey
         relays = initial.relays
         profileRelays = initial.profileRelays
+        initial.pendingDkgShare
+            .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
+            .onFailure { pendingDkgUnreadable = true }
     }
 
     LaunchedEffect(Unit) {
@@ -528,6 +555,7 @@ fun MainScreen(
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
+                val dkgEpochAtRead = pendingDkgEpoch
                 val pollResult = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
@@ -541,7 +569,10 @@ fun MainScreen(
                     val db = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
                         .onFailure { if (it is CancellationException) throw it }
                         .getOrNull()
-                    PollResult(h, s, a, k, dc, db)
+                    // Marker-only read, no biometric; safe to poll.
+                    val pdkg = runCatching { keepMobile.pendingDkgShare() }
+                        .onFailure { if (it is CancellationException) throw it }
+                    PollResult(h, s, a, k, dc, db, pdkg)
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
@@ -549,6 +580,14 @@ fun MainScreen(
                 activeAccountKey = pollResult.activeAccountKey
                 descriptorCount = pollResult.descriptorCount
                 activeDidBackup = pollResult.activeDidBackup
+                // Don't clobber the dialog state mid-recovery: an in-flight biometric
+                // chain hasn't cleared the marker yet, so a poll would re-show it.
+                if (!dkgRecoveryInProgress && !dkgDiscardInProgress && pendingDkgEpoch == dkgEpochAtRead) {
+                    // Keep the last known marker on a read failure rather than clearing it.
+                    pollResult.pendingDkgShare
+                        .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
+                        .onFailure { pendingDkgUnreadable = true }
+                }
                 refreshCertificatePins()
                 profileRelays = withContext(Dispatchers.IO) { loadProfileRelays(pollResult.activeAccountKey) }
                 delay(10_000)
@@ -608,13 +647,19 @@ fun MainScreen(
             onVerify = { pin ->
                 val verified = withContext(Dispatchers.IO) { pinStore.verifyPin(pin) }
                 if (verified) {
+                    // Success dismisses the dialog too; drop the cancel so it doesn't fire.
+                    pendingAuthGateCancel = {}
                     action()
                     true
                 } else {
                     false
                 }
             },
-            onDismiss = { pendingAuthGateAction = null }
+            onDismiss = {
+                pendingAuthGateCancel()
+                pendingAuthGateCancel = {}
+                pendingAuthGateAction = null
+            }
         )
     }
 
@@ -652,7 +697,7 @@ fun MainScreen(
                         appContext.getString(R.string.settings_biometric_timeout_reauth_title),
                         appContext.getString(R.string.settings_biometric_timeout_reauth_text),
                         appContext.getString(R.string.settings_reauth_confirm),
-                        applyTimeout,
+                        action = applyTimeout,
                     )
                 } else {
                     coroutineScope.launch { applyTimeout() }
@@ -670,7 +715,7 @@ fun MainScreen(
                         appContext.getString(R.string.settings_biometric_lock_disable_reauth_title),
                         appContext.getString(R.string.settings_biometric_lock_disable_reauth_text),
                         appContext.getString(R.string.settings_reauth_confirm),
-                        applyLockOnLaunch,
+                        action = applyLockOnLaunch,
                     )
                 } else {
                     coroutineScope.launch { applyLockOnLaunch() }
@@ -1125,6 +1170,118 @@ fun MainScreen(
     val initEncryptionFailedMessage = stringResource(R.string.main_init_encryption_failed)
     val connectRelaysTitle = stringResource(R.string.main_connect_relays_title)
     val connectRelaysSubtitle = stringResource(R.string.main_connect_relays_subtitle)
+
+    val pendingDkgRecoverTitle = stringResource(R.string.main_pending_dkg_recover_title)
+    val pendingDkgRecoverSubtitle = stringResource(R.string.main_pending_dkg_recover_subtitle)
+    val pendingDkgRecoveredMessage = stringResource(R.string.main_pending_dkg_recovered)
+    val pendingDkgRecoverFailedMessage = stringResource(R.string.main_pending_dkg_recover_failed)
+    val pendingDkgDiscardAuthTitle = stringResource(R.string.main_pending_dkg_discard_auth_title)
+    val pendingDkgDiscardAuthSubtitle = stringResource(R.string.main_pending_dkg_discard_auth_subtitle)
+    val pendingDkgDiscardLabel = stringResource(R.string.main_pending_dkg_discard)
+    val pendingDkgDiscardFailedMessage = stringResource(R.string.main_pending_dkg_discard_failed)
+    val pendingDkgStillUnreadableMessage = stringResource(R.string.main_pending_dkg_still_unreadable)
+
+    // Reaching neither a marker nor an error means there is nothing to confirm; drop a
+    // stale confirm so a later poll can't re-present the destructive dialog unprompted.
+    LaunchedEffect(pendingDkgShare, pendingDkgUnreadable) {
+        if (pendingDkgShare == null && !pendingDkgUnreadable) showDiscardDkgConfirm = false
+    }
+
+    fun startPendingDkgDiscard() {
+        // Single-flight: a double-tap must not launch two concurrent discards
+        // (the native call takes no lock of its own).
+        if (dkgDiscardInProgress) return
+        dkgDiscardInProgress = true
+        // Destructive: gate behind a verified auth factor. Uses the auth-only
+        // prompt (not the DKG vault cipher) so discard still works when the
+        // stash is unrecoverable -- its whole reason to exist.
+        requireAuthThen(
+            pendingDkgDiscardAuthTitle,
+            pendingDkgDiscardAuthSubtitle,
+            pendingDkgDiscardLabel,
+            onCancel = { dkgDiscardInProgress = false }
+        ) {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { accountActions.discardPendingDkgShare() }.isSuccess
+            }
+            if (ok) {
+                pendingDkgShare = null
+                pendingDkgUnreadable = false
+                pendingDkgEpoch++
+            } else {
+                Toast.makeText(appContext, pendingDkgDiscardFailedMessage, Toast.LENGTH_LONG).show()
+            }
+            showDiscardDkgConfirm = false
+            dkgDiscardInProgress = false
+        }
+    }
+
+    val pendingDkg = pendingDkgShare
+    when {
+        showDiscardDkgConfirm && (pendingDkg != null || pendingDkgUnreadable) -> {
+            DiscardPendingDkgDialog(
+                onConfirm = { startPendingDkgDiscard() },
+                onDismiss = {
+                    // Backing out of the confirm dialog itself; auth-cancel is handled by
+                    // requireAuthThen's onCancel above.
+                    dkgDiscardInProgress = false
+                    showDiscardDkgConfirm = false
+                }
+            )
+        }
+        pendingDkg != null && !dkgRecoveryInProgress -> {
+            PendingDkgShareDialog(
+                groupName = pendingDkg.name,
+                onRecover = {
+                    // Single-flight: a same-frame double-tap must not start two recoveries.
+                    if (!dkgRecoveryInProgress) try {
+                        requireBiometricReady()
+                        dkgRecoveryInProgress = true
+                        accountActions.recoverPendingDkgShare(
+                            title = pendingDkgRecoverTitle,
+                            subtitle = pendingDkgRecoverSubtitle,
+                            onResult = { info ->
+                                dkgRecoveryInProgress = false
+                                if (info != null) {
+                                    pendingDkgShare = null
+                                    pendingDkgUnreadable = false
+                                    pendingDkgEpoch++
+                                    Toast.makeText(appContext, pendingDkgRecoveredMessage, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(appContext, pendingDkgRecoverFailedMessage, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            onDismiss = { reason ->
+                                dkgRecoveryInProgress = false
+                                // Null means the user cancelled; anything else has to be shown.
+                                if (reason != null) {
+                                    Toast.makeText(appContext, reason, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        )
+                    } catch (e: BiometricHelper.BiometricNotReadyException) {
+                        Toast.makeText(appContext, e.message ?: biometricUnavailableMessage, Toast.LENGTH_LONG).show()
+                    }
+                },
+                onDiscard = { showDiscardDkgConfirm = true }
+            )
+        }
+        pendingDkgUnreadable && !pendingDkgDeferred -> {
+            PendingDkgUnreadableDialog(
+                onLater = { pendingDkgDeferred = true },
+                onRetry = {
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) { runCatching { keepMobile.pendingDkgShare() } }
+                            .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false; pendingDkgEpoch++ }
+                            .onFailure {
+                                Toast.makeText(appContext, pendingDkgStillUnreadableMessage, Toast.LENGTH_LONG).show()
+                            }
+                    }
+                },
+                onDiscard = { showDiscardDkgConfirm = true }
+            )
+        }
+    }
 
     val navController = rememberNavController()
 
@@ -1908,7 +2065,8 @@ private data class AccountInitial(
     val accounts: List<AccountInfo>,
     val activeKey: String?,
     val relays: List<String>,
-    val profileRelays: List<String>
+    val profileRelays: List<String>,
+    val pendingDkgShare: Result<PendingShareInfo?>
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1943,7 +2101,8 @@ private data class PollResult(
     val allAccounts: List<AccountInfo>,
     val activeAccountKey: String?,
     val descriptorCount: Int,
-    val activeDidBackup: Boolean?
+    val activeDidBackup: Boolean?,
+    val pendingDkgShare: Result<PendingShareInfo?>
 )
 
 @Composable
@@ -1957,6 +2116,73 @@ private fun KillSwitchConfirmDialog(
         text = { Text(stringResource(R.string.main_kill_switch_dialog_text)) },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text(stringResource(R.string.main_enable)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }
+        }
+    )
+}
+
+@Composable
+private fun PendingDkgShareDialog(
+    groupName: String,
+    onRecover: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text(stringResource(R.string.main_pending_dkg_title)) },
+        text = { Text(stringResource(R.string.main_pending_dkg_text, groupName)) },
+        confirmButton = {
+            TextButton(onClick = onRecover) { Text(stringResource(R.string.main_pending_dkg_recover)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+        }
+    )
+}
+
+@Composable
+private fun PendingDkgUnreadableDialog(
+    onLater: () -> Unit,
+    onRetry: () -> Unit,
+    onDiscard: () -> Unit
+) {
+    // Storage being unreadable must not corner the user into the destructive option to
+    // get their app back. Dismissing only hides the dialog for the session; the Rust
+    // still fail-closes group creation, so nothing unsafe is unlocked by deferring.
+    AlertDialog(
+        onDismissRequest = onLater,
+        title = { Text(stringResource(R.string.main_pending_dkg_unreadable_title)) },
+        text = { Text(stringResource(R.string.main_pending_dkg_unreadable_text)) },
+        confirmButton = {
+            TextButton(onClick = onRetry) { Text(stringResource(R.string.main_pending_dkg_retry)) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+                TextButton(onClick = onLater) { Text(stringResource(R.string.main_pending_dkg_later)) }
+            }
+        }
+    )
+}
+
+@Composable
+private fun DiscardPendingDkgDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.main_pending_dkg_discard_confirm_title)) },
+        text = { Text(stringResource(R.string.main_pending_dkg_discard_confirm_text)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    stringResource(R.string.main_pending_dkg_discard),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.main_cancel)) }

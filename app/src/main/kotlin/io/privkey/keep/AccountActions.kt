@@ -529,8 +529,15 @@ internal class AccountActions(
      * mid-import. Reads only the non-auth marker, so it needs no biometric.
      * `null` when nothing is pending.
      */
-    suspend fun pendingDkgShare(): PendingShareInfo? = withContext(Dispatchers.IO) {
-        runCatching { keepMobile.pendingDkgShare() }.getOrNull()
+    /**
+     * `Ok(null)` means nothing is pending; a failure means the stash could not be
+     * read and must not be rendered as absence. The Rust draws the same
+     * distinction deliberately (`pending_dkg_share`), because a marker that reads
+     * as absent while `frost_run_dkg` still fail-closes on it strands the user
+     * with no way to reach the discard escape hatch.
+     */
+    suspend fun pendingDkgShare(): Result<PendingShareInfo?> = withContext(Dispatchers.IO) {
+        runCatching { keepMobile.pendingDkgShare() }
     }
 
     /**
@@ -556,24 +563,40 @@ internal class AccountActions(
         title: String,
         subtitle: String,
         onResult: (ShareInfo?) -> Unit,
-        onDismiss: () -> Unit
+        // Null reason means the user cancelled and needs no message. Any other stop
+        // must carry one: Recover sits in an undismissable dialog whose only other
+        // button destroys the share, so a silent no-op reads as a dead button.
+        onDismiss: (String?) -> Unit
     ) {
         coroutineScope.launch {
-            val pending = pendingDkgShare()
-            if (pending == null || !pending.vaultProtected) {
-                onDismiss()
+            val pendingResult = pendingDkgShare()
+            val pending = pendingResult.getOrNull()
+            if (pending == null) {
+                // Genuinely absent -> no exception -> nothing to say. A read failure
+                // here carries a message and must not look like a dead button.
+                onDismiss(pendingResult.exceptionOrNull()?.message)
                 return@launch
             }
-            val decryptCipher = withContext(Dispatchers.IO) {
-                runCatching { storage.getDkgSecretDecryptCipher() }.getOrNull()
+            if (!pending.vaultProtected) {
+                onDismiss(appContext.getString(R.string.main_pending_dkg_recover_passphrase_required))
+                return@launch
             }
+            // A re-enrolled fingerprint invalidates the alias, and the exception
+            // carries the only actionable text ("please re-import your share").
+            val decryptAttempt = withContext(Dispatchers.IO) {
+                runCatching { storage.getDkgSecretDecryptCipher() }
+            }
+            val decryptCipher = decryptAttempt.getOrNull()
             if (decryptCipher == null) {
-                onDismiss()
+                onDismiss(
+                    decryptAttempt.exceptionOrNull()?.message
+                        ?: appContext.getString(R.string.main_pending_dkg_recover_unavailable)
+                )
                 return@launch
             }
             onBiometricRequest(title, subtitle, decryptCipher) { authedDecrypt ->
                 if (authedDecrypt == null) {
-                    onDismiss()
+                    onDismiss(null)
                     return@onBiometricRequest
                 }
                 requestEncryptCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
@@ -587,19 +610,23 @@ internal class AccountActions(
         subtitle: String,
         authedDecrypt: Cipher,
         onResult: (ShareInfo?) -> Unit,
-        onDismiss: () -> Unit
+        onDismiss: (String?) -> Unit
     ) {
         coroutineScope.launch {
-            val encryptCipher = withContext(Dispatchers.IO) {
-                runCatching { storage.getCipherForShareEncryption(groupPubkeyHex) }.getOrNull()
+            val encryptAttempt = withContext(Dispatchers.IO) {
+                runCatching { storage.getCipherForShareEncryption(groupPubkeyHex) }
             }
+            val encryptCipher = encryptAttempt.getOrNull()
             if (encryptCipher == null) {
-                onDismiss()
+                onDismiss(
+                    encryptAttempt.exceptionOrNull()?.message
+                        ?: appContext.getString(R.string.main_pending_dkg_recover_unavailable)
+                )
                 return@launch
             }
             onBiometricRequest(title, subtitle, encryptCipher) { authedEncrypt ->
                 if (authedEncrypt == null) {
-                    onDismiss()
+                    onDismiss(null)
                     return@onBiometricRequest
                 }
                 finishRecoverDkgShare(authedDecrypt, authedEncrypt, onResult)
