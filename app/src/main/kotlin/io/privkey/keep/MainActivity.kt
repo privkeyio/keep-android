@@ -287,6 +287,25 @@ private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
     Toast.makeText(context, resId, Toast.LENGTH_LONG).show()
 }
 
+/** Outcome of the pending-DKG gate that guards entry into the group-creation ceremony. */
+enum class GroupCreationGate { WAIT, BLOCK, ALLOW }
+
+/**
+ * Decide whether a Create Group request may proceed. Fail-closed: while the initial
+ * marker read is still outstanding ([pendingCheckComplete] false) we cannot rule out a
+ * pending share owning the single slot, so we WAIT rather than ALLOW. A known share or an
+ * unreadable marker BLOCKs; only a completed check with a clear slot ALLOWs.
+ */
+fun groupCreationGate(
+    pendingCheckComplete: Boolean,
+    hasPendingShare: Boolean,
+    pendingUnreadable: Boolean,
+): GroupCreationGate = when {
+    !pendingCheckComplete -> GroupCreationGate.WAIT
+    hasPendingShare || pendingUnreadable -> GroupCreationGate.BLOCK
+    else -> GroupCreationGate.ALLOW
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -339,6 +358,11 @@ fun MainScreen(
     // same error, so collapsing it to null blocks group creation while hiding the only
     // control that can clear the block.
     var pendingDkgUnreadable by remember { mutableStateOf(false) }
+    // False until the initial marker read resolves. Both the share and unreadable flags
+    // default to "nothing pending", so a Create Group tap fired before that first read
+    // lands would sail past the gate even when a completed-but-unrecovered stash owns
+    // the slot. Group creation stays fail-closed until this flips true.
+    var pendingDkgCheckComplete by remember { mutableStateOf(false) }
     // Bumped on every local mutation of the marker state. A poll captures it before its
     // read and drops the result if it changed, so a read that started before a discard
     // can't land afterward and resurrect the marker it just cleared. A plain
@@ -537,6 +561,7 @@ fun MainScreen(
         initial.pendingDkgShare
             .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
             .onFailure { pendingDkgUnreadable = true }
+        pendingDkgCheckComplete = true
     }
 
     LaunchedEffect(Unit) {
@@ -988,19 +1013,32 @@ fun MainScreen(
     }
 
     if (showCreateGroupScreen) {
-        // A completed-but-unrecovered DKG stash owns the single pending slot, so a
-        // new ceremony would run the whole multi-round DKG only to be refused at
-        // persistence (frost_run_dkg). Refuse at the door instead and re-surface the
-        // recover/discard dialog, sparing the user -- and every peer -- that wasted
-        // round trip. Covers the deferred-unreadable path #492 made reachable.
-        if (pendingDkgShare != null || pendingDkgUnreadable) {
-            val blockedMessage = stringResource(R.string.main_pending_dkg_blocks_create_group)
-            LaunchedEffect(Unit) {
-                showCreateGroupScreen = false
-                pendingDkgDeferred = false
-                Toast.makeText(appContext, blockedMessage, Toast.LENGTH_LONG).show()
+        when (groupCreationGate(pendingDkgCheckComplete, pendingDkgShare != null, pendingDkgUnreadable)) {
+            GroupCreationGate.WAIT -> {
+                // The initial marker read hasn't resolved yet, so we don't know whether a
+                // pending stash owns the single slot. Fail closed: hold the ceremony behind
+                // a spinner rather than let a Create tap in this window slip past the block
+                // below and kick off a DKG that persistence would only reject.
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                return
             }
-            return
+            GroupCreationGate.BLOCK -> {
+                // A completed-but-unrecovered DKG stash owns the single pending slot, so a
+                // new ceremony would run the whole multi-round DKG only to be refused at
+                // persistence (frost_run_dkg). Refuse at the door instead and re-surface the
+                // recover/discard dialog, sparing the user -- and every peer -- that wasted
+                // round trip. Covers the deferred-unreadable path #492 made reachable.
+                val blockedMessage = stringResource(R.string.main_pending_dkg_blocks_create_group)
+                LaunchedEffect(Unit) {
+                    showCreateGroupScreen = false
+                    pendingDkgDeferred = false
+                    Toast.makeText(appContext, blockedMessage, Toast.LENGTH_LONG).show()
+                }
+                return
+            }
+            GroupCreationGate.ALLOW -> Unit
         }
         // Cache the fallback lookup so the getRelayConfig FFI is not re-run on every
         // recomposition; recompute only when the preferred relays change.
