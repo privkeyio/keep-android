@@ -3,6 +3,7 @@ package io.privkey.keep.storage
 import android.os.Build
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import androidx.biometric.BiometricManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.uniffi.ShareMetadataInfo
@@ -54,6 +55,19 @@ class DkgSecretStrongBoxTest {
         return info.securityLevel
     }
 
+    /**
+     * The DKG alias is created with `AUTH_BIOMETRIC_STRONG` for every use, which the
+     * Keystore refuses to generate at all when nothing is enrolled. That is a property
+     * of the environment rather than of the change under test, so cases needing the real
+     * alias skip instead of failing on a device without biometrics, such as CI's emulator.
+     */
+    private fun assumeBiometricEnrolled() = assumeTrue(
+        "requires an enrolled strong biometric",
+        BiometricManager.from(ctx)
+            .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+    )
+
     /** Writing the DKG secret is what triggers keypair creation. */
     private fun triggerCreation() {
         AndroidKeystoreStorage(ctx, requireUserAuth = false).storeShareByKey(
@@ -64,6 +78,7 @@ class DkgSecretStrongBoxTest {
     }
 
     @Test fun keypairIsCreatedAndUsableForTheWritePath() {
+        assumeBiometricEnrolled()
         triggerCreation()
         assertTrue("DKG secret alias should exist after a write", keyStore.containsAlias(alias))
     }
@@ -82,6 +97,7 @@ class DkgSecretStrongBoxTest {
      * check without needing a biometric.
      */
     @Test fun strongBoxKeyAcceptsTheOaepParametersUsedForDecryption() {
+        assumeBiometricEnrolled()
         triggerCreation()
         val storage = AndroidKeystoreStorage(ctx, requireUserAuth = false)
         val cipher = storage.getDkgSecretDecryptCipher()
@@ -141,6 +157,7 @@ class DkgSecretStrongBoxTest {
     @Test fun keyIsStrongBoxBackedWhenTheDeviceAdvertisesIt() {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         assumeTrue(ctx.packageManager.hasSystemFeature("android.hardware.strongbox_keystore"))
+        assumeBiometricEnrolled()
         triggerCreation()
         assertEquals(
             "device advertises StrongBox, so the DKG keypair must be StrongBox-backed",
