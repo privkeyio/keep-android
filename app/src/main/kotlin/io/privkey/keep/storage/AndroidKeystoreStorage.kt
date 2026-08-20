@@ -15,6 +15,7 @@ import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.InvalidAlgorithmParameterException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -803,7 +804,8 @@ class AndroidKeystoreStorage(
             try {
                 generator.initialize(buildSpec(useStrongBox = true))
                 generator.generateKeyPair()
-            } catch (e: ProviderException) {
+            } catch (e: Exception) {
+                if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
                 if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox DKG keypair generation failed, falling back to TEE", e)
                 if (keyStore.containsAlias(DKG_SECRET_ALIAS)) keyStore.deleteEntry(DKG_SECRET_ALIAS)
                 generator.initialize(buildSpec(useStrongBox = false))
