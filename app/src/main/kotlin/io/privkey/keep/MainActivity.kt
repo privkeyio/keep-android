@@ -988,6 +988,20 @@ fun MainScreen(
     }
 
     if (showCreateGroupScreen) {
+        // A completed-but-unrecovered DKG stash owns the single pending slot, so a
+        // new ceremony would run the whole multi-round DKG only to be refused at
+        // persistence (frost_run_dkg). Refuse at the door instead and re-surface the
+        // recover/discard dialog, sparing the user -- and every peer -- that wasted
+        // round trip. Covers the deferred-unreadable path #492 made reachable.
+        if (pendingDkgShare != null || pendingDkgUnreadable) {
+            val blockedMessage = stringResource(R.string.main_pending_dkg_blocks_create_group)
+            LaunchedEffect(Unit) {
+                showCreateGroupScreen = false
+                pendingDkgDeferred = false
+                Toast.makeText(appContext, blockedMessage, Toast.LENGTH_LONG).show()
+            }
+            return
+        }
         // Cache the fallback lookup so the getRelayConfig FFI is not re-run on every
         // recomposition; recompute only when the preferred relays change.
         val groupRelays = remember(relays) {
