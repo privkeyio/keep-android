@@ -544,6 +544,7 @@ fun MainScreen(
     }
 
     LaunchedEffect(Unit) {
+        val dkgEpochAtRead = pendingDkgEpoch
         val initial = withContext(Dispatchers.IO) {
             val a = storage.listAllShares().map { it.toAccountInfo() }
             val k = storage.getActiveShareKey()
@@ -558,9 +559,15 @@ fun MainScreen(
         activeAccountKey = initial.activeKey
         relays = initial.relays
         profileRelays = initial.profileRelays
-        initial.pendingDkgShare
-            .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
-            .onFailure { pendingDkgUnreadable = true }
+        // A discard/recover that bumps the epoch while this read was in flight has
+        // already cleared the marker; drop the stale write so this read can't resurrect
+        // it, mirroring the poll guard below. Complete the check either way so the gate
+        // doesn't latch on WAIT.
+        if (pendingDkgEpoch == dkgEpochAtRead) {
+            initial.pendingDkgShare
+                .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
+                .onFailure { pendingDkgUnreadable = true }
+        }
         pendingDkgCheckComplete = true
     }
 
