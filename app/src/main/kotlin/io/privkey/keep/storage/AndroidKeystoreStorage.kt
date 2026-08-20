@@ -15,6 +15,7 @@ import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.InvalidAlgorithmParameterException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -784,7 +785,8 @@ class AndroidKeystoreStorage(
             KeyProperties.KEY_ALGORITHM_RSA,
             "AndroidKeyStore"
         )
-        generator.initialize(
+
+        fun buildSpec(useStrongBox: Boolean): KeyGenParameterSpec =
             KeyGenParameterSpec.Builder(
                 DKG_SECRET_ALIAS,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
@@ -795,9 +797,24 @@ class AndroidKeystoreStorage(
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
                 .setInvalidatedByBiometricEnrollment(true)
+                .apply { if (useStrongBox) setIsStrongBoxBacked(true) }
                 .build()
-        )
-        generator.generateKeyPair()
+
+        if (isStrongBoxAvailable()) {
+            try {
+                generator.initialize(buildSpec(useStrongBox = true))
+                generator.generateKeyPair()
+            } catch (e: Exception) {
+                if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
+                if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox DKG keypair generation failed, falling back to TEE", e)
+                if (keyStore.containsAlias(DKG_SECRET_ALIAS)) keyStore.deleteEntry(DKG_SECRET_ALIAS)
+                generator.initialize(buildSpec(useStrongBox = false))
+                generator.generateKeyPair()
+            }
+        } else {
+            generator.initialize(buildSpec(useStrongBox = false))
+            generator.generateKeyPair()
+        }
     }
 
     // OAEP digest SHA-256 with an MGF1-SHA1 mask. AndroidKeyStore authorizes only
