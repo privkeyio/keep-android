@@ -114,17 +114,21 @@ class CreateGroupValidationTest {
     @Test
     fun rosterRejectsThresholdAboveParticipants() = assertFalse(isValidRoster(roster(th = 4)))
 
+    // Duplicate indices/pubkeys and a missing coordinator slot are well-formed at
+    // the wire level, so the shape pre-check deliberately accepts them here; the
+    // authoritative rejection is frost_verify_roster (Rust), exercised by the
+    // keep-mobile dkg unit tests. Do not re-add the semantic checks to Kotlin.
     @Test
-    fun rosterRejectsDuplicateIndex() =
-        assertFalse(isValidRoster(roster(entries = """[{"i":1,"pk":"$hex64"},{"i":1,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""")))
+    fun rosterShapeCheckDefersDuplicateIndexToRust() =
+        assertTrue(isValidRoster(roster(entries = """[{"i":1,"pk":"$hex64"},{"i":1,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""")))
 
     @Test
-    fun rosterRejectsDuplicatePubkey() =
-        assertFalse(isValidRoster(roster(entries = """[{"i":1,"pk":"$hex64"},{"i":2,"pk":"$hex64"},{"i":3,"pk":"$hex64c"}]""")))
+    fun rosterShapeCheckDefersDuplicatePubkeyToRust() =
+        assertTrue(isValidRoster(roster(entries = """[{"i":1,"pk":"$hex64"},{"i":2,"pk":"$hex64"},{"i":3,"pk":"$hex64c"}]""")))
 
     @Test
-    fun rosterRejectsMissingCoordinatorIndex() =
-        assertFalse(isValidRoster(roster(entries = """[{"i":2,"pk":"$hex64"},{"i":3,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""")))
+    fun rosterShapeCheckDefersMissingCoordinatorIndexToRust() =
+        assertTrue(isValidRoster(roster(entries = """[{"i":2,"pk":"$hex64"},{"i":3,"pk":"$hex64b"},{"i":3,"pk":"$hex64c"}]""")))
 
     @Test
     fun setupAcceptsWebsocketRelays() =
