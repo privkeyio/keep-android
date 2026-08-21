@@ -240,6 +240,10 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    // Pin espresso-core over the 3.5.0 dragged in transitively by ui-test-junit4:
+    // 3.5.0 reflects into the removed InputManager.getInstance and dies in Compose
+    // test setup on Android 17. 3.7.0 uses getSystemService for SDK_INT >= 23 (gh #481).
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.room:room-testing:$roomVersion")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
