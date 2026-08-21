@@ -545,28 +545,38 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         val dkgEpochAtRead = pendingDkgEpoch
-        val initial = withContext(Dispatchers.IO) {
-            val a = storage.listAllShares().map { it.toAccountInfo() }
-            val k = storage.getActiveShareKey()
-            val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
-                ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
-            val r = config.frostRelays
-            val pr = config.profileRelays
-            val pdkg = runCatching { keepMobile.pendingDkgShare() }
-            AccountInitial(a, k, r, pr, pdkg)
-        }
-        allAccounts = initial.accounts
-        activeAccountKey = initial.activeKey
-        relays = initial.relays
-        profileRelays = initial.profileRelays
-        // A discard/recover that bumps the epoch while this read was in flight has
-        // already cleared the marker; drop the stale write so this read can't resurrect
-        // it, mirroring the poll guard below. Complete the check either way so the gate
-        // doesn't latch on WAIT.
-        if (pendingDkgEpoch == dkgEpochAtRead) {
-            initial.pendingDkgShare
-                .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
-                .onFailure { pendingDkgUnreadable = true }
+        // listAllShares/getActiveShareKey read Keystore-encrypted prefs; a transient
+        // decrypt fault must not crash launch. On failure treat the pending-DKG slot as
+        // unreadable so the group-creation gate fails closed rather than open.
+        runCatching {
+            val initial = withContext(Dispatchers.IO) {
+                val a = storage.listAllShares().map { it.toAccountInfo() }
+                val k = storage.getActiveShareKey()
+                val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
+                    ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
+                val r = config.frostRelays
+                val pr = config.profileRelays
+                val pdkg = runCatching { keepMobile.pendingDkgShare() }
+                AccountInitial(a, k, r, pr, pdkg)
+            }
+            allAccounts = initial.accounts
+            activeAccountKey = initial.activeKey
+            relays = initial.relays
+            profileRelays = initial.profileRelays
+            // A discard/recover that bumps the epoch while this read was in flight has
+            // already cleared the marker; drop the stale write so this read can't resurrect
+            // it, mirroring the poll guard below. Complete the check either way so the gate
+            // doesn't latch on WAIT.
+            if (pendingDkgEpoch == dkgEpochAtRead) {
+                initial.pendingDkgShare
+                    .onSuccess { pendingDkgShare = it; pendingDkgUnreadable = false }
+                    .onFailure { pendingDkgUnreadable = true }
+            }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            if (pendingDkgEpoch == dkgEpochAtRead) {
+                pendingDkgUnreadable = true
+            }
         }
         pendingDkgCheckComplete = true
     }
