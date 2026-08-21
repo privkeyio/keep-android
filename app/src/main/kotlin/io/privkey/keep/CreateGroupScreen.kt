@@ -616,6 +616,7 @@ private fun JoinGroupMode(
     val beginFailedMessage = stringResource(R.string.create_group_begin_failed)
     val wrongGroupMessage = stringResource(R.string.create_group_wrong_group)
     val notInRosterMessage = stringResource(R.string.create_group_not_in_roster)
+    val rosterInvalidMessage = stringResource(R.string.create_group_roster_invalid)
     val scanSetupTitle = stringResource(R.string.create_group_scan_setup_title)
     val scanRosterTitle = stringResource(R.string.create_group_scan_roster_title)
 
@@ -652,7 +653,8 @@ private fun JoinGroupMode(
                 val parsed = parseRoster(code)
                 // Rust resolves this device's index by matching its subkey and
                 // validates the roster (uniqueness, dup-pubkey, group id) in one
-                // call; a null result means malformed or not in the roster.
+                // call; failure means either malformed or not in the roster, told
+                // apart below by whether our subkey appears among the entries.
                 val verified = if (parsed != null && mine != null) {
                     runCatching { verifyRoster(parsed, mine) }
                         .onFailure {
@@ -671,13 +673,18 @@ private fun JoinGroupMode(
                         parsed.participants != currentSetup.participants ||
                         parsed.relays != currentSetup.relays ->
                         errorMessage = wrongGroupMessage
-                    verified == null -> errorMessage = notInRosterMessage
-                    else -> {
+                    verified != null -> {
                         errorMessage = null
                         roster = parsed
                         verification = verified
                         phase = JoinPhase.Ready
                     }
+                    // verifyRoster failed: our subkey absent from the entries is
+                    // genuine nonmembership; present-but-rejected means the roster
+                    // itself is malformed (dup index/pubkey, bad group-id binding).
+                    parsed.roster.none { it.pubkey == mine } ->
+                        errorMessage = notInRosterMessage
+                    else -> errorMessage = rosterInvalidMessage
                 }
             },
             onDismiss = { scanRoster = false },
