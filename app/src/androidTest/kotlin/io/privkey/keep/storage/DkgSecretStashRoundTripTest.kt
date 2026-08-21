@@ -1,6 +1,7 @@
 package io.privkey.keep.storage
 
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -8,9 +9,11 @@ import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -46,19 +49,45 @@ class DkgSecretStashRoundTripTest {
     private val ctx get() = InstrumentationRegistry.getInstrumentation().targetContext
     private lateinit var keyStore: KeyStore
     private lateinit var storage: AndroidKeystoreStorage
+    private var ownsAlias = false
 
     @Before fun setup() {
         keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        // The alias and stash are the production ones, so never clobber a live pending
+        // share. Production creates this alias auth-gated; the twin below never is, so an
+        // auth-gated key here is real user data — skip rather than delete it. Only after
+        // this passes does the test claim ownership, so teardown cleans up only its own.
+        assumeTrue(
+            "refusing to run: a real auth-gated DKG key is present on this device",
+            !productionDkgKeyPresent()
+        )
         if (keyStore.containsAlias(ALIAS)) keyStore.deleteEntry(ALIAS)
         storage = AndroidKeystoreStorage(ctx, requireUserAuth = false)
-        // Wipe any stash the real alias/prefs may still hold from a prior run.
+        // Wipe any stash the alias/prefs may still hold from a prior run of this test.
         runCatching { storage.deleteShareByKey(SECRET_KEY) }
         seedNonAuthTwinAlias()
+        ownsAlias = true
     }
 
     @After fun teardown() {
+        if (!ownsAlias) return
         runCatching { storage.deleteShareByKey(SECRET_KEY) }
         if (keyStore.containsAlias(ALIAS)) keyStore.deleteEntry(ALIAS)
+    }
+
+    /**
+     * True when the fixed DKG alias already holds a real, auth-gated production key.
+     * Only production creates it with user-auth required; this test's twin never does,
+     * so this cleanly tells live user data from a leftover twin without deleting either.
+     */
+    private fun productionDkgKeyPresent(): Boolean {
+        if (!keyStore.containsAlias(ALIAS)) return false
+        val key = keyStore.getKey(ALIAS, null) as? PrivateKey ?: return false
+        val info = runCatching {
+            KeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
+                .getKeySpec(key, KeyInfo::class.java) as KeyInfo
+        }.getOrNull() ?: return false
+        return info.isUserAuthenticationRequired
     }
 
     /**
@@ -89,6 +118,14 @@ class DkgSecretStashRoundTripTest {
         Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding").apply {
             init(Cipher.DECRYPT_MODE, keyStore.getKey(ALIAS, null) as PrivateKey, oaepSpec())
         }
+
+    /** A decrypt cipher under an unrelated RSA key, so unwrapping the real stash fails. */
+    private fun wrongKeyDecryptCipher(): Cipher {
+        val foreign = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        return Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding").apply {
+            init(Cipher.DECRYPT_MODE, foreign.private, oaepSpec())
+        }
+    }
 
     private fun writeStash(secret: ByteArray) =
         storage.storeShareByKey(SECRET_KEY, secret, META)
@@ -124,10 +161,11 @@ class DkgSecretStashRoundTripTest {
         val secret = ByteArray(64) { it.toByte() }
         writeStash(secret)
 
-        // A cipher queued under the wrong role is never consumed by the decrypt read,
-        // so the read fails for want of a decrypt cipher — without touching the stash.
+        // Drive a genuine decrypt failure: a decrypt cipher from an unrelated key is
+        // consumed by the read and reads the stash, then fails to unwrap the AES key.
+        // The load path must surface that error without wiping the stash (INVARIANTS #1).
         val badRequest = UUID.randomUUID().toString()
-        storage.setPendingCipher(badRequest, decryptCipher(), AndroidKeystoreStorage.CipherRole.ENCRYPT)
+        storage.setPendingCipher(badRequest, wrongKeyDecryptCipher(), AndroidKeystoreStorage.CipherRole.DECRYPT)
         storage.setRequestIdContext(badRequest)
         try {
             assertThrows(Exception::class.java) { storage.loadShareByKey(SECRET_KEY) }
