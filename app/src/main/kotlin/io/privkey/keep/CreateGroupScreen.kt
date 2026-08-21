@@ -524,7 +524,13 @@ private fun StartGroupMode(
             // Assemble (coordinator idx 1, joiners idx i+2) and validate + fingerprint
             // in Rust — the single authority for the roster identity path.
             val assembled = remember(mine, collected.toList()) {
-                runCatching { frostAssembleRoster(mine, collected.toList()) }.getOrNull()
+                runCatching { frostAssembleRoster(mine, collected.toList()) }
+                    .onFailure {
+                        if (BuildConfig.DEBUG) {
+                            Log.e("CreateGroup", "assembleRoster failed: ${it::class.simpleName}")
+                        }
+                    }
+                    .getOrNull()
             }
             val roster = assembled?.let {
                 RosterPayload(
@@ -533,7 +539,15 @@ private fun StartGroupMode(
                 )
             }
             val verification = remember(roster) {
-                roster?.let { r -> runCatching { verifyRoster(r, mine) }.getOrNull() }
+                roster?.let { r ->
+                    runCatching { verifyRoster(r, mine) }
+                        .onFailure {
+                            if (BuildConfig.DEBUG) {
+                                Log.e("CreateGroup", "verifyRoster failed: ${it::class.simpleName}")
+                            }
+                        }
+                        .getOrNull()
+                }
             }
             var confirmed by remember { mutableStateOf(false) }
 
@@ -640,7 +654,13 @@ private fun JoinGroupMode(
                 // validates the roster (uniqueness, dup-pubkey, group id) in one
                 // call; a null result means malformed or not in the roster.
                 val verified = if (parsed != null && mine != null) {
-                    runCatching { verifyRoster(parsed, mine) }.getOrNull()
+                    runCatching { verifyRoster(parsed, mine) }
+                        .onFailure {
+                            if (BuildConfig.DEBUG) {
+                                Log.e("CreateGroup", "verifyRoster failed: ${it::class.simpleName}")
+                            }
+                        }
+                        .getOrNull()
                 } else {
                     null
                 }
