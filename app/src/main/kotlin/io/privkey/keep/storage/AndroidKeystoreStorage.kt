@@ -38,7 +38,20 @@ import javax.crypto.spec.SecretKeySpec
 class AndroidKeystoreStorage(
     private val context: Context,
     private val requireUserAuth: Boolean = true,
-    strongBoxUseTimeProbe: (() -> Boolean)? = null
+    strongBoxUseTimeProbe: (() -> Boolean)? = null,
+    // Test seam: the Keystore alias backing the legacy single-share AES key.
+    // Production always uses KEYSTORE_ALIAS ("keep_frost_share"); an instrumented
+    // test overrides it so its no-auth storage never contends with the app's
+    // auth-gated storage over the one shared alias, whose auth requirement is
+    // fixed by whichever caller creates it first (keep-android-dcq).
+    @get:VisibleForTesting
+    internal val keystoreAlias: String = KEYSTORE_ALIAS,
+    // Test seam: suffix appended to every SharedPreferences namespace (legacy
+    // single-share prefs, per-share prefs, and the multi-share registry). Empty in
+    // production; an instrumented test sets it so its storeShare/deleteShare write
+    // and clear an isolated sandbox instead of the app's real share data.
+    @get:VisibleForTesting
+    internal val prefsSuffix: String = ""
 ) : SecureStorage {
 
     companion object {
@@ -112,9 +125,9 @@ class AndroidKeystoreStorage(
     private fun createEncryptedPrefs(name: String): SharedPreferences =
         KeystoreEncryptedPrefs.create(context, name)
 
-    private val prefs: SharedPreferences by lazy { createEncryptedPrefs(PREFS_NAME) }
+    private val prefs: SharedPreferences by lazy { createEncryptedPrefs("$PREFS_NAME$prefsSuffix") }
 
-    private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs(MULTI_PREFS_NAME) }
+    private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs("$MULTI_PREFS_NAME$prefsSuffix") }
 
     private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
 
@@ -175,21 +188,21 @@ class AndroidKeystoreStorage(
     }
 
     private fun getSharePrefs(key: String): SharedPreferences =
-        createEncryptedPrefs("$PREFS_PREFIX${sanitizeKey(key)}")
+        createEncryptedPrefs("$PREFS_PREFIX${sanitizeKey(key)}$prefsSuffix")
 
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
     @Synchronized
-    private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(KEYSTORE_ALIAS, requireUserAuth)
+    private fun getOrCreateKey(): SecretKey = getOrCreateKeyWithAlias(keystoreAlias, requireUserAuth)
 
     private fun isStrongBoxAvailable(): Boolean = runCatching {
         context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore")
     }.getOrDefault(false)
 
     fun getSecurityLevel(): String {
-        if (!keyStore.containsAlias(KEYSTORE_ALIAS)) return "none"
+        if (!keyStore.containsAlias(keystoreAlias)) return "none"
         val keyInfo = runCatching {
-            val key = keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey ?: return "unknown"
+            val key = keyStore.getKey(keystoreAlias, null) as? SecretKey ?: return "unknown"
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
         }.getOrNull() ?: return "unknown"
@@ -464,8 +477,8 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to clear share metadata")
         }
         try {
-            if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
-                keyStore.deleteEntry(KEYSTORE_ALIAS)
+            if (keyStore.containsAlias(keystoreAlias)) {
+                keyStore.deleteEntry(keystoreAlias)
             }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
@@ -484,9 +497,9 @@ class AndroidKeystoreStorage(
             return keyStore.getKey(legacyAlias, null) as? SecretKey
                 ?: throw KeepMobileException.StorageException("Key $legacyAlias is not a SecretKey")
         }
-        if (keyStore.containsAlias(KEYSTORE_ALIAS) && isLegacyAccount(key)) {
-            return keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey
-                ?: throw KeepMobileException.StorageException("Key $KEYSTORE_ALIAS is not a SecretKey")
+        if (keyStore.containsAlias(keystoreAlias) && isLegacyAccount(key)) {
+            return keyStore.getKey(keystoreAlias, null) as? SecretKey
+                ?: throw KeepMobileException.StorageException("Key $keystoreAlias is not a SecretKey")
         }
         return getOrCreateKeyWithAlias(newAlias, requireUserAuth)
     }

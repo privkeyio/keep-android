@@ -14,7 +14,6 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.junit.Assert.*
-import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,8 +28,16 @@ class FrostSigningIntegrationTest {
     private var testNip55Handler: Nip55Handler? = null
 
     private companion object {
-        // Matches AndroidKeystoreStorage.KEYSTORE_ALIAS (the legacy single-share AES key).
-        const val SHARE_KEY_ALIAS = "keep_frost_share"
+        // Dedicated test alias, distinct from production's KEYSTORE_ALIAS
+        // ("keep_frost_share"). The test's no-auth storage and the app's
+        // auth-gated storage otherwise share one alias, whose auth requirement is
+        // fixed by whichever caller creates it first; an isolated alias removes
+        // that race (keep-android-dcq).
+        const val SHARE_KEY_ALIAS = "keep_frost_share_test"
+        // Suffix that isolates this test's SharedPreferences (legacy, per-share,
+        // and registry namespaces) from the app's, so storeShare/deleteShare here
+        // cannot overwrite or clear real share data.
+        const val TEST_PREFS_SUFFIX = "_test"
     }
 
     private fun hasBiometricEnrollment(): Boolean {
@@ -47,13 +54,18 @@ class FrostSigningIntegrationTest {
 
         // Always use no-auth storage for instrumented runs. The app's storage is
         // auth-per-use (setUserAuthenticationParameters(0, ...)) whenever a device
-        // has a biometric enrolled, and doFinal cannot succeed unattended.
-        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        // has a biometric enrolled, and doFinal cannot succeed unattended. The
+        // dedicated SHARE_KEY_ALIAS keeps this key off the production alias so the
+        // app's auth-gated storage can never win the create-race and gate it.
+        val storage = AndroidKeystoreStorage(
+            context,
+            requireUserAuth = false,
+            keystoreAlias = SHARE_KEY_ALIAS,
+            prefsSuffix = TEST_PREFS_SUFFIX
+        )
         // requireUserAuth is only honored when the key is created; an existing
-        // keep_frost_share alias is reused as-is. A prior run on a biometric
-        // device could leave it auth-gated, which would make importShare's doFinal
-        // require a biometric. Drop leftover auth-gated key material so a fresh
-        // non-auth key is generated; if a real share sits behind it, skip instead.
+        // alias is reused as-is. A prior run could leave the test alias behind, so
+        // drop leftover auth-gated key material to force a fresh non-auth key.
         resetIfShareKeyRequiresAuth(storage)
         val mobile = KeepMobile(storage)
         testStorage = storage
@@ -71,17 +83,12 @@ class FrostSigningIntegrationTest {
             (factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo).isUserAuthenticationRequired
         }.getOrDefault(false)
         if (!authRequired) return
-        // An auth-gated alias with a share stored behind it is a real user share:
-        // production always creates this alias with requireUserAuth = true, while this
-        // test only ever writes no-auth fixture shares, so an auth-gated share is never
-        // one of ours. deleteShare() would drop both the share and the key that decrypts
-        // it, so skip instead of destroying user data.
-        assumeFalse(
-            "device holds a real auth-gated share; skipping to avoid destroying it",
-            storage.hasShare()
-        )
-        // Auth-gated key with no share behind it is leftover key material from an
-        // earlier aborted run; dropping it lets a fresh no-auth key be generated.
+        // SHARE_KEY_ALIAS is test-exclusive (distinct from production's
+        // KEYSTORE_ALIAS), so an auth-gated key here is never a real user share —
+        // only stale material from an earlier run. deleteShare() also clears prefs,
+        // but TEST_PREFS_SUFFIX isolates those from the production legacy store
+        // (keep_secure_prefs), so this cannot touch real share data. Drop it so a
+        // fresh no-auth key is generated.
         storage.deleteShare()
     }
 
