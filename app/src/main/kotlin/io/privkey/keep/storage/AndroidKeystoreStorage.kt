@@ -513,11 +513,23 @@ class AndroidKeystoreStorage(
                 }.build()
 
             if (isStrongBoxAvailable()) {
-                try {
+                // StrongBox can generate an AES-GCM key cleanly and still fail at
+                // use time (some Keymint implementations reject the operation only
+                // when the cipher runs, e.g. Pixel 9a on Android 17 throwing at
+                // doFinal). Generation-only fallback misses that, so a non-auth key
+                // is probed with a throwaway encrypt and a failure falls back to
+                // TEE. An auth-gated key cannot be exercised without a biometric, so
+                // it is left as generated and validated when the user authenticates.
+                val strongBoxOk = try {
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
-                } catch (e: ProviderException) {
+                    requireUserAuth || canEncryptWithKey(alias)
+                } catch (e: Exception) {
+                    if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
                     if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
+                    false
+                }
+                if (!strongBoxOk) {
                     if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
                     keyGenerator.init(buildSpec(useStrongBox = false))
                     keyGenerator.generateKey()
@@ -530,6 +542,20 @@ class AndroidKeystoreStorage(
 
         return keyStore.getKey(alias, null) as? SecretKey
             ?: throw KeepMobileException.StorageException("Key $alias is not a SecretKey")
+    }
+
+    // A non-auth AES key is exercised with a throwaway encrypt so a StrongBox key
+    // that generated cleanly but rejects the operation at use time is caught here
+    // rather than surfacing later as "Failed to encrypt share".
+    private fun canEncryptWithKey(alias: String): Boolean = runCatching {
+        val key = keyStore.getKey(alias, null) as? SecretKey ?: return false
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        cipher.doFinal(ByteArray(1))
+        true
+    }.getOrElse { e ->
+        if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key failed use-time probe, falling back to TEE", e)
+        false
     }
 
     fun getCipherForShareEncryption(key: String): Cipher =
