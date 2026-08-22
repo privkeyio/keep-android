@@ -4,6 +4,12 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// True when the requested tasks include instrumented (connected) tests; used to
+// disable per-ABI splits so a universal debug APK is built for the test device.
+val runningInstrumentedTests = gradle.startParameter.taskNames.any {
+    it.contains("AndroidTest", ignoreCase = true)
+}
+
 android {
     namespace = "io.privkey.keep"
     compileSdk = 37
@@ -96,9 +102,14 @@ android {
     // Per-ABI APK splits for F-Droid: ship one APK per architecture instead of a
     // single universal APK. Each split gets a distinct versionCode assigned in
     // the androidComponents block below.
+    //
+    // Disabled while running instrumented (connected) tests: splits produce per-ABI
+    // app APKs but the androidTest APK is universal, and the install path cannot
+    // reconcile the two, so installPackages fails before any test runs and it is
+    // misreported as failing tests (GH #482). A universal debug APK installs fine.
     splits {
         abi {
-            isEnable = true
+            isEnable = !runningInstrumentedTests
             reset()
             include("arm64-v8a", "x86_64")
             isUniversalApk = false
