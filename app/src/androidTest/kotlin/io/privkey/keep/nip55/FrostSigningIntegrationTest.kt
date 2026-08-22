@@ -1,8 +1,12 @@
 package io.privkey.keep.nip55
 
+import android.security.keystore.KeyInfo
 import androidx.biometric.BiometricManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.security.KeyStore
+import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
@@ -23,6 +27,11 @@ class FrostSigningIntegrationTest {
     private var testMobile: KeepMobile? = null
     private var testNip55Handler: Nip55Handler? = null
 
+    private companion object {
+        // Matches AndroidKeystoreStorage.KEYSTORE_ALIAS (the legacy single-share AES key).
+        const val SHARE_KEY_ALIAS = "keep_frost_share"
+    }
+
     private fun hasBiometricEnrollment(): Boolean {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val result = BiometricManager.from(context)
@@ -39,11 +48,30 @@ class FrostSigningIntegrationTest {
         // auth-per-use (setUserAuthenticationParameters(0, ...)) whenever a device
         // has a biometric enrolled, and doFinal cannot succeed unattended.
         val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        // requireUserAuth is only honored when the key is created; an existing
+        // keep_frost_share alias is reused as-is. A prior run on a biometric
+        // device could leave it auth-gated, which would make importShare's doFinal
+        // require a biometric. Drop such a key (and its share) so a fresh non-auth
+        // key is generated and signing stays non-interactive.
+        resetIfShareKeyRequiresAuth(storage)
         val mobile = KeepMobile(storage)
         testStorage = storage
         testMobile = mobile
         testNip55Handler = Nip55Handler(mobile)
         ensureShareExistsNoAuth(mobile, storage)
+    }
+
+    private fun resetIfShareKeyRequiresAuth(storage: AndroidKeystoreStorage) {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keyStore.containsAlias(SHARE_KEY_ALIAS)) return
+        val authRequired = runCatching {
+            val key = keyStore.getKey(SHARE_KEY_ALIAS, null) as? SecretKey ?: return
+            val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
+            (factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo).isUserAuthenticationRequired
+        }.getOrDefault(false)
+        if (authRequired) {
+            storage.deleteShare()
+        }
     }
 
     private fun getKeepMobile(): KeepMobile? = testMobile ?: app?.getKeepMobile()
