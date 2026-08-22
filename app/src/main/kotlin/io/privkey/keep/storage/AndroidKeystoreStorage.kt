@@ -524,7 +524,8 @@ class AndroidKeystoreStorage(
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
                     requireUserAuth || canEncryptWithKey(alias)
-                } catch (e: ProviderException) {
+                } catch (e: Exception) {
+                    if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
                     if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
                     false
                 }
