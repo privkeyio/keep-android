@@ -417,19 +417,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         return runCatching { h.handleRequest(request, callerPackage) }
             .mapCatching { response ->
-                if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
-                    if (response.result.isEmpty()) {
-                        throw IllegalStateException("Handler returned empty pubkey")
-                    }
-                    val groupPubkey = app.getStorage()?.getShareMetadata()?.groupPubkey
-                    if (groupPubkey == null || groupPubkey.isEmpty()) {
-                        throw IllegalStateException("Stored pubkey unavailable for verification")
-                    }
-                    val storedPubkey = groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-                    if (!MessageDigest.isEqual(response.result.toByteArray(Charsets.UTF_8), storedPubkey.toByteArray(Charsets.UTF_8))) {
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Pubkey verification failed: mismatch detected")
-                        throw IllegalStateException("Pubkey verification failed")
-                    }
+                // Same self-verification as the foreground path: compare the handler's
+                // returned pubkey against the independently-read stored group pubkey
+                // (keystore share metadata) through the single shared checkPubkey helper.
+                checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
+                    throw IllegalStateException("Pubkey verification failed")
                 }
                 runCatching {
                     runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
