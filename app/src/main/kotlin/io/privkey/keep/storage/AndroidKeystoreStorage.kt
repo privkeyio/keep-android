@@ -260,7 +260,10 @@ class AndroidKeystoreStorage(
 
     private fun encryptWithCipher(cipher: Cipher, data: ByteArray): ByteArray = runCatching {
         cipher.doFinal(data)
-    }.getOrElse { throw KeepMobileException.StorageException("Failed to encrypt share") }
+    }.getOrElse { e ->
+        if (BuildConfig.DEBUG) Log.e(TAG, "Encryption failed: ${e::class.simpleName}: ${e.message}", e)
+        throw KeepMobileException.StorageException("Failed to encrypt share")
+    }
 
     private fun decryptWithCipher(cipher: Cipher, encryptedBase64: String): ByteArray = runCatching {
         cipher.doFinal(Base64.decode(encryptedBase64, Base64.NO_WRAP))
