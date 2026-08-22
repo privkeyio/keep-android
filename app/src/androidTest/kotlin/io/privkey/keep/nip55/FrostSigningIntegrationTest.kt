@@ -35,44 +35,20 @@ class FrostSigningIntegrationTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         app = context.applicationContext as? KeepMobileApp
 
-        if (hasBiometricEnrollment()) {
-            ensureShareExists()
-        } else {
-            val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
-            val mobile = KeepMobile(storage)
-            testStorage = storage
-            testMobile = mobile
-            testNip55Handler = Nip55Handler(mobile)
-            ensureShareExistsNoAuth(mobile, storage)
-        }
+        // Always use no-auth storage for instrumented runs. The app's storage is
+        // auth-per-use (setUserAuthenticationParameters(0, ...)) whenever a device
+        // has a biometric enrolled, and doFinal cannot succeed unattended.
+        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        val mobile = KeepMobile(storage)
+        testStorage = storage
+        testMobile = mobile
+        testNip55Handler = Nip55Handler(mobile)
+        ensureShareExistsNoAuth(mobile, storage)
     }
 
     private fun getKeepMobile(): KeepMobile? = testMobile ?: app?.getKeepMobile()
     private fun getStorage(): AndroidKeystoreStorage? = testStorage ?: app?.getStorage()
     private fun getNip55Handler(): Nip55Handler? = testNip55Handler ?: app?.getNip55Handler()
-
-    private fun ensureShareExists() {
-        val mobile = app?.getKeepMobile() ?: return
-        val storage = app?.getStorage() ?: return
-
-        if (storage.hasShare()) {
-            val metadata = storage.getShareMetadata()
-            if (metadata != null && metadata.threshold == 2u.toUShort() && metadata.totalShares == 2u.toUShort()) return
-        }
-
-        val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", "test")
-        val exportData = result.shares.first().exportData
-        val requestId = "test-setup"
-        val cipher = storage.getCipherForEncryption()
-        storage.setRequestIdContext(requestId)
-        storage.setPendingCipher(requestId, cipher)
-        try {
-            mobile.importShare(exportData, "test", "test")
-        } finally {
-            storage.clearRequestIdContext()
-            storage.clearPendingCipher(requestId)
-        }
-    }
 
     private fun ensureShareExistsNoAuth(mobile: KeepMobile, storage: AndroidKeystoreStorage) {
         if (storage.hasShare()) {
