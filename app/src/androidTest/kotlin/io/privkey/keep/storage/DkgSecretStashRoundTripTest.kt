@@ -176,6 +176,20 @@ class DkgSecretStashRoundTripTest {
         assertArrayEquals("stash must survive a failed read", secret, readStash())
     }
 
+    /**
+     * The production guard: a storage configured to require user auth must refuse a
+     * non-auth key sitting at the DKG alias rather than silently wrapping the stash
+     * under it. The seeded twin is non-auth, so a `requireUserAuth = true` instance
+     * must throw before any write reaches it. This fires on key inspection alone, so
+     * it needs no biometric.
+     */
+    @Test fun productionRefusesNonAuthKeyAtDkgAlias() {
+        val gated = AndroidKeystoreStorage(ctx, requireUserAuth = true)
+        assertThrows(Exception::class.java) {
+            gated.storeShareByKey(SECRET_KEY, ByteArray(48) { it.toByte() }, META)
+        }
+    }
+
     private companion object {
         const val SECRET_KEY = "__keep_dkg_secret_v1"
         const val ALIAS = "keep_dkg_secret"

@@ -20,6 +20,7 @@ import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.PrivateKey
 import java.security.ProviderException
 import java.security.spec.MGF1ParameterSpec
 import java.security.spec.X509EncodedKeySpec
@@ -806,7 +807,26 @@ class AndroidKeystoreStorage(
 
     @Synchronized
     private fun getOrCreateDkgSecretKeypair() {
-        if (keyStore.containsAlias(DKG_SECRET_ALIAS)) return
+        if (keyStore.containsAlias(DKG_SECRET_ALIAS)) {
+            // Reusing an existing alias is correct only if it carries the auth
+            // gate this key exists to provide. A non-auth key at this alias (e.g.
+            // a crash between a test's headless seed and its teardown) would wrap
+            // every DKG stash with the biometric gate silently absent. Refuse
+            // rather than regenerate: regeneration would orphan a live pending
+            // stash and lose the share. Skipped when this instance is explicitly
+            // not auth-gated (test/dev), which is the only path that seeds a
+            // non-auth twin here — mirrors the encrypt-probe waiver above.
+            if (requireUserAuth) {
+                val privateKey = keyStore.getKey(DKG_SECRET_ALIAS, null) as? PrivateKey
+                    ?: throw KeepMobileException.StorageException("DKG secret alias is not a private key")
+                val keyInfo = KeyFactory.getInstance(privateKey.algorithm, "AndroidKeyStore")
+                    .getKeySpec(privateKey, KeyInfo::class.java) as KeyInfo
+                if (!keyInfo.isUserAuthenticationRequired) {
+                    throw KeepMobileException.StorageException("DKG secret key is not auth-gated; refusing to use it")
+                }
+            }
+            return
+        }
         val generator = KeyPairGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_RSA,
             "AndroidKeyStore"
