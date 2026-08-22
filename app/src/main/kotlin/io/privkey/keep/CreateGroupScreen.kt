@@ -19,10 +19,12 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgParticipant
 import io.privkey.keep.uniffi.DkgProgressUpdate
+import io.privkey.keep.uniffi.RosterVerification
+import io.privkey.keep.uniffi.frostAssembleRoster
+import io.privkey.keep.uniffi.frostVerifyRoster
 import io.privkey.keep.uniffi.truncateStr
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 import javax.crypto.Cipher
 
 private const val MAX_PARTICIPANTS = 8
@@ -175,17 +177,16 @@ internal fun isValidRoster(data: String): Boolean {
         if (threshold !in MIN_THRESHOLD..participants) return false
         if (!relaysValid(relaysFromJson(obj))) return false
         if (entries.length() != participants) return false
-        val seenIdx = HashSet<Int>()
-        val seenPk = HashSet<String>()
+        // Shape pre-check only: enough to reject an obviously bad frame at the
+        // scan. Index uniqueness, duplicate-pubkey rejection and group-id binding
+        // are the authoritative job of frostVerifyRoster (Rust), run once the
+        // frame is accepted, so they are not re-implemented here.
         for (i in 0 until entries.length()) {
             val e = entries.optJSONObject(i) ?: return false
-            val idx = e.optInt("i", -1)
-            val pk = e.optString("pk", "")
-            if (idx !in 1..participants || !isHex64(pk)) return false
-            if (!seenIdx.add(idx) || !seenPk.add(pk)) return false
+            if (e.optInt("i", -1) !in 1..participants || !isHex64(e.optString("pk", ""))) {
+                return false
+            }
         }
-        // Unique indices in 1..participants filling all `participants` slots means
-        // the set is exactly {1..participants}, so index 1 (coordinator) is present.
         true
     } catch (_: Exception) {
         false
@@ -239,34 +240,22 @@ private fun dkgConfig(roster: RosterPayload, ourIndex: Int): DkgConfig = DkgConf
     roster = roster.roster.map { DkgParticipant(it.index.toUShort(), it.pubkey) }
 )
 
-// A short, human-comparable fingerprint of the finalized roster. Every device
-// holding the same name, threshold, and index-ordered members derives the same
-// string, so participants can read it aloud out of band. A coordinator who slips
-// an extra key they control into one device's roster (two of the n shares, so a
-// "2-of-3" they can sign alone) yields a different fingerprint on that device and
-// the mismatch is visible. Every variable-length field is length-prefixed so an
-// attacker-chosen name cannot absorb the first pubkey and collide two rosters.
-private fun rosterFingerprint(roster: RosterPayload): String {
-    fun be32(v: Int) = byteArrayOf(
-        (v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte()
+// Validate the finalized roster and derive its fingerprint in Rust, the single
+// authority for the DKG identity path (index range/uniqueness, duplicate-pubkey
+// rejection, threshold bounds, and the canonical frost_group_id). `ourPubkey` is
+// this device's per-group subkey; the returned index is resolved by matching it,
+// and the fingerprint is a prefix of the same group id the run lands on, so the
+// value read aloud out of band cannot drift from what the ceremony uses. Throws a
+// typed KeepMobileException if the roster is malformed or this device is not in
+// it; callers treat that as an invalid roster.
+private fun verifyRoster(roster: RosterPayload, ourPubkey: String): RosterVerification =
+    frostVerifyRoster(
+        roster.name,
+        roster.threshold.toUShort(),
+        roster.participants.toUShort(),
+        roster.roster.map { DkgParticipant(it.index.toUShort(), it.pubkey) },
+        ourPubkey
     )
-    val md = MessageDigest.getInstance("SHA-256")
-    md.update("keep-roster-fp-v1".toByteArray(Charsets.UTF_8))
-    val nameBytes = roster.name.toByteArray(Charsets.UTF_8)
-    md.update(be32(nameBytes.size))
-    md.update(nameBytes)
-    md.update(byteArrayOf(roster.threshold.toByte(), roster.participants.toByte()))
-    md.update(be32(roster.participants))
-    roster.roster.sortedBy { it.index }.forEach { entry ->
-        md.update(be32(entry.index))
-        val pk = entry.pubkey.toByteArray(Charsets.UTF_8)
-        md.update(be32(pk.size))
-        md.update(pk)
-    }
-    val digest = md.digest()
-    val hex = (0 until 8).joinToString("") { "%02X".format(digest[it].toInt() and 0xFF) }
-    return hex.chunked(4).joinToString(" ")
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -385,6 +374,7 @@ private fun StartGroupMode(
     val beginFailedMessage = stringResource(R.string.create_group_begin_failed)
     val wrongGroupMessage = stringResource(R.string.create_group_wrong_group)
     val duplicateMessage = stringResource(R.string.create_group_duplicate_participant)
+    val rosterInvalidMessage = stringResource(R.string.create_group_roster_invalid)
     val scanParticipantTitle = stringResource(R.string.create_group_scan_participant_title)
 
     if (showScanner) {
@@ -530,45 +520,78 @@ private fun StartGroupMode(
         }
 
         CoordPhase.Ready -> {
-            val entries = buildList {
-                add(RosterEntry(1, myPubkey!!))
-                collected.forEachIndexed { i, pk -> add(RosterEntry(i + 2, pk)) }
+            val mine = myPubkey!!
+            // Assemble (coordinator idx 1, joiners idx i+2) and validate + fingerprint
+            // in Rust — the single authority for the roster identity path.
+            val assembled = remember(mine, collected.toList()) {
+                runCatching { frostAssembleRoster(mine, collected.toList()) }
+                    .onFailure {
+                        if (BuildConfig.DEBUG) {
+                            Log.e("CreateGroup", "assembleRoster failed: ${it::class.simpleName}")
+                        }
+                    }
+                    .getOrNull()
             }
-            val roster = RosterPayload(name, threshold, participants, relays, entries)
-            val rosterJson = buildRosterJson(roster)
-
+            val roster = assembled?.let {
+                RosterPayload(
+                    name, threshold, participants, relays,
+                    it.map { p -> RosterEntry(p.index.toInt(), p.pubkey) }
+                )
+            }
+            val verification = remember(roster) {
+                roster?.let { r ->
+                    runCatching { verifyRoster(r, mine) }
+                        .onFailure {
+                            if (BuildConfig.DEBUG) {
+                                Log.e("CreateGroup", "verifyRoster failed: ${it::class.simpleName}")
+                            }
+                        }
+                        .getOrNull()
+                }
+            }
             var confirmed by remember { mutableStateOf(false) }
 
-            QrCodeDisplay(
-                data = rosterJson,
-                label = stringResource(R.string.create_group_roster_qr_label)
-            )
+            if (roster == null || verification == null) {
+                ErrorText(rosterInvalidMessage)
+            } else {
+                QrCodeDisplay(
+                    data = buildRosterJson(roster),
+                    label = stringResource(R.string.create_group_roster_qr_label)
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = stringResource(R.string.create_group_roster_ready),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                Text(
+                    text = stringResource(R.string.create_group_roster_ready),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            RosterReview(roster, ourIndex = 1, confirmed = confirmed) { confirmed = it }
+                RosterReview(
+                    roster,
+                    ourIndex = verification.ourIndex.toInt(),
+                    fingerprint = verification.fingerprint,
+                    confirmed = confirmed
+                ) { confirmed = it }
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            ErrorText(errorMessage)
+                ErrorText(errorMessage)
 
-            Button(
-                onClick = {
-                    errorMessage = null
-                    runDkg(dkgConfig(roster, 1), name) { errorMessage = it }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = confirmed
-            ) {
-                Text(stringResource(R.string.create_group_start_dkg))
+                Button(
+                    onClick = {
+                        errorMessage = null
+                        runDkg(dkgConfig(roster, verification.ourIndex.toInt()), name) {
+                            errorMessage = it
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = confirmed
+                ) {
+                    Text(stringResource(R.string.create_group_start_dkg))
+                }
             }
         }
     }
@@ -585,7 +608,7 @@ private fun JoinGroupMode(
     var setup by remember { mutableStateOf<SetupPayload?>(null) }
     var myPubkey by remember { mutableStateOf<String?>(null) }
     var roster by remember { mutableStateOf<RosterPayload?>(null) }
-    var ourIndex by remember { mutableStateOf(0) }
+    var verification by remember { mutableStateOf<RosterVerification?>(null) }
     var scanSetup by remember { mutableStateOf(false) }
     var scanRoster by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -593,6 +616,7 @@ private fun JoinGroupMode(
     val beginFailedMessage = stringResource(R.string.create_group_begin_failed)
     val wrongGroupMessage = stringResource(R.string.create_group_wrong_group)
     val notInRosterMessage = stringResource(R.string.create_group_not_in_roster)
+    val rosterInvalidMessage = stringResource(R.string.create_group_roster_invalid)
     val scanSetupTitle = stringResource(R.string.create_group_scan_setup_title)
     val scanRosterTitle = stringResource(R.string.create_group_scan_roster_title)
 
@@ -627,7 +651,21 @@ private fun JoinGroupMode(
             onCodeScanned = { code ->
                 scanRoster = false
                 val parsed = parseRoster(code)
-                val idx = parsed?.roster?.firstOrNull { it.pubkey == mine }?.index
+                // Rust resolves this device's index by matching its subkey and
+                // validates the roster (uniqueness, dup-pubkey, group id) in one
+                // call; failure means either malformed or not in the roster, told
+                // apart below by whether our subkey appears among the entries.
+                val verified = if (parsed != null && mine != null) {
+                    runCatching { verifyRoster(parsed, mine) }
+                        .onFailure {
+                            if (BuildConfig.DEBUG) {
+                                Log.e("CreateGroup", "verifyRoster failed: ${it::class.simpleName}")
+                            }
+                        }
+                        .getOrNull()
+                } else {
+                    null
+                }
                 when {
                     parsed == null || currentSetup == null || mine == null -> {}
                     parsed.name != currentSetup.name ||
@@ -635,13 +673,18 @@ private fun JoinGroupMode(
                         parsed.participants != currentSetup.participants ||
                         parsed.relays != currentSetup.relays ->
                         errorMessage = wrongGroupMessage
-                    idx == null -> errorMessage = notInRosterMessage
-                    else -> {
+                    verified != null -> {
                         errorMessage = null
                         roster = parsed
-                        ourIndex = idx
+                        verification = verified
                         phase = JoinPhase.Ready
                     }
+                    // verifyRoster failed: our subkey absent from the entries is
+                    // genuine nonmembership; present-but-rejected means the roster
+                    // itself is malformed (dup index/pubkey, bad group-id binding).
+                    parsed.roster.none { it.pubkey == mine } ->
+                        errorMessage = notInRosterMessage
+                    else -> errorMessage = rosterInvalidMessage
                 }
             },
             onDismiss = { scanRoster = false },
@@ -691,6 +734,7 @@ private fun JoinGroupMode(
 
         JoinPhase.Ready -> {
             val currentRoster = roster!!
+            val ourIndex = verification!!.ourIndex.toInt()
             var confirmed by remember { mutableStateOf(false) }
             Text(
                 text = stringResource(
@@ -705,7 +749,12 @@ private fun JoinGroupMode(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            RosterReview(currentRoster, ourIndex = ourIndex, confirmed = confirmed) { confirmed = it }
+            RosterReview(
+                currentRoster,
+                ourIndex = ourIndex,
+                fingerprint = verification!!.fingerprint,
+                confirmed = confirmed
+            ) { confirmed = it }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -729,10 +778,10 @@ private fun JoinGroupMode(
 private fun RosterReview(
     roster: RosterPayload,
     ourIndex: Int,
+    fingerprint: String,
     confirmed: Boolean,
     onConfirmedChange: (Boolean) -> Unit
 ) {
-    val fingerprint = remember(roster) { rosterFingerprint(roster) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.create_group_verify_title),

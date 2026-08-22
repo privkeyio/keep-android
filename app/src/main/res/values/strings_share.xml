@@ -151,6 +151,7 @@
     <string name="create_group_roster_ready">All codes collected. Have everyone scan this roster, then everyone taps Start DKG together.</string>
     <string name="create_group_wrong_group">That code is for a different group.</string>
     <string name="create_group_duplicate_participant">That participant code was already added.</string>
+    <string name="create_group_roster_invalid">That roster could not be verified. Rebuild the group and try again.</string>
 
     <!-- Joiner ceremony -->
     <string name="create_group_join_scan_setup">Scan the coordinator\'s setup code to join.</string>
