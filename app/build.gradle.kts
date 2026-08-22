@@ -4,14 +4,40 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Canonical connected/instrumented-test task names. Gradle lets any of these be
+// abbreviated in camelCase on the command line (`cAT` -> connectedAndroidTest,
+// `cC` -> connectedCheck, `cDAT` -> connectedDebugAndroidTest), and an abbreviation
+// contains neither "connected" nor "AndroidTest", so a substring match alone misses
+// a local `./gradlew cAT` and it silently keeps ABI splits enabled, still hitting #482.
+val connectedTestTasks = listOf(
+    "connectedCheck",
+    "connectedAndroidTest",
+    "connectedDebugAndroidTest",
+    "assembleAndroidTest",
+    "assembleDebugAndroidTest",
+)
+
+// True when the requested `name` is a Gradle camelCase abbreviation of `full`:
+// same number of camel-hump segments, each a case-insensitive prefix of the
+// corresponding segment of `full` (so `cAT` matches connectedAndroidTest but plain
+// `cat` — a single lowercase hump — matches nothing multi-hump).
+fun abbreviatesCamelCase(name: String, full: String): Boolean {
+    val nameHumps = name.split(Regex("(?=\\p{Upper})"))
+    val fullHumps = full.split(Regex("(?=\\p{Upper})"))
+    return nameHumps.size == fullHumps.size &&
+        nameHumps.indices.all { fullHumps[it].startsWith(nameHumps[it], ignoreCase = true) }
+}
+
 // True when the requested tasks include instrumented (connected) tests; used to
 // disable per-ABI splits so a universal debug APK is built for the test device.
-// Matches both the explicit test tasks (connectedDebugAndroidTest,
-// assembleDebugAndroidTest, ...) and the lifecycle wrappers (connectedCheck),
-// so any connected-test entry point gets the universal APK, not just the one CI runs.
-val runningInstrumentedTests = gradle.startParameter.taskNames.any {
-    it.contains("AndroidTest", ignoreCase = true) ||
-        it.contains("connected", ignoreCase = true)
+// Matches the explicit test tasks (connectedDebugAndroidTest, ...), the lifecycle
+// wrappers (connectedCheck), and their camelCase abbreviations, so any connected-test
+// entry point gets the universal APK, not just the one CI runs.
+val runningInstrumentedTests = gradle.startParameter.taskNames.any { requested ->
+    val name = requested.substringAfterLast(':')
+    name.contains("AndroidTest", ignoreCase = true) ||
+        name.contains("connected", ignoreCase = true) ||
+        connectedTestTasks.any { abbreviatesCamelCase(name, it) }
 }
 
 // splits.abi is a global (non-per-variant) config, so disabling it for an
