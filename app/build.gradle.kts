@@ -6,8 +6,28 @@ plugins {
 
 // True when the requested tasks include instrumented (connected) tests; used to
 // disable per-ABI splits so a universal debug APK is built for the test device.
+// Matches both the explicit test tasks (connectedDebugAndroidTest,
+// assembleDebugAndroidTest, ...) and the lifecycle wrappers (connectedCheck),
+// so any connected-test entry point gets the universal APK, not just the one CI runs.
 val runningInstrumentedTests = gradle.startParameter.taskNames.any {
-    it.contains("AndroidTest", ignoreCase = true)
+    it.contains("AndroidTest", ignoreCase = true) ||
+        it.contains("connected", ignoreCase = true)
+}
+
+// splits.abi is a global (non-per-variant) config, so disabling it for an
+// instrumented-test run also strips the per-ABI release splits and their version
+// codes, silently producing a universal release APK at the base versionCode.
+// Refuse the mixed invocation rather than emit a broken F-Droid artifact (GH #482).
+val assemblingRelease = gradle.startParameter.taskNames.any {
+    it.contains("Release", ignoreCase = true) &&
+        (it.contains("assemble", ignoreCase = true) || it.contains("bundle", ignoreCase = true))
+}
+if (runningInstrumentedTests && assemblingRelease) {
+    throw GradleException(
+        "Do not request instrumented tests and a release build in the same Gradle " +
+            "invocation: disabling ABI splits for the universal test APK would also " +
+            "strip the per-ABI release splits and their version codes. Run them separately."
+    )
 }
 
 android {
