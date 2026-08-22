@@ -4,6 +4,58 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Canonical connected/instrumented-test task names. Gradle lets any of these be
+// abbreviated in camelCase on the command line (`cAT` -> connectedAndroidTest,
+// `cC` -> connectedCheck, `cDAT` -> connectedDebugAndroidTest), and an abbreviation
+// contains neither "connected" nor "AndroidTest", so a substring match alone misses
+// a local `./gradlew cAT` and it silently keeps ABI splits enabled, still hitting #482.
+val connectedTestTasks = listOf(
+    "connectedCheck",
+    "connectedAndroidTest",
+    "connectedDebugAndroidTest",
+    "assembleAndroidTest",
+    "assembleDebugAndroidTest",
+)
+
+// True when the requested `name` is a Gradle camelCase abbreviation of `full`:
+// same number of camel-hump segments, each a case-insensitive prefix of the
+// corresponding segment of `full` (so `cAT` matches connectedAndroidTest but plain
+// `cat` — a single lowercase hump — matches nothing multi-hump).
+fun abbreviatesCamelCase(name: String, full: String): Boolean {
+    val nameHumps = name.split(Regex("(?=\\p{Upper})"))
+    val fullHumps = full.split(Regex("(?=\\p{Upper})"))
+    return nameHumps.size == fullHumps.size &&
+        nameHumps.indices.all { fullHumps[it].startsWith(nameHumps[it], ignoreCase = true) }
+}
+
+// True when the requested tasks include instrumented (connected) tests; used to
+// disable per-ABI splits so a universal debug APK is built for the test device.
+// Matches the explicit test tasks (connectedDebugAndroidTest, ...), the lifecycle
+// wrappers (connectedCheck), and their camelCase abbreviations, so any connected-test
+// entry point gets the universal APK, not just the one CI runs.
+val runningInstrumentedTests = gradle.startParameter.taskNames.any { requested ->
+    val name = requested.substringAfterLast(':')
+    name.contains("AndroidTest", ignoreCase = true) ||
+        name.contains("connected", ignoreCase = true) ||
+        connectedTestTasks.any { abbreviatesCamelCase(name, it) }
+}
+
+// splits.abi is a global (non-per-variant) config, so disabling it for an
+// instrumented-test run also strips the per-ABI release splits and their version
+// codes, silently producing a universal release APK at the base versionCode.
+// Refuse the mixed invocation rather than emit a broken F-Droid artifact (GH #482).
+val assemblingRelease = gradle.startParameter.taskNames.any {
+    it.contains("Release", ignoreCase = true) &&
+        (it.contains("assemble", ignoreCase = true) || it.contains("bundle", ignoreCase = true))
+}
+if (runningInstrumentedTests && assemblingRelease) {
+    throw GradleException(
+        "Do not request instrumented tests and a release build in the same Gradle " +
+            "invocation: disabling ABI splits for the universal test APK would also " +
+            "strip the per-ABI release splits and their version codes. Run them separately."
+    )
+}
+
 android {
     namespace = "io.privkey.keep"
     compileSdk = 37
@@ -96,9 +148,14 @@ android {
     // Per-ABI APK splits for F-Droid: ship one APK per architecture instead of a
     // single universal APK. Each split gets a distinct versionCode assigned in
     // the androidComponents block below.
+    //
+    // Disabled while running instrumented (connected) tests: splits produce per-ABI
+    // app APKs but the androidTest APK is universal, and the install path cannot
+    // reconcile the two, so installPackages fails before any test runs and it is
+    // misreported as failing tests (GH #482). A universal debug APK installs fine.
     splits {
         abi {
-            isEnable = true
+            isEnable = !runningInstrumentedTests
             reset()
             include("arm64-v8a", "x86_64")
             isUniversalApk = false
