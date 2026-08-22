@@ -38,7 +38,15 @@ import javax.crypto.spec.SecretKeySpec
 class AndroidKeystoreStorage(
     private val context: Context,
     private val requireUserAuth: Boolean = true,
-    strongBoxUseTimeProbe: (() -> Boolean)? = null,
+    // Test seam: the StrongBox use-time probe for auth-gated keys. Injected via the
+    // constructor so an instrumented test can force it to fail and assert the
+    // downgrade-to-TEE path, which cannot otherwise be provoked on hardware whose
+    // StrongBox works. Immutable after construction so no app-module code can switch
+    // the downgrade off at runtime. Null selects the production probe
+    // (canEncryptWithStrongBoxProbe); a member-function default can't be expressed
+    // inline because it captures an as-yet-uninitialized instance.
+    @get:VisibleForTesting
+    internal val strongBoxUseTimeProbe: (() -> Boolean)? = null,
     // Test seam: the Keystore alias backing the legacy single-share AES key.
     // Production always uses KEYSTORE_ALIAS ("keep_frost_share"); an instrumented
     // test overrides it so its no-auth storage never contends with the app's
@@ -112,15 +120,6 @@ class AndroidKeystoreStorage(
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
     }
-
-    // Test seam: the StrongBox use-time probe for auth-gated keys. Injected via the
-    // constructor so an instrumented test can force it to fail and assert the
-    // downgrade-to-TEE path, which cannot otherwise be provoked on hardware whose
-    // StrongBox works. Immutable after construction so no app-module code can switch
-    // the downgrade off at runtime.
-    @VisibleForTesting
-    internal val strongBoxUseTimeProbe: () -> Boolean =
-        strongBoxUseTimeProbe ?: { canEncryptWithStrongBoxProbe() }
 
     private fun createEncryptedPrefs(name: String): SharedPreferences =
         KeystoreEncryptedPrefs.create(context, name)
@@ -560,7 +559,7 @@ class AndroidKeystoreStorage(
                 val strongBoxOk = try {
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
-                    if (requireUserAuth) strongBoxUseTimeProbe() else canEncryptWithKey(alias)
+                    if (requireUserAuth) (strongBoxUseTimeProbe ?: ::canEncryptWithStrongBoxProbe)() else canEncryptWithKey(alias)
                 } catch (e: Exception) {
                     if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
                     if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
