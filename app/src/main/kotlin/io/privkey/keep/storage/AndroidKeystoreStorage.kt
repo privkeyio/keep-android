@@ -9,6 +9,7 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
@@ -96,6 +97,12 @@ class AndroidKeystoreStorage(
     private val keyStore: KeyStore = KeyStore.getInstance("AndroidKeyStore").apply {
         load(null)
     }
+
+    // Test seam: the StrongBox use-time probe for auth-gated keys. Overridable so an
+    // instrumented test can force it to fail and assert the downgrade-to-TEE path,
+    // which cannot otherwise be provoked on hardware whose StrongBox works.
+    @VisibleForTesting
+    internal var strongBoxUseTimeProbe: () -> Boolean = { canEncryptWithStrongBoxProbe() }
 
     private fun createEncryptedPrefs(name: String): SharedPreferences =
         KeystoreEncryptedPrefs.create(context, name)
@@ -479,6 +486,14 @@ class AndroidKeystoreStorage(
         return getOrCreateKeyWithAlias(newAlias, requireUserAuth)
     }
 
+    // Creates (but does not use) the per-share key, so a test can trigger the
+    // auth-gated creation path without a biometric-bound cipher operation.
+    @VisibleForTesting
+    internal fun ensureShareKey(key: String): SecretKey = getOrCreateKeyForShare(key)
+
+    @VisibleForTesting
+    internal fun keystoreAliasFor(key: String): String = getKeystoreAlias(key)
+
     private fun isLegacyAccount(key: String): Boolean {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return false
@@ -517,13 +532,14 @@ class AndroidKeystoreStorage(
                 // use time (some Keymint implementations reject the operation only
                 // when the cipher runs, e.g. Pixel 9a on Android 17 throwing at
                 // doFinal). Generation-only fallback misses that, so a non-auth key
-                // is probed with a throwaway encrypt and a failure falls back to
-                // TEE. An auth-gated key cannot be exercised without a biometric, so
-                // it is left as generated and validated when the user authenticates.
+                // is probed directly with a throwaway encrypt. An auth-gated key
+                // cannot be exercised without a biometric, so its use-time behaviour
+                // is checked against a throwaway non-auth key with the same StrongBox
+                // params; a failure on either falls back to TEE.
                 val strongBoxOk = try {
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
-                    requireUserAuth || canEncryptWithKey(alias)
+                    if (requireUserAuth) strongBoxUseTimeProbe() else canEncryptWithKey(alias)
                 } catch (e: Exception) {
                     if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
                     if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key generation failed, falling back to TEE", e)
@@ -556,6 +572,36 @@ class AndroidKeystoreStorage(
     }.getOrElse { e ->
         if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox key failed use-time probe, falling back to TEE", e)
         false
+    }
+
+    // An auth-gated key cannot be exercised without a biometric, so its StrongBox
+    // use-time capability is checked against a throwaway non-auth key built with the
+    // same StrongBox AES params. This costs one extra keygen the first time a key is
+    // created; the probe key is deleted regardless of outcome.
+    private fun canEncryptWithStrongBoxProbe(): Boolean {
+        val probeAlias = "keep_strongbox_aes_probe"
+        return try {
+            if (keyStore.containsAlias(probeAlias)) keyStore.deleteEntry(probeAlias)
+            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+                init(
+                    KeyGenParameterSpec.Builder(
+                        probeAlias,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256)
+                        .setIsStrongBoxBacked(true)
+                        .build()
+                )
+            }.generateKey()
+            canEncryptWithKey(probeAlias)
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "StrongBox probe key generation failed, falling back to TEE", e)
+            false
+        } finally {
+            if (keyStore.containsAlias(probeAlias)) keyStore.deleteEntry(probeAlias)
+        }
     }
 
     fun getCipherForShareEncryption(key: String): Cipher =
