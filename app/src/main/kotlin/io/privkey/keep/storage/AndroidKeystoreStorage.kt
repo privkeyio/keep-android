@@ -579,7 +579,7 @@ class AndroidKeystoreStorage(
     // same StrongBox AES params. This costs one extra keygen the first time a key is
     // created; the probe key is deleted regardless of outcome.
     private fun canEncryptWithStrongBoxProbe(): Boolean {
-        val probeAlias = "keep_strongbox_aes_probe"
+        val probeAlias = "keep_strongbox_aes_probe_${java.util.UUID.randomUUID()}"
         return try {
             if (keyStore.containsAlias(probeAlias)) keyStore.deleteEntry(probeAlias)
             KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
