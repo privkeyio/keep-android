@@ -64,9 +64,7 @@ class StrongBoxAuthKeyFallbackTest {
         assumeTrue(ctx.packageManager.hasSystemFeature("android.hardware.strongbox_keystore"))
         assumeBiometricEnrolled()
 
-        val storage = AndroidKeystoreStorage(ctx, requireUserAuth = true).apply {
-            strongBoxUseTimeProbe = { false }
-        }
+        val storage = AndroidKeystoreStorage(ctx, requireUserAuth = true, strongBoxUseTimeProbe = { false })
         val key = storage.ensureShareKey(shareKey)
 
         assertNotEquals(

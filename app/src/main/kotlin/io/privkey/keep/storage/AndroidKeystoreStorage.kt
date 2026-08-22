@@ -36,7 +36,8 @@ import javax.crypto.spec.SecretKeySpec
 
 class AndroidKeystoreStorage(
     private val context: Context,
-    private val requireUserAuth: Boolean = true
+    private val requireUserAuth: Boolean = true,
+    strongBoxUseTimeProbe: (() -> Boolean)? = null
 ) : SecureStorage {
 
     companion object {
@@ -98,11 +99,14 @@ class AndroidKeystoreStorage(
         load(null)
     }
 
-    // Test seam: the StrongBox use-time probe for auth-gated keys. Overridable so an
-    // instrumented test can force it to fail and assert the downgrade-to-TEE path,
-    // which cannot otherwise be provoked on hardware whose StrongBox works.
+    // Test seam: the StrongBox use-time probe for auth-gated keys. Injected via the
+    // constructor so an instrumented test can force it to fail and assert the
+    // downgrade-to-TEE path, which cannot otherwise be provoked on hardware whose
+    // StrongBox works. Immutable after construction so no app-module code can switch
+    // the downgrade off at runtime.
     @VisibleForTesting
-    internal var strongBoxUseTimeProbe: () -> Boolean = { canEncryptWithStrongBoxProbe() }
+    internal val strongBoxUseTimeProbe: () -> Boolean =
+        strongBoxUseTimeProbe ?: { canEncryptWithStrongBoxProbe() }
 
     private fun createEncryptedPrefs(name: String): SharedPreferences =
         KeystoreEncryptedPrefs.create(context, name)
