@@ -1,8 +1,12 @@
 package io.privkey.keep.nip55
 
+import android.security.keystore.KeyInfo
 import androidx.biometric.BiometricManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.security.KeyStore
+import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
@@ -10,6 +14,7 @@ import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestType
 import org.junit.Assert.*
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,6 +28,11 @@ class FrostSigningIntegrationTest {
     private var testMobile: KeepMobile? = null
     private var testNip55Handler: Nip55Handler? = null
 
+    private companion object {
+        // Matches AndroidKeystoreStorage.KEYSTORE_ALIAS (the legacy single-share AES key).
+        const val SHARE_KEY_ALIAS = "keep_frost_share"
+    }
+
     private fun hasBiometricEnrollment(): Boolean {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val result = BiometricManager.from(context)
@@ -35,44 +45,49 @@ class FrostSigningIntegrationTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         app = context.applicationContext as? KeepMobileApp
 
-        if (hasBiometricEnrollment()) {
-            ensureShareExists()
-        } else {
-            val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
-            val mobile = KeepMobile(storage)
-            testStorage = storage
-            testMobile = mobile
-            testNip55Handler = Nip55Handler(mobile)
-            ensureShareExistsNoAuth(mobile, storage)
-        }
+        // Always use no-auth storage for instrumented runs. The app's storage is
+        // auth-per-use (setUserAuthenticationParameters(0, ...)) whenever a device
+        // has a biometric enrolled, and doFinal cannot succeed unattended.
+        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        // requireUserAuth is only honored when the key is created; an existing
+        // keep_frost_share alias is reused as-is. A prior run on a biometric
+        // device could leave it auth-gated, which would make importShare's doFinal
+        // require a biometric. Drop leftover auth-gated key material so a fresh
+        // non-auth key is generated; if a real share sits behind it, skip instead.
+        resetIfShareKeyRequiresAuth(storage)
+        val mobile = KeepMobile(storage)
+        testStorage = storage
+        testMobile = mobile
+        testNip55Handler = Nip55Handler(mobile)
+        ensureShareExistsNoAuth(mobile, storage)
+    }
+
+    private fun resetIfShareKeyRequiresAuth(storage: AndroidKeystoreStorage) {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!keyStore.containsAlias(SHARE_KEY_ALIAS)) return
+        val authRequired = runCatching {
+            val key = keyStore.getKey(SHARE_KEY_ALIAS, null) as? SecretKey ?: return
+            val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
+            (factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo).isUserAuthenticationRequired
+        }.getOrDefault(false)
+        if (!authRequired) return
+        // An auth-gated alias with a share stored behind it is a real user share:
+        // production always creates this alias with requireUserAuth = true, while this
+        // test only ever writes no-auth fixture shares, so an auth-gated share is never
+        // one of ours. deleteShare() would drop both the share and the key that decrypts
+        // it, so skip instead of destroying user data.
+        assumeFalse(
+            "device holds a real auth-gated share; skipping to avoid destroying it",
+            storage.hasShare()
+        )
+        // Auth-gated key with no share behind it is leftover key material from an
+        // earlier aborted run; dropping it lets a fresh no-auth key be generated.
+        storage.deleteShare()
     }
 
     private fun getKeepMobile(): KeepMobile? = testMobile ?: app?.getKeepMobile()
     private fun getStorage(): AndroidKeystoreStorage? = testStorage ?: app?.getStorage()
     private fun getNip55Handler(): Nip55Handler? = testNip55Handler ?: app?.getNip55Handler()
-
-    private fun ensureShareExists() {
-        val mobile = app?.getKeepMobile() ?: return
-        val storage = app?.getStorage() ?: return
-
-        if (storage.hasShare()) {
-            val metadata = storage.getShareMetadata()
-            if (metadata != null && metadata.threshold == 2u.toUShort() && metadata.totalShares == 2u.toUShort()) return
-        }
-
-        val result = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "test", "test")
-        val exportData = result.shares.first().exportData
-        val requestId = "test-setup"
-        val cipher = storage.getCipherForEncryption()
-        storage.setRequestIdContext(requestId)
-        storage.setPendingCipher(requestId, cipher)
-        try {
-            mobile.importShare(exportData, "test", "test")
-        } finally {
-            storage.clearRequestIdContext()
-            storage.clearPendingCipher(requestId)
-        }
-    }
 
     private fun ensureShareExistsNoAuth(mobile: KeepMobile, storage: AndroidKeystoreStorage) {
         if (storage.hasShare()) {
