@@ -559,6 +559,9 @@ class AndroidKeystoreStorage(
                 val strongBoxOk = try {
                     keyGenerator.init(buildSpec(useStrongBox = true))
                     keyGenerator.generateKey()
+                    // The elvis fallback to the production probe belongs at every use of
+                    // strongBoxUseTimeProbe: it is nullable, so a call site that omits the
+                    // fallback would silently skip the use-time check for auth-gated keys.
                     if (requireUserAuth) (strongBoxUseTimeProbe ?: ::canEncryptWithStrongBoxProbe)() else canEncryptWithKey(alias)
                 } catch (e: Exception) {
                     if (e !is ProviderException && e !is InvalidAlgorithmParameterException) throw e
