@@ -27,6 +27,7 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.Nip55Response
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
+import io.privkey.keep.uniffi.nip55MaxBatchSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -103,8 +104,9 @@ class Nip55Activity : FragmentActivity() {
         private const val MAX_CONTENT_LENGTH = 1024 * 1024
         private const val MAX_PUBKEY_LENGTH = 128
         private const val MAX_EXTRA_LENGTH = 2048
-        // Mirrors keep-mobile MAX_BATCH_SIZE; bounds accumulation against a spammy caller.
-        private const val MAX_BATCH_SIZE = 20
+        // keep-mobile owns the batch cap; read it rather than duplicate the value and
+        // risk drift across the RMP boundary. Bounds accumulation against a spammy caller.
+        private val MAX_BATCH_SIZE = nip55MaxBatchSize().toInt()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
