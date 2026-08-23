@@ -61,7 +61,9 @@ class Nip55Activity : FragmentActivity() {
     // pending list, the displayed snapshot the decision binds to, and the commit lock,
     // and enforces the three TOCTOU guards so a late-racing request can never be folded
     // into the signed set (gh #372).
-    private val gate = BatchConsentGate<PendingNip55Request, DisplayedCaller>(MAX_BATCH_SIZE) { it.request.requestType }
+    private val gate by lazy {
+        BatchConsentGate<PendingNip55Request, DisplayedCaller>(MAX_BATCH_SIZE) { it.request.requestType }
+    }
 
     private class PendingNip55Request(
         val request: Nip55Request,
@@ -106,7 +108,11 @@ class Nip55Activity : FragmentActivity() {
         private const val MAX_EXTRA_LENGTH = 2048
         // keep-mobile owns the batch cap; read it rather than duplicate the value and
         // risk drift across the RMP boundary. Bounds accumulation against a spammy caller.
-        private val MAX_BATCH_SIZE = nip55MaxBatchSize().toInt()
+        // Computed (not a stored val) so the FFI call happens at the use site during
+        // request handling rather than at class-init: in the degraded state where
+        // initializeKeepMobile() failed, a NIP-55 intent then fails on the signing path
+        // as a handled error rather than an opaque ExceptionInInitializerError at load.
+        private val MAX_BATCH_SIZE: Int get() = nip55MaxBatchSize().toInt()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
