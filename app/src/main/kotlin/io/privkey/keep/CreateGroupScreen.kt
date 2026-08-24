@@ -970,6 +970,9 @@ private fun DkgRunView(
 
 @Composable
 private fun dkgStatusText(update: DkgProgressUpdate): String = when (update) {
+    // Started only carries the cancel id; to the user it is the same "connecting"
+    // moment as Connecting, which follows immediately, so render it identically.
+    is DkgProgressUpdate.Started -> stringResource(R.string.create_group_status_connecting)
     is DkgProgressUpdate.Connecting -> stringResource(R.string.create_group_status_connecting)
     is DkgProgressUpdate.Round1 ->
         stringResource(R.string.create_group_status_round1, update.received.toInt(), update.total.toInt())

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import android.util.Log
 import android.widget.Toast
 import io.privkey.keep.storage.AndroidKeystoreStorage
@@ -68,12 +69,20 @@ internal class AccountActions(
 
     private val accountMutex = Mutex()
 
-    // Single-flight guard for the DKG. frostCancelDkg sets one process-wide flag
-    // with no run identity, so a second ceremony queued behind accountMutex (e.g.
-    // a double-tap on Start before the button hides) would let a cancel abort the
-    // run actually on the wire while the queued one proceeds. Reject duplicates
-    // synchronously so only ever one run is in flight for cancel to target.
+    // Single-flight guard for the DKG. Reject a second ceremony queued behind
+    // accountMutex (e.g. a double-tap on Start before the button hides) so only
+    // ever one run is in flight, and so the run id cancel targets is unambiguous.
     private val dkgInProgress = AtomicBoolean(false)
+
+    // frostCancelDkg now targets a run by id, delivered via
+    // DkgProgressUpdate.Started at run start. Hold the live run's id so cancelDkg
+    // can address it; null before Started arrives or between runs.
+    private val dkgRunId = AtomicReference<ULong?>(null)
+
+    // A cancel pressed during the synthesised Connecting window (before Started
+    // delivers an id) has nothing to target yet. Remember it and apply it the
+    // moment the id arrives, so an early cancel is honoured rather than dropped.
+    private val dkgCancelPending = AtomicBoolean(false)
 
     @Volatile
     private var currentRelays: List<String> = emptyList()
@@ -429,8 +438,22 @@ internal class AccountActions(
      */
     fun dkgBegin(groupName: String): String = keepMobile.frostDkgBegin(groupName)
 
-    /** Signal a cancel to an in-flight [createGroup] DKG run. */
-    fun cancelDkg() = keepMobile.frostCancelDkg()
+    /**
+     * Signal a cancel to an in-flight [createGroup] DKG run.
+     *
+     * Set the pending flag first, then read the id: paired with [onProgress]'s
+     * Started handling (which sets the id first, then reads the flag) this loses
+     * no cancel across the window where the two race. If the id is already known
+     * we clear the flag and cancel now; otherwise the flag stays set and Started
+     * applies it when the id arrives.
+     */
+    fun cancelDkg() {
+        dkgCancelPending.set(true)
+        val runId = dkgRunId.get()
+        if (runId != null && dkgCancelPending.compareAndSet(true, false)) {
+            keepMobile.frostCancelDkg(runId)
+        }
+    }
 
     fun createGroup(
         config: DkgConfig,
@@ -456,8 +479,20 @@ internal class AccountActions(
             postState(CreateGroupState.Error(appContext.getString(R.string.create_group_in_progress)))
             return
         }
+        // Fresh run: no id yet, and no cancel carried over from a prior run.
+        dkgRunId.set(null)
+        dkgCancelPending.set(false)
         val callback = object : DkgProgressCallback {
             override fun onProgress(update: DkgProgressUpdate) {
+                if (update is DkgProgressUpdate.Started) {
+                    // Record the id first, then honour any cancel queued during the
+                    // Connecting window. Ordered against cancelDkg (flag-then-id) so
+                    // a cancel racing Started is applied by exactly one side.
+                    dkgRunId.set(update.runId)
+                    if (dkgCancelPending.compareAndSet(true, false)) {
+                        keepMobile.frostCancelDkg(update.runId)
+                    }
+                }
                 mainHandler.post { if (!finished.get()) onState(CreateGroupState.Running(update)) }
             }
         }
@@ -520,7 +555,11 @@ internal class AccountActions(
         // the body: a coroutine launched into an already-cancelled scope never runs
         // its body, but invokeOnCompletion still fires (synchronously here), so the
         // guard cannot be stranded true and permanently block later ceremonies.
-        job.invokeOnCompletion { dkgInProgress.set(false) }
+        job.invokeOnCompletion {
+            dkgRunId.set(null)
+            dkgCancelPending.set(false)
+            dkgInProgress.set(false)
+        }
     }
 
     /**
