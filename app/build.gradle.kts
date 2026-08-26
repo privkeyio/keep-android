@@ -272,7 +272,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    implementation("net.zetetic:sqlcipher-android:4.17.0")
+    implementation("net.zetetic:sqlcipher-android:4.18.0")
     implementation("androidx.biometric:biometric:1.1.0")
     // biometric:1.1.0 drags in fragment 1.2.5, whose FragmentActivity still enforces
     // the legacy <=16-bit permission request-code validator and crashes the
