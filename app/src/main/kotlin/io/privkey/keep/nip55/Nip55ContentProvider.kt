@@ -20,8 +20,6 @@ import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
-import io.privkey.keep.storage.SignPolicy
-import io.privkey.keep.storage.toSelection
 import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55DecisionInputs
 import io.privkey.keep.uniffi.Nip55Handler
@@ -272,13 +270,14 @@ class Nip55ContentProvider : ContentProvider() {
             }
         }
 
-        // Sign-policy precedence: per-app override (Room) -> core-owned global -> MANUAL
-        // default. The selection passes through as-is; collapsing BASIC onto AUTO here
-        // would discard the stricter Basic auto-approval band the core now enforces.
+        // Sign-policy precedence: per-app override -> core-owned global -> MANUAL
+        // default, resolved in AppSignPolicyOverrides so this and the settings UI
+        // cannot drift. The override read consults the core first and falls back to
+        // the legacy Room row, so an unmigrated app keeps its (usually stricter)
+        // override. The selection passes through as-is; collapsing BASIC onto AUTO
+        // here would discard the stricter Basic auto-approval band the core enforces.
         val policySelection = runWithTimeout {
-            store.getAppSignPolicyOverride(callerPackage)?.let { SignPolicy.fromOrdinal(it).toSelection() }
-                ?: currentApp.getSignPolicyStore()?.globalPolicy()
-                ?: SignPolicySelection.MANUAL
+            AppSignPolicyOverrides.effectivePolicy(currentApp.getSignPolicyStore(), store, callerPackage)
         } ?: SignPolicySelection.MANUAL
 
         val isOptedIn = currentApp.getAutoSigningSafeguards()?.isOptedIn(callerPackage) == true
@@ -360,7 +359,7 @@ class Nip55ContentProvider : ContentProvider() {
             Nip55Outcome.AutoApprove ->
                 executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser, v3Kind, v3Scope)
             is Nip55Outcome.Reject -> {
-                if (outcome.reason == "deny_expired") runWithTimeout { store.cleanupExpired() }
+                if (outcome.reason == "deny_expired") runWithTimeout { store.cleanupExpired(currentApp.getSignPolicyStore()) }
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, outcome.reason, wasAutomatic = true) }
                 rejectedCursor(null)
             }
