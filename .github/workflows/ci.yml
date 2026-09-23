@@ -93,7 +93,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-aarch64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
@@ -172,7 +172,7 @@ jobs:
           key: rust-outputs-${{ runner.os }}-x86_64-linux-android-ndk${{ env.NDK_VERSION }}-rust${{ env.RUST_VERSION }}-ndkcargo${{ env.CARGO_NDK_VERSION }}-keep${{ hashFiles('keep.version') }}-lock${{ hashFiles('keep/Cargo.lock') }}-toolchain${{ hashFiles('keep/rust-toolchain.toml') }}-scripts${{ hashFiles('build-rust.sh', 'scripts/**/*.sh') }}
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@4076c08d76dba979c11a7285295b0716c1d67908 # v2
+        uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2
         with:
           tool: cargo-ndk@${{ env.CARGO_NDK_VERSION }}
 
