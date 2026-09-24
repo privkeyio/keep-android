@@ -9,6 +9,7 @@ import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
 import io.privkey.keep.uniffi.Nip55VelocityResult
+import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.nip55AuditEntryHash
 import io.privkey.keep.uniffi.nip55CheckVelocity
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
@@ -29,19 +30,66 @@ class PermissionStore(private val database: Nip55Database) {
 
     val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
 
-    suspend fun cleanupExpired() {
+    /**
+     * [signPolicyStore] lets the sweep take the core-owned sign-policy override down
+     * with the expiring row. Without it a per-app override would outlive its expiry
+     * window, since the core store has no expiry of its own.
+     *
+     * The app-settings rows are deleted one package at a time after the transaction
+     * commits, replacing the bulk `deleteExpired`, because a row must not be dropped
+     * unless that package's core override is confirmed gone: the row is the only
+     * index Kotlin has for it, so deleting it first would orphan the override
+     * permanently and invisibly. Each delete re-checks `isExpired` first, which is the
+     * predicate the bulk statement applied at delete time, so a row refreshed between
+     * the enumeration and the delete is still spared.
+     *
+     * The clears run outside the transaction: they are blocking keystore and disk
+     * commits, and the transaction holds the process-wide audit mutex.
+     */
+    suspend fun cleanupExpired(signPolicyStore: SignPolicyStore? = null) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
+        var expiredPackages = emptyList<String>()
         auditWriter.prune(now - 30 * DAY_MS) {
             dao.deleteExpired(now, nowElapsed)
             dao.deleteNip46Permissions()
-            val expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
+            expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
                 dao.deleteForCaller(pkg)
             }
-            appSettingsDao.deleteExpired(now, nowElapsed)
+        }
+        for (pkg in expiredPackages) {
+            val settings = appSettingsDao.getSettings(pkg) ?: continue
+            if (!settings.isExpired()) continue
+            val cleared = if (signPolicyStore == null) {
+                // Nothing can be cleared or confirmed this session. A row carrying no
+                // override has no core counterpart to orphan, so it expires as it
+                // always did; one that does is left for a sweep that can confirm it.
+                settings.signPolicyOverride == null
+            } else {
+                coreOverrideCleared(signPolicyStore, pkg)
+            }
+            if (cleared) appSettingsDao.delete(pkg)
         }
     }
+
+    /**
+     * Clears [callerPackage]'s core-owned sign-policy override and confirms it by
+     * reading it back.
+     *
+     * The read-back is the whole point: the encrypted-prefs backend behind the core
+     * store swallows write failures and discards `commit()`'s boolean, so the call
+     * returning normally proves nothing. Anything short of an observed null leaves the
+     * override in place and the caller keeps the row that indexes it.
+     */
+    private fun coreOverrideCleared(signPolicyStore: SignPolicyStore, callerPackage: String): Boolean =
+        runCatching {
+            // Nothing to clear is already the desired state, and skipping the write
+            // keeps the account-switch wipe from committing once per historical caller.
+            if (signPolicyStore.appOverride(callerPackage) == null) return@runCatching true
+            signPolicyStore.setAppOverride(callerPackage, null)
+            signPolicyStore.appOverride(callerPackage) == null
+        }.getOrDefault(false)
 
     // Decision resolution (incl. the rule that sensitive kinds never fall back
     // to a generic grant) lives in Rust; Android fetches the candidate rows and
@@ -423,7 +471,44 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun revokeAllPermissions() = dao.deleteAll()
 
-    suspend fun clearAllAppSettings() = appSettingsDao.deleteAll()
+    /**
+     * Wipe every app settings row, clearing each package's core sign-policy override
+     * first so no override survives an account switch.
+     *
+     * Every clear is confirmed by read-back, and the single `deleteAll` is issued only
+     * if all of them verify. Otherwise the rows for the packages that did verify are
+     * deleted individually and the rest are kept: the row is the only record that the
+     * package still holds a core override, so a later wipe can resume it. Deleting it
+     * regardless would strand an override Kotlin can no longer see and could never
+     * clear again.
+     *
+     * The candidates are the mirror rows plus the permission and audit callers. The
+     * core store cannot be enumerated, so an override whose mirror row is already gone
+     * is only reachable through some other record of that package.
+     */
+    suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
+        if (signPolicyStore == null) {
+            // Nothing can be cleared or confirmed this session, and keeping the rows
+            // would carry the previous account's settings into the new one.
+            appSettingsDao.deleteAll()
+            return
+        }
+        val packages = LinkedHashSet<String>()
+        runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
+        runCatching { packages.addAll(dao.getDistinctCallers()) }
+        runCatching { packages.addAll(auditDao.getDistinctCallers()) }
+
+        val unclearable = packages.filterNot { coreOverrideCleared(signPolicyStore, it) }
+        if (unclearable.isEmpty()) {
+            // Also sweeps rows that appeared after the snapshot above.
+            appSettingsDao.deleteAll()
+        } else {
+            appSettingsDao.getAll()
+                .map { it.callerPackage }
+                .filterNot { it in unclearable }
+                .forEach { appSettingsDao.delete(it) }
+        }
+    }
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
@@ -452,6 +537,8 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: String,
         eventKind: Int?
     ): Long? = auditDao.getLastUsedTimeForPermission(callerPackage, requestType, eventKind ?: EVENT_KIND_GENERIC)
+
+    suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
