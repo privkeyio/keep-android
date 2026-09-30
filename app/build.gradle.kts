@@ -265,9 +265,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.10.1")
+    implementation("androidx.navigation:navigation-compose:2.10.2")
     implementation("androidx.activity:activity-compose:1.13.0")
-    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.room:room-runtime:$roomVersion")
@@ -278,7 +278,7 @@ dependencies {
     // the legacy <=16-bit permission request-code validator and crashes the
     // activity-result permission launcher (large request codes). Align fragment with
     // the modern activity stack, where that validator is gone.
-    implementation("androidx.fragment:fragment:1.9.0")
+    implementation("androidx.fragment:fragment:1.9.1")
     implementation("androidx.security:security-crypto:1.1.0")
     implementation("androidx.camera:camera-camera2:1.6.1")
     implementation("androidx.camera:camera-lifecycle:1.6.1")
