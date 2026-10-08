@@ -348,12 +348,28 @@ class AppSignPolicyOverridesInstrumentedTest {
             )
         )
 
+        // An ALLOW with no expiry of its own, which per-row expiry would never retire.
+        database.permissionDao().insertPermission(
+            Nip55Permission(
+                callerPackage = PKG,
+                requestType = Nip55RequestType.SIGN_EVENT.name,
+                eventKind = 2,
+                decision = "allow",
+                expiresAt = null,
+                createdAt = now - 2_000L
+            )
+        )
+
         store.cleanupExpired(core, safeguards)
 
         assertEquals(
             PermissionDecision.DENY,
             store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1)
         )
+        // The grant goes with the window. Keeping it would auto-approve at the stored
+        // permission gate as soon as this sweep drops the settings row and the app stops
+        // counting as expired.
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 2))
         assertFalse(safeguards.isOptedIn(PKG))
     }
 

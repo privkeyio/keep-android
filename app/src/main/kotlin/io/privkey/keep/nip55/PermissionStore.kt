@@ -45,12 +45,13 @@ class PermissionStore(private val database: Nip55Database) {
      * auto-approval for an app whose window had just closed, and for one the user had
      * explicitly refused. A time box must not end in broader access than it granted.
      *
-     * So the unfiltered per-caller delete is gone. Permission rows carry their own
-     * `expiresAt` and `durationMs`, and `deleteExpired` in the same transaction already
-     * honors them, so each grant and each refusal lives exactly as long as the user asked
-     * rather than being tied to the app-settings window. [autoSigning] clears the opt-in
-     * for each expired package, which is what makes re-approval necessary instead of
-     * optional.
+     * So the per-caller delete now spares a DENY. What the window granted still goes,
+     * because an ALLOW may be [PermissionDuration.FOREVER] and would otherwise outlive
+     * the window and auto-approve at the stored-permission gate the moment this sweep
+     * drops the settings row. A refusal is not part of what was granted, and it carries
+     * its own expiry, so it lives exactly as long as the user asked. [autoSigning] clears
+     * the opt-in for each expired package, which is what makes re-approval necessary
+     * instead of optional.
      *
      * [signPolicyStore] lets the sweep take the core-owned sign-policy override down
      * with the expiring row. Without it a per-app override would outlive its expiry
@@ -75,11 +76,17 @@ class PermissionStore(private val database: Nip55Database) {
         val nowElapsed = SystemClock.elapsedRealtime()
         var expiredPackages = emptyList<String>()
         auditWriter.prune(now - 30 * DAY_MS) {
-            // Per-row expiry only. A standing DENY is not part of the time-boxed grant,
-            // and an ALLOW carries its own window, so neither is tied to this row's.
             dao.deleteExpired(now, nowElapsed)
             dao.deleteNip46Permissions()
             expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
+            expiredPackages.forEach { pkg ->
+                // Grants only. An ALLOW can be PermissionDuration.FOREVER, so per-row
+                // expiry would never retire it, and once this sweep drops the settings row
+                // the app stops being expired and that ALLOW auto-approves at the stored
+                // permission gate. A DENY is left alone: it is not part of what the window
+                // granted, and it has its own expiry.
+                dao.deleteGrantsForCaller(pkg)
+            }
         }
         for (pkg in expiredPackages) {
             // Re-approval, not reset-to-global: without this the app keeps its opt-in and

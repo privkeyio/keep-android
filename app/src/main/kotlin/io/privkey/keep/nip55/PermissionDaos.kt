@@ -30,6 +30,13 @@ interface Nip55PermissionDao {
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
 
+    // Everything the app's expiry window granted, but not a refusal: a DENY is the user's
+    // standing instruction about that app rather than part of the time-boxed grant, and it
+    // carries its own expiry. LOWER() because inserts store "allow" while
+    // updateDecision stores the enum name, so the column holds both cases.
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND LOWER(decision) <> 'deny'")
+    suspend fun deleteGrantsForCaller(callerPackage: String)
+
     @Query("DELETE FROM nip55_permissions WHERE callerPackage LIKE 'nip46:%'")
     suspend fun deleteNip46Permissions()
 
