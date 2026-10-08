@@ -81,7 +81,6 @@ class MainActivity : FragmentActivity() {
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
         val signPolicyStore = app.getSignPolicyStore()
-        val autoSigningSafeguards = app.getAutoSigningSafeguards()
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
         val pinStore = app.getPinStore()
@@ -385,6 +384,8 @@ fun MainScreen(
     val appLiveState = (LocalContext.current.applicationContext as? KeepMobileApp)?.liveState
     val signingAuditLog = (LocalContext.current.applicationContext as? KeepMobileApp)?.getSigningAuditLog()
     val eventLogStore = (LocalContext.current.applicationContext as? KeepMobileApp)?.getEventLogStore()
+    val autoSigningSafeguards =
+        (LocalContext.current.applicationContext as? KeepMobileApp)?.getAutoSigningSafeguards()
     val peers = appLiveState?.peers ?: emptyList()
     val pendingCount = appLiveState?.pendingRequests?.size ?: 0
     val connectionStatus = appLiveState?.connectionStatus
