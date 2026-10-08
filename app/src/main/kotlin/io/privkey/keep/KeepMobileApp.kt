@@ -12,6 +12,7 @@ import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip55.AUDIT_OP_ACCOUNT_SWITCH
 import io.privkey.keep.nip55.AndroidSigningRateLimiterStorage
+import io.privkey.keep.nip55.AppSignPolicyOverrides
 import io.privkey.keep.nip55.AutoSigningSafeguards
 import io.privkey.keep.nip55.CallerVerificationStore
 import io.privkey.keep.nip55.EventLogCategory
@@ -224,7 +225,10 @@ class KeepMobileApp : Application() {
             eventLogStore = eventLog
             initializeSigningAuditLog(db)
             applicationScope.launch {
-                store.cleanupExpired()
+                store.cleanupExpired(signPolicyStore)
+                // After the expiry sweep, so a row that just aged out is not copied
+                // into the core (which has no expiry) as a permanent override.
+                signPolicyStore?.let { AppSignPolicyOverrides.migrateLegacyOverrides(it, store) }
                 callerVerificationStore?.cleanupExpiredNonces()
                 runCatching {
                     eventLog.cleanupOld(System.currentTimeMillis() - EVENT_LOG_MAX_AGE_MS)
@@ -464,8 +468,11 @@ class KeepMobileApp : Application() {
         }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
+            // Before the revoke: clearAllAppSettings enumerates permission callers to
+            // find overrides whose mirror row is already gone, and revokeAllPermissions
+            // empties that index.
+            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings(signPolicyStore) }
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
-            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings() }
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }

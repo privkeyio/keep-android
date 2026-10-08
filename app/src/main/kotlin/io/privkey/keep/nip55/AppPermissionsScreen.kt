@@ -29,6 +29,8 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip46.Nip46ClientStore
+import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
@@ -36,6 +38,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// The selector speaks SignPolicy ordinals; the stores speak SignPolicySelection.
+private suspend fun readOverrideOrdinal(
+    signPolicyStore: SignPolicyStore?,
+    permissionStore: PermissionStore,
+    packageName: String
+): Int? = AppSignPolicyOverrides.override(signPolicyStore, permissionStore, packageName)
+    ?.toSignPolicy()
+    ?.ordinal
 
 private data class AppState(
     val label: String? = null,
@@ -75,7 +86,7 @@ fun AppPermissionsScreen(
                     .getOrDefault(emptyList())
 
                 val loadedSettings = permissionStore.getAppSettings(packageName)
-                val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                val signPolicyOverride = runCatching { readOverrideOrdinal(signPolicyStore, permissionStore, packageName) }
                     .getOrNull()
 
                 Pair(AppState(label, null, true, true, permissions, signPolicyOverride, isLoading = false), loadedSettings)
@@ -95,7 +106,7 @@ fun AppPermissionsScreen(
                     .getOrDefault(emptyList())
 
                 val loadedSettings = permissionStore.getAppSettings(packageName)
-                val signPolicyOverride = runCatching { permissionStore.getAppSignPolicyOverride(packageName) }
+                val signPolicyOverride = runCatching { readOverrideOrdinal(signPolicyStore, permissionStore, packageName) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to load sign policy [hash:$pkgHash]", it) }
                     .getOrNull()
 
@@ -269,10 +280,21 @@ private fun AppPermissionsListContent(
                             onOverrideChange = { newOverride ->
                                 coroutineScope.launch {
                                     try {
-                                        withContext(Dispatchers.IO) {
-                                            permissionStore.setAppSignPolicyOverride(packageName, newOverride)
+                                        // Show what actually persisted. The core's storage
+                                        // trait cannot report a write failure, so a failed
+                                        // write leaves the previous override in force; the
+                                        // screen must not claim a tightening that did not
+                                        // take effect.
+                                        val persisted = withContext(Dispatchers.IO) {
+                                            AppSignPolicyOverrides.setOverride(
+                                                signPolicyStore,
+                                                permissionStore,
+                                                packageName,
+                                                newOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
+                                            )
+                                            readOverrideOrdinal(signPolicyStore, permissionStore, packageName)
                                         }
-                                        onAppStateChange(appState.copy(signPolicyOverride = newOverride))
+                                        onAppStateChange(appState.copy(signPolicyOverride = persisted))
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
                                         Toast.makeText(context, toastSignPolicyError, Toast.LENGTH_SHORT).show()
