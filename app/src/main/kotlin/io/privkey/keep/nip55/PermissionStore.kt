@@ -105,25 +105,35 @@ class PermissionStore(private val database: Nip55Database) {
             // is gone this package never comes back from getExpiredPackages, so neither
             // can be retried. An opt-in left behind is what lets the policy gate
             // auto-approve the app again, which is the whole point of the sweep.
-            if (cleared && optInCleared(autoSigning, pkg)) appSettingsDao.delete(pkg)
+            if (!cleared || !optInCleared(autoSigning, pkg)) continue
+            // Re-read before deleting. Both clears above are blocking keystore and disk
+            // commits, so the user can refresh this app's window while they run, and the
+            // isExpired check at the top of the loop does not cover the delete. This
+            // narrows that window to a single read rather than closing it; a refresh
+            // landing between this read and the delete still loses the row.
+            val current = appSettingsDao.getSettings(pkg) ?: continue
+            if (current.isExpired()) appSettingsDao.delete(pkg)
         }
     }
 
     /**
-     * Whether [callerPackage] is known not to be opted in to auto-signing.
+     * Whether [callerPackage]'s auto-signing opt-in is durably gone.
      *
      * Re-approval, not reset-to-global: an app that keeps its opt-in is auto-approved by
      * whatever the global policy happens to be on its next request. The clear has to be
      * durable rather than fire-and-forget, because the caller drops the settings row on
-     * the strength of it. No safeguards store this session means it cannot be established,
-     * which keeps the row for a sweep that can, and an app that was never opted in needs
-     * no write at all.
+     * the strength of it and the package cannot be enumerated as expired again afterwards.
+     * No safeguards store this session means it cannot be established, which keeps the row
+     * for a sweep that can.
+     *
+     * Deliberately no `isOptedIn` short-circuit. The encrypted prefs return the default
+     * when a value cannot be decrypted, so a false read is indistinguishable from an
+     * opt-in that is still on disk, and skipping the write on that basis would drop the
+     * row while leaving the opt-in to come back when the read recovers. The cost is one
+     * removal per expired package.
      */
-    private fun optInCleared(autoSigning: AutoSigningSafeguards?, callerPackage: String): Boolean {
-        if (autoSigning == null) return false
-        if (!autoSigning.isOptedIn(callerPackage)) return true
-        return autoSigning.clearOptIn(callerPackage)
-    }
+    private fun optInCleared(autoSigning: AutoSigningSafeguards?, callerPackage: String): Boolean =
+        autoSigning?.clearOptIn(callerPackage) ?: false
 
     /**
      * Clears [callerPackage]'s core-owned sign-policy override and reports whether that
