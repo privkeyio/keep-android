@@ -29,10 +29,11 @@ private const val TAG = "AppSignPolicyOverrides"
  *
  * Resolution takes the stricter of the two, which makes the row a floor rather than a
  * second opinion to reconcile: a write that reached one store and not the other cannot
- * widen the app, and the floor never has to decide which side is newer. A pinned app
- * whose tier the core cannot produce at all is unknown rather than unpinned, and resolves
- * to Manual: not to the global, which may be looser than the tier the user chose. So both
- * a partial write and a fault tighten rather than loosen.
+ * widen the app, and the floor never has to decide which side is newer. When only one
+ * side knows of an override at all, the tier exists but is unknown, and that resolves to
+ * Manual rather than to the global, which may be looser than the tier the user chose, and
+ * rather than to whichever side answered, which may be the stale one. So a partial write,
+ * an unmigrated row and a read fault all tighten rather than loosen.
  *
  * The content provider and the UI both go through here so the two cannot drift.
  */
@@ -73,17 +74,22 @@ object AppSignPolicyOverrides {
         callerPackage: String
     ): Result<SignPolicySelection?> = runCatching {
         val row = permissions.getAppSettings(callerPackage)
-        // No row, or a row carrying no override, means the app is not pinned. A lapsed
-        // window retires it: the row is the only record of when the override was due to
-        // end, and the signing path applies the policy before it evaluates app expiry, so
-        // an override left in force here would auto-approve on the way past.
-        if (row?.signPolicyOverride == null || row.isExpired()) return@runCatching null
+        // A lapsed window retires the override: the row is the only record of when it was
+        // due to end, and the signing path applies the policy before it evaluates app
+        // expiry, so an override left in force here would auto-approve on the way past.
+        if (row != null && row.isExpired()) return@runCatching null
         // An out-of-range stored ordinal resolves to Manual, the strictest tier.
-        val fromRow = SignPolicy.fromOrdinal(row.signPolicyOverride).toSelection()
-        // A tier the core cannot produce is unknown rather than absent, whether because
-        // it has not migrated, because a write never landed, or because the read faulted.
+        val fromRow = row?.signPolicyOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
         val fromCore = core?.appOverride(callerPackage)
-            ?: return@runCatching SignPolicySelection.MANUAL
+        // Neither side knows of one: the app is not pinned, so the global applies.
+        if (fromRow == null && fromCore == null) return@runCatching null
+        // Exactly one side knows of one, so a tier exists but which one is unknown: the
+        // row has not been migrated, or a write reached one store and not the other, or a
+        // read faulted (the prefs layer returns the default when a value cannot be
+        // decrypted, so unreadable is indistinguishable from absent). Resolve the
+        // strictest tier rather than the global, which may be looser than what the user
+        // chose, and rather than the one side that did answer, which may be the stale one.
+        if (fromRow == null || fromCore == null) return@runCatching SignPolicySelection.MANUAL
         stricter(fromCore, fromRow)
     }
 

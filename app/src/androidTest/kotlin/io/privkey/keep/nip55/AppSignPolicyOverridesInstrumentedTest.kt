@@ -102,14 +102,14 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     @Test
-    fun noOverrideWhenNoRowCarriesOne() = runBlocking {
+    fun noOverrideOnlyWhenNeitherSideKnowsOfOne() = runBlocking {
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
 
         core.setAppOverride(PKG, SignPolicySelection.AUTO)
-        // A tier with no row to index it is inert: the app is simply not pinned, and the
-        // lifecycle sweeps are what clear the leftover. Honoring it would put policy back
-        // in two places, which is the ambiguity this design removes.
-        assertNull(AppSignPolicyOverrides.override(core, store, PKG))
+        // A tier with no row to index it still means a tier exists, so it is unknown
+        // rather than absent and resolves strict. Falling to the global here would loosen
+        // an app whose only surviving record is stricter than the global.
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
@@ -419,7 +419,9 @@ class AppSignPolicyOverridesInstrumentedTest {
         AppSignPolicyOverrides.setOverride(null, store, PKG, null)
 
         assertNull(store.getAppSettings(PKG))
-        assertNull(AppSignPolicyOverrides.override(core, store, PKG))
+        // The core still holds the old tier, known to one side only, so it resolves strict
+        // rather than handing the app the global.
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     /**
@@ -439,10 +441,16 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         assertNull(store.getAppSettings(PKG))
         assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
-        assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
+        // The clear took effect in that the chosen tier is gone, but the leftover is known
+        // to one side only, so it resolves strict instead of following the global.
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(flaky, store, PKG)
+        )
 
+        // And the row is gone, so the migration has nothing to copy back.
         AppSignPolicyOverrides.migrateLegacyOverrides(flaky, store)
-        assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
+        assertNull(store.getAppSettings(PKG))
     }
 
     /**
@@ -545,12 +553,11 @@ class AppSignPolicyOverridesInstrumentedTest {
             AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
         )
 
-        // Dropping the row un-indexes the tier, so the app follows the global again. The
-        // old design honored the orphaned tier instead, which is how an override could
-        // outlive every record of itself.
+        // Dropping the row leaves the tier known to only one side, which resolves strict
+        // rather than falling to the looser global.
         store.clearAppSettings(PKG)
         assertEquals(
-            SignPolicySelection.AUTO,
+            SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.effectivePolicy(newCore(), store, PKG)
         )
     }
