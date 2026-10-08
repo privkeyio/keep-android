@@ -25,6 +25,16 @@ class AutoSigningSafeguards(context: Context) {
         prefs.edit().putBoolean(KEY_PREFIX_OPTED_IN + packageName, optedIn).apply()
     }
 
+    /**
+     * Removes the opt-in and reports whether that reached disk.
+     *
+     * Durable where [setOptedIn] is fire-and-forget, because the expiry sweep drops the
+     * app's settings row on the strength of this and the package cannot be enumerated as
+     * expired again afterwards, so a lost write could never be retried.
+     */
+    fun clearOptIn(packageName: String): Boolean =
+        prefs.edit().remove(KEY_PREFIX_OPTED_IN + packageName).commit()
+
     fun clearAll() {
         prefs.edit().clear().commit()
     }

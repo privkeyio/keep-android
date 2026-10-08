@@ -45,7 +45,9 @@ class PermissionStore(private val database: Nip55Database) {
      * auto-approval for an app whose window had just closed, and for one the user had
      * explicitly refused. A time box must not end in broader access than it granted.
      *
-     * So the per-caller delete now spares a DENY. What the window granted still goes,
+     * So the per-caller delete now spares a DENY and an explicit ASK, both of which are
+     * standing instructions about the app written only by the user's own toggle. What the
+     * window granted still goes,
      * because an ALLOW may be [PermissionDuration.FOREVER] and would otherwise outlive
      * the window and auto-approve at the stored-permission gate the moment this sweep
      * drops the settings row. A refusal is not part of what was granted, and it carries
@@ -84,14 +86,11 @@ class PermissionStore(private val database: Nip55Database) {
                 // expiry would never retire it, and once this sweep drops the settings row
                 // the app stops being expired and that ALLOW auto-approves at the stored
                 // permission gate. A DENY is left alone: it is not part of what the window
-                // granted, and it has its own expiry.
+                // granted, and it has its own expiry. Nor is an explicit "always ask".
                 dao.deleteGrantsForCaller(pkg)
             }
         }
         for (pkg in expiredPackages) {
-            // Re-approval, not reset-to-global: without this the app keeps its opt-in and
-            // the next request is auto-approved by whatever the global happens to be.
-            autoSigning?.setOptedIn(pkg, false)
             val settings = appSettingsDao.getSettings(pkg) ?: continue
             if (!settings.isExpired()) continue
             val cleared = if (signPolicyStore == null) {
@@ -102,8 +101,28 @@ class PermissionStore(private val database: Nip55Database) {
             } else {
                 coreOverrideCleared(signPolicyStore, pkg)
             }
-            if (cleared) appSettingsDao.delete(pkg)
+            // Gated the same way as the core clear, and for the same reason: once the row
+            // is gone this package never comes back from getExpiredPackages, so neither
+            // can be retried. An opt-in left behind is what lets the policy gate
+            // auto-approve the app again, which is the whole point of the sweep.
+            if (cleared && optInCleared(autoSigning, pkg)) appSettingsDao.delete(pkg)
         }
+    }
+
+    /**
+     * Whether [callerPackage] is known not to be opted in to auto-signing.
+     *
+     * Re-approval, not reset-to-global: an app that keeps its opt-in is auto-approved by
+     * whatever the global policy happens to be on its next request. The clear has to be
+     * durable rather than fire-and-forget, because the caller drops the settings row on
+     * the strength of it. No safeguards store this session means it cannot be established,
+     * which keeps the row for a sweep that can, and an app that was never opted in needs
+     * no write at all.
+     */
+    private fun optInCleared(autoSigning: AutoSigningSafeguards?, callerPackage: String): Boolean {
+        if (autoSigning == null) return false
+        if (!autoSigning.isOptedIn(callerPackage)) return true
+        return autoSigning.clearOptIn(callerPackage)
     }
 
     /**

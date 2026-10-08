@@ -348,6 +348,7 @@ class AppSignPolicyOverridesInstrumentedTest {
             )
         )
 
+        store.setPermissionToAsk(PKG, Nip55RequestType.SIGN_EVENT, 3)
         // An ALLOW with no expiry of its own, which per-row expiry would never retire.
         database.permissionDao().insertPermission(
             Nip55Permission(
@@ -370,7 +371,16 @@ class AppSignPolicyOverridesInstrumentedTest {
         // permission gate as soon as this sweep drops the settings row and the app stops
         // counting as expired.
         assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 2))
+        // An explicit "always ask" is a standing instruction too, and at keep v0.11.0 it
+        // blocks the policy auto-approve, so deleting it would hand that back.
+        assertEquals(
+            PermissionDecision.ASK,
+            store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 3)
+        )
         assertFalse(safeguards.isOptedIn(PKG))
+        // The row only goes once the opt-in clear is durable, since the package cannot be
+        // enumerated as expired again afterwards.
+        assertNull(store.getAppSettings(PKG))
     }
 
     /**
