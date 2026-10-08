@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fails CI if the Fastlane changelog for the current release is missing.
+# Fails CI if the Fastlane changelog for the current release is missing, or if
+# any changelog exceeds the 500-character "What's New" limit (CONTRIBUTING.md).
 #
 # F-Droid renders "What's New" from
 # fastlane/metadata/android/<locale>/changelogs/<versionCode>.txt, and reads it
@@ -53,6 +54,17 @@ while read -r abi code; do
     done
 done <<< "$ABI_CODES"
 
+# Every changelog, not only this release's. Characters, not bytes, without the
+# final newline.
+too_long=0
+while IFS= read -r -d '' f; do
+    n=$(sed -z 's/\n$//' "$f" | LC_ALL=C.UTF-8 wc -m)
+    if [ "$n" -gt 500 ]; then
+        echo "error: changelog is $n characters, over the 500 limit: ${f#"$ROOT"/}" >&2
+        too_long=1
+    fi
+done < <(find "$FASTLANE" -path '*/changelogs/*.txt' -print0)
+
 if [ "$missing" -ne 0 ]; then
     codes=()
     while read -r _ c; do codes+=("$((BASE * 10 + c))"); done <<< "$ABI_CODES"
@@ -69,4 +81,6 @@ EOF
     exit 1
 fi
 
-echo "ok: changelogs present for versionCode base $BASE in all locales."
+[ "$too_long" -eq 0 ] || exit 1
+
+echo "ok: changelogs present for versionCode base $BASE in all locales, all within 500 characters."
