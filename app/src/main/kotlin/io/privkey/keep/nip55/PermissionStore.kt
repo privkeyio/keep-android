@@ -574,6 +574,13 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
+    /**
+     * Drops the settings row only. The row is the index for the package's core
+     * sign-policy tier, so a caller that wants the override gone has to clear the tier
+     * too, as [cleanupExpired] and [clearAllAppSettings] do; otherwise the tier is left
+     * in the core where nothing can reach it. Safe as it stands because every caller is
+     * test teardown.
+     */
     suspend fun clearAppSettings(callerPackage: String) {
         appSettingsDao.delete(callerPackage)
     }

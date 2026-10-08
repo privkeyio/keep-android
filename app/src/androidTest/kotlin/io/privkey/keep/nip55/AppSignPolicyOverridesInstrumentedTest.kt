@@ -70,27 +70,13 @@ class AppSignPolicyOverridesInstrumentedTest {
     private fun newCore() = SignPolicyStore(SignPolicySelectionPrefs(context))
 
     @Test
-    fun stricterWinsWhenTheCoreIsLooserThanRoom() = runBlocking {
+    fun theCoreTierResolvesWhateverTheRowCopyHolds() = runBlocking {
         core.setAppOverride(PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
-        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
-    }
-
-    @Test
-    fun stricterWinsWhenRoomIsLooserThanTheCore() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
-        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
-
-        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
-    }
-
-    @Test
-    fun stricterWinsAcrossTheMiddleTier() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
-        store.setAppSignPolicyOverride(PKG, SignPolicy.BASIC.ordinal)
-
-        assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
+        // The row marks the app as pinned and seeds the migration. It is not the policy,
+        // so there is no disagreement between the two to reconcile.
+        assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
@@ -102,22 +88,31 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     @Test
-    fun roomOverrideIsUsedWhenTheCoreHasNone() = runBlocking {
+    fun aPinnedAppWhoseTierIsNotInTheCoreResolvesToManual() = runBlocking {
         store.setAppSignPolicyOverride(PKG, SignPolicy.BASIC.ordinal)
 
+        // Not migrated yet, so the tier is unknown rather than Basic. Resolving to the
+        // global instead would loosen an app pinned stricter than it.
         assertNull(core.appOverride(PKG))
-        assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
-    fun noOverrideOnlyWhenBothStoresAreEmpty() = runBlocking {
+    fun noOverrideWhenNoRowCarriesOne() = runBlocking {
+        assertNull(AppSignPolicyOverrides.override(core, store, PKG))
+
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        // A tier with no row to index it is inert: the app is simply not pinned, and the
+        // lifecycle sweeps are what clear the leftover. Honoring it would put policy back
+        // in two places, which is the ambiguity this design removes.
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
-    fun outOfRangeRoomOrdinalResolvesToManual() = runBlocking {
+    fun outOfRangeRowOrdinalResolvesToManual() = runBlocking {
         store.setAppSignPolicyOverride(PKG, 99)
 
+        // Pinned, with nothing the core can serve for it.
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
@@ -142,7 +137,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     @Test
-    fun writeMirrorsTheSameValueIntoBothStores() = runBlocking {
+    fun writePutsTheTierInTheCoreAndIndexesItOnTheRow() = runBlocking {
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.BASIC)
@@ -153,11 +148,12 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * The resurrection case: a clear has to null BOTH stores, or the dual read would
-     * hand the stale Room mirror straight back after the user cleared it.
+     * A clear has to drop the row as well as the tier. The row is the index, so one left
+     * behind would keep the app pinned-but-unknown, which resolves to Manual rather than
+     * to the global the user asked to follow.
      */
     @Test
-    fun clearedOverrideDoesNotResurrectFromRoom() = runBlocking {
+    fun clearedOverrideLeavesTheAppFollowingTheGlobal() = runBlocking {
         core.setGlobalPolicy(SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
@@ -293,23 +289,17 @@ class AppSignPolicyOverridesInstrumentedTest {
      * tightening the user actually made.
      */
     @Test
-    fun aTighteningMadeWithoutACoreStoreOutranksTheStaleCoreValue() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+    fun withoutACoreStoreAnOverrideIsRecordedAtManual() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.AUTO)
 
-        AppSignPolicyOverrides.setOverride(null, store, PKG, SignPolicySelection.MANUAL)
+        // Nothing can honor a tier while the store is missing, so a loosening is refused
+        // rather than recorded, and the app stays at the strictest tier.
+        AppSignPolicyOverrides.setOverride(null, store, PKG, SignPolicySelection.AUTO)
+
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
-
-        val liveCore = newCore()
-        AppSignPolicyOverrides.migrateLegacyOverrides(liveCore, store)
-        assertEquals(SignPolicySelection.AUTO, liveCore.appOverride(PKG))
-
         assertEquals(
             SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.override(liveCore, store, PKG)
-        )
-        assertEquals(
-            SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.effectivePolicy(liveCore, store, PKG)
+            AppSignPolicyOverrides.effectivePolicy(null, store, PKG)
         )
     }
 
@@ -394,7 +384,7 @@ class AppSignPolicyOverridesInstrumentedTest {
      * against the tier the user had moved away from.
      */
     @Test
-    fun aTighteningWhoseWriteIsNotConfirmedIsReassertedToBothStores() = runBlocking {
+    fun aTighteningWhoseWriteIsNotConfirmedPinsManual() = runBlocking {
         val unreliable = SignPolicyStore(UncommittableStorage())
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
 
@@ -414,7 +404,7 @@ class AppSignPolicyOverridesInstrumentedTest {
      * put the live value out of reach of the UI and of both sweeps.
      */
     @Test
-    fun aClearWhoseCoreWriteDoesNotPersistRestoresTheMirror() = runBlocking {
+    fun aClearWhoseCoreWriteDoesNotPersistPinsManualAndKeepsTheRow() = runBlocking {
         val flaky = SignPolicyStore(UnremovableStorage(PKG))
         AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL)
 
@@ -429,20 +419,23 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * A clear writes the mirror first, so a mirror failure aborts before the core is
-     * touched: both stores still hold the override and there is nothing to resurrect.
-     * The reverse order would leave the stale mirror as the only copy, and the next
-     * migration would copy it back into the core for good.
+     * A clear confirms the core write before dropping the row, so a row write that then
+     * fails leaves the app pinned-but-unknown rather than unpinned. An unreadable row
+     * makes the signing path fall to Manual, never to a global that may be looser than
+     * the tier the user had chosen.
      */
     @Test
-    fun aClearWhoseMirrorWriteThrowsDoesNotResurrect() = runBlocking {
+    fun aClearWhoseRowWriteThrowsStillFailsClosed() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.AUTO)
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
         database.close()
 
         runCatching { AppSignPolicyOverrides.setOverride(core, store, PKG, null) }
 
-        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
-        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
+        )
     }
 
     @Test
@@ -459,7 +452,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     @Test
-    fun migrationLeavesTheRoomValuesInPlaceForTheFallback() = runBlocking {
+    fun migrationLeavesTheRowValuesInPlaceAsItsOwnSource() = runBlocking {
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
@@ -525,9 +518,12 @@ class AppSignPolicyOverridesInstrumentedTest {
             AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
         )
 
+        // Dropping the row un-indexes the tier, so the app follows the global again. The
+        // old design honored the orphaned tier instead, which is how an override could
+        // outlive every record of itself.
         store.clearAppSettings(PKG)
         assertEquals(
-            SignPolicySelection.MANUAL,
+            SignPolicySelection.AUTO,
             AppSignPolicyOverrides.effectivePolicy(newCore(), store, PKG)
         )
     }

@@ -280,11 +280,11 @@ private fun AppPermissionsListContent(
                             onOverrideChange = { newOverride ->
                                 coroutineScope.launch {
                                     try {
-                                        // Show what actually persisted. The core's storage
-                                        // trait cannot report a write failure, so a failed
-                                        // write leaves the previous override in force; the
-                                        // screen must not claim a tightening that did not
-                                        // take effect.
+                                        // Show what actually persisted. An unconfirmed
+                                        // core write is repaired to Manual, and a failed
+                                        // row write throws to the catch below, so the
+                                        // screen must report what resolved rather than
+                                        // claim the tier that was asked for.
                                         val persisted = withContext(Dispatchers.IO) {
                                             AppSignPolicyOverrides.setOverride(
                                                 signPolicyStore,
