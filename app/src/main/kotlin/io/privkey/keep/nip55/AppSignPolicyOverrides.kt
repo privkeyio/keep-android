@@ -33,7 +33,7 @@ object AppSignPolicyOverrides {
      * When the two disagree the STRICTER value wins (Manual < Basic < Auto), not the
      * core. The stores can only disagree because a write landed in one and not the
      * other, and there is no way to tell which side is the newer intent: the core's
-     * prefs backend swallows write failures and discards `commit()`'s result, so a
+     * prefs backend can report a failed write but still serve the cached value, so a
      * value can be current in memory and absent on disk, and a session where the core
      * store failed to construct writes to Room alone (the migration then skips that
      * package forever, because the core already "knows" it). Core-first would let a
@@ -87,16 +87,22 @@ object AppSignPolicyOverrides {
      * and [PermissionStore.clearAllAppSettings]). Clearing Room here instead would
      * make core overrides invisible to Kotlin and immortal.
      *
-     * On a SET the core goes first and Room is only touched once the core reports the
-     * new value back, because the core's storage trait cannot signal a failed write.
+     * Both directions go to the core first and touch Room only once the core reports
+     * a durable write. `setAppOverride` returns its backing store's `commit()` result,
+     * so a write that did not reach disk is reported rather than having to be inferred;
+     * a read-back could not do this, since the encrypted prefs serve the value a failed
+     * commit left behind.
      *
-     * On a CLEAR the order is reversed: the mirror goes first, and the core is left
-     * alone if that throws. Clearing the core first and then failing on the mirror
-     * would leave the stale override as the only copy, which [override] hands straight
-     * back and [migrateLegacyOverrides] then copies into the core permanently, since
-     * the core no longer holds anything to skip on. Mirror-first turns that into "the
-     * clear did not happen": both stores still agree on the old value, the caller sees
-     * the throw, and a re-read shows the override still in force.
+     * A core write that reports failure leaves Room untouched, which makes it "the
+     * write did not happen": a re-read still shows the old value and the caller can
+     * retry. Dropping the mirror first would instead leave a live override as the only
+     * copy, with nothing indexing it.
+     *
+     * A reported failure is indeterminate rather than a no-op, so the write may yet be
+     * on disk. The global selection re-asserts the stricter tier for that reason
+     * ([SignPolicyScreen]); here [override] already resolves the resulting divergence
+     * to the stricter of the two stores, which bounds it to "no looser than either
+     * side" without a second write.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
@@ -113,13 +119,12 @@ object AppSignPolicyOverrides {
             return
         }
         if (selection == null) {
+            if (!core.setAppOverride(callerPackage, null)) return
             permissions.setAppSignPolicyOverride(callerPackage, null)
-            core.setAppOverride(callerPackage, null)
             return
         }
-        core.setAppOverride(callerPackage, selection)
-        if (core.appOverride(callerPackage) != selection) return
-        // A failed mirror write must not propagate: the core already holds the new
+        if (!core.setAppOverride(callerPackage, selection)) return
+        // A failed mirror write must not propagate: the core durably holds the new
         // value, so the write did take effect. The stores diverge until the next
         // write, and stricter-wins bounds that to "no looser than either side".
         runCatching { permissions.setAppSignPolicyOverride(callerPackage, ordinal) }

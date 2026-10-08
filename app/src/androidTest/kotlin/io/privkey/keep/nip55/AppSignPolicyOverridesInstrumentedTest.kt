@@ -511,9 +511,9 @@ class AppSignPolicyOverridesInstrumentedTest {
 /**
  * A real backend for the real core store, not a stubbed uniffi type: it implements the
  * same [SignPolicySelectionStorage] trait the production encrypted-prefs class does,
- * and reproduces the failure mode that motivates the read-back checks. Removals for
- * [unremovablePackage] are dropped and reported as success, exactly as the production
- * backend does when it swallows an exception or `commit()` returns false.
+ * and reproduces the failure the write paths have to survive. Removals for
+ * [unremovablePackage] are dropped and reported as the failed durable write they are,
+ * which is what the production backend returns when `commit()` fails.
  */
 private class UnremovableStorage(private val unremovablePackage: String) : SignPolicySelectionStorage {
 
@@ -521,12 +521,14 @@ private class UnremovableStorage(private val unremovablePackage: String) : SignP
 
     override fun load(key: String): String? = values[key]
 
-    override fun save(key: String, value: String) {
+    override fun save(key: String, value: String): Boolean {
         values[key] = value
+        return true
     }
 
-    override fun remove(key: String) {
-        if (key.endsWith(unremovablePackage)) return
+    override fun remove(key: String): Boolean {
+        if (key.endsWith(unremovablePackage)) return false
         values.remove(key)
+        return true
     }
 }

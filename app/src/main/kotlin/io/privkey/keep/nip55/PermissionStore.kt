@@ -74,22 +74,20 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     /**
-     * Clears [callerPackage]'s core-owned sign-policy override and confirms it by
-     * reading it back.
+     * Clears [callerPackage]'s core-owned sign-policy override and reports whether that
+     * clear durably persisted.
      *
-     * The read-back is the whole point: the encrypted-prefs backend behind the core
-     * store swallows write failures and discards `commit()`'s boolean, so the call
-     * returning normally proves nothing. Anything short of an observed null leaves the
-     * override in place and the caller keeps the row that indexes it.
+     * `setAppOverride` returns the backing store's own `commit()` result, which is the
+     * only signal that separates "gone from disk" from "gone from the in-memory map a
+     * failed commit left behind". A read-back cannot tell those apart, because the
+     * encrypted prefs serve the cached value. Nor can an absent read stand in for
+     * proof: a decrypt fault reads identically to absence, so skipping the write on an
+     * absent read would declare a live override cleared and drop the row that indexes
+     * it. The clear is therefore issued unconditionally, and anything short of a
+     * durable `true` leaves the override in place and the caller keeps that row.
      */
     private fun coreOverrideCleared(signPolicyStore: SignPolicyStore, callerPackage: String): Boolean =
-        runCatching {
-            // Nothing to clear is already the desired state, and skipping the write
-            // keeps the account-switch wipe from committing once per historical caller.
-            if (signPolicyStore.appOverride(callerPackage) == null) return@runCatching true
-            signPolicyStore.setAppOverride(callerPackage, null)
-            signPolicyStore.appOverride(callerPackage) == null
-        }.getOrDefault(false)
+        runCatching { signPolicyStore.setAppOverride(callerPackage, null) }.getOrDefault(false)
 
     // Decision resolution (incl. the rule that sensitive kinds never fall back
     // to a generic grant) lives in Rust; Android fetches the candidate rows and
@@ -475,8 +473,8 @@ class PermissionStore(private val database: Nip55Database) {
      * Wipe every app settings row, clearing each package's core sign-policy override
      * first so no override survives an account switch.
      *
-     * Every clear is confirmed by read-back, and the single `deleteAll` is issued only
-     * if all of them verify. Otherwise the rows for the packages that did verify are
+     * Every clear is gated on the core's durable-write result, and the single
+     * `deleteAll` is issued only if all of them report success. Otherwise the rows for the packages that did verify are
      * deleted individually and the rest are kept: the row is the only record that the
      * package still holds a core override, so a later wipe can resume it. Deleting it
      * regardless would strand an override Kotlin can no longer see and could never
@@ -540,8 +538,11 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
+    // An expired row must not supply an override even if its sweep could not confirm
+    // the core clear: the core has no expiry of its own, and the signing path applies
+    // the policy before it ever evaluates app expiry.
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
-        appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
+        appSettingsDao.getSettings(callerPackage)?.takeUnless { it.isExpired() }?.signPolicyOverride
 
     suspend fun setAppSignPolicyOverride(callerPackage: String, signPolicyOrdinal: Int?) {
         val existing = appSettingsDao.getSettings(callerPackage)

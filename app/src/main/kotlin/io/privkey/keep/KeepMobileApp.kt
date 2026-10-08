@@ -468,8 +468,11 @@ class KeepMobileApp : Application() {
         }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
-            runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
+            // Before the revoke: clearAllAppSettings enumerates permission callers to
+            // find overrides whose mirror row is already gone, and revokeAllPermissions
+            // empties that index.
             runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings(signPolicyStore) }
+            runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
             runAccountSwitchCleanup("clear auto-signing state") { autoSigningSafeguards?.clearAll() }
