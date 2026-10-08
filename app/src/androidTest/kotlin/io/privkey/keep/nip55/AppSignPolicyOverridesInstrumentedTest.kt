@@ -399,23 +399,26 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * A clear whose core write does not durably land must leave the override indexed.
-     * The row is the only record Kotlin has of a core override, so dropping it would
-     * put the live value out of reach of the UI and of both sweeps.
+     * A clear whose core write does not durably land still takes effect, because dropping
+     * the row un-indexes the tier and an unindexed tier is inert.
+     *
+     * The leftover has to stay inert across a startup too, which is what makes the
+     * row-first ordering load-bearing: the migration copies from the row's tier, so a row
+     * left behind would be written back into the empty slot and revert the clear.
      */
     @Test
-    fun aClearWhoseCoreWriteDoesNotPersistPinsManualAndKeepsTheRow() = runBlocking {
+    fun aClearWhoseCoreWriteDoesNotPersistStillTakesEffect() = runBlocking {
         val flaky = SignPolicyStore(UnremovableStorage(PKG))
         AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL)
 
         AppSignPolicyOverrides.setOverride(flaky, store, PKG, null)
 
-        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSettings(PKG)?.signPolicyOverride)
+        assertNull(store.getAppSettings(PKG))
         assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
-        assertEquals(
-            SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.override(flaky, store, PKG)
-        )
+        assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(flaky, store)
+        assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
     }
 
     /**

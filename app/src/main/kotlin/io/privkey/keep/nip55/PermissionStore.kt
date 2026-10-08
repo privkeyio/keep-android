@@ -487,9 +487,15 @@ class PermissionStore(private val database: Nip55Database) {
      */
     suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
         if (signPolicyStore == null) {
-            // Nothing can be cleared or confirmed this session, and keeping the rows
-            // would carry the previous account's settings into the new one.
-            appSettingsDao.deleteAll()
+            // Nothing can be cleared or confirmed this session. Rows carrying no override
+            // go, since they would otherwise carry the previous account's settings into
+            // the new one. A row that carries one stays: dropping it would un-index a tier
+            // still in the core, and an unindexed tier is inert, so those apps would fall
+            // to the global policy instead of staying pinned. The next wipe that has a
+            // store retries them, exactly as the expiry sweep does.
+            appSettingsDao.getAll()
+                .filter { it.signPolicyOverride == null }
+                .forEach { appSettingsDao.delete(it.callerPackage) }
             return
         }
         val packages = LinkedHashSet<String>()
@@ -544,9 +550,9 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
-    // The stored value, whatever its row's state. Whether an expired row still supplies
-    // an override is resolved in AppSignPolicyOverrides, which has to retire the core's
-    // copy at the same time.
+    // The row's copy of the tier, which is the migration's source and not the policy:
+    // AppSignPolicyOverrides resolves the tier from the core. Test-only; no main-source
+    // caller reads this.
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
 

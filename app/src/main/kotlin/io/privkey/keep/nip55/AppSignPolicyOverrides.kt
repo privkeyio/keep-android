@@ -18,9 +18,10 @@ private const val TAG = "AppSignPolicyOverrides"
  * the app was pinned away from. That one risk shapes everything here.
  *
  * The core-owned store holds the tier, and it is the only thing that does. The Room
- * `nip55_app_settings` row holds what the core cannot: whether the app is pinned at all,
- * since the core store cannot be enumerated, and the window the override expires at,
- * since the core keeps no expiry. The row also carries the tier, but only as the source
+ * `nip55_app_settings` row holds what the core cannot: the window the override expires at,
+ * since the core keeps no expiry, and a record of the pinning that the lifecycle sweeps
+ * can enumerate, since the core store cannot be listed (it answers for one package, it
+ * just cannot produce the set of them). The row also carries the tier, but only as the source
  * [migrateLegacyOverrides] copies from; resolution never reads it as the policy, so the
  * two cannot disagree in a way that has to be reconciled.
  *
@@ -89,14 +90,13 @@ object AppSignPolicyOverrides {
      *
      * An unconfirmed write does not say which value is stored, so it is repaired rather
      * than ignored: the core may hold the old tier, or serve the new one from memory
-     * while its disk still holds the old. Pinning Manual covers every one of those, and
-     * keeping the row means the app still resolves to Manual even if the repair does not
-     * land either. The UI shows the tier that was actually achieved, so the user can pick
-     * again.
+     * while its disk still holds the old. Pinning Manual covers every one of those. It is
+     * best effort, not a floor: the row's tier is not read, so if the repair does not land
+     * either, the core keeps serving whatever it has. The screen reports the tier that
+     * resolved rather than the one that was asked for, so the user can pick again.
      *
      * The row write is not guarded. It is the index, so a row that cannot be written
-     * means the change did not take, and the settings screen reports that rather than
-     * claiming a tier the resolver will not serve.
+     * means the change did not take, and the screen reports that too.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
@@ -104,7 +104,6 @@ object AppSignPolicyOverrides {
         callerPackage: String,
         selection: SignPolicySelection?
     ) {
-        val ordinal = selection?.toSignPolicy()?.ordinal
         if (core == null) {
             // No core store this session, so there is nowhere to put the tier and nothing
             // would honor it. Record the app as pinned at Manual, which is what it
@@ -114,23 +113,27 @@ object AppSignPolicyOverrides {
             permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
             return
         }
-        if (selection != null) {
-            // Index first. A row whose tier the core cannot produce resolves to Manual,
-            // so a tier write that does not land fails closed. Writing the tier first
-            // would leave it unindexed, and an unindexed tier is inert, which drops the
-            // app onto the global policy instead.
-            permissions.setAppSignPolicyOverride(callerPackage, ordinal)
-            if (wrote(core, callerPackage, selection)) return
-        } else {
-            // Clear the tier before dropping the index, for the same reason in reverse:
-            // dropping the row first would make a tier that is still in the core inert.
-            if (wrote(core, callerPackage, null)) {
-                permissions.setAppSignPolicyOverride(callerPackage, null)
-                return
-            }
+        if (selection == null) {
+            // Dropping the row IS the clear, because a tier with no row to index it is
+            // inert. Doing it first also means a core clear that does not land cannot be
+            // undone later: [migrateLegacyOverrides] reads the row's tier, so a row left
+            // behind would be copied back into the empty slot at the next startup and
+            // silently revert the clear.
+            permissions.setAppSignPolicyOverride(callerPackage, null)
+            // Hygiene, not the clear itself: drop the now-unreachable tier so nothing
+            // picks it up again.
+            wrote(core, callerPackage, null)
+            return
         }
+        // Index first, for the mirror of that reason: an unindexed tier is inert, while a
+        // row whose tier the core cannot produce resolves to Manual, so a tier write that
+        // does not land fails closed instead of dropping the app onto the global.
+        permissions.setAppSignPolicyOverride(callerPackage, selection.toSignPolicy().ordinal)
+        if (wrote(core, callerPackage, selection)) return
+        // Unconfirmed: `false` does not say which value is stored, so pin Manual. If that
+        // does not land either, the core goes on serving whatever it has and the settings
+        // screen reports that rather than the tier that was asked for.
         wrote(core, callerPackage, SignPolicySelection.MANUAL)
-        permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
     }
 
     /**
