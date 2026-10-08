@@ -61,6 +61,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     private fun clearPrefs() {
         context.deleteSharedPreferences(SELECTION_PREFS)
         context.deleteSharedPreferences(LEGACY_PREFS)
+        context.deleteSharedPreferences(AUTO_SIGNING_PREFS)
         // Only our own one-shot marker; the marker file is shared with other
         // migrations, so it must not be deleted wholesale.
         context.getSharedPreferences(
@@ -216,7 +217,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         )
         core.setAppOverride(PKG, SignPolicySelection.BASIC)
 
-        store.cleanupExpired(core)
+        store.cleanupExpired(core, AutoSigningSafeguards(context))
 
         assertNull(core.appOverride(PKG))
         assertNull(newCore().appOverride(PKG))
@@ -258,11 +259,36 @@ class AppSignPolicyOverridesInstrumentedTest {
             )
         )
 
-        store.cleanupExpired()
+        store.cleanupExpired(null, AutoSigningSafeguards(context))
 
         assertNotNull(store.getAppSettings(PKG))
         // A row with no override has no core counterpart, so it expires as it always did.
         assertNull(store.getAppSettings(OTHER_PKG))
+    }
+
+    /**
+     * With no safeguards store this session, "not opted in" cannot be told apart from
+     * "opted in and unclearable", so the sweep keeps the row rather than dropping the one
+     * record that keeps the app expired. Fail-closed: the app stays refused until a sweep
+     * that can establish it runs, instead of silently regaining the global policy.
+     */
+    @Test
+    fun expirySweepWithoutSafeguardsKeepsTheRow() = runBlocking {
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        store.cleanupExpired(core, null)
+
+        assertNotNull(store.getAppSettings(PKG))
     }
 
     @Test
@@ -722,6 +748,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         const val PKG = "com.test.app"
         const val OTHER_PKG = "com.test.other"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
+        const val AUTO_SIGNING_PREFS = "nip55_auto_signing"
         const val LEGACY_PREFS = "keep_sign_policy"
     }
 }
