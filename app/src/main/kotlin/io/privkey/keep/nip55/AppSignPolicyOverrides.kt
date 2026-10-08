@@ -23,9 +23,7 @@ private const val TAG = "AppSignPolicyOverrides"
  * the pinning that the lifecycle sweeps can enumerate, since the core store cannot be
  * listed (it answers for one package, it just cannot produce the set of them), and the
  * last tier the user chose, which both seeds [migrateLegacyOverrides] and serves as the
- * strictness floor below. The row also carries the tier, but only as the source
- * [migrateLegacyOverrides] copies from; resolution never reads it as the policy, so the
- * two cannot disagree in a way that has to be reconciled.
+ * strictness floor below.
  *
  * Resolution takes the stricter of the two, which makes the row a floor rather than a
  * second opinion to reconcile: a write that reached one store and not the other cannot
@@ -117,10 +115,10 @@ object AppSignPolicyOverrides {
     /**
      * Pins [callerPackage] to [selection], or clears its override when null.
      *
-     * The core write has to durably land before the row is updated. `setAppOverride`
-     * returns its backing store's `commit()` result, which is the only signal that
-     * separates "on disk" from "in the in-memory map a failed commit left behind"; a
-     * read-back cannot, because the encrypted prefs serve that cached value.
+     * `setAppOverride` returns its backing store's `commit()` result, which is the only
+     * signal that separates "on disk" from "in the in-memory map a failed commit left
+     * behind"; a read-back cannot, because the encrypted prefs serve that cached value.
+     * Which store is written first differs by direction, for the reasons at each branch.
      *
      * An unconfirmed write does not say which value is stored, so Manual is pinned as a
      * best-effort repair: the core may hold the old tier, or serve the new one from memory
@@ -138,11 +136,11 @@ object AppSignPolicyOverrides {
         selection: SignPolicySelection?
     ) {
         if (selection == null) {
-            // Dropping the row IS the clear, because a tier with no row to index it is
-            // inert. Doing it first also means a core clear that does not land cannot be
-            // undone later: [migrateLegacyOverrides] reads the row's tier, so a row left
-            // behind would be copied back into the empty slot at the next startup and
-            // silently revert the clear.
+            // Drop the row first. A core clear that does not land then leaves a tier
+            // known to one side only, which resolves to Manual: the chosen tier is gone,
+            // which is what the user asked for, and the leftover cannot widen anything.
+            // Keeping the row instead would let [migrateLegacyOverrides] copy its tier
+            // back into the empty slot at the next startup and silently revert the clear.
             permissions.setAppSignPolicyOverride(callerPackage, null)
             // Hygiene, not the clear itself: drop the now-unreachable tier so nothing
             // picks it up again. Nothing to drop when there is no store this session.
@@ -158,15 +156,27 @@ object AppSignPolicyOverrides {
             permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
             return
         }
-        // Index first, for the mirror of that reason: an unindexed tier is inert, while a
-        // row whose tier the core cannot produce resolves to Manual, so a tier write that
-        // does not land fails closed instead of dropping the app onto the global.
-        permissions.setAppSignPolicyOverride(callerPackage, selection.toSignPolicy().ordinal)
-        if (wrote(core, callerPackage, selection)) return
-        // Unconfirmed: `false` does not say which value is stored, so pin Manual. If that
-        // does not land either, the core goes on serving whatever it has and the settings
-        // screen reports that rather than the tier that was asked for.
-        wrote(core, callerPackage, SignPolicySelection.MANUAL)
+        // Index first, so a tier write that does not land leaves the app pinned-but-
+        // unknown, which resolves to Manual rather than dropping it onto the global.
+        //
+        // A row write that THROWS must not skip the tier write, though. The floor means a
+        // core holding the new tier against a row holding the old one resolves to the
+        // stricter of the two, so attempting the tier write can only tighten: a
+        // tightening still takes effect, and a loosening is refused because the old row
+        // value wins. Returning early here instead would leave both stores on the old
+        // tier and silently lose the tightening, which is what the previous ordering did.
+        val rowFailure = runCatching {
+            permissions.setAppSignPolicyOverride(callerPackage, selection.toSignPolicy().ordinal)
+        }.exceptionOrNull()
+        if (!wrote(core, callerPackage, selection)) {
+            // Unconfirmed: `false` does not say which value is stored, so pin Manual. If
+            // that does not land either, the floor still bounds the app by whichever tier
+            // each store holds.
+            wrote(core, callerPackage, SignPolicySelection.MANUAL)
+        }
+        // Reported after the tier write, so the screen still tells the user the change did
+        // not fully take and re-reads what actually resolved.
+        rowFailure?.let { throw it }
     }
 
     /**

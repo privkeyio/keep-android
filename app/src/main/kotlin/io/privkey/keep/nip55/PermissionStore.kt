@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.os.SystemClock
 import androidx.room.withTransaction
+import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55AuditEntry
 import io.privkey.keep.uniffi.Nip55ChainStatus
 import io.privkey.keep.uniffi.Nip55PermissionDecision
@@ -486,14 +487,18 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
         if (signPolicyStore == null) {
             // Nothing can be cleared or confirmed this session. Rows carrying no override
-            // go, since they would otherwise carry the previous account's settings into
-            // the new one. A row that carries one stays: dropping it would un-index a tier
-            // still in the core, and an unindexed tier is inert, so those apps would fall
-            // to the global policy instead of staying pinned. The next wipe that has a
-            // store retries them, exactly as the expiry sweep does.
-            appSettingsDao.getAll()
-                .filter { it.signPolicyOverride == null }
-                .forEach { appSettingsDao.delete(it.callerPackage) }
+            // go. A row that carries one has to stay, because it is the only index of a
+            // tier still sitting in the core, but it must not hand the next account the
+            // previous one's choice: it is rewritten to the strictest tier with no
+            // window, which still indexes the tier for a later wipe to clear. The next
+            // wipe that has a store retries them, exactly as the expiry sweep does.
+            appSettingsDao.getAll().forEach { row ->
+                if (row.signPolicyOverride == null) {
+                    appSettingsDao.delete(row.callerPackage)
+                } else {
+                    strictestTombstone(row.callerPackage)
+                }
+            }
             return
         }
         val packages = LinkedHashSet<String>()
@@ -514,8 +519,33 @@ class PermissionStore(private val database: Nip55Database) {
         appSettingsDao.getAll().forEach { row ->
             if (row.callerPackage in cleared || row.signPolicyOverride == null) {
                 appSettingsDao.delete(row.callerPackage)
+            } else {
+                strictestTombstone(row.callerPackage)
             }
         }
+    }
+
+    /**
+     * Rewrite a kept row to the strictest tier with no expiry window.
+     *
+     * Used by the account-switch wipe for a row it cannot drop, because that row still
+     * indexes a tier sitting in the core. Keeping the row as it stands would carry the
+     * previous account's choice and its time-boxed window into the new account, and the
+     * resolver takes the stricter of row and core, so the row's tier is load-bearing.
+     * Manual with no window keeps the tier reachable for a later wipe without granting
+     * the new account anything.
+     */
+    private suspend fun strictestTombstone(callerPackage: String) {
+        appSettingsDao.insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = callerPackage,
+                expiresAt = null,
+                signPolicyOverride = SignPolicy.MANUAL.ordinal,
+                createdAt = System.currentTimeMillis(),
+                createdAtElapsed = SystemClock.elapsedRealtime(),
+                durationMs = null
+            )
+        )
     }
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
@@ -548,9 +578,9 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
-    // The row's copy of the tier, which is the migration's source and not the policy:
-    // AppSignPolicyOverrides resolves the tier from the core. Test-only; no main-source
-    // caller reads this.
+    // The row's copy of the tier. AppSignPolicyOverrides resolves the policy from the
+    // core floored by this value, so it is not the policy on its own. Test-only; no
+    // main-source caller reads it.
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
 

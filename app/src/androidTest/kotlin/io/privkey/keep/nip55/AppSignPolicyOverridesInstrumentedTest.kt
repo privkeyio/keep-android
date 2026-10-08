@@ -15,6 +15,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -81,6 +82,11 @@ class AppSignPolicyOverridesInstrumentedTest {
         core.setAppOverride(PKG, SignPolicySelection.MANUAL)
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
+
+        // Across the middle tier too, since stricter() leans on the declaration order.
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.BASIC.ordinal)
+        assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
@@ -307,6 +313,33 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
+     * A storeless account switch cannot clear a tier, so it cannot drop the row that
+     * indexes one. That row must not hand the next account the previous one's choice or
+     * its time box either, so it is rewritten to the strictest tier with no window.
+     */
+    @Test
+    fun aStorelessAccountSwitchTombstonesRowsItCannotClear() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR)
+        store.setAppExpiry(OTHER_PKG, AppExpiryDuration.ONE_HOUR)
+
+        store.clearAllAppSettings(null)
+
+        // A row carrying no tier has nothing to index, so it goes.
+        assertNull(store.getAppSettings(OTHER_PKG))
+        val kept = store.getAppSettings(PKG)
+        assertNotNull(kept)
+        assertEquals(SignPolicy.MANUAL.ordinal, kept?.signPolicyOverride)
+        assertNull(kept?.expiresAt)
+        assertNull(kept?.durationMs)
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(core, store, PKG)
+        )
+    }
+
+    /**
      * A tier whose row is gone is invisible to the app-settings table, so the wipe has to
      * reach it through another record of the package.
      */
@@ -448,29 +481,39 @@ class AppSignPolicyOverridesInstrumentedTest {
             AppSignPolicyOverrides.override(flaky, store, PKG)
         )
 
-        // And the row is gone, so the migration has nothing to copy back.
+        // The row is gone, so the migration has nothing to copy back. Asserted on the
+        // resolved policy rather than on the row, which was already absent and would hold
+        // whatever the migration did.
         AppSignPolicyOverrides.migrateLegacyOverrides(flaky, store)
-        assertNull(store.getAppSettings(PKG))
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(flaky, store, PKG)
+        )
     }
 
     /**
-     * A clear confirms the core write before dropping the row, so a row write that then
-     * fails leaves the app pinned-but-unknown rather than unpinned. An unreadable row
-     * makes the signing path fall to Manual, never to a global that may be looser than
-     * the tier the user had chosen.
+     * A row write that throws must not skip the tier write. The floor means the core
+     * holding the new tier against a row still holding the old one resolves to the
+     * stricter of the two, so attempting it can only tighten, and returning early would
+     * leave both stores on the old tier and lose the tightening.
+     *
+     * Asserted on the core rather than through the resolver on purpose: with the database
+     * closed the row read throws, and that alone yields Manual whatever the ordering was,
+     * which is what made the previous version of this test vacuous.
      */
     @Test
-    fun aClearWhoseRowWriteThrowsStillFailsClosed() = runBlocking {
-        core.setGlobalPolicy(SignPolicySelection.AUTO)
-        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
+    fun aRowWriteThatThrowsStillWritesTheTier() = runBlocking {
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.AUTO)
         database.close()
 
-        runCatching { AppSignPolicyOverrides.setOverride(core, store, PKG, null) }
+        val result = runCatching {
+            AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
+        }
 
-        assertEquals(
-            SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
-        )
+        assertTrue(result.isFailure)
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
+        // And durably, not just in the store's in-memory map.
+        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
     }
 
     @Test
