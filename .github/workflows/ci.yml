@@ -215,3 +215,17 @@ jobs:
           target: google_apis
           profile: pixel_6
           script: ./gradlew connectedDebugAndroidTest --no-daemon
+
+      # The console log names the failing task but not the failing test, and the
+      # emulator's build dir does not survive the job, so a red run is otherwise
+      # undiagnosable without pushing a commit to re-run it.
+      - name: Upload instrumented test report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: androidTest-report
+          path: |
+            app/build/reports/androidTests/**
+            app/build/outputs/androidTest-results/**
+          if-no-files-found: warn
+          retention-days: 7

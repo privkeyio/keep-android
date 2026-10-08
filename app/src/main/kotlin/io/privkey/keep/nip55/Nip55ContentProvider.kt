@@ -114,6 +114,15 @@ class Nip55ContentProvider : ContentProvider() {
             runBlocking {
                 withTimeoutOrNull(OPERATION_TIMEOUT_MS) { deferred.await() }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // `await` rethrows whatever the block threw, which would cross the binder
+            // instead of reaching the caller's fail-closed null. Every caller treats
+            // null as the closed outcome, so a faulting operation reports it rather
+            // than surfacing an exception to the calling app.
+            if (BuildConfig.DEBUG) Log.w(TAG, "Provider operation failed: ${e::class.simpleName}")
+            null
         } finally {
             concurrentRequestSemaphore.release()
         }

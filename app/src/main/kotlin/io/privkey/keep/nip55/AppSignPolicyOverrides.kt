@@ -46,7 +46,27 @@ object AppSignPolicyOverrides {
         permissions: PermissionStore,
         callerPackage: String
     ): SignPolicySelection? =
-        stricter(core?.appOverride(callerPackage), legacyOverride(permissions, callerPackage))
+        stricter(
+            core?.let { readCore(it, callerPackage).getOrNull() },
+            readLegacy(permissions, callerPackage).getOrNull()
+        )
+
+    /**
+     * A store read that throws is indeterminate, not absence, and must not propagate:
+     * [Nip55ContentProvider.query] has no outer catch and resolves the policy on every
+     * request, and the settings UI resolves it from a coroutine. [override] shows the
+     * stricter of whatever is readable, which is informational; [effectivePolicy] gates
+     * signing and so treats a fault as unknown rather than resolving from one store.
+     */
+    private fun readCore(
+        core: SignPolicyStore,
+        callerPackage: String
+    ): Result<SignPolicySelection?> = runCatching { core.appOverride(callerPackage) }
+
+    private suspend fun readLegacy(
+        permissions: PermissionStore,
+        callerPackage: String
+    ): Result<SignPolicySelection?> = runCatching { legacyOverride(permissions, callerPackage) }
 
     private fun stricter(
         first: SignPolicySelection?,
@@ -70,10 +90,18 @@ object AppSignPolicyOverrides {
         core: SignPolicyStore?,
         permissions: PermissionStore,
         callerPackage: String
-    ): SignPolicySelection =
-        override(core, permissions, callerPackage)
-            ?: core?.globalPolicy()
-            ?: SignPolicySelection.MANUAL
+    ): SignPolicySelection {
+        val legacy = readLegacy(permissions, callerPackage)
+        if (legacy.isFailure) return SignPolicySelection.MANUAL
+        if (core == null) return legacy.getOrNull() ?: SignPolicySelection.MANUAL
+        val fromCore = readCore(core, callerPackage)
+        // Either read faulting leaves the app's pinned tier unknown. Falling to the
+        // strictest tier costs a prompt; resolving from the store that did answer would
+        // hand the app whatever the other one happened to hold.
+        if (fromCore.isFailure) return SignPolicySelection.MANUAL
+        return stricter(fromCore.getOrNull(), legacy.getOrNull())
+            ?: runCatching { core.globalPolicy() }.getOrDefault(SignPolicySelection.MANUAL)
+    }
 
     /**
      * Writes [selection] to the core (null clears the override) and mirrors the same
