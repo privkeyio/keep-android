@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -310,6 +311,50 @@ class AppSignPolicyOverridesInstrumentedTest {
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.effectivePolicy(null, store, PKG)
         )
+    }
+
+    /**
+     * An expired window must not take the user's standing refusal with it, and must not
+     * leave the app able to auto-sign under the global policy.
+     *
+     * A DENY carries its own expiry, so it is not part of the time-boxed grant: the sweep
+     * leaving it in place is what stops expiry from loosening. Clearing the opt-in is what
+     * makes the app re-approvable rather than silently back on the global.
+     */
+    @Test
+    fun theExpirySweepKeepsAStandingDenyAndClearsTheOptIn() = runBlocking {
+        val safeguards = AutoSigningSafeguards(context)
+        safeguards.setOptedIn(PKG, true)
+        val now = System.currentTimeMillis()
+        // A refusal with no expiry of its own: the user denied this app, full stop.
+        database.permissionDao().insertPermission(
+            Nip55Permission(
+                callerPackage = PKG,
+                requestType = Nip55RequestType.SIGN_EVENT.name,
+                eventKind = 1,
+                decision = "deny",
+                expiresAt = null,
+                createdAt = now - 2_000L
+            )
+        )
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        store.cleanupExpired(core, safeguards)
+
+        assertEquals(
+            PermissionDecision.DENY,
+            store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1)
+        )
+        assertFalse(safeguards.isOptedIn(PKG))
     }
 
     /**

@@ -81,6 +81,7 @@ class MainActivity : FragmentActivity() {
         val keepMobile = app.getKeepMobile()
         val storage = app.getStorage()
         val signPolicyStore = app.getSignPolicyStore()
+        val autoSigningSafeguards = app.getAutoSigningSafeguards()
         val autoStartStore = app.getAutoStartStore()
         val foregroundServiceStore = app.getForegroundServiceStore()
         val pinStore = app.getPinStore()
@@ -1604,7 +1605,7 @@ fun MainScreen(
                     onSigningHistoryClick = { showHistoryScreen = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
-                            permissionStore.cleanupExpired(signPolicyStore)
+                            permissionStore.cleanupExpired(signPolicyStore, autoSigningSafeguards)
                         }
                     }
                 )

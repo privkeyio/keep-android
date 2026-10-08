@@ -35,6 +35,23 @@ class PermissionStore(private val database: Nip55Database) {
     val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
 
     /**
+     * Retires what an expired app-settings window granted, so the app has to be approved
+     * again rather than dropping back to the global policy.
+     *
+     * Expiry used to LOOSEN. The sweep deleted every permission row for the caller, which
+     * took the user's explicit DENY with it, left the per-package auto-signing opt-in
+     * intact, and removed the settings row, so `isAppExpired` then reported false and the
+     * app resolved to the global policy. Under a global of Auto or Basic that is silent
+     * auto-approval for an app whose window had just closed, and for one the user had
+     * explicitly refused. A time box must not end in broader access than it granted.
+     *
+     * So the unfiltered per-caller delete is gone. Permission rows carry their own
+     * `expiresAt` and `durationMs`, and `deleteExpired` in the same transaction already
+     * honors them, so each grant and each refusal lives exactly as long as the user asked
+     * rather than being tied to the app-settings window. [autoSigning] clears the opt-in
+     * for each expired package, which is what makes re-approval necessary instead of
+     * optional.
+     *
      * [signPolicyStore] lets the sweep take the core-owned sign-policy override down
      * with the expiring row. Without it a per-app override would outlive its expiry
      * window, since the core store has no expiry of its own.
@@ -50,19 +67,24 @@ class PermissionStore(private val database: Nip55Database) {
      * The clears run outside the transaction: they are blocking keystore and disk
      * commits, and the transaction holds the process-wide audit mutex.
      */
-    suspend fun cleanupExpired(signPolicyStore: SignPolicyStore? = null) {
+    suspend fun cleanupExpired(
+        signPolicyStore: SignPolicyStore? = null,
+        autoSigning: AutoSigningSafeguards? = null
+    ) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
         var expiredPackages = emptyList<String>()
         auditWriter.prune(now - 30 * DAY_MS) {
+            // Per-row expiry only. A standing DENY is not part of the time-boxed grant,
+            // and an ALLOW carries its own window, so neither is tied to this row's.
             dao.deleteExpired(now, nowElapsed)
             dao.deleteNip46Permissions()
             expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
-            expiredPackages.forEach { pkg ->
-                dao.deleteForCaller(pkg)
-            }
         }
         for (pkg in expiredPackages) {
+            // Re-approval, not reset-to-global: without this the app keeps its opt-in and
+            // the next request is auto-approved by whatever the global happens to be.
+            autoSigning?.setOptedIn(pkg, false)
             val settings = appSettingsDao.getSettings(pkg) ?: continue
             if (!settings.isExpired()) continue
             val cleared = if (signPolicyStore == null) {
