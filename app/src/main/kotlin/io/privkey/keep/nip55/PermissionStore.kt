@@ -474,11 +474,12 @@ class PermissionStore(private val database: Nip55Database) {
      * first so no override survives an account switch.
      *
      * Every clear is gated on the core's durable-write result, and the single
-     * `deleteAll` is issued only if all of them report success. Otherwise the rows for the packages that did verify are
-     * deleted individually and the rest are kept: the row is the only record that the
-     * package still holds a core override, so a later wipe can resume it. Deleting it
-     * regardless would strand an override Kotlin can no longer see and could never
-     * clear again.
+     * `deleteAll` is issued only when all of them report success and the candidate
+     * enumeration itself was complete. Otherwise only the rows for the packages that
+     * did report success are deleted and the rest are kept: the row is the only record
+     * that the package still holds a core override, so a later wipe can resume it.
+     * Deleting it regardless would strand an override Kotlin can no longer see and
+     * could never clear again.
      *
      * The candidates are the mirror rows plus the permission and audit callers. The
      * core store cannot be enumerated, so an override whose mirror row is already gone
@@ -492,19 +493,24 @@ class PermissionStore(private val database: Nip55Database) {
             return
         }
         val packages = LinkedHashSet<String>()
-        runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
-        runCatching { packages.addAll(dao.getDistinctCallers()) }
-        runCatching { packages.addAll(auditDao.getDistinctCallers()) }
+        // An enumeration that throws yields an incomplete candidate set, and a package
+        // holding a core override with no mirror row would then be invisible to the
+        // clears below while `deleteAll` removed the rows that index everything else.
+        val enumerated = listOf(
+            runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } },
+            runCatching { packages.addAll(dao.getDistinctCallers()) },
+            runCatching { packages.addAll(auditDao.getDistinctCallers()) }
+        ).all { it.isSuccess }
 
-        val unclearable = packages.filterNot { coreOverrideCleared(signPolicyStore, it) }
-        if (unclearable.isEmpty()) {
+        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }
+        if (enumerated && cleared.size == packages.size) {
             // Also sweeps rows that appeared after the snapshot above.
             appSettingsDao.deleteAll()
         } else {
-            appSettingsDao.getAll()
-                .map { it.callerPackage }
-                .filterNot { it in unclearable }
-                .forEach { appSettingsDao.delete(it) }
+            // Only the packages whose core override is confirmed gone. Every other row
+            // stays, including one for a package an incomplete enumeration never
+            // produced, because the row is the only index a later wipe can retry from.
+            cleared.forEach { appSettingsDao.delete(it) }
         }
     }
 

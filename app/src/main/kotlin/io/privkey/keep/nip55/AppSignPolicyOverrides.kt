@@ -63,6 +63,17 @@ object AppSignPolicyOverrides {
         callerPackage: String
     ): Result<SignPolicySelection?> = runCatching { core.appOverride(callerPackage) }
 
+    /**
+     * Whether the core durably recorded [selection]. A throw counts as a failed write:
+     * on the clear path the mirror row is already gone by this point, so an escaping
+     * exception would strand a live override instead of reaching the restore below.
+     */
+    private fun wrote(
+        core: SignPolicyStore,
+        callerPackage: String,
+        selection: SignPolicySelection?
+    ): Boolean = runCatching { core.setAppOverride(callerPackage, selection) }.getOrDefault(false)
+
     private suspend fun readLegacy(
         permissions: PermissionStore,
         callerPackage: String
@@ -152,7 +163,7 @@ object AppSignPolicyOverrides {
         if (selection == null) {
             val previous = permissions.getAppSettings(callerPackage)?.signPolicyOverride
             permissions.setAppSignPolicyOverride(callerPackage, null)
-            if (!core.setAppOverride(callerPackage, null)) {
+            if (!wrote(core, callerPackage, null)) {
                 // The override is still on disk and the row that indexed it is gone.
                 // Put the row back so the sweeps can still reach it and the user can
                 // retry, rather than stranding an override Kotlin can no longer see.
@@ -161,7 +172,7 @@ object AppSignPolicyOverrides {
             }
             return
         }
-        if (!core.setAppOverride(callerPackage, selection)) return
+        if (!wrote(core, callerPackage, selection)) return
         // A failed mirror write must not propagate: the core durably holds the new
         // value, so the write did take effect. The stores diverge until the next
         // write, and stricter-wins bounds that to "no looser than either side".
