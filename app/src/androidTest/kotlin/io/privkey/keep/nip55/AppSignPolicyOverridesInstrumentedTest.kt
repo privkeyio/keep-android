@@ -378,8 +378,32 @@ class AppSignPolicyOverridesInstrumentedTest {
         store.cleanupExpired(flaky)
 
         assertNotNull(store.getAppSettings(PKG))
-        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
+        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSettings(PKG)?.signPolicyOverride)
+        // The row is kept so a later sweep can retry the clear, but an expired row must
+        // not supply an override in the meantime: the core applies the policy before it
+        // evaluates app expiry.
+        assertNull(store.getAppSignPolicyOverride(PKG))
         assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+    }
+
+    /**
+     * A clear whose core write does not durably land must leave the override indexed.
+     * The row is the only record Kotlin has of a core override, so dropping it would
+     * put the live value out of reach of the UI and of both sweeps.
+     */
+    @Test
+    fun aClearWhoseCoreWriteDoesNotPersistRestoresTheMirror() = runBlocking {
+        val flaky = SignPolicyStore(UnremovableStorage(PKG))
+        AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL)
+
+        AppSignPolicyOverrides.setOverride(flaky, store, PKG, null)
+
+        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSettings(PKG)?.signPolicyOverride)
+        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(flaky, store, PKG)
+        )
     }
 
     /**
@@ -451,9 +475,11 @@ class AppSignPolicyOverridesInstrumentedTest {
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
 
         // Copying it would freeze a time-boxed override into the core, which has no
-        // expiry. The Room fallback still serves it until the expiry sweep runs.
+        // expiry. Nor does the Room fallback serve it while it waits for the sweep: the
+        // core applies the policy at its sign-policy gate, before the one that denies an
+        // expired app, so a retained AUTO would auto-approve on the way past.
         assertNull(core.appOverride(PKG))
-        assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.override(core, store, PKG))
+        assertNull(AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     /**

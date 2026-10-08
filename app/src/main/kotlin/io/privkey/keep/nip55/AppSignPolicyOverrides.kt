@@ -115,16 +115,19 @@ object AppSignPolicyOverrides {
      * and [PermissionStore.clearAllAppSettings]). Clearing Room here instead would
      * make core overrides invisible to Kotlin and immortal.
      *
-     * Both directions go to the core first and touch Room only once the core reports
-     * a durable write. `setAppOverride` returns its backing store's `commit()` result,
-     * so a write that did not reach disk is reported rather than having to be inferred;
-     * a read-back could not do this, since the encrypted prefs serve the value a failed
-     * commit left behind.
+     * On a SET the core goes first and Room is only touched once the core reports a
+     * durable write. `setAppOverride` returns its backing store's `commit()` result, so
+     * a write that did not reach disk is reported rather than inferred; a read-back
+     * could not do this, since the encrypted prefs serve the value a failed commit left
+     * behind. A core write that reports failure leaves Room untouched, which makes it
+     * "the write did not happen": a re-read still shows the old value.
      *
-     * A core write that reports failure leaves Room untouched, which makes it "the
-     * write did not happen": a re-read still shows the old value and the caller can
-     * retry. Dropping the mirror first would instead leave a live override as the only
-     * copy, with nothing indexing it.
+     * On a CLEAR the mirror goes first, so a mirror failure aborts before the core is
+     * touched and both stores still hold the override. Clearing the core first and then
+     * failing on the mirror would leave the stale mirror as the only copy, which
+     * [override] hands straight back and [migrateLegacyOverrides] would then copy into
+     * the core permanently. If the core clear reports a failed write, the mirror is put
+     * back, because the row is the only index of an override that is still live.
      *
      * A reported failure is indeterminate rather than a no-op, so the write may yet be
      * on disk. The global selection re-asserts the stricter tier for that reason
@@ -147,8 +150,15 @@ object AppSignPolicyOverrides {
             return
         }
         if (selection == null) {
-            if (!core.setAppOverride(callerPackage, null)) return
+            val previous = permissions.getAppSettings(callerPackage)?.signPolicyOverride
             permissions.setAppSignPolicyOverride(callerPackage, null)
+            if (!core.setAppOverride(callerPackage, null)) {
+                // The override is still on disk and the row that indexed it is gone.
+                // Put the row back so the sweeps can still reach it and the user can
+                // retry, rather than stranding an override Kotlin can no longer see.
+                runCatching { permissions.setAppSignPolicyOverride(callerPackage, previous) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror restore failed", it) }
+            }
             return
         }
         if (!core.setAppOverride(callerPackage, selection)) return
