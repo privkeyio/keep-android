@@ -1,7 +1,9 @@
 package io.privkey.keep.nip55
 
 import android.os.SystemClock
+import android.util.Log
 import androidx.room.withTransaction
+import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55AuditEntry
 import io.privkey.keep.uniffi.Nip55ChainStatus
@@ -16,6 +18,7 @@ import io.privkey.keep.uniffi.nip55CheckVelocity
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
+import kotlinx.coroutines.CancellationException
 
 private const val MINUTE_MS = 60 * 1000L
 private const val HOUR_MS = 60 * MINUTE_MS
@@ -492,11 +495,13 @@ class PermissionStore(private val database: Nip55Database) {
             // previous one's choice: it is rewritten to the strictest tier with no
             // window, which still indexes the tier for a later wipe to clear. The next
             // wipe that has a store retries them, exactly as the expiry sweep does.
-            appSettingsDao.getAll().forEach { row ->
-                if (row.signPolicyOverride == null) {
-                    appSettingsDao.delete(row.callerPackage)
-                } else {
-                    strictestTombstone(row.callerPackage)
+            wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
+                wipeStep("rewrite ${row.callerPackage}") {
+                    if (row.signPolicyOverride == null) {
+                        appSettingsDao.delete(row.callerPackage)
+                    } else {
+                        strictestTombstone(row.callerPackage)
+                    }
                 }
             }
             return
@@ -505,9 +510,9 @@ class PermissionStore(private val database: Nip55Database) {
         // Best effort, and an enumeration that throws only narrows which tiers get
         // cleared: the per-row rule below is safe whether or not the candidate set is
         // complete, so there is nothing to gate on it.
-        runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
-        runCatching { packages.addAll(dao.getDistinctCallers()) }
-        runCatching { packages.addAll(auditDao.getDistinctCallers()) }
+        wipeStep("enumerate settings callers") { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
+        wipeStep("enumerate permission callers") { packages.addAll(dao.getDistinctCallers()) }
+        wipeStep("enumerate audit callers") { packages.addAll(auditDao.getDistinctCallers()) }
 
         val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }.toSet()
         // A row goes only when its tier is confirmed gone, or when it never carried one.
@@ -518,8 +523,8 @@ class PermissionStore(private val database: Nip55Database) {
         // bulk delete would otherwise have un-indexed.
         // Per row, so one failure cannot leave the rest of the previous account's tiers
         // in place. The enumeration is wrapped for the same reason.
-        runCatching { appSettingsDao.getAll() }.getOrDefault(emptyList()).forEach { row ->
-            runCatching {
+        wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
+            wipeStep("clear ${row.callerPackage}") {
                 if (row.callerPackage in cleared || row.signPolicyOverride == null) {
                     appSettingsDao.delete(row.callerPackage)
                 } else {
@@ -528,6 +533,25 @@ class PermissionStore(private val database: Nip55Database) {
             }
         }
     }
+
+    /**
+     * One best-effort step of the account-switch wipe.
+     *
+     * Each step is isolated so a single failure cannot leave the rest of the previous
+     * account's tiers in place. Cancellation is rethrown rather than swallowed, so a
+     * cancelled switch stops instead of wiping on, and a real failure is logged under
+     * DEBUG, because a wipe that silently touched nothing is indistinguishable from a
+     * clean one otherwise.
+     */
+    private inline fun <T> wipeStep(what: String, block: () -> T): T? =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e("PermissionStore", "account-switch wipe: $what", e)
+            null
+        }
 
     /**
      * Rewrite a kept row to the strictest tier with no expiry window.
