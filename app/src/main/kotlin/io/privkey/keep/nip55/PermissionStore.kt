@@ -35,6 +35,26 @@ class PermissionStore(private val database: Nip55Database) {
     val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
 
     /**
+     * Retires what an expired app-settings window granted, so the app has to be approved
+     * again rather than dropping back to the global policy.
+     *
+     * Expiry used to LOOSEN. The sweep deleted every permission row for the caller, which
+     * took the user's explicit DENY with it, left the per-package auto-signing opt-in
+     * intact, and removed the settings row, so `isAppExpired` then reported false and the
+     * app resolved to the global policy. Under a global of Auto or Basic that is silent
+     * auto-approval for an app whose window had just closed, and for one the user had
+     * explicitly refused. A time box must not end in broader access than it granted.
+     *
+     * So the per-caller delete now spares a DENY and an explicit ASK, both of which are
+     * standing instructions about the app written only by the user's own toggle. What the
+     * window granted still goes,
+     * because an ALLOW may be [PermissionDuration.FOREVER] and would otherwise outlive
+     * the window and auto-approve at the stored-permission gate the moment this sweep
+     * drops the settings row. A refusal is not part of what was granted, and it carries
+     * its own expiry, so it lives exactly as long as the user asked. [autoSigning] clears
+     * the opt-in for each expired package, which is what makes re-approval necessary
+     * instead of optional.
+     *
      * [signPolicyStore] lets the sweep take the core-owned sign-policy override down
      * with the expiring row. Without it a per-app override would outlive its expiry
      * window, since the core store has no expiry of its own.
@@ -50,7 +70,10 @@ class PermissionStore(private val database: Nip55Database) {
      * The clears run outside the transaction: they are blocking keystore and disk
      * commits, and the transaction holds the process-wide audit mutex.
      */
-    suspend fun cleanupExpired(signPolicyStore: SignPolicyStore? = null) {
+    suspend fun cleanupExpired(
+        signPolicyStore: SignPolicyStore? = null,
+        autoSigning: AutoSigningSafeguards? = null
+    ) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
         var expiredPackages = emptyList<String>()
@@ -59,7 +82,12 @@ class PermissionStore(private val database: Nip55Database) {
             dao.deleteNip46Permissions()
             expiredPackages = appSettingsDao.getExpiredPackages(now, nowElapsed)
             expiredPackages.forEach { pkg ->
-                dao.deleteForCaller(pkg)
+                // Grants only. An ALLOW can be PermissionDuration.FOREVER, so per-row
+                // expiry would never retire it, and once this sweep drops the settings row
+                // the app stops being expired and that ALLOW auto-approves at the stored
+                // permission gate. A DENY is left alone: it is not part of what the window
+                // granted, and it has its own expiry. Nor is an explicit "always ask".
+                dao.deleteGrantsForCaller(pkg)
             }
         }
         for (pkg in expiredPackages) {
@@ -73,9 +101,39 @@ class PermissionStore(private val database: Nip55Database) {
             } else {
                 coreOverrideCleared(signPolicyStore, pkg)
             }
-            if (cleared) appSettingsDao.delete(pkg)
+            // Gated the same way as the core clear, and for the same reason: once the row
+            // is gone this package never comes back from getExpiredPackages, so neither
+            // can be retried. An opt-in left behind is what lets the policy gate
+            // auto-approve the app again, which is the whole point of the sweep.
+            if (!cleared || !optInCleared(autoSigning, pkg)) continue
+            // Re-read before deleting. Both clears above are blocking keystore and disk
+            // commits, so the user can refresh this app's window while they run, and the
+            // isExpired check at the top of the loop does not cover the delete. This
+            // narrows that window to a single read rather than closing it; a refresh
+            // landing between this read and the delete still loses the row.
+            val current = appSettingsDao.getSettings(pkg) ?: continue
+            if (current.isExpired()) appSettingsDao.delete(pkg)
         }
     }
+
+    /**
+     * Whether [callerPackage]'s auto-signing opt-in is durably gone.
+     *
+     * Re-approval, not reset-to-global: an app that keeps its opt-in is auto-approved by
+     * whatever the global policy happens to be on its next request. The clear has to be
+     * durable rather than fire-and-forget, because the caller drops the settings row on
+     * the strength of it and the package cannot be enumerated as expired again afterwards.
+     * No safeguards store this session means it cannot be established, which keeps the row
+     * for a sweep that can.
+     *
+     * Deliberately no `isOptedIn` short-circuit. The encrypted prefs return the default
+     * when a value cannot be decrypted, so a false read is indistinguishable from an
+     * opt-in that is still on disk, and skipping the write on that basis would drop the
+     * row while leaving the opt-in to come back when the read recovers. The cost is one
+     * removal per expired package.
+     */
+    private fun optInCleared(autoSigning: AutoSigningSafeguards?, callerPackage: String): Boolean =
+        autoSigning?.clearOptIn(callerPackage) ?: false
 
     /**
      * Clears [callerPackage]'s core-owned sign-policy override and reports whether that

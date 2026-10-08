@@ -226,7 +226,7 @@ class KeepMobileApp : Application() {
             eventLogStore = eventLog
             initializeSigningAuditLog(db)
             applicationScope.launch {
-                store.cleanupExpired(signPolicyStore)
+                store.cleanupExpired(signPolicyStore, autoSigningSafeguards)
                 // After the expiry sweep, so a row that just aged out is not copied
                 // into the core (which has no expiry) as a permanent override.
                 //

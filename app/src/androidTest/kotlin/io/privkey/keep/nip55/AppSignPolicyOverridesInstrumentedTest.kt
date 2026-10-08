@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -60,6 +61,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     private fun clearPrefs() {
         context.deleteSharedPreferences(SELECTION_PREFS)
         context.deleteSharedPreferences(LEGACY_PREFS)
+        context.deleteSharedPreferences(AUTO_SIGNING_PREFS)
         // Only our own one-shot marker; the marker file is shared with other
         // migrations, so it must not be deleted wholesale.
         context.getSharedPreferences(
@@ -215,7 +217,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         )
         core.setAppOverride(PKG, SignPolicySelection.BASIC)
 
-        store.cleanupExpired(core)
+        store.cleanupExpired(core, AutoSigningSafeguards(context))
 
         assertNull(core.appOverride(PKG))
         assertNull(newCore().appOverride(PKG))
@@ -257,11 +259,36 @@ class AppSignPolicyOverridesInstrumentedTest {
             )
         )
 
-        store.cleanupExpired()
+        store.cleanupExpired(null, AutoSigningSafeguards(context))
 
         assertNotNull(store.getAppSettings(PKG))
         // A row with no override has no core counterpart, so it expires as it always did.
         assertNull(store.getAppSettings(OTHER_PKG))
+    }
+
+    /**
+     * With no safeguards store this session, "not opted in" cannot be told apart from
+     * "opted in and unclearable", so the sweep keeps the row rather than dropping the one
+     * record that keeps the app expired. Fail-closed: the app stays refused until a sweep
+     * that can establish it runs, instead of silently regaining the global policy.
+     */
+    @Test
+    fun expirySweepWithoutSafeguardsKeepsTheRow() = runBlocking {
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        store.cleanupExpired(core, null)
+
+        assertNotNull(store.getAppSettings(PKG))
     }
 
     @Test
@@ -310,6 +337,76 @@ class AppSignPolicyOverridesInstrumentedTest {
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.effectivePolicy(null, store, PKG)
         )
+    }
+
+    /**
+     * An expired window must not take the user's standing refusal with it, and must not
+     * leave the app able to auto-sign under the global policy.
+     *
+     * A DENY carries its own expiry, so it is not part of the time-boxed grant: the sweep
+     * leaving it in place is what stops expiry from loosening. Clearing the opt-in is what
+     * makes the app re-approvable rather than silently back on the global.
+     */
+    @Test
+    fun theExpirySweepKeepsAStandingDenyAndClearsTheOptIn() = runBlocking {
+        val safeguards = AutoSigningSafeguards(context)
+        safeguards.setOptedIn(PKG, true)
+        val now = System.currentTimeMillis()
+        // A refusal with no expiry of its own: the user denied this app, full stop.
+        database.permissionDao().insertPermission(
+            Nip55Permission(
+                callerPackage = PKG,
+                requestType = Nip55RequestType.SIGN_EVENT.name,
+                eventKind = 1,
+                decision = "deny",
+                expiresAt = null,
+                createdAt = now - 2_000L
+            )
+        )
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        store.setPermissionToAsk(PKG, Nip55RequestType.SIGN_EVENT, 3)
+        // An ALLOW with no expiry of its own, which per-row expiry would never retire.
+        database.permissionDao().insertPermission(
+            Nip55Permission(
+                callerPackage = PKG,
+                requestType = Nip55RequestType.SIGN_EVENT.name,
+                eventKind = 2,
+                decision = "allow",
+                expiresAt = null,
+                createdAt = now - 2_000L
+            )
+        )
+
+        store.cleanupExpired(core, safeguards)
+
+        assertEquals(
+            PermissionDecision.DENY,
+            store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1)
+        )
+        // The grant goes with the window. Keeping it would auto-approve at the stored
+        // permission gate as soon as this sweep drops the settings row and the app stops
+        // counting as expired.
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 2))
+        // An explicit "always ask" is a standing instruction too, and at keep v0.11.0 it
+        // blocks the policy auto-approve, so deleting it would hand that back.
+        assertEquals(
+            PermissionDecision.ASK,
+            store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 3)
+        )
+        assertFalse(safeguards.isOptedIn(PKG))
+        // The row only goes once the opt-in clear is durable, since the package cannot be
+        // enumerated as expired again afterwards.
+        assertNull(store.getAppSettings(PKG))
     }
 
     /**
@@ -651,6 +748,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         const val PKG = "com.test.app"
         const val OTHER_PKG = "com.test.other"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
+        const val AUTO_SIGNING_PREFS = "nip55_auto_signing"
         const val LEGACY_PREFS = "keep_sign_policy"
     }
 }

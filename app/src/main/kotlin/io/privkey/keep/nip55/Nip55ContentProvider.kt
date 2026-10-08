@@ -369,7 +369,12 @@ class Nip55ContentProvider : ContentProvider() {
             Nip55Outcome.AutoApprove ->
                 executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser, v3Kind, v3Scope)
             is Nip55Outcome.Reject -> {
-                if (outcome.reason == "deny_expired") runWithTimeout { store.cleanupExpired(currentApp.getSignPolicyStore()) }
+                if (outcome.reason == "deny_expired") runWithTimeout {
+                    store.cleanupExpired(
+                        currentApp.getSignPolicyStore(),
+                        currentApp.getAutoSigningSafeguards()
+                    )
+                }
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, outcome.reason, wasAutomatic = true) }
                 rejectedCursor(null)
             }

@@ -30,6 +30,17 @@ interface Nip55PermissionDao {
     @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage")
     suspend fun deleteForCaller(callerPackage: String)
 
+    // Everything the app's expiry window granted, but neither a refusal nor an explicit
+    // "always ask": both are standing instructions about the app rather than part of the
+    // time-boxed grant, both are written only by the user's own toggle with no expiry of
+    // their own, and at keep v0.11.0 an ASK row blocks the policy auto-approve and the
+    // whitelisted-relay auto-accept, so deleting it would hand back an auto-approve the
+    // user had switched off. LOWER() to match the core's to_ascii_lowercase rather than
+    // because the column holds mixed case; every writer stores lowercase, since
+    // PermissionDecision.toString() is overridden to name.lowercase().
+    @Query("DELETE FROM nip55_permissions WHERE callerPackage = :callerPackage AND LOWER(decision) NOT IN ('deny', 'ask')")
+    suspend fun deleteGrantsForCaller(callerPackage: String)
+
     @Query("DELETE FROM nip55_permissions WHERE callerPackage LIKE 'nip46:%'")
     suspend fun deleteNip46Permissions()
 
