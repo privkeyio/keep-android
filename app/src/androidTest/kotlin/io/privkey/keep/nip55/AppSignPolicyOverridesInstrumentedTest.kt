@@ -368,13 +368,17 @@ class AppSignPolicyOverridesInstrumentedTest {
     @Test
     fun accountSwitchKeepsRowsWhoseClearDoesNotVerify() = runBlocking {
         val flaky = SignPolicyStore(UnremovableStorage(PKG))
-        AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL)
+        // Pinned to AUTO, not MANUAL, so the rewrite below is observable: starting at
+        // MANUAL would satisfy the assertion whether or not it happened.
+        AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.AUTO)
         AppSignPolicyOverrides.setOverride(flaky, store, OTHER_PKG, SignPolicySelection.BASIC)
 
         store.clearAllAppSettings(flaky)
 
-        // Unprocessed package: override intact and still indexed by its row.
-        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+        // Unprocessed package: the tier is still in the core and still indexed by its row,
+        // but the row was rewritten to the strictest tier so the next account inherits
+        // nothing, and the floor therefore resolves Manual rather than the old AUTO.
+        assertEquals(SignPolicySelection.AUTO, flaky.appOverride(PKG))
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
         assertEquals(
             SignPolicySelection.MANUAL,
@@ -440,6 +444,27 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
+     * A clear whose row write throws leaves both stores untouched, so the override stays
+     * in force and the failure is reported.
+     *
+     * Deliberately unlike the set path, which attempts the tier write anyway: there, the
+     * tier write can only tighten, so attempting it preserves a tightening that would
+     * otherwise be lost. A clear has no tightening to preserve, so leaving both stores as
+     * they were is the cleaner failure and matches what the screen tells the user.
+     */
+    @Test
+    fun aClearWhoseRowWriteThrowsLeavesTheOverrideInForce() = runBlocking {
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.BASIC)
+        database.close()
+
+        val result = runCatching { AppSignPolicyOverrides.setOverride(core, store, PKG, null) }
+
+        assertTrue(result.isFailure)
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.BASIC, newCore().appOverride(PKG))
+    }
+
+    /**
      * A clear has to clear even with no core store this session. Recording a Manual
      * ordinal instead would index the app as pinned, turning the clear into a pin that
      * the next session resolves from whatever the core still holds.
@@ -458,12 +483,13 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * A clear whose core write does not durably land still takes effect, because dropping
-     * the row un-indexes the tier and an unindexed tier is inert.
+     * A clear whose core write does not durably land still takes the chosen tier out of
+     * force: dropping the row leaves the leftover known to one side only, which resolves
+     * to Manual rather than to the tier the user cleared.
      *
-     * The leftover has to stay inert across a startup too, which is what makes the
-     * row-first ordering load-bearing: the migration copies from the row's tier, so a row
-     * left behind would be written back into the empty slot and revert the clear.
+     * Dropping the row first is what keeps it that way across a startup. The migration
+     * copies from the row's tier, so a row left behind would be written back into the
+     * empty slot and revert the clear outright.
      */
     @Test
     fun aClearWhoseCoreWriteDoesNotPersistStillTakesEffect() = runBlocking {

@@ -298,6 +298,16 @@ private fun AppPermissionsListContent(
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
                                         Toast.makeText(context, toastSignPolicyError, Toast.LENGTH_SHORT).show()
+                                        // Re-read rather than leaving the pre-tap value on
+                                        // screen. The tier write can land even when the row
+                                        // write throws, so the old value can be wrong in the
+                                        // looser direction, and a toast alone would leave the
+                                        // screen claiming a tier the resolver will not serve.
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                readOverrideOrdinal(signPolicyStore, permissionStore, packageName)
+                                            }
+                                        }.onSuccess { onAppStateChange(appState.copy(signPolicyOverride = it)) }
                                     }
                                 }
                             }

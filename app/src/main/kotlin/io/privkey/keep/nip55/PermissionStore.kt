@@ -516,11 +516,15 @@ class PermissionStore(private val database: Nip55Database) {
         // core with nothing pointing at it. Re-reading here rather than reusing the
         // snapshot also covers a row that appeared while the clears were running, which a
         // bulk delete would otherwise have un-indexed.
-        appSettingsDao.getAll().forEach { row ->
-            if (row.callerPackage in cleared || row.signPolicyOverride == null) {
-                appSettingsDao.delete(row.callerPackage)
-            } else {
-                strictestTombstone(row.callerPackage)
+        // Per row, so one failure cannot leave the rest of the previous account's tiers
+        // in place. The enumeration is wrapped for the same reason.
+        runCatching { appSettingsDao.getAll() }.getOrDefault(emptyList()).forEach { row ->
+            runCatching {
+                if (row.callerPackage in cleared || row.signPolicyOverride == null) {
+                    appSettingsDao.delete(row.callerPackage)
+                } else {
+                    strictestTombstone(row.callerPackage)
+                }
             }
         }
     }
