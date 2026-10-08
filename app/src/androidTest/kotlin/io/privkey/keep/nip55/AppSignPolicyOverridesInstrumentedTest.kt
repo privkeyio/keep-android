@@ -287,10 +287,9 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * A session whose core store failed to construct writes to Room alone. The next
-     * session has a live core holding the STALE, looser value, and the migration skips
-     * the package because the core already knows it. Only stricter-wins keeps the
-     * tightening the user actually made.
+     * A session whose core store failed to construct has nowhere to put a tier, so it
+     * records the strictest one rather than a choice nothing can honor. The floor then
+     * holds that line even once a live core turns up with a staler, looser tier.
      */
     @Test
     fun withoutACoreStoreAnOverrideIsRecordedAtManual() = runBlocking {
@@ -308,8 +307,8 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * An override whose mirror row is gone is invisible to the app-settings table, so
-     * the wipe has to reach it through another record of the package.
+     * A tier whose row is gone is invisible to the app-settings table, so the wipe has to
+     * reach it through another record of the package.
      */
     @Test
     fun accountSwitchClearsACoreOverrideWithNoRoomRow() = runBlocking {

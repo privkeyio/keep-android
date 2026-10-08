@@ -473,16 +473,14 @@ class PermissionStore(private val database: Nip55Database) {
      * Wipe every app settings row, clearing each package's core sign-policy override
      * first so no override survives an account switch.
      *
-     * Every clear is gated on the core's durable-write result, and the single
-     * `deleteAll` is issued only when all of them report success and the candidate
-     * enumeration itself was complete. Otherwise only the rows for the packages that
-     * did report success are deleted and the rest are kept: the row is the only record
-     * that the package still holds a core override, so a later wipe can resume it.
-     * Deleting it regardless would strand an override Kotlin can no longer see and
-     * could never clear again.
+     * Every clear is gated on the core's durable-write result, and a row is dropped only
+     * when its tier is confirmed gone or when it never carried one. Any other row is kept:
+     * the row is the only record that the package still holds a tier, so a later wipe can
+     * resume it, and dropping it would strand a tier Kotlin can no longer see and could
+     * never clear again.
      *
-     * The candidates are the mirror rows plus the permission and audit callers. The
-     * core store cannot be enumerated, so an override whose mirror row is already gone
+     * The candidates are the settings rows plus the permission and audit callers. The
+     * core store cannot be enumerated, so a tier whose row is already gone
      * is only reachable through some other record of that package.
      */
     suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
@@ -499,24 +497,24 @@ class PermissionStore(private val database: Nip55Database) {
             return
         }
         val packages = LinkedHashSet<String>()
-        // An enumeration that throws yields an incomplete candidate set, and a package
-        // holding a core override with no mirror row would then be invisible to the
-        // clears below while `deleteAll` removed the rows that index everything else.
-        val enumerated = listOf(
-            runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } },
-            runCatching { packages.addAll(dao.getDistinctCallers()) },
-            runCatching { packages.addAll(auditDao.getDistinctCallers()) }
-        ).all { it.isSuccess }
+        // Best effort, and an enumeration that throws only narrows which tiers get
+        // cleared: the per-row rule below is safe whether or not the candidate set is
+        // complete, so there is nothing to gate on it.
+        runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
+        runCatching { packages.addAll(dao.getDistinctCallers()) }
+        runCatching { packages.addAll(auditDao.getDistinctCallers()) }
 
-        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }
-        if (enumerated && cleared.size == packages.size) {
-            // Also sweeps rows that appeared after the snapshot above.
-            appSettingsDao.deleteAll()
-        } else {
-            // Only the packages whose core override is confirmed gone. Every other row
-            // stays, including one for a package an incomplete enumeration never
-            // produced, because the row is the only index a later wipe can retry from.
-            cleared.forEach { appSettingsDao.delete(it) }
+        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }.toSet()
+        // A row goes only when its tier is confirmed gone, or when it never carried one.
+        // Any other row stays, which keeps its tier indexed: that row resolves to Manual
+        // and a later wipe can retry it, whereas deleting it would leave the tier in the
+        // core with nothing pointing at it. Re-reading here rather than reusing the
+        // snapshot also covers a row that appeared while the clears were running, which a
+        // bulk delete would otherwise have un-indexed.
+        appSettingsDao.getAll().forEach { row ->
+            if (row.callerPackage in cleared || row.signPolicyOverride == null) {
+                appSettingsDao.delete(row.callerPackage)
+            }
         }
     }
 
