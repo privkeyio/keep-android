@@ -17,18 +17,22 @@ private const val TAG = "AppSignPolicyOverrides"
  * Manual while the global is Auto), so serving the wrong value auto-approves signing
  * the app was pinned away from. That one risk shapes everything here.
  *
- * The core-owned store holds the tier, and it is the only thing that does. The Room
- * `nip55_app_settings` row holds what the core cannot: the window the override expires at,
- * since the core keeps no expiry, and a record of the pinning that the lifecycle sweeps
- * can enumerate, since the core store cannot be listed (it answers for one package, it
- * just cannot produce the set of them). The row also carries the tier, but only as the source
+ * The core-owned store owns the tier: it is what a write has to land in, and what the
+ * signing path reads. The Room `nip55_app_settings` row carries three things the core
+ * cannot: the window the override expires at, since the core keeps no expiry, a record of
+ * the pinning that the lifecycle sweeps can enumerate, since the core store cannot be
+ * listed (it answers for one package, it just cannot produce the set of them), and the
+ * last tier the user chose, which both seeds [migrateLegacyOverrides] and serves as the
+ * strictness floor below. The row also carries the tier, but only as the source
  * [migrateLegacyOverrides] copies from; resolution never reads it as the policy, so the
  * two cannot disagree in a way that has to be reconciled.
  *
- * Every failure therefore has the same answer. A pinned app whose tier the core cannot
- * produce is unknown rather than unpinned, and resolves to Manual: not to the global,
- * which may be looser than the tier the user chose. A write that does not durably land
- * pins Manual as well. Unknown means strict, so a fault tightens rather than loosens.
+ * Resolution takes the stricter of the two, which makes the row a floor rather than a
+ * second opinion to reconcile: a write that reached one store and not the other cannot
+ * widen the app, and the floor never has to decide which side is newer. A pinned app
+ * whose tier the core cannot produce at all is unknown rather than unpinned, and resolves
+ * to Manual: not to the global, which may be looser than the tier the user chose. So both
+ * a partial write and a fault tighten rather than loosen.
  *
  * The content provider and the UI both go through here so the two cannot drift.
  */
@@ -74,11 +78,35 @@ object AppSignPolicyOverrides {
         // end, and the signing path applies the policy before it evaluates app expiry, so
         // an override left in force here would auto-approve on the way past.
         if (row?.signPolicyOverride == null || row.isExpired()) return@runCatching null
-        // The row says this app is pinned; the core holds the tier. A tier the core
-        // cannot produce is unknown rather than absent, whether because it has not
-        // migrated, because a write never landed, or because the read faulted.
-        core?.appOverride(callerPackage) ?: SignPolicySelection.MANUAL
+        // An out-of-range stored ordinal resolves to Manual, the strictest tier.
+        val fromRow = SignPolicy.fromOrdinal(row.signPolicyOverride).toSelection()
+        // A tier the core cannot produce is unknown rather than absent, whether because
+        // it has not migrated, because a write never landed, or because the read faulted.
+        val fromCore = core?.appOverride(callerPackage)
+            ?: return@runCatching SignPolicySelection.MANUAL
+        stricter(fromCore, fromRow)
     }
+
+    /**
+     * Never looser than either side.
+     *
+     * The core holds the tier that durably landed and the row holds the last choice that
+     * was recorded, so a write that reached one and not the other must not widen the app.
+     * `setAppOverride` returning `false` is exactly that case, and it does not say which
+     * value is stored: the prefs layer applies to its in-memory map before the disk write,
+     * so the core can serve the new tier for the rest of the session while its file still
+     * holds the old one, and the next process start would otherwise read the old tier back
+     * with nothing to correct it.
+     *
+     * This is a floor, not a reconciliation. It never has to decide which side is newer,
+     * which is what made the previous resolve-the-disagreement scheme hard to reason
+     * about: the strictest of what either store knows is always a safe answer.
+     */
+    private fun stricter(
+        first: SignPolicySelection,
+        second: SignPolicySelection
+    ): SignPolicySelection =
+        if (first.toSignPolicy().ordinal <= second.toSignPolicy().ordinal) first else second
 
     /**
      * Pins [callerPackage] to [selection], or clears its override when null.
@@ -88,12 +116,11 @@ object AppSignPolicyOverrides {
      * separates "on disk" from "in the in-memory map a failed commit left behind"; a
      * read-back cannot, because the encrypted prefs serve that cached value.
      *
-     * An unconfirmed write does not say which value is stored, so it is repaired rather
-     * than ignored: the core may hold the old tier, or serve the new one from memory
-     * while its disk still holds the old. Pinning Manual covers every one of those. It is
-     * best effort, not a floor: the row's tier is not read, so if the repair does not land
-     * either, the core keeps serving whatever it has. The screen reports the tier that
-     * resolved rather than the one that was asked for, so the user can pick again.
+     * An unconfirmed write does not say which value is stored, so Manual is pinned as a
+     * best-effort repair: the core may hold the old tier, or serve the new one from memory
+     * while its disk still holds the old. The repair can fail too, which is why the floor
+     * in [resolve] rather than the repair is what actually bounds this: the row holds the
+     * tier that was asked for, so the app can never resolve looser than it.
      *
      * The row write is not guarded. It is the index, so a row that cannot be written
      * means the change did not take, and the screen reports that too.
@@ -104,15 +131,6 @@ object AppSignPolicyOverrides {
         callerPackage: String,
         selection: SignPolicySelection?
     ) {
-        if (core == null) {
-            // No core store this session, so there is nowhere to put the tier and nothing
-            // would honor it. Record the app as pinned at Manual, which is what it
-            // resolves to anyway while the store is missing, rather than recording a tier
-            // that cannot take effect. A looser choice is simply refused until the store
-            // is back.
-            permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
-            return
-        }
         if (selection == null) {
             // Dropping the row IS the clear, because a tier with no row to index it is
             // inert. Doing it first also means a core clear that does not land cannot be
@@ -121,8 +139,17 @@ object AppSignPolicyOverrides {
             // silently revert the clear.
             permissions.setAppSignPolicyOverride(callerPackage, null)
             // Hygiene, not the clear itself: drop the now-unreachable tier so nothing
-            // picks it up again.
-            wrote(core, callerPackage, null)
+            // picks it up again. Nothing to drop when there is no store this session.
+            if (core != null) wrote(core, callerPackage, null)
+            return
+        }
+        if (core == null) {
+            // No core store this session, so there is nowhere to put the tier and nothing
+            // would honor it. Record the app as pinned at Manual, which is what it
+            // resolves to anyway while the store is missing, rather than recording a tier
+            // that cannot take effect. A looser choice is simply refused until the store
+            // is back.
+            permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
             return
         }
         // Index first, for the mirror of that reason: an unindexed tier is inert, while a

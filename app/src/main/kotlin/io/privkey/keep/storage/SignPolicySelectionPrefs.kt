@@ -100,6 +100,9 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         // together; holds no secret, only a boolean "already attempted" flag.
         internal const val MARKER_PREFS_NAME = "keep_migration_markers"
         internal const val MIGRATION_MARKER = "keep_sign_policy_selection_migrated"
+        // Same one-shot reasoning as MIGRATION_MARKER, for the per-app override copy
+        // that AppSignPolicyOverrides.migrateLegacyOverrides performs.
+        internal const val APP_OVERRIDE_MIGRATION_MARKER = "keep_sign_policy_app_overrides_migrated"
         const val GLOBAL_POLICY_KEY = "global_sign_policy"
     }
 }

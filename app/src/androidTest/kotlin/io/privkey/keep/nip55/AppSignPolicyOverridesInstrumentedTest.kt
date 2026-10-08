@@ -70,13 +70,17 @@ class AppSignPolicyOverridesInstrumentedTest {
     private fun newCore() = SignPolicyStore(SignPolicySelectionPrefs(context))
 
     @Test
-    fun theCoreTierResolvesWhateverTheRowCopyHolds() = runBlocking {
+    fun theStricterOfTheTwoStoresResolves() = runBlocking {
         core.setAppOverride(PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
-        // The row marks the app as pinned and seeds the migration. It is not the policy,
-        // so there is no disagreement between the two to reconcile.
-        assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.override(core, store, PKG))
+        // The row is a floor: a write that reached one store and not the other must not
+        // widen the app, whichever side holds the looser tier.
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
+
+        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
@@ -391,11 +395,32 @@ class AppSignPolicyOverridesInstrumentedTest {
         AppSignPolicyOverrides.setOverride(unreliable, store, PKG, SignPolicySelection.MANUAL)
 
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
-        // A fresh process, whose core never persisted anything, still sees the tightening.
+
+        // The case that matters is a next process whose core file still holds the OLD,
+        // looser tier, not one that holds nothing: an empty store resolves Manual through
+        // the unknown arm and would pass without any floor at all.
+        val nextProcess = SignPolicyStore(UncommittableStorage())
+        nextProcess.setAppOverride(PKG, SignPolicySelection.AUTO)
         assertEquals(
             SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.override(SignPolicyStore(UncommittableStorage()), store, PKG)
+            AppSignPolicyOverrides.override(nextProcess, store, PKG)
         )
+    }
+
+    /**
+     * A clear has to clear even with no core store this session. Recording a Manual
+     * ordinal instead would index the app as pinned, turning the clear into a pin that
+     * the next session resolves from whatever the core still holds.
+     */
+    @Test
+    fun aClearWithoutACoreStoreDropsTheRow() = runBlocking {
+        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+
+        AppSignPolicyOverrides.setOverride(null, store, PKG, null)
+
+        assertNull(store.getAppSettings(PKG))
+        assertNull(AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     /**

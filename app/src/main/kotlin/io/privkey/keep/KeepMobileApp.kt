@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import android.app.Application
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -228,7 +229,27 @@ class KeepMobileApp : Application() {
                 store.cleanupExpired(signPolicyStore)
                 // After the expiry sweep, so a row that just aged out is not copied
                 // into the core (which has no expiry) as a permanent override.
-                signPolicyStore?.let { AppSignPolicyOverrides.migrateLegacyOverrides(it, store) }
+                //
+                // Gated on a persisted marker, not on the core looking empty: the
+                // encrypted-prefs layer returns the default when a value cannot be
+                // decrypted, so an unreadable store is indistinguishable from an unset
+                // one, and re-running would copy the row's tier over a stricter one the
+                // user has chosen since. The marker is set whether or not the copy
+                // succeeded, exactly as the global selection's own one-shot copy does, so
+                // a failed copy leaves those apps resolving Manual rather than
+                // resurrecting a stale tier.
+                signPolicyStore?.let { policyStore ->
+                    val markers = getSharedPreferences(
+                        SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+                        Context.MODE_PRIVATE
+                    )
+                    if (!markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)) {
+                        AppSignPolicyOverrides.migrateLegacyOverrides(policyStore, store)
+                        markers.edit()
+                            .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
+                            .apply()
+                    }
+                }
                 callerVerificationStore?.cleanupExpiredNonces()
                 runCatching {
                     eventLog.cleanupOld(System.currentTimeMillis() - EVENT_LOG_MAX_AGE_MS)
