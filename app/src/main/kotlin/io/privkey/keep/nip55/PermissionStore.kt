@@ -544,15 +544,19 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
-    // An expired row must not supply an override even if its sweep could not confirm
-    // the core clear: the core has no expiry of its own, and the signing path applies
-    // the policy before it ever evaluates app expiry.
+    // The stored value, whatever its row's state. Whether an expired row still supplies
+    // an override is resolved in AppSignPolicyOverrides, which has to retire the core's
+    // copy at the same time.
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
-        appSettingsDao.getSettings(callerPackage)?.takeUnless { it.isExpired() }?.signPolicyOverride
+        appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
 
     suspend fun setAppSignPolicyOverride(callerPackage: String, signPolicyOrdinal: Int?) {
         val existing = appSettingsDao.getSettings(callerPackage)
-        if (signPolicyOrdinal == null && existing?.expiresAt == null) {
+        // A window that has already lapsed must not retroactively expire a fresh choice:
+        // the override would resolve to nothing the moment it was set, and the next sweep
+        // would drop the app onto the global instead of the tier just picked.
+        val lapsed = existing?.isExpired() == true
+        if (signPolicyOrdinal == null && (existing?.expiresAt == null || lapsed)) {
             appSettingsDao.delete(callerPackage)
         } else {
             val now = System.currentTimeMillis()
@@ -560,11 +564,11 @@ class PermissionStore(private val database: Nip55Database) {
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
-                    expiresAt = existing?.expiresAt,
+                    expiresAt = existing?.expiresAt.takeUnless { lapsed },
                     signPolicyOverride = signPolicyOrdinal,
                     createdAt = existing?.createdAt ?: now,
                     createdAtElapsed = existing?.createdAtElapsed ?: nowElapsed,
-                    durationMs = existing?.durationMs
+                    durationMs = existing?.durationMs.takeUnless { lapsed }
                 )
             )
         }

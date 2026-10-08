@@ -45,23 +45,34 @@ object AppSignPolicyOverrides {
         core: SignPolicyStore?,
         permissions: PermissionStore,
         callerPackage: String
-    ): SignPolicySelection? =
-        stricter(
-            core?.let { readCore(it, callerPackage).getOrNull() },
-            readLegacy(permissions, callerPackage).getOrNull()
-        )
+    ): SignPolicySelection? = resolve(core, permissions, callerPackage).getOrNull()
 
     /**
-     * A store read that throws is indeterminate, not absence, and must not propagate:
+     * The override both stores agree to honor, or failure if either read faulted.
+     *
+     * The settings row's window is the only expiry either store has: the core keeps no
+     * expiry of its own, so a lapsed row has to retire the override in both. Filtering
+     * only the Room copy would leave the core's copy auto-approving for an app whose
+     * window has closed, and would throw away the Room value that could otherwise
+     * tighten a stale looser one.
+     *
+     * A read that throws is indeterminate, not absence, and must not propagate:
      * [Nip55ContentProvider.query] has no outer catch and resolves the policy on every
-     * request, and the settings UI resolves it from a coroutine. [override] shows the
+     * request, and the settings UI resolves it from a coroutine. [override] reports the
      * stricter of whatever is readable, which is informational; [effectivePolicy] gates
      * signing and so treats a fault as unknown rather than resolving from one store.
      */
-    private fun readCore(
-        core: SignPolicyStore,
+    private suspend fun resolve(
+        core: SignPolicyStore?,
+        permissions: PermissionStore,
         callerPackage: String
-    ): Result<SignPolicySelection?> = runCatching { core.appOverride(callerPackage) }
+    ): Result<SignPolicySelection?> = runCatching {
+        val row = permissions.getAppSettings(callerPackage)
+        if (row?.isExpired() == true) return@runCatching null
+        // An out-of-range stored ordinal resolves to Manual, the strictest tier.
+        val fromRow = row?.signPolicyOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
+        stricter(core?.appOverride(callerPackage), fromRow)
+    }
 
     /**
      * Whether the core durably recorded [selection]. A throw counts as a failed write:
@@ -73,11 +84,6 @@ object AppSignPolicyOverrides {
         callerPackage: String,
         selection: SignPolicySelection?
     ): Boolean = runCatching { core.setAppOverride(callerPackage, selection) }.getOrDefault(false)
-
-    private suspend fun readLegacy(
-        permissions: PermissionStore,
-        callerPackage: String
-    ): Result<SignPolicySelection?> = runCatching { legacyOverride(permissions, callerPackage) }
 
     private fun stricter(
         first: SignPolicySelection?,
@@ -102,16 +108,14 @@ object AppSignPolicyOverrides {
         permissions: PermissionStore,
         callerPackage: String
     ): SignPolicySelection {
-        val legacy = readLegacy(permissions, callerPackage)
-        if (legacy.isFailure) return SignPolicySelection.MANUAL
-        if (core == null) return legacy.getOrNull() ?: SignPolicySelection.MANUAL
-        val fromCore = readCore(core, callerPackage)
-        // Either read faulting leaves the app's pinned tier unknown. Falling to the
-        // strictest tier costs a prompt; resolving from the store that did answer would
-        // hand the app whatever the other one happened to hold.
-        if (fromCore.isFailure) return SignPolicySelection.MANUAL
-        return stricter(fromCore.getOrNull(), legacy.getOrNull())
-            ?: runCatching { core.globalPolicy() }.getOrDefault(SignPolicySelection.MANUAL)
+        val resolved = resolve(core, permissions, callerPackage)
+        // A faulting read leaves the app's pinned tier unknown. Falling to the strictest
+        // tier costs a prompt; resolving from whichever store did answer would hand the
+        // app whatever that one happened to hold.
+        if (resolved.isFailure) return SignPolicySelection.MANUAL
+        return resolved.getOrNull()
+            ?: core?.let { runCatching { it.globalPolicy() }.getOrNull() }
+            ?: SignPolicySelection.MANUAL
     }
 
     /**
@@ -160,24 +164,47 @@ object AppSignPolicyOverrides {
             permissions.setAppSignPolicyOverride(callerPackage, ordinal)
             return
         }
+        val previous = permissions.getAppSettings(callerPackage)
+            ?.signPolicyOverride
+            ?.let { SignPolicy.fromOrdinal(it).toSelection() }
         if (selection == null) {
-            val previous = permissions.getAppSettings(callerPackage)?.signPolicyOverride
             permissions.setAppSignPolicyOverride(callerPackage, null)
             if (!wrote(core, callerPackage, null)) {
-                // The override is still on disk and the row that indexed it is gone.
-                // Put the row back so the sweeps can still reach it and the user can
-                // retry, rather than stranding an override Kotlin can no longer see.
-                runCatching { permissions.setAppSignPolicyOverride(callerPackage, previous) }
-                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror restore failed", it) }
+                // The override may still be on disk and the row that indexed it is gone,
+                // so it has to be re-indexed. Not with `previous` verbatim though: the
+                // user fell back to the global, and an override looser than it would go
+                // on being honored and would be copied into the core by the next
+                // migration. The stricter of the two keeps the override reachable
+                // without widening what the user just chose.
+                val global = runCatching { core.globalPolicy() }.getOrNull()
+                mirror(permissions, callerPackage, stricter(previous, global))
             }
             return
         }
-        if (!wrote(core, callerPackage, selection)) return
-        // A failed mirror write must not propagate: the core durably holds the new
-        // value, so the write did take effect. The stores diverge until the next
-        // write, and stricter-wins bounds that to "no looser than either side".
-        runCatching { permissions.setAppSignPolicyOverride(callerPackage, ordinal) }
-            .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror write failed", it) }
+        if (!wrote(core, callerPackage, selection)) {
+            // `false` does not say which value is stored: the core can serve the new
+            // value from memory while its disk still holds the old one, so treating this
+            // as a no-op would lose a tightening at the next process start. Re-assert the
+            // stricter of the two to both stores, which is what the global selection does
+            // on the same signal.
+            val safest = stricter(selection, previous) ?: selection
+            wrote(core, callerPackage, safest)
+            mirror(permissions, callerPackage, safest)
+            return
+        }
+        mirror(permissions, callerPackage, selection)
+    }
+
+    // A failed mirror write must not propagate: the core holds the value, and [resolve]
+    // settles the divergence on the stricter side until the next write.
+    private suspend fun mirror(
+        permissions: PermissionStore,
+        callerPackage: String,
+        selection: SignPolicySelection?
+    ) {
+        runCatching {
+            permissions.setAppSignPolicyOverride(callerPackage, selection?.toSignPolicy()?.ordinal)
+        }.onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror write failed", it) }
     }
 
     /**
@@ -210,11 +237,4 @@ object AppSignPolicyOverrides {
         }
     }
 
-    // An out-of-range stored ordinal resolves to Manual, the strictest tier.
-    private suspend fun legacyOverride(
-        permissions: PermissionStore,
-        callerPackage: String
-    ): SignPolicySelection? =
-        permissions.getAppSignPolicyOverride(callerPackage)
-            ?.let { SignPolicy.fromOrdinal(it).toSelection() }
 }

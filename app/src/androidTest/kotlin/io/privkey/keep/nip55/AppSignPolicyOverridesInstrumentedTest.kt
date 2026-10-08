@@ -379,11 +379,33 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         assertNotNull(store.getAppSettings(PKG))
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSettings(PKG)?.signPolicyOverride)
-        // The row is kept so a later sweep can retry the clear, but an expired row must
-        // not supply an override in the meantime: the core applies the policy before it
-        // evaluates app expiry.
-        assertNull(store.getAppSignPolicyOverride(PKG))
+        // The row is kept so a later sweep can retry the clear, but a lapsed row must
+        // retire the override in BOTH stores in the meantime: the core keeps no expiry
+        // of its own, and the signing path applies the policy before it evaluates app
+        // expiry, so a surviving AUTO would auto-approve on the way past.
+        assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
         assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+    }
+
+    /**
+     * An unconfirmed write does not say which value is stored, so a tightening must not
+     * be dropped. The core can serve the new tier from memory while its disk still holds
+     * the old one, and a process that starts after that would otherwise auto-approve
+     * against the tier the user had moved away from.
+     */
+    @Test
+    fun aTighteningWhoseWriteIsNotConfirmedIsReassertedToBothStores() = runBlocking {
+        val unreliable = SignPolicyStore(UncommittableStorage())
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+
+        AppSignPolicyOverrides.setOverride(unreliable, store, PKG, SignPolicySelection.MANUAL)
+
+        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
+        // A fresh process, whose core never persisted anything, still sees the tightening.
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            AppSignPolicyOverrides.override(SignPolicyStore(UncommittableStorage()), store, PKG)
+        )
     }
 
     /**
@@ -531,6 +553,29 @@ class AppSignPolicyOverridesInstrumentedTest {
         const val OTHER_PKG = "com.test.other"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
         const val LEGACY_PREFS = "keep_sign_policy"
+    }
+}
+
+/**
+ * A backend whose writes never persist: the `commit()` returning false that the core's
+ * trait warns about. The value is served from memory for the rest of the session while
+ * the durable write is reported as failed, which is the case a caller cannot detect by
+ * reading back.
+ */
+private class UncommittableStorage : SignPolicySelectionStorage {
+
+    private val values = HashMap<String, String>()
+
+    override fun load(key: String): String? = values[key]
+
+    override fun save(key: String, value: String): Boolean {
+        values[key] = value
+        return false
+    }
+
+    override fun remove(key: String): Boolean {
+        values.remove(key)
+        return false
     }
 }
 
