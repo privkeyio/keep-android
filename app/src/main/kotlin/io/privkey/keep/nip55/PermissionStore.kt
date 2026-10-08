@@ -1,7 +1,10 @@
 package io.privkey.keep.nip55
 
 import android.os.SystemClock
+import android.util.Log
 import androidx.room.withTransaction
+import io.privkey.keep.BuildConfig
+import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.uniffi.Nip55AuditEntry
 import io.privkey.keep.uniffi.Nip55ChainStatus
 import io.privkey.keep.uniffi.Nip55PermissionDecision
@@ -15,6 +18,7 @@ import io.privkey.keep.uniffi.nip55CheckVelocity
 import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
+import kotlinx.coroutines.CancellationException
 
 private const val MINUTE_MS = 60 * 1000L
 private const val HOUR_MS = 60 * MINUTE_MS
@@ -473,45 +477,103 @@ class PermissionStore(private val database: Nip55Database) {
      * Wipe every app settings row, clearing each package's core sign-policy override
      * first so no override survives an account switch.
      *
-     * Every clear is gated on the core's durable-write result, and the single
-     * `deleteAll` is issued only when all of them report success and the candidate
-     * enumeration itself was complete. Otherwise only the rows for the packages that
-     * did report success are deleted and the rest are kept: the row is the only record
-     * that the package still holds a core override, so a later wipe can resume it.
-     * Deleting it regardless would strand an override Kotlin can no longer see and
-     * could never clear again.
+     * Every clear is gated on the core's durable-write result, and a row is dropped only
+     * when its tier is confirmed gone or when it never carried one. Any other row is kept:
+     * the row is the only record that the package still holds a tier, so a later wipe can
+     * resume it, and dropping it would strand a tier Kotlin can no longer see and could
+     * never clear again.
      *
-     * The candidates are the mirror rows plus the permission and audit callers. The
-     * core store cannot be enumerated, so an override whose mirror row is already gone
+     * The candidates are the settings rows plus the permission and audit callers. The
+     * core store cannot be enumerated, so a tier whose row is already gone
      * is only reachable through some other record of that package.
      */
     suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
         if (signPolicyStore == null) {
-            // Nothing can be cleared or confirmed this session, and keeping the rows
-            // would carry the previous account's settings into the new one.
-            appSettingsDao.deleteAll()
+            // Nothing can be cleared or confirmed this session. Rows carrying no override
+            // go. A row that carries one has to stay, because it is the only index of a
+            // tier still sitting in the core, but it must not hand the next account the
+            // previous one's choice: it is rewritten to the strictest tier with no
+            // window, which still indexes the tier for a later wipe to clear. The next
+            // wipe that has a store retries them, exactly as the expiry sweep does.
+            wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
+                wipeStep("rewrite ${row.callerPackage}") {
+                    if (row.signPolicyOverride == null) {
+                        appSettingsDao.delete(row.callerPackage)
+                    } else {
+                        strictestTombstone(row.callerPackage)
+                    }
+                }
+            }
             return
         }
         val packages = LinkedHashSet<String>()
-        // An enumeration that throws yields an incomplete candidate set, and a package
-        // holding a core override with no mirror row would then be invisible to the
-        // clears below while `deleteAll` removed the rows that index everything else.
-        val enumerated = listOf(
-            runCatching { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } },
-            runCatching { packages.addAll(dao.getDistinctCallers()) },
-            runCatching { packages.addAll(auditDao.getDistinctCallers()) }
-        ).all { it.isSuccess }
+        // Best effort, and an enumeration that throws only narrows which tiers get
+        // cleared: the per-row rule below is safe whether or not the candidate set is
+        // complete, so there is nothing to gate on it.
+        wipeStep("enumerate settings callers") { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
+        wipeStep("enumerate permission callers") { packages.addAll(dao.getDistinctCallers()) }
+        wipeStep("enumerate audit callers") { packages.addAll(auditDao.getDistinctCallers()) }
 
-        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }
-        if (enumerated && cleared.size == packages.size) {
-            // Also sweeps rows that appeared after the snapshot above.
-            appSettingsDao.deleteAll()
-        } else {
-            // Only the packages whose core override is confirmed gone. Every other row
-            // stays, including one for a package an incomplete enumeration never
-            // produced, because the row is the only index a later wipe can retry from.
-            cleared.forEach { appSettingsDao.delete(it) }
+        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }.toSet()
+        // A row goes only when its tier is confirmed gone, or when it never carried one.
+        // Any other row stays, which keeps its tier indexed: that row resolves to Manual
+        // and a later wipe can retry it, whereas deleting it would leave the tier in the
+        // core with nothing pointing at it. Re-reading here rather than reusing the
+        // snapshot also covers a row that appeared while the clears were running, which a
+        // bulk delete would otherwise have un-indexed.
+        // Per row, so one failure cannot leave the rest of the previous account's tiers
+        // in place. The enumeration is wrapped for the same reason.
+        wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
+            wipeStep("clear ${row.callerPackage}") {
+                if (row.callerPackage in cleared || row.signPolicyOverride == null) {
+                    appSettingsDao.delete(row.callerPackage)
+                } else {
+                    strictestTombstone(row.callerPackage)
+                }
+            }
         }
+    }
+
+    /**
+     * One best-effort step of the account-switch wipe.
+     *
+     * Each step is isolated so a single failure cannot leave the rest of the previous
+     * account's tiers in place. Cancellation is rethrown rather than swallowed, so a
+     * cancelled switch stops instead of wiping on, and a real failure is logged under
+     * DEBUG, because a wipe that silently touched nothing is indistinguishable from a
+     * clean one otherwise.
+     */
+    private inline fun <T> wipeStep(what: String, block: () -> T): T? =
+        try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e("PermissionStore", "account-switch wipe: $what", e)
+            null
+        }
+
+    /**
+     * Rewrite a kept row to the strictest tier with no expiry window.
+     *
+     * Used by the account-switch wipe for a row it cannot drop, because that row still
+     * indexes a tier sitting in the core. Keeping the row as it stands would carry the
+     * previous account's choice and its time-boxed window into the new account, and the
+     * resolver takes the stricter of row and core, so the row's tier is load-bearing.
+     * Manual with no window keeps the tier reachable for a later wipe without granting
+     * the new account anything.
+     */
+    private suspend fun strictestTombstone(callerPackage: String) {
+        appSettingsDao.insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = callerPackage,
+                expiresAt = null,
+                signPolicyOverride = SignPolicy.MANUAL.ordinal,
+                createdAt = System.currentTimeMillis(),
+                createdAtElapsed = SystemClock.elapsedRealtime(),
+                durationMs = null
+            )
+        )
     }
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
@@ -544,9 +606,9 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun getAllAppSettings(): List<Nip55AppSettings> = appSettingsDao.getAll()
 
-    // The stored value, whatever its row's state. Whether an expired row still supplies
-    // an override is resolved in AppSignPolicyOverrides, which has to retire the core's
-    // copy at the same time.
+    // The row's copy of the tier. AppSignPolicyOverrides resolves the policy from the
+    // core floored by this value, so it is not the policy on its own. Test-only; no
+    // main-source caller reads it.
     suspend fun getAppSignPolicyOverride(callerPackage: String): Int? =
         appSettingsDao.getSettings(callerPackage)?.signPolicyOverride
 
@@ -574,6 +636,13 @@ class PermissionStore(private val database: Nip55Database) {
         }
     }
 
+    /**
+     * Drops the settings row only. The row is the index for the package's core
+     * sign-policy tier, so a caller that wants the override gone has to clear the tier
+     * too, as [cleanupExpired] and [clearAllAppSettings] do; otherwise the tier is left
+     * in the core where nothing can reach it. Safe as it stands because every caller is
+     * test teardown.
+     */
     suspend fun clearAppSettings(callerPackage: String) {
         appSettingsDao.delete(callerPackage)
     }

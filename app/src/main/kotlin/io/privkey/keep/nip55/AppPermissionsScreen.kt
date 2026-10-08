@@ -280,11 +280,11 @@ private fun AppPermissionsListContent(
                             onOverrideChange = { newOverride ->
                                 coroutineScope.launch {
                                     try {
-                                        // Show what actually persisted. The core's storage
-                                        // trait cannot report a write failure, so a failed
-                                        // write leaves the previous override in force; the
-                                        // screen must not claim a tightening that did not
-                                        // take effect.
+                                        // Show what actually persisted. An unconfirmed
+                                        // core write is repaired to Manual, and a failed
+                                        // row write throws to the catch below, so the
+                                        // screen must report what resolved rather than
+                                        // claim the tier that was asked for.
                                         val persisted = withContext(Dispatchers.IO) {
                                             AppSignPolicyOverrides.setOverride(
                                                 signPolicyStore,
@@ -298,6 +298,16 @@ private fun AppPermissionsListContent(
                                     } catch (e: Exception) {
                                         if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update sign policy", e)
                                         Toast.makeText(context, toastSignPolicyError, Toast.LENGTH_SHORT).show()
+                                        // Re-read rather than leaving the pre-tap value on
+                                        // screen. The tier write can land even when the row
+                                        // write throws, so the old value can be wrong in the
+                                        // looser direction, and a toast alone would leave the
+                                        // screen claiming a tier the resolver will not serve.
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                readOverrideOrdinal(signPolicyStore, permissionStore, packageName)
+                                            }
+                                        }.onSuccess { onAppStateChange(appState.copy(signPolicyOverride = it)) }
                                     }
                                 }
                             }

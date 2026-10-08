@@ -281,10 +281,11 @@ class Nip55ContentProvider : ContentProvider() {
 
         // Sign-policy precedence: per-app override -> core-owned global -> MANUAL
         // default, resolved in AppSignPolicyOverrides so this and the settings UI
-        // cannot drift. The override read consults the core first and falls back to
-        // the legacy Room row, so an unmigrated app keeps its (usually stricter)
-        // override. The selection passes through as-is; collapsing BASIC onto AUTO
-        // here would discard the stricter Basic auto-approval band the core enforces.
+        // cannot drift. The core owns the per-app tier; an app the settings row marks as
+        // pinned but whose tier the core cannot produce, including one not yet migrated,
+        // resolves to MANUAL rather than to the global. The selection passes through
+        // as-is; collapsing BASIC onto AUTO here would discard the stricter Basic
+        // auto-approval band the core enforces.
         val policySelection = runWithTimeout {
             AppSignPolicyOverrides.effectivePolicy(currentApp.getSignPolicyStore(), store, callerPackage)
         } ?: SignPolicySelection.MANUAL

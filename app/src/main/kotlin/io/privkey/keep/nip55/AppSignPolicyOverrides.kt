@@ -11,36 +11,33 @@ import io.privkey.keep.uniffi.SignPolicyStore
 private const val TAG = "AppSignPolicyOverrides"
 
 /**
- * Per-app sign-policy overrides, mid-move from the legacy Room `nip55_app_settings`
- * row into the core-owned store.
+ * Per-app sign-policy overrides.
  *
  * A per-app override is normally STRICTER than the global policy (an app pinned to
- * Manual while the global is Auto), so losing one silently drops that app onto the
- * looser global and auto-approves signing it should not get. Every path here is built
- * around that: reads consult both stores and resolve a disagreement to the stricter
- * side, a write only touches the second store once the first has confirmed, and the
- * migration never overwrites the core.
+ * Manual while the global is Auto), so serving the wrong value auto-approves signing
+ * the app was pinned away from. That one risk shapes everything here.
+ *
+ * The core-owned store owns the tier: it is what a write has to land in, and what the
+ * signing path reads. The Room `nip55_app_settings` row carries three things the core
+ * cannot: the window the override expires at, since the core keeps no expiry, a record of
+ * the pinning that the lifecycle sweeps can enumerate, since the core store cannot be
+ * listed (it answers for one package, it just cannot produce the set of them), and the
+ * last tier the user chose, which both seeds [migrateLegacyOverrides] and serves as the
+ * strictness floor below.
+ *
+ * Resolution takes the stricter of the two, which makes the row a floor rather than a
+ * second opinion to reconcile: a write that reached one store and not the other cannot
+ * widen the app, and the floor never has to decide which side is newer. When only one
+ * side knows of an override at all, the tier exists but is unknown, and that resolves to
+ * Manual rather than to the global, which may be looser than the tier the user chose, and
+ * rather than to whichever side answered, which may be the stale one. So a partial write,
+ * an unmigrated row and a read fault all tighten rather than loosen.
  *
  * The content provider and the UI both go through here so the two cannot drift.
  */
 object AppSignPolicyOverrides {
 
-    /**
-     * The override in force, read from both stores. Yields null only when neither
-     * holds one, so an incomplete or failed migration can never drop an app onto the
-     * looser global policy.
-     *
-     * When the two disagree the STRICTER value wins (Manual < Basic < Auto), not the
-     * core. The stores can only disagree because a write landed in one and not the
-     * other, and there is no way to tell which side is the newer intent: the core's
-     * prefs backend can report a failed write but still serve the cached value, so a
-     * value can be current in memory and absent on disk, and a session where the core
-     * store failed to construct writes to Room alone (the migration then skips that
-     * package forever, because the core already "knows" it). Core-first would let a
-     * stale looser value win in every one of those cases. Picking the stricter side
-     * costs the user a re-pick at worst; picking the looser one silently auto-approves
-     * signing the app was pinned away from.
-     */
+    /** The override in force, or null when the app has none. */
     suspend fun override(
         core: SignPolicyStore?,
         permissions: PermissionStore,
@@ -48,60 +45,11 @@ object AppSignPolicyOverrides {
     ): SignPolicySelection? = resolve(core, permissions, callerPackage).getOrNull()
 
     /**
-     * The override both stores agree to honor, or failure if either read faulted.
-     *
-     * The settings row's window is the only expiry either store has: the core keeps no
-     * expiry of its own, so a lapsed row has to retire the override in both. Filtering
-     * only the Room copy would leave the core's copy auto-approving for an app whose
-     * window has closed, and would throw away the Room value that could otherwise
-     * tighten a stale looser one.
-     *
-     * A read that throws is indeterminate, not absence, and must not propagate:
-     * [Nip55ContentProvider.query] has no outer catch and resolves the policy on every
-     * request, and the settings UI resolves it from a coroutine. [override] reports the
-     * stricter of whatever is readable, which is informational; [effectivePolicy] gates
-     * signing and so treats a fault as unknown rather than resolving from one store.
-     */
-    private suspend fun resolve(
-        core: SignPolicyStore?,
-        permissions: PermissionStore,
-        callerPackage: String
-    ): Result<SignPolicySelection?> = runCatching {
-        val row = permissions.getAppSettings(callerPackage)
-        if (row?.isExpired() == true) return@runCatching null
-        // An out-of-range stored ordinal resolves to Manual, the strictest tier.
-        val fromRow = row?.signPolicyOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
-        stricter(core?.appOverride(callerPackage), fromRow)
-    }
-
-    /**
-     * Whether the core durably recorded [selection]. A throw counts as a failed write:
-     * on the clear path the mirror row is already gone by this point, so an escaping
-     * exception would strand a live override instead of reaching the restore below.
-     */
-    private fun wrote(
-        core: SignPolicyStore,
-        callerPackage: String,
-        selection: SignPolicySelection?
-    ): Boolean = runCatching { core.setAppOverride(callerPackage, selection) }.getOrDefault(false)
-
-    private fun stricter(
-        first: SignPolicySelection?,
-        second: SignPolicySelection?
-    ): SignPolicySelection? {
-        if (first == null) return second
-        if (second == null) return first
-        // Via SignPolicy so the ordering goes through the checked mapping rather than
-        // assuming the FFI enum's declaration order.
-        return if (first.toSignPolicy().ordinal <= second.toSignPolicy().ordinal) first else second
-    }
-
-    /**
      * Override -> global -> Manual, the precedence the signing path has always used.
      *
-     * Deliberately not the core's `effectivePolicy`, which cannot see the Room
-     * fallback and would report the global for any app whose override has not been
-     * migrated yet. Switch to it once the fallback below is retired.
+     * Deliberately not the core's `effectivePolicy`, which cannot see the row and so
+     * cannot tell an app that has no override from one whose tier has not been migrated
+     * yet. Switch to it once every override is known to live in the core.
      */
     suspend fun effectivePolicy(
         core: SignPolicyStore?,
@@ -109,46 +57,77 @@ object AppSignPolicyOverrides {
         callerPackage: String
     ): SignPolicySelection {
         val resolved = resolve(core, permissions, callerPackage)
-        // A faulting read leaves the app's pinned tier unknown. Falling to the strictest
-        // tier costs a prompt; resolving from whichever store did answer would hand the
-        // app whatever that one happened to hold.
+        // The row read faulted, so whether this app is pinned at all is unknown. Falling
+        // to the strictest tier costs a prompt; falling to the global would hand the app
+        // whatever that happens to be.
         if (resolved.isFailure) return SignPolicySelection.MANUAL
         return resolved.getOrNull()
             ?: core?.let { runCatching { it.globalPolicy() }.getOrNull() }
             ?: SignPolicySelection.MANUAL
     }
 
+    private suspend fun resolve(
+        core: SignPolicyStore?,
+        permissions: PermissionStore,
+        callerPackage: String
+    ): Result<SignPolicySelection?> = runCatching {
+        val row = permissions.getAppSettings(callerPackage)
+        // A lapsed window retires the override: the row is the only record of when it was
+        // due to end, and the signing path applies the policy before it evaluates app
+        // expiry, so an override left in force here would auto-approve on the way past.
+        if (row != null && row.isExpired()) return@runCatching null
+        // An out-of-range stored ordinal resolves to Manual, the strictest tier.
+        val fromRow = row?.signPolicyOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
+        val fromCore = core?.appOverride(callerPackage)
+        // Neither side knows of one: the app is not pinned, so the global applies.
+        if (fromRow == null && fromCore == null) return@runCatching null
+        // Exactly one side knows of one, so a tier exists but which one is unknown: the
+        // row has not been migrated, or a write reached one store and not the other, or a
+        // read faulted (the prefs layer returns the default when a value cannot be
+        // decrypted, so unreadable is indistinguishable from absent). Resolve the
+        // strictest tier rather than the global, which may be looser than what the user
+        // chose, and rather than the one side that did answer, which may be the stale one.
+        if (fromRow == null || fromCore == null) return@runCatching SignPolicySelection.MANUAL
+        stricter(fromCore, fromRow)
+    }
+
     /**
-     * Writes [selection] to the core (null clears the override) and mirrors the same
-     * value into the Room row.
+     * Never looser than either side.
      *
-     * Room is a mirror, not a stale leftover: a clear nulls both stores, so the dual
-     * read above cannot resurrect an override the user has cleared or loosened. The
-     * mirror is what keeps the Room row usable as the lifecycle index for overrides,
-     * which is how the expiry sweep and the account-switch wipe still find the
-     * packages whose core override has to go (see [PermissionStore.cleanupExpired]
-     * and [PermissionStore.clearAllAppSettings]). Clearing Room here instead would
-     * make core overrides invisible to Kotlin and immortal.
+     * The core holds the tier that durably landed and the row holds the last choice that
+     * was recorded, so a write that reached one and not the other must not widen the app.
+     * `setAppOverride` returning `false` is exactly that case, and it does not say which
+     * value is stored: the prefs layer applies to its in-memory map before the disk write,
+     * so the core can serve the new tier for the rest of the session while its file still
+     * holds the old one, and the next process start would otherwise read the old tier back
+     * with nothing to correct it.
      *
-     * On a SET the core goes first and Room is only touched once the core reports a
-     * durable write. `setAppOverride` returns its backing store's `commit()` result, so
-     * a write that did not reach disk is reported rather than inferred; a read-back
-     * could not do this, since the encrypted prefs serve the value a failed commit left
-     * behind. A core write that reports failure leaves Room untouched, which makes it
-     * "the write did not happen": a re-read still shows the old value.
+     * This is a floor, not a reconciliation. It never has to decide which side is newer,
+     * which is what made the previous resolve-the-disagreement scheme hard to reason
+     * about: the strictest of what either store knows is always a safe answer.
+     */
+    private fun stricter(
+        first: SignPolicySelection,
+        second: SignPolicySelection
+    ): SignPolicySelection =
+        if (first.toSignPolicy().ordinal <= second.toSignPolicy().ordinal) first else second
+
+    /**
+     * Pins [callerPackage] to [selection], or clears its override when null.
      *
-     * On a CLEAR the mirror goes first, so a mirror failure aborts before the core is
-     * touched and both stores still hold the override. Clearing the core first and then
-     * failing on the mirror would leave the stale mirror as the only copy, which
-     * [override] hands straight back and [migrateLegacyOverrides] would then copy into
-     * the core permanently. If the core clear reports a failed write, the mirror is put
-     * back, because the row is the only index of an override that is still live.
+     * `setAppOverride` returns its backing store's `commit()` result, which is the only
+     * signal that separates "on disk" from "in the in-memory map a failed commit left
+     * behind"; a read-back cannot, because the encrypted prefs serve that cached value.
+     * Which store is written first differs by direction, for the reasons at each branch.
      *
-     * A reported failure is indeterminate rather than a no-op, so the write may yet be
-     * on disk. The global selection re-asserts the stricter tier for that reason
-     * ([SignPolicyScreen]); here [override] already resolves the resulting divergence
-     * to the stricter of the two stores, which bounds it to "no looser than either
-     * side" without a second write.
+     * An unconfirmed write does not say which value is stored, so Manual is pinned as a
+     * best-effort repair: the core may hold the old tier, or serve the new one from memory
+     * while its disk still holds the old. The repair can fail too, which is why the floor
+     * in [resolve] rather than the repair is what actually bounds this: the row holds the
+     * tier that was asked for, so the app can never resolve looser than it.
+     *
+     * The row write is not guarded. It is the index, so a row that cannot be written
+     * means the change did not take, and the screen reports that too.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
@@ -156,75 +135,75 @@ object AppSignPolicyOverrides {
         callerPackage: String,
         selection: SignPolicySelection?
     ) {
-        val ordinal = selection?.toSignPolicy()?.ordinal
-        if (core == null) {
-            // No core store this session (init failed). Keep Room authoritative
-            // rather than dropping the override on the floor. The stricter-wins rule
-            // in [override] stops a stale core value from outranking this later.
-            permissions.setAppSignPolicyOverride(callerPackage, ordinal)
-            return
-        }
-        val previous = permissions.getAppSettings(callerPackage)
-            ?.signPolicyOverride
-            ?.let { SignPolicy.fromOrdinal(it).toSelection() }
         if (selection == null) {
+            // Drop the row first. A core clear that does not land then leaves a tier
+            // known to one side only, which resolves to Manual: the chosen tier is gone,
+            // which is what the user asked for, and the leftover cannot widen anything.
+            // Keeping the row instead would let [migrateLegacyOverrides] copy its tier
+            // back into the empty slot at the next startup and silently revert the clear.
             permissions.setAppSignPolicyOverride(callerPackage, null)
-            if (!wrote(core, callerPackage, null)) {
-                // The override may still be on disk and the row that indexed it is gone,
-                // so it has to be re-indexed. Not with `previous` verbatim though: the
-                // user fell back to the global, and an override looser than it would go
-                // on being honored and would be copied into the core by the next
-                // migration. The stricter of the two keeps the override reachable
-                // without widening what the user just chose.
-                val global = runCatching { core.globalPolicy() }.getOrNull()
-                mirror(permissions, callerPackage, stricter(previous, global))
-            }
+            // Hygiene, not the clear itself: drop the now-unreachable tier so nothing
+            // picks it up again. Nothing to drop when there is no store this session.
+            if (core != null) wrote(core, callerPackage, null)
             return
         }
+        if (core == null) {
+            // No core store this session, so there is nowhere to put the tier and nothing
+            // would honor it. Record the app as pinned at Manual, which is what it
+            // resolves to anyway while the store is missing, rather than recording a tier
+            // that cannot take effect. A looser choice is simply refused until the store
+            // is back.
+            permissions.setAppSignPolicyOverride(callerPackage, SignPolicy.MANUAL.ordinal)
+            return
+        }
+        // Index first, so a tier write that does not land leaves the app pinned-but-
+        // unknown, which resolves to Manual rather than dropping it onto the global.
+        //
+        // A row write that THROWS must not skip the tier write, though. The floor means a
+        // core holding the new tier against a row holding the old one resolves to the
+        // stricter of the two, so attempting the tier write can only tighten: a
+        // tightening still takes effect, and a loosening is refused because the old row
+        // value wins. Returning early here instead would leave both stores on the old
+        // tier and silently lose the tightening, which is what the previous ordering did.
+        val rowFailure = runCatching {
+            permissions.setAppSignPolicyOverride(callerPackage, selection.toSignPolicy().ordinal)
+        }.exceptionOrNull()
         if (!wrote(core, callerPackage, selection)) {
-            // `false` does not say which value is stored: the core can serve the new
-            // value from memory while its disk still holds the old one, so treating this
-            // as a no-op would lose a tightening at the next process start. Re-assert the
-            // stricter of the two to both stores, which is what the global selection does
-            // on the same signal.
-            val safest = stricter(selection, previous) ?: selection
-            wrote(core, callerPackage, safest)
-            mirror(permissions, callerPackage, safest)
-            return
+            // Unconfirmed: `false` does not say which value is stored, so pin Manual. If
+            // that does not land either, the floor still bounds the app by whichever tier
+            // each store holds.
+            wrote(core, callerPackage, SignPolicySelection.MANUAL)
         }
-        mirror(permissions, callerPackage, selection)
-    }
-
-    // A failed mirror write must not propagate: the core holds the value, and [resolve]
-    // settles the divergence on the stricter side until the next write.
-    private suspend fun mirror(
-        permissions: PermissionStore,
-        callerPackage: String,
-        selection: SignPolicySelection?
-    ) {
-        runCatching {
-            permissions.setAppSignPolicyOverride(callerPackage, selection?.toSignPolicy()?.ordinal)
-        }.onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy mirror write failed", it) }
+        // Reported after the tier write, so the screen still tells the user the change did
+        // not fully take and re-reads what actually resolved.
+        rowFailure?.let { throw it }
     }
 
     /**
-     * Best-effort copy of the legacy Room overrides into the core, run at startup.
-     * Idempotent: a package the core already holds an override for is left alone, so
-     * a re-run can never clobber a newer choice with the stale Room value. Skipping
-     * those packages is safe precisely because [override] resolves a disagreement to
-     * the stricter side rather than to whatever the core happens to hold.
+     * Whether the core durably recorded [selection]. A throw counts as a failed write,
+     * so a faulting store is repaired like any other unconfirmed write rather than
+     * surfacing to the caller: the settings UI resolves this from a coroutine.
+     */
+    private fun wrote(
+        core: SignPolicyStore,
+        callerPackage: String,
+        selection: SignPolicySelection?
+    ): Boolean = runCatching { core.setAppOverride(callerPackage, selection) }.getOrDefault(false)
+
+    /**
+     * Copies the row values into the core at startup, which is what moves a pinned app
+     * from resolving Manual to resolving its chosen tier.
      *
-     * The Room values stay on disk: [override] still falls back to them, and they are
-     * the index the lifecycle sweeps use. A failure here is therefore harmless, it
-     * just leaves the fallback doing the work.
+     * Idempotent: a package the core already holds a tier for is left alone, so a re-run
+     * cannot clobber a newer choice with the row's copy.
      */
     suspend fun migrateLegacyOverrides(core: SignPolicyStore, permissions: PermissionStore) {
         runCatching {
             for (settings in permissions.getAllAppSettings()) {
                 val ordinal = settings.signPolicyOverride ?: continue
-                // An expired row is on its way out via the expiry sweep; copying it
-                // would turn a time-boxed override into a permanent one. The Room
-                // fallback still covers it until the sweep removes it.
+                // An expired row is on its way out via the expiry sweep, and the core
+                // keeps no expiry, so copying it would turn a time-boxed override into a
+                // permanent one. It already resolves to nothing.
                 if (settings.isExpired()) continue
                 if (core.appOverride(settings.callerPackage) != null) continue
                 core.setAppOverride(
@@ -236,5 +215,4 @@ object AppSignPolicyOverrides {
             if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy override migration failed", it)
         }
     }
-
 }
