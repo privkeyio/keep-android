@@ -1,9 +1,11 @@
 package io.privkey.keep.storage
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.SignPolicySelectionStorage
+import java.security.MessageDigest
 
 private const val TAG = "SignPolicySelectionPrefs"
 
@@ -104,5 +106,35 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         // that AppSignPolicyOverrides.migrateLegacyOverrides performs.
         internal const val APP_OVERRIDE_MIGRATION_MARKER = "keep_sign_policy_app_overrides_migrated"
         const val GLOBAL_POLICY_KEY = "global_sign_policy"
+
+        internal const val APP_OVERRIDE_MARKER_PREFIX = APP_OVERRIDE_MIGRATION_MARKER + "_"
+
+        /**
+         * Marker key recording that the per-app copy was attempted for one package.
+         *
+         * These markers have to live in plain prefs rather than the encrypted file: a
+         * marker that could fail to decrypt would read as absent, which is exactly the
+         * absence-versus-unreadable ambiguity the marker exists to remove. So the key
+         * cannot be the keyed hash the encrypted file uses for its own key names, whose
+         * HMAC key only exists once something has been decrypted.
+         *
+         * The digest is obfuscation, not confidentiality, and nothing should be built on
+         * it: it is unsalted over a namespace anyone who can read the data directory can
+         * also enumerate, so recovering a name is a dictionary lookup, and the number of
+         * markers shows how many apps are pinned. It is here because the rest of this
+         * app does not spell caller package names into storage, and because a stable
+         * digest is all a marker needs. The markers are deleted as soon as the run-wide
+         * marker makes them redundant, which is what actually keeps this from becoming a
+         * standing list.
+         */
+        internal fun appOverrideMarkerKey(callerPackage: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(callerPackage.toByteArray(Charsets.UTF_8))
+            val suffix = Base64.encodeToString(
+                digest,
+                Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
+            )
+            return APP_OVERRIDE_MARKER_PREFIX + suffix
+        }
     }
 }
