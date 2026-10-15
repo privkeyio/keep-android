@@ -807,14 +807,23 @@ class AndroidKeystoreStorage(
      * as saved while holding fewer shares than the device owns. Kotlin-only on
      * purpose, since it answers a question the FFI trait cannot express.
      *
-     * Covers a share whose name resolution faults, which is the fault that makes a
-     * share vanish from the list. A share listed but never stored reads as absent, not
-     * unreadable, and does not count: it would otherwise block backups forever.
+     * Checked per share against both faults that drop one from the list: a name
+     * resolution that raises, and metadata that will not parse. [readMetadataFromPrefs]
+     * answers null for either an unreadable value or an out-of-range one, and
+     * [listAllShares] drops that share, so a check on the stored share data alone would
+     * pass a share the backup then silently omits. A share listed but never stored reads
+     * as absent, not unreadable, and does not count: it would otherwise block backups
+     * forever.
      */
     fun shareStorageIsFullyReadable(): Boolean =
         infallibleRead("share readability check", onFault = false) {
             val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-            keys.none { runCatching { getSharePrefs(it).contains(KEY_SHARE_DATA) }.isFailure }
+            keys.all { key ->
+                runCatching {
+                    val sharePrefs = getSharePrefs(key)
+                    !sharePrefs.contains(KEY_SHARE_DATA) || readMetadataFromPrefs(sharePrefs) != null
+                }.getOrDefault(false)
+            }
         }
 
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {

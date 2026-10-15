@@ -326,6 +326,32 @@ class InfallibleStorageReadTest {
         assertTrue(storage().shareStorageIsFullyReadable())
     }
 
+    @Test
+    fun a_share_the_list_drops_for_unusable_metadata_is_not_fully_readable() {
+        // The fault that drops a share here is metadata that will not turn into a
+        // share rather than metadata that will not decrypt: an undecryptable value
+        // reads back as its default, while an index outside UShort range fails
+        // readMetadataFromPrefs' own range check and answers null. listAllShares
+        // drops the share either way, so checking that the share data is present
+        // would pass a store whose backup silently omits a share.
+        seedShareFile(GROUP_HEX, GROUP_B64)
+        seedShareFile(SECOND_GROUP_HEX, SECOND_GROUP_B64)
+        KeystoreEncryptedPrefs.create(context, shareStoreName(SECOND_GROUP_HEX) + SUFFIX).edit()
+            .putInt("share_index", UShort.MAX_VALUE.toInt() + 1)
+            .commit()
+        KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit()
+            .putStringSet("all_share_keys", setOf(GROUP_HEX, SECOND_GROUP_HEX))
+            .commit()
+
+        val storage = storage()
+        assertEquals(
+            "precondition: the share is missing from the list a backup is built from",
+            1,
+            storage.listAllShares().size
+        )
+        assertFalse(storage.shareStorageIsFullyReadable())
+    }
+
     private companion object {
         const val SINGLE_PREFS = "keep_secure_prefs"
         const val MULTI_PREFS = "keep_multi_share_prefs"
