@@ -1,9 +1,11 @@
 package io.privkey.keep.storage
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.SignPolicySelectionStorage
+import java.security.MessageDigest
 
 private const val TAG = "SignPolicySelectionPrefs"
 
@@ -104,5 +106,42 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         // that AppSignPolicyOverrides.migrateLegacyOverrides performs.
         internal const val APP_OVERRIDE_MIGRATION_MARKER = "keep_sign_policy_app_overrides_migrated"
         const val GLOBAL_POLICY_KEY = "global_sign_policy"
+
+        // Deliberately not derived from APP_OVERRIDE_MIGRATION_MARKER. Every key with this
+        // prefix is swept from the marker file once the run-wide marker lands, and that
+        // file is shared with LegacyPrefsMigration, whose keys are built from a prefs file
+        // name. A prefix spelled out here cannot be produced by that scheme by accident.
+        internal const val APP_OVERRIDE_MARKER_PREFIX = "keep_app_override_pkg_"
+
+        /**
+         * Marker key recording that the per-app copy was attempted for one package.
+         *
+         * These markers have to live in plain prefs rather than the encrypted file: a
+         * marker that could fail to decrypt would read as absent, which is exactly the
+         * absence-versus-unreadable ambiguity the marker exists to remove. So the key
+         * cannot be the keyed hash the encrypted file uses for its own key names, whose
+         * HMAC key only exists once something has been decrypted.
+         *
+         * The digest is obfuscation, not confidentiality, and nothing should be built on
+         * it: it is unsalted over a namespace anyone who can read the data directory can
+         * also enumerate, so recovering a name is a dictionary lookup, and the number of
+         * markers shows how many apps are pinned. It is here because the rest of this
+         * app does not spell caller package names into storage, and because a stable
+         * digest is all a marker needs.
+         *
+         * The markers are swept once the run-wide marker lands, which is the ordinary
+         * case. An install holding an expired override row that the sweep could not clear
+         * never completes a run, so it keeps its markers until that row goes, and the
+         * digest is the only thing covering them in the meantime.
+         */
+        internal fun appOverrideMarkerKey(callerPackage: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(callerPackage.toByteArray(Charsets.UTF_8))
+            val suffix = Base64.encodeToString(
+                digest,
+                Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
+            )
+            return APP_OVERRIDE_MARKER_PREFIX + suffix
+        }
     }
 }

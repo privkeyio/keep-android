@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -40,10 +41,12 @@ class AppSignPolicyOverridesInstrumentedTest {
     private lateinit var database: Nip55Database
     private lateinit var store: PermissionStore
     private lateinit var core: SignPolicyStore
+    private lateinit var markers: SharedPreferences
 
     @Before
     fun setup() {
         clearPrefs()
+        markers = context.getSharedPreferences(MARKER_PREFS, Context.MODE_PRIVATE)
         database = Room.inMemoryDatabaseBuilder(
             context,
             Nip55Database::class.java
@@ -60,6 +63,9 @@ class AppSignPolicyOverridesInstrumentedTest {
 
     private fun clearPrefs() {
         context.deleteSharedPreferences(SELECTION_PREFS)
+        // The migration markers get a file of their own here, so a test can delete it
+        // wholesale without touching the shared one the app ships.
+        context.deleteSharedPreferences(MARKER_PREFS)
         context.deleteSharedPreferences(LEGACY_PREFS)
         context.deleteSharedPreferences(AUTO_SIGNING_PREFS)
         // Only our own one-shot marker; the marker file is shared with other
@@ -168,7 +174,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     fun clearedOverrideLeavesTheAppFollowingTheGlobal() = runBlocking {
         core.setGlobalPolicy(SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
         AppSignPolicyOverrides.setOverride(core, store, PKG, null)
 
@@ -607,7 +613,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         // The row is gone, so the migration has nothing to copy back. Asserted on the
         // resolved policy rather than on the row, which was already absent and would hold
         // whatever the migration did.
-        AppSignPolicyOverrides.migrateLegacyOverrides(flaky, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(flaky, store, markers)
         assertEquals(
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.override(flaky, store, PKG)
@@ -644,7 +650,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
         store.setAppSignPolicyOverride(OTHER_PKG, SignPolicy.BASIC.ordinal)
 
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
         assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
         assertEquals(SignPolicySelection.BASIC, core.appOverride(OTHER_PKG))
@@ -656,7 +662,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     fun migrationLeavesTheRowValuesInPlaceAsItsOwnSource() = runBlocking {
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
     }
@@ -667,9 +673,9 @@ class AppSignPolicyOverridesInstrumentedTest {
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
         core.setAppOverride(PKG, SignPolicySelection.MANUAL)
 
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
-        AppSignPolicyOverrides.migrateLegacyOverrides(newCore(), store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+        AppSignPolicyOverrides.migrateLegacyOverrides(newCore(), store, markers)
 
         assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
     }
@@ -688,7 +694,7 @@ class AppSignPolicyOverridesInstrumentedTest {
             )
         )
 
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
         // Copying it would freeze a time-boxed override into the core, which has no
         // expiry. Nor does the Room fallback serve it while it waits for the sweep: the
@@ -696,6 +702,188 @@ class AppSignPolicyOverridesInstrumentedTest {
         // expired app, so a retained AUTO would auto-approve on the way past.
         assertNull(core.appOverride(PKG))
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
+    }
+
+    @Test
+    fun aFullRunSetsTheRunWideMarkerAndDropsThePerPackageOnes() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertTrue(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
+        // The per-package markers are only read before the run-wide one is set, so keeping
+        // them would leave a standing list of which apps the user pinned. That they are
+        // written at all is covered by aPartialRunKeepsThePerPackageMarkersItRecorded.
+        assertTrue(
+            "per-package markers should be gone: ${markers.all.keys}",
+            markers.all.keys.none {
+                it.startsWith(SignPolicySelectionPrefs.APP_OVERRIDE_MARKER_PREFIX)
+            }
+        )
+    }
+
+    @Test
+    fun aPartialRunKeepsThePerPackageMarkersItRecorded() = runBlocking {
+        val now = System.currentTimeMillis()
+        store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
+        // An expired row is never attempted, so this run is not complete and the run-wide
+        // marker has to stay unset: the sweep can keep such a row and its window can be
+        // refreshed later, and claiming the marker would strand that tier for good.
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = OTHER_PKG,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = SignPolicy.AUTO.ordinal,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
+        assertTrue(markers.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), false))
+        // The point of withholding the run-wide marker: the expired row must not come out
+        // of this recorded as attempted, or its tier becomes uncopyable once the window is
+        // refreshed. Covered end to end by aRefreshedWindowIsCopiedByALaterRun.
+        assertFalse(
+            markers.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(OTHER_PKG), false)
+        )
+    }
+
+    /**
+     * The positive control for withholding the run-wide marker on an expired row. The sweep
+     * can retain such a row, `setAppExpiry` can refresh its window while preserving the
+     * tier, and a later run then has to be able to copy it.
+     */
+    @Test
+    fun aRefreshedWindowIsCopiedByALaterRun() = runBlocking {
+        val now = System.currentTimeMillis()
+        val expired = Nip55AppSettings(
+            callerPackage = PKG,
+            expiresAt = now - 1_000L,
+            signPolicyOverride = SignPolicy.AUTO.ordinal,
+            createdAt = now - 2_000L,
+            createdAtElapsed = 0L,
+            durationMs = null
+        )
+        database.appSettingsDao().insertOrUpdate(expired)
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertNull("an expired row must not be copied", core.appOverride(PKG))
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
+
+        database.appSettingsDao().insertOrUpdate(expired.copy(expiresAt = now + 600_000L))
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(PKG))
+    }
+
+    /**
+     * Installs that finished this copy before the markers became per-package carry only
+     * the run-wide one, so it has to keep standing on its own.
+     */
+    @Test
+    fun aRunWideMarkerAloneStopsTheCopy() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        markers.edit()
+            .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
+            .commit()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertNull(core.appOverride(PKG))
+    }
+
+    @Test
+    fun aLaterRunCopiesOnlyThePackagesNoRunReached() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        store.setAppSignPolicyOverride(OTHER_PKG, SignPolicy.BASIC.ordinal)
+        // PKG was attempted by an earlier run that never reached OTHER_PKG.
+        markers.edit()
+            .putBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), true)
+            .commit()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertNull(core.appOverride(PKG))
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(OTHER_PKG))
+    }
+
+    /**
+     * Why the marker rather than the absence check carries this. A core that reads as
+     * empty is indistinguishable from one whose value would not decrypt, and by the time
+     * a second run happens the core may durably hold the stricter Manual an unconfirmed
+     * write pinned while the row still holds the looser tier the user asked for. Copying
+     * the row again would then widen the app, so an attempted package is never copied
+     * twice whatever the core answers.
+     */
+    @Test
+    fun anAttemptedPackageIsNotCopiedWhenTheCoreReadsAsEmpty() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        markers.edit()
+            .putBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), true)
+            .commit()
+        val unreadable = UnreadableStorage()
+        val faulting = SignPolicyStore(unreadable)
+        // What an unconfirmed setOverride write leaves behind: the core durably holds the
+        // stricter tier while reads of it come back empty.
+        faulting.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        val before = unreadable.saved.toList()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(faulting, store, markers)
+
+        assertEquals(before, unreadable.saved)
+    }
+
+    /**
+     * A copy that does not confirm pins Manual rather than leaving the tier it could not
+     * durably write. Retrying it on a later start would be a copy whose outcome is already
+     * unknown, which is the one shape that can widen.
+     */
+    @Test
+    fun aCopyThatDoesNotConfirmPinsManual() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        val uncommittable = UncommittableStorage()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(
+            SignPolicyStore(uncommittable),
+            store,
+            markers
+        )
+
+        // Read through a fresh store over the same backing map, the way the next process
+        // would: the repair is what is there to be read, not the row's AUTO.
+        assertEquals(
+            SignPolicySelection.MANUAL,
+            SignPolicyStore(uncommittable).appOverride(PKG)
+        )
+    }
+
+    /**
+     * A marker whose write never reaches the disk must not leave the package marked. The
+     * platform applies an edit to its in-memory map before it reports the disk result, and
+     * a write serializes the whole map, so a marker left behind would be persisted by the
+     * next successful write in the same run, for a package nothing was copied for.
+     */
+    @Test
+    fun aMarkerThatDoesNotPersistLeavesThePackageUnmarked() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        val unwritable = UncommittablePrefs()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, unwritable)
+
+        assertFalse(
+            unwritable.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), false)
+        )
+        assertFalse(
+            unwritable.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)
+        )
+        // And nothing was copied, since the attempt could not be recorded.
+        assertNull(core.appOverride(PKG))
     }
 
     /**
@@ -713,7 +901,7 @@ class AppSignPolicyOverridesInstrumentedTest {
             AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
         )
 
-        AppSignPolicyOverrides.migrateLegacyOverrides(core, store)
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
         assertEquals(
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
@@ -750,6 +938,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         const val SELECTION_PREFS = "keep_sign_policy_selection"
         const val AUTO_SIGNING_PREFS = "nip55_auto_signing"
         const val LEGACY_PREFS = "keep_sign_policy"
+        const val MARKER_PREFS = "test_migration_markers"
     }
 }
 
@@ -798,5 +987,122 @@ private class UnremovableStorage(private val unremovablePackage: String) : SignP
         if (key.endsWith(unremovablePackage)) return false
         values.remove(key)
         return true
+    }
+}
+
+/**
+ * A backend whose reads all come back empty while its writes persist: the decrypt fault
+ * the encrypted-prefs layer reports as an absent value, since it returns the default
+ * when a value cannot be decrypted. Records what it was asked to store so a test can
+ * tell a copy that was skipped from one that landed.
+ */
+private class UnreadableStorage : SignPolicySelectionStorage {
+
+    val saved = mutableListOf<Pair<String, String>>()
+
+    override fun load(key: String): String? = null
+
+    override fun save(key: String, value: String): Boolean {
+        saved += key to value
+        return true
+    }
+
+    override fun remove(key: String): Boolean = true
+}
+
+/**
+ * Prefs whose edits reach the in-memory map but never the disk, which is what the platform
+ * does when a `commit()` fails: it applies to memory first and its result reports only the
+ * durable write. Only booleans are exercised; the rest satisfies the interface.
+ */
+private class UncommittablePrefs : SharedPreferences {
+
+    private val values = HashMap<String, Any?>()
+
+    override fun getAll(): MutableMap<String, *> = HashMap(values)
+
+    override fun getString(key: String, defValue: String?): String? =
+        values[key] as? String ?: defValue
+
+    @Suppress("UNCHECKED_CAST")
+    override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
+        values[key] as? MutableSet<String> ?: defValues
+
+    override fun getInt(key: String, defValue: Int): Int = values[key] as? Int ?: defValue
+
+    override fun getLong(key: String, defValue: Long): Long = values[key] as? Long ?: defValue
+
+    override fun getFloat(key: String, defValue: Float): Float = values[key] as? Float ?: defValue
+
+    override fun getBoolean(key: String, defValue: Boolean): Boolean =
+        values[key] as? Boolean ?: defValue
+
+    override fun contains(key: String): Boolean = values.containsKey(key)
+
+    override fun edit(): SharedPreferences.Editor = FailingEditor()
+
+    override fun registerOnSharedPreferenceChangeListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener?
+    ) = Unit
+
+    override fun unregisterOnSharedPreferenceChangeListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener?
+    ) = Unit
+
+    private inner class FailingEditor : SharedPreferences.Editor {
+
+        private val pending = HashMap<String, Any?>()
+        private val removals = HashSet<String>()
+        private var clearRequested = false
+
+        private fun put(key: String, value: Any?): SharedPreferences.Editor {
+            pending[key] = value
+            return this
+        }
+
+        override fun putString(key: String, value: String?): SharedPreferences.Editor =
+            put(key, value)
+
+        override fun putStringSet(
+            key: String,
+            values: MutableSet<String>?
+        ): SharedPreferences.Editor = put(key, values)
+
+        override fun putInt(key: String, value: Int): SharedPreferences.Editor = put(key, value)
+
+        override fun putLong(key: String, value: Long): SharedPreferences.Editor = put(key, value)
+
+        override fun putFloat(key: String, value: Float): SharedPreferences.Editor = put(key, value)
+
+        override fun putBoolean(key: String, value: Boolean): SharedPreferences.Editor =
+            put(key, value)
+
+        override fun remove(key: String): SharedPreferences.Editor {
+            removals += key
+            return this
+        }
+
+        override fun clear(): SharedPreferences.Editor {
+            clearRequested = true
+            return this
+        }
+
+        override fun commit(): Boolean {
+            applyToMemory()
+            return false
+        }
+
+        override fun apply() {
+            applyToMemory()
+        }
+
+        private fun applyToMemory() {
+            if (clearRequested) values.clear()
+            removals.forEach { values.remove(it) }
+            values.putAll(pending)
+            pending.clear()
+            removals.clear()
+            clearRequested = false
+        }
     }
 }

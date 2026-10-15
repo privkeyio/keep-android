@@ -1,8 +1,10 @@
 package io.privkey.keep.nip55
 
+import android.content.SharedPreferences
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.uniffi.SignPolicySelection
@@ -194,25 +196,123 @@ object AppSignPolicyOverrides {
      * Copies the row values into the core at startup, which is what moves a pinned app
      * from resolving Manual to resolving its chosen tier.
      *
-     * Idempotent: a package the core already holds a tier for is left alone, so a re-run
-     * cannot clobber a newer choice with the row's copy.
+     * Gated on persisted markers in [markers] rather than on the core looking empty for a
+     * package. The encrypted-prefs layer returns the default when a value cannot be
+     * decrypted, so an unreadable tier is indistinguishable from an absent one, and a
+     * second run that read it as absent would copy the row's tier over a stricter one the
+     * core durably holds: `setOverride` pins Manual in the core when its write is
+     * unconfirmed while the row keeps the tier the user asked for, so core-stricter-than-
+     * row is a state this code produces deliberately. The absence check stays as the
+     * second line, but it is not what bounds this.
+     *
+     * Each package's marker is written before its copy is attempted, and a package whose
+     * marker cannot be persisted is skipped rather than copied unrecorded: an attempt that
+     * left no record is the only way a package gets copied twice. The run-wide marker is
+     * then set only once every row was attempted, so a run that threw partway leaves the
+     * packages it never reached to a later startup instead of abandoning them. The
+     * per-package markers are what make that retry safe.
+     *
+     * Skipping is always the strict direction, and it costs a prompt rather than widening
+     * anything. What it costs differs by case. A package no run has reached yet is copied by
+     * a later startup. A package whose marker is already recorded gets no later copy at all:
+     * it resolves Manual until the user picks its tier again. That is the accepted price of
+     * closing the double-copy window, and it includes the plain case of the process being
+     * killed between the marker commit and the write, with no fault involved at all. A
+     * two-phase in-progress marker would not buy anything, because in-progress is precisely
+     * the unknown outcome that must not be retried.
+     *
+     * One widening window is left, and the markers do not close it: for a package no run
+     * has attempted yet, a core that reads as absent because its value would not decrypt
+     * gets the row's tier copied over whatever it durably holds, which an unconfirmed
+     * `setOverride` write may have left stricter. Closing that needs a store that can tell
+     * an absent value from an unreadable one.
      */
-    suspend fun migrateLegacyOverrides(core: SignPolicyStore, permissions: PermissionStore) {
-        runCatching {
+    suspend fun migrateLegacyOverrides(
+        core: SignPolicyStore,
+        permissions: PermissionStore,
+        markers: SharedPreferences
+    ) {
+        // Installs that completed this copy before the markers became per-package have
+        // only this one, and none of the per-package ones. Honoring it first is what keeps
+        // them from being migrated a second time.
+        if (markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)) return
+
+        val everyRowAttempted = runCatching {
+            var complete = true
             for (settings in permissions.getAllAppSettings()) {
-                val ordinal = settings.signPolicyOverride ?: continue
+                // Cheap filter on the snapshot. What actually gets copied is the fresh read
+                // below, which is the authority.
+                if (settings.signPolicyOverride == null) continue
+                // The snapshot can be well out of date by the time the Keystore writes in
+                // this loop reach this package, so the row is read again here. A user who
+                // tightened the app in the meantime must not have the stale, looser choice
+                // written into the core behind them. The floor in [resolve] is what keeps
+                // that from widening anything today, but only because nothing reads the
+                // core's tier without the row beside it.
+                val current = permissions.getAppSettings(settings.callerPackage)
+                val ordinal = current?.signPolicyOverride
                 // An expired row is on its way out via the expiry sweep, and the core
                 // keeps no expiry, so copying it would turn a time-boxed override into a
                 // permanent one. It already resolves to nothing.
-                if (settings.isExpired()) continue
-                if (core.appOverride(settings.callerPackage) != null) continue
-                core.setAppOverride(
-                    settings.callerPackage,
-                    SignPolicy.fromOrdinal(ordinal).toSelection()
-                )
+                //
+                // Not an attempt, so it must not count as one: the sweep keeps an expired
+                // row whose core clear it could not confirm, and `setAppExpiry` can later
+                // refresh that row's window while preserving its tier. Claiming the
+                // run-wide marker here would leave that live row's tier uncopyable. A row
+                // that went away entirely drops out of the next snapshot, so it cannot
+                // withhold the marker for good.
+                if (current == null || ordinal == null || current.isExpired()) {
+                    complete = false
+                    continue
+                }
+                val marker = SignPolicySelectionPrefs.appOverrideMarkerKey(settings.callerPackage)
+                // Checked before the core read, which costs a Keystore round trip.
+                if (markers.getBoolean(marker, false)) continue
+                if (!markers.edit().putBoolean(marker, true).commit()) {
+                    // `commit()` applies to the in-memory map before it reports the disk
+                    // write, and a write serializes the whole map, so the marker has to be
+                    // taken back out: left there, the next successful commit in this run
+                    // persists a marker for a package nothing was copied for, and that
+                    // package is then skipped forever. The removal only has to reach memory
+                    // to do its job, which is why its own result is not checked.
+                    markers.edit().remove(marker).commit()
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Could not record a migration attempt; deferring one package")
+                    complete = false
+                    continue
+                }
+                // A read that could not answer is not a licence to copy: the tier it failed
+                // to produce may be stricter than this row's. Caught per package so one
+                // package's fault does not abandon the rest of the run.
+                val existing = runCatching { core.appOverride(settings.callerPackage) }
+                if (existing.isFailure || existing.getOrNull() != null) continue
+                // A copy that did not confirm pins Manual instead of being retried. `false`
+                // does not say which value is stored, and the platform prefs serve the new
+                // one from memory for the rest of the process either way, so a retry on a
+                // later start is a copy whose outcome is already unknown: if the core
+                // durably holds the stricter Manual that an unconfirmed `setOverride` write
+                // pinned, and the read of it faults, the retry widens the app. Tightening
+                // instead costs the user a re-pick.
+                val tier = SignPolicy.fromOrdinal(ordinal).toSelection()
+                if (!wrote(core, settings.callerPackage, tier)) {
+                    wrote(core, settings.callerPackage, SignPolicySelection.MANUAL)
+                }
             }
+            complete
         }.onFailure {
             if (BuildConfig.DEBUG) Log.w(TAG, "Sign-policy override migration failed", it)
+        }.getOrDefault(false)
+
+        if (everyRowAttempted) {
+            // The per-package markers are dead once this lands, because the return above
+            // happens before any of them is read. Dropped in the same editor so the file
+            // stops carrying a standing list of which apps the user pinned, and so the
+            // run-wide marker cannot be set without them going with it.
+            val edit = markers.edit()
+                .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
+            markers.all.keys
+                .filter { it.startsWith(SignPolicySelectionPrefs.APP_OVERRIDE_MARKER_PREFIX) }
+                .forEach { edit.remove(it) }
+            edit.commit()
         }
     }
 }
