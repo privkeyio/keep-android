@@ -108,6 +108,14 @@ interface Nip55PermissionDao {
         durationMs: Long?
     )
 
+    // Deny and ask are never offered with a duration, so a flip to either drops
+    // whatever lifetime the row was carrying. An expiring refusal is swept by
+    // deleteExpired, which has no decision filter, and the resolver skips an
+    // expired row whatever its decision, so a bound left on a deny ends the
+    // refusal rather than the grant.
+    @Query("UPDATE nip55_permissions SET decision = :decision, expiresAt = NULL, durationMs = NULL WHERE id = :id")
+    suspend fun updateDecisionClearingLifetime(id: Long, decision: String)
+
     @Query("SELECT * FROM nip55_permissions WHERE id = :id")
     suspend fun getById(id: Long): Nip55Permission?
 

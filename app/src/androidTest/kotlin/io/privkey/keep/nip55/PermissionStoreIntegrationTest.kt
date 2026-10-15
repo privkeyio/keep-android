@@ -563,9 +563,99 @@ class PermissionStoreIntegrationTest {
     }
 
     @Test
-    fun flippingAnAlreadyBoundedRowDoesNotRestartItsClock() = runBlocking {
-        // Re-deriving the lifetime of a row that already has one would hand back
-        // time the row had already spent.
+    fun reTappingAllowOnALiveBoundedGrantDoesNotRestartItsClock() = runBlocking {
+        // Every decision is offered on every row, so allow is tappable on a row that
+        // already allows. Re-deriving the lifetime of a row that has one would hand
+        // back time the row had already spent.
+        store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.ONE_HOUR)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(HOUR_MS, updated.durationMs)
+        assertEquals(row.createdAtElapsed, updated.createdAtElapsed)
+        assertEquals(row.createdAt, updated.createdAt)
+    }
+
+    @Test
+    fun flippingAClampedAllowBackToDenyLeavesTheDenyStanding() = runBlocking {
+        // The clamp writes a lifetime, and a refusal must not inherit it: deleteExpired
+        // has no decision filter and the resolver skips an expired row whatever its
+        // decision, so a bound left here would end the user's refusal and let the
+        // request fall through to whatever the global policy allows.
+        store.denyPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.FOREVER)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+        assertEquals(
+            "precondition: the flip to allow is clamped, so a lifetime now exists to inherit",
+            DAY_MS,
+            store.getPermissionsForCaller("com.test.app").single().durationMs
+        )
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.DENY,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(PermissionDecision.DENY.toString(), updated.decision)
+        assertNull("a deny must not carry a duration", updated.durationMs)
+        assertNull("a deny must not carry an expiry", updated.expiresAt)
+        assertFalse(
+            "the refusal must still stand a day later",
+            updated.isExpired(
+                currentElapsed = updated.createdAtElapsed + DAY_MS + 1,
+                currentTimeMillis = updated.createdAt + DAY_MS + 1
+            )
+        )
+    }
+
+    @Test
+    fun flippingAGrantToAskDropsTheLifetimeItWouldHaveExpiredWith() = runBlocking {
+        // Same rule from the other side, and the lifetime here is the grant's own
+        // rather than the clamp's. An ask that expires stops blocking both the policy
+        // auto-approve and the whitelisted-relay auto-accept, which is the setting the
+        // user just switched on.
+        store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.ONE_HOUR)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals("precondition: the grant is bounded", HOUR_MS, row.durationMs)
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ASK,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(PermissionDecision.ASK.toString(), updated.decision)
+        assertNull(updated.durationMs)
+        assertNull(updated.expiresAt)
+    }
+
+    @Test
+    fun aRefusalRoundTripReDerivesTheAllowAsAnUnqualifiedToggleGrant() = runBlocking {
+        // The cost of clearing the lifetime above, pinned rather than left to be found:
+        // the row's original hour is gone once it has been refused, so tapping allow
+        // again asks for what the toggle asks for, which is forever, and gets the
+        // clamp. Bounded by the clamp and reachable only by the user's own two taps.
         store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.ONE_HOUR)
         val row = store.getPermissionsForCaller("com.test.app").single()
 
@@ -585,9 +675,7 @@ class PermissionStoreIntegrationTest {
         )
 
         val updated = store.getPermissionsForCaller("com.test.app").single()
-        assertEquals(HOUR_MS, updated.durationMs)
-        assertEquals(row.createdAtElapsed, updated.createdAtElapsed)
-        assertEquals(row.createdAt, updated.createdAt)
+        assertEquals(DAY_MS, updated.durationMs)
     }
 
     @Test

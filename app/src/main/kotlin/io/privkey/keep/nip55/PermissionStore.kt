@@ -499,9 +499,11 @@ class PermissionStore(private val database: Nip55Database) {
         }
         val storedRequestType = findRequestType(permission.requestType)
             ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
-        val clamped = clampOnAllow(permission, decision)
+        val clamped = if (decision == PermissionDecision.ALLOW) clampOnAllow(permission) else null
         logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false) {
-            if (clamped == null) {
+            if (decision != PermissionDecision.ALLOW) {
+                dao.updateDecisionClearingLifetime(id, decision.toString())
+            } else if (clamped == null) {
                 dao.updateDecision(id, decision.toString())
             } else {
                 @Suppress("DEPRECATION")
@@ -518,28 +520,32 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     /**
-     * The lifetime a row has to be rewritten with when it is moved to allow, or null
-     * when its stored lifetime already stands.
+     * The lifetime an unbounded row has to be rewritten with when it is moved to
+     * allow, or null when the row's stored lifetime stands as it is.
      *
      * A grant gets the sensitive-kind clamp applied at grant time, but a row stores
      * the lifetime it was given rather than the duration it was asked for, so flipping
      * only the decision would carry an unclamped lifetime into an allow. A deny is
      * never clamped, and rightly so, which is exactly how an unbounded row for a
-     * sensitive kind comes to exist. Only forever is unbounded, so an unbounded row is
-     * the single case to re-derive: every other lifetime is already no looser than
-     * what a fresh grant of it would get. The clamp itself stays in Rust.
+     * sensitive kind comes to exist. Only an unbounded row is re-derived: every other
+     * lifetime is already no looser than what a fresh grant of it would get, and
+     * re-deriving one would hand back time the row had already spent.
+     *
+     * A toggle carries no duration, so the duration asked for here is forever, which
+     * is what a grant with no time box requests. The clamp itself stays in Rust.
+     *
+     * Tested on the millis rather than on forever: forever and just-this-time are both
+     * unbounded as a [PermissionDuration], so naming the constant would let a future
+     * clamp target of just-this-time through as the unbounded allow this exists to
+     * prevent.
      */
-    private fun clampOnAllow(
-        permission: Nip55Permission,
-        decision: PermissionDecision
-    ): PermissionDuration? {
-        if (decision != PermissionDecision.ALLOW) return null
+    private fun clampOnAllow(permission: Nip55Permission): PermissionDuration? {
         if (permission.expiresAt != null || permission.durationMs != null) return null
         val effective = nip55EffectiveGrantDuration(
             permission.eventKindOrNull,
             PermissionDuration.FOREVER.toUniffi()
         ).toDomain()
-        return effective.takeIf { it != PermissionDuration.FOREVER }
+        return effective.takeIf { it.millis != null }
     }
 
     suspend fun setPermissionToAsk(
