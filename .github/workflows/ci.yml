@@ -218,9 +218,11 @@ jobs:
 
       # The console log names the failing task but not the failing test, and the
       # emulator's build dir does not survive the job, so a red run is otherwise
-      # undiagnosable without pushing a commit to re-run it.
+      # undiagnosable without pushing a commit to re-run it. Uploaded on a green
+      # run too: the task reports success whether it ran the suite or skipped it,
+      # and the report is the only place the executed count appears.
       - name: Upload instrumented test report
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: androidTest-report
