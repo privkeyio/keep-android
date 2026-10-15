@@ -121,12 +121,12 @@ class AndroidKeystoreStorage(
         load(null)
     }
 
-    private fun createEncryptedPrefs(name: String): SharedPreferences =
+    private fun createEncryptedPrefs(name: String): ReadablePrefs =
         KeystoreEncryptedPrefs.create(context, name)
 
-    private val prefs: SharedPreferences by lazy { createEncryptedPrefs("$PREFS_NAME$prefsSuffix") }
+    private val prefs: ReadablePrefs by lazy { createEncryptedPrefs("$PREFS_NAME$prefsSuffix") }
 
-    private val multiSharePrefs: SharedPreferences by lazy { createEncryptedPrefs("$MULTI_PREFS_NAME$prefsSuffix") }
+    private val multiSharePrefs: ReadablePrefs by lazy { createEncryptedPrefs("$MULTI_PREFS_NAME$prefsSuffix") }
 
     private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
 
@@ -206,11 +206,13 @@ class AndroidKeystoreStorage(
      * Resolves a [SecureStorage] method that uniffi generates *with* an error type.
      *
      * uniffi lowers only the declared error: `uniffiTraitInterfaceCallWithError` sends
-     * a [KeepMobileException] across as a call error and turns anything else into the
-     * same unexpected-callback error that panics the core. The faults here are raw
-     * crypto and argument exceptions, so without translating them the fallible methods
-     * panic for exactly the reason the infallible ones did. The declared exception is
-     * rethrown untouched, since the core already handles that one.
+     * a [KeepMobileException] across as a call error and anything else as an
+     * unexpected-callback error carrying a stack-trace string. Unlike the infallible
+     * methods that does not panic, because the core converts it through its own
+     * `From<UnexpectedUniFFICallbackError>`; it arrives as a generic error naming no
+     * fault the core can act on, where a [KeepMobileException.StorageException] is a
+     * storage failure it already handles. The faults here are raw crypto and argument
+     * exceptions, so they are translated. The declared exception is rethrown untouched.
      */
     private fun <T> fallibleStorage(what: String, block: () -> T): T =
         try {
@@ -237,7 +239,7 @@ class AndroidKeystoreStorage(
         return "$KEYSTORE_PREFIX$legacySanitized"
     }
 
-    private fun getSharePrefs(key: String): SharedPreferences =
+    private fun getSharePrefs(key: String): ReadablePrefs =
         createEncryptedPrefs("$PREFS_PREFIX${sanitizeKey(key)}$prefsSuffix")
 
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
@@ -509,7 +511,15 @@ class AndroidKeystoreStorage(
             return true
         }
 
-        val registryKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        // An unreadable registry must not reach the clear below: it would delete the
+        // active pointer because the registry could not be read, which is a write this
+        // method has no way to report, being one of the infallible ones. `true` is the
+        // same answer the outer guard gives for the same reason.
+        val registryKeys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable -> return true
+        }
         val hasRegistryShares = registryKeys.isNotEmpty()
 
         if (activeKey != null && !hasRegistryShares) {
@@ -731,13 +741,18 @@ class AndroidKeystoreStorage(
     }
 
     private fun addKeyToRegistry(key: String) {
-        val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        // Already listed: do not rewrite. The read above returns the default
-        // when the registry cannot be decrypted, so a rewrite in that state
-        // would persist a set containing only this key and deregister every
-        // other group. Their share files would survive while becoming invisible
-        // to listing, the active-share lookup and the has-share check, none of
-        // which rebuild it.
+        // This write replaces the whole registry, so it cannot proceed from a read that
+        // did not complete: the set would persist holding only this key and every other
+        // group would be deregistered. Their share files and Keystore aliases survive
+        // while becoming invisible to listing, the active-share lookup, the has-share
+        // check and the backup readability gate, none of which rebuild it. Reporting
+        // the fault is available here because this runs under a fallible method.
+        val existingKeys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("Share registry could not be read")
+        }
         if (existingKeys.contains(key)) return
         val registryUpdated = multiSharePrefs.edit()
             .putStringSet(KEY_ALL_SHARE_KEYS, existingKeys + key)
@@ -868,7 +883,17 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
         }
 
-        val existingKeys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        // Same rule as the add path: this replaces the whole registry, and an empty
+        // read would deregister every remaining group rather than just this one. The
+        // share data is already gone by now, so refusing leaves a registry entry with
+        // nothing behind it, which reads as absent rather than unreadable and so does
+        // not block a backup.
+        val existingKeys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("Share registry could not be read")
+        }
         val updatedKeys = existingKeys - key
         val activeKey = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
         val editor = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys)
@@ -905,7 +930,22 @@ class AndroidKeystoreStorage(
         }
 
     private fun activeShareKeyUnguarded(): String? {
-        val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+        val keys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            // An unreadable registry cannot say which groups exist, and treating that as
+            // "none" reports no active account for a device whose account is intact. The
+            // pointer is its own entry and still answers for itself, so fall back to it
+            // under the same fault rule the membership path below uses.
+            PrefRead.Unreadable -> {
+                val stored = multiSharePrefs.readString(KEY_ACTIVE_SHARE)
+                return if (stored is PrefRead.Found && storesShareData(stored.value, onFault = true)) {
+                    stored.value
+                } else {
+                    null
+                }
+            }
+        }
         if (keys.isEmpty()) return null
         val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
         if (active != null && keys.contains(active) && storesShareData(active, onFault = true)) return active

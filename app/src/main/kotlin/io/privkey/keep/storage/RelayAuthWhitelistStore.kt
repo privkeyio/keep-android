@@ -1,7 +1,6 @@
 package io.privkey.keep.storage
 
 import android.content.Context
-import android.content.SharedPreferences
 import io.privkey.keep.uniffi.nip55NormalizeRelayHost
 
 /**
@@ -19,7 +18,7 @@ class RelayAuthWhitelistStore(context: Context) {
         private const val MAX_ENTRIES = 256
     }
 
-    private val prefs: SharedPreferences = run {
+    private val prefs: ReadablePrefs = run {
         val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
         LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
     }
@@ -30,12 +29,20 @@ class RelayAuthWhitelistStore(context: Context) {
 
     /**
      * Normalizes [rawUrl] and adds it. Returns the normalized host on success, or null
-     * if the input is not a usable relay host or the list is full.
+     * if the input is not a usable relay host, the list is full, or the stored list
+     * could not be read.
      */
     @Synchronized
     fun add(rawUrl: String): String? {
         val host = nip55NormalizeRelayHost(rawUrl) ?: return null
-        val current = prefs.getStringSet(KEY_HOSTS, emptySet())?.toMutableSet() ?: mutableSetOf()
+        val current = when (val read = prefs.readStringSet(KEY_HOSTS)) {
+            is PrefRead.Found -> read.value.toMutableSet()
+            PrefRead.Absent -> mutableSetOf()
+            // This write replaces the whole entry, so going on from a read that failed
+            // would leave the list holding nothing but the host being added, deleting
+            // every relay the person had allowed.
+            PrefRead.Unreadable -> return null
+        }
         if (host !in current && current.size >= MAX_ENTRIES) return null
         current.add(host)
         if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return null
@@ -44,7 +51,13 @@ class RelayAuthWhitelistStore(context: Context) {
 
     @Synchronized
     fun remove(host: String) {
-        val current = prefs.getStringSet(KEY_HOSTS, emptySet())?.toMutableSet() ?: return
+        // Safe today only because the default is an empty set, which makes the removal
+        // below find nothing and skip the write. Saying it outright so the guarantee
+        // does not depend on that.
+        val current = when (val read = prefs.readStringSet(KEY_HOSTS)) {
+            is PrefRead.Found -> read.value.toMutableSet()
+            PrefRead.Absent, PrefRead.Unreadable -> return
+        }
         if (current.remove(host)) {
             prefs.edit().putStringSet(KEY_HOSTS, current).commit()
         }

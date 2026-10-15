@@ -19,8 +19,8 @@ object LegacyPrefsMigration {
     fun migrateIfNeeded(
         context: Context,
         prefsName: String,
-        newPrefs: SharedPreferences
-    ): SharedPreferences {
+        newPrefs: ReadablePrefs
+    ): ReadablePrefs {
         val migrationMarker = prefsName + MIGRATION_MARKER_SUFFIX
         val markerPrefs = context.getSharedPreferences("keep_migration_markers", Context.MODE_PRIVATE)
 
