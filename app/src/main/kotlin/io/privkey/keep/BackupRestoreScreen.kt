@@ -250,6 +250,22 @@ fun BackupRestoreScreen(
                                         val data = withContext(Dispatchers.IO) {
                                             try {
                                                 storage.setRequestIdContext(requestId)
+                                                // A backup takes its shares from the
+                                                // share list, which drops a share it
+                                                // cannot read and cannot report that it
+                                                // did. Nothing downstream rejects a
+                                                // short or empty set, so the file would
+                                                // encrypt and save and report success
+                                                // while holding less than the device
+                                                // owns. Refuse instead: a recovery
+                                                // artifact that silently recovers
+                                                // nothing is worse than no backup.
+                                                check(storage.shareStorageIsFullyReadable()) {
+                                                    "share storage is not fully readable"
+                                                }
+                                                check(storage.listAllShares().isNotEmpty()) {
+                                                    "no shares to back up"
+                                                }
                                                 keepMobile.createBackup(passphrase)
                                             } finally {
                                                 storage.clearRequestIdContext()
