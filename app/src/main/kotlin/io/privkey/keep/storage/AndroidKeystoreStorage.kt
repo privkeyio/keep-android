@@ -171,6 +171,57 @@ class AndroidKeystoreStorage(
     private fun shouldPreserveOnDecryptFailure(key: String): Boolean =
         key == DKG_MARKER_STORAGE_KEY
 
+    /**
+     * Resolves a [SecureStorage] read that uniffi generates without an error type.
+     *
+     * `hasShare`, `getShareMetadata`, `listAllShares` and `getActiveShareKey` are
+     * infallible across the FFI, so a throw from one of them is an unexpected-callback
+     * error rather than something the core can handle, and the core panics on it. The
+     * reads are not fault-free: resolving a key name goes through the file's HMAC key,
+     * whose own decrypt is unguarded, so a Keystore alias that no longer matches the
+     * stored ciphertext raises out of `contains` and every typed getter.
+     *
+     * [onFault] is per caller and is chosen for what cannot destroy anything, not for
+     * what looks like a neutral default. The fallible methods raise instead, through
+     * [fallibleStorage], which gives the core a declared error to act on.
+     *
+     * The catch is deliberately `Exception` rather than `Throwable`, to mirror the
+     * uniffi wrapper: an `Error` was never converted into a callback error there
+     * either, so widening this would only start swallowing failures that have nothing
+     * to do with a storage fault.
+     */
+    private fun <T> infallibleRead(what: String, onFault: T, read: () -> T): T =
+        try {
+            read()
+        } catch (e: Exception) {
+            // Ungated, unlike most logging in this file: this fault changes the answer
+            // of a read whose caller cannot be told it failed, so a release build going
+            // quiet here leaves nothing at all to go on. The class name is the whole
+            // diagnostic, so the throwable is left out rather than logged.
+            Log.e(TAG, "$what could not be completed: ${e::class.simpleName}")
+            onFault
+        }
+
+    /**
+     * Resolves a [SecureStorage] method that uniffi generates *with* an error type.
+     *
+     * uniffi lowers only the declared error: `uniffiTraitInterfaceCallWithError` sends
+     * a [KeepMobileException] across as a call error and turns anything else into the
+     * same unexpected-callback error that panics the core. The faults here are raw
+     * crypto and argument exceptions, so without translating them the fallible methods
+     * panic for exactly the reason the infallible ones did. The declared exception is
+     * rethrown untouched, since the core already handles that one.
+     */
+    private fun <T> fallibleStorage(what: String, block: () -> T): T =
+        try {
+            block()
+        } catch (e: KeepMobileException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "$what could not be completed: ${e::class.simpleName}")
+            throw KeepMobileException.StorageException("$what failed: ${e::class.simpleName}")
+        }
+
     private fun isDkgSecretKey(key: String): Boolean = key == DKG_SECRET_STORAGE_KEY
 
     private fun sanitizeKey(key: String): String {
@@ -380,7 +431,10 @@ class AndroidKeystoreStorage(
         requestIdContext.remove()
     }
 
-    override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) {
+    override fun storeShare(data: ByteArray, metadata: ShareMetadataInfo) =
+        fallibleStorage("storeShare") { storeShareUnguarded(data, metadata) }
+
+    private fun storeShareUnguarded(data: ByteArray, metadata: ShareMetadataInfo) {
         require(data.isNotEmpty()) { "Share data must not be empty" }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
@@ -414,7 +468,10 @@ class AndroidKeystoreStorage(
         }
     }
 
-    override fun loadShare(): ByteArray {
+    override fun loadShare(): ByteArray =
+        fallibleStorage("loadShare") { loadShareUnguarded() }
+
+    private fun loadShareUnguarded(): ByteArray {
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
         val cipher = consumePendingCipher(requestId, CipherRole.DECRYPT)
@@ -424,8 +481,27 @@ class AndroidKeystoreStorage(
         return data
     }
 
+    /**
+     * Whether any share is stored.
+     *
+     * A fault resolves to `true`, which is the opposite of what a read normally
+     * defaults to. `false` is a positive claim about what is durably on disk, and a
+     * read that failed cannot support it: the callers that take `false` as final go on
+     * to report "no key stored", which misdescribes a device whose share is intact and
+     * merely unreadable. `true` instead lets the next step reach a fallible method,
+     * which reports the real fault. Nothing destructive hangs on either answer: every
+     * share write is keyed by group pubkey, and the single-share slot this once wrote
+     * has no writer left in the core.
+     *
+     * `true` is not a guarantee the person is kept off the no-account screen, since
+     * that screen also appears when `getShareMetadata` resolves to null on the same
+     * fault. Surfacing an unreadable store to the person is its own change.
+     */
     @Synchronized
-    override fun hasShare(): Boolean {
+    override fun hasShare(): Boolean =
+        infallibleRead("hasShare", onFault = true) { hasShareUnguarded() }
+
+    private fun hasShareUnguarded(): Boolean {
         if (prefs.contains(KEY_SHARE_DATA)) return true
 
         val activeKey = getActiveShareKey()
@@ -443,13 +519,14 @@ class AndroidKeystoreStorage(
         return hasRegistryShares
     }
 
-    override fun getShareMetadata(): ShareMetadataInfo? {
-        if (prefs.contains(KEY_SHARE_DATA)) {
-            return readMetadataFromPrefs(prefs)
+    override fun getShareMetadata(): ShareMetadataInfo? =
+        infallibleRead("getShareMetadata", onFault = null) {
+            if (prefs.contains(KEY_SHARE_DATA)) {
+                readMetadataFromPrefs(prefs)
+            } else {
+                getActiveShareKey()?.let(::getShareMetadataByKey)
+            }
         }
-        val activeKey = getActiveShareKey() ?: return null
-        return getShareMetadataByKey(activeKey)
-    }
 
     private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
         val groupPubkeyB64 = sharePrefs.getString(KEY_SHARE_GROUP_PUBKEY, "") ?: ""
@@ -473,7 +550,9 @@ class AndroidKeystoreStorage(
         null
     }
 
-    override fun deleteShare() {
+    override fun deleteShare() = fallibleStorage("deleteShare") { deleteShareUnguarded() }
+
+    private fun deleteShareUnguarded() {
         val cleared = prefs.edit().clear().commit()
         if (!cleared) {
             throw KeepMobileException.StorageException("Failed to clear share metadata")
@@ -668,7 +747,10 @@ class AndroidKeystoreStorage(
         }
     }
 
-    override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
+    override fun storeShareByKey(key: String, data: ByteArray, metadata: ShareMetadataInfo) =
+        fallibleStorage("storeShareByKey") { storeShareByKeyUnguarded(key, data, metadata) }
+
+    private fun storeShareByKeyUnguarded(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         require(key.isNotBlank()) { "Share key must not be blank" }
         require(data.isNotEmpty()) { "Share data must not be empty" }
         if (isDkgSecretKey(key)) {
@@ -686,7 +768,10 @@ class AndroidKeystoreStorage(
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
 
-    override fun loadShareByKey(key: String): ByteArray {
+    override fun loadShareByKey(key: String): ByteArray =
+        fallibleStorage("loadShareByKey") { loadShareByKeyUnguarded(key) }
+
+    private fun loadShareByKeyUnguarded(key: String): ByteArray {
         require(key.isNotBlank()) { "Share key must not be blank" }
         if (isDkgSecretKey(key)) {
             return loadDkgSecret()
@@ -701,10 +786,36 @@ class AndroidKeystoreStorage(
         return loadShareByKeyWithCipher(cipher, key)
     }
 
-    override fun listAllShares(): List<ShareMetadataInfo> {
-        val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-        return keys.mapNotNull(::getShareMetadataByKey)
-    }
+    override fun listAllShares(): List<ShareMetadataInfo> =
+        infallibleRead("listAllShares", onFault = emptyList()) {
+            val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+            // Per share rather than per call: every share has its own file under its own
+            // Keystore alias, so one of them faulting must not drop the rest of the list.
+            // The outer guard still covers the registry read itself.
+            keys.mapNotNull { key ->
+                infallibleRead("share metadata read", onFault = null) { getShareMetadataByKey(key) }
+            }
+        }
+
+    /**
+     * Whether every share the registry lists can be read right now.
+     *
+     * [listAllShares] has to answer the core with a list and has no way to say
+     * "incomplete", so a share whose file will not decrypt is simply missing from it.
+     * That is right for showing accounts and wrong for anything that treats the list
+     * as the whole set, a backup above all: it would be built, encrypted and reported
+     * as saved while holding fewer shares than the device owns. Kotlin-only on
+     * purpose, since it answers a question the FFI trait cannot express.
+     *
+     * Covers a share whose name resolution faults, which is the fault that makes a
+     * share vanish from the list. A share listed but never stored reads as absent, not
+     * unreadable, and does not count: it would otherwise block backups forever.
+     */
+    fun shareStorageIsFullyReadable(): Boolean =
+        infallibleRead("share readability check", onFault = false) {
+            val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
+            keys.none { runCatching { getSharePrefs(it).contains(KEY_SHARE_DATA) }.isFailure }
+        }
 
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
@@ -712,7 +823,10 @@ class AndroidKeystoreStorage(
         return readMetadataFromPrefs(sharePrefs)
     }
 
-    override fun deleteShareByKey(key: String) {
+    override fun deleteShareByKey(key: String) =
+        fallibleStorage("deleteShareByKey") { deleteShareByKeyUnguarded(key) }
+
+    private fun deleteShareByKeyUnguarded(key: String) {
         require(key.isNotBlank()) { "Share key must not be blank" }
         if (isDkgSecretKey(key)) {
             deleteDkgSecret()
@@ -759,20 +873,44 @@ class AndroidKeystoreStorage(
     }
 
     @Synchronized
-    override fun getActiveShareKey(): String? {
+    override fun getActiveShareKey(): String? =
+        infallibleRead("getActiveShareKey", onFault = null) { activeShareKeyUnguarded() }
+
+    /**
+     * Whether one share's own file holds share data, with [onFault] deciding what an
+     * unreadable file answers, because the two callers need opposite answers.
+     *
+     * For the stored active pointer a fault answers `true`: that account is the active
+     * one, and falling through to the scan would silently sign as a different account,
+     * while NIP-55 grants are keyed on the calling package alone and are cleared only
+     * by an explicit switch. Keeping the pointer lets the caller's own fallible read
+     * report the fault instead.
+     *
+     * For the scan a fault answers `false`, so one unreadable share does not abandon
+     * the scan and hide a readable one further down the registry. `hasShare` uses
+     * neither: there the question is whether a share might exist at all.
+     */
+    private fun storesShareData(key: String, onFault: Boolean): Boolean =
+        infallibleRead("share presence check", onFault = onFault) {
+            getSharePrefs(key).contains(KEY_SHARE_DATA)
+        }
+
+    private fun activeShareKeyUnguarded(): String? {
         val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
         if (keys.isEmpty()) return null
         val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
-        if (active != null && keys.contains(active) &&
-            getSharePrefs(active).contains(KEY_SHARE_DATA)) return active
-        val fallbackKey = keys.sorted().firstOrNull { getSharePrefs(it).contains(KEY_SHARE_DATA) }
+        if (active != null && keys.contains(active) && storesShareData(active, onFault = true)) return active
+        val fallbackKey = keys.sorted().firstOrNull { storesShareData(it, onFault = false) }
             ?: return null
         setActiveShareKey(fallbackKey)
         return fallbackKey
     }
 
     @Synchronized
-    override fun setActiveShareKey(key: String?) {
+    override fun setActiveShareKey(key: String?) =
+        fallibleStorage("setActiveShareKey") { setActiveShareKeyUnguarded(key) }
+
+    private fun setActiveShareKeyUnguarded(key: String?) {
         if (key != null) require(key.isNotBlank()) { "Active share key must not be blank" }
         val editor = multiSharePrefs.edit()
         if (key != null) {
@@ -855,7 +993,13 @@ class AndroidKeystoreStorage(
         if (sharePrefs.getString(KEY_SHARE_IV, null) != shareIv) return
 
         addKeyToRegistry(groupPubkeyHex)
-        if (getActiveShareKey() == null) {
+        // The stored pointer rather than getActiveShareKey(): that resolver now hides a
+        // storage fault behind null, and repointing the active share on a fault would
+        // move the account out from under the NIP-55 grants, which are keyed on the
+        // calling package alone and are cleared only by an explicit account switch. A
+        // pointer left dangling is harmless by comparison, since the resolver heals it
+        // on the next read.
+        if (multiSharePrefs.getString(KEY_ACTIVE_SHARE, null) == null) {
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
         }
         prefs.edit().clear().apply()
