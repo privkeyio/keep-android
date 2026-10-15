@@ -90,6 +90,33 @@ interface Nip55PermissionDao {
     @Query("UPDATE nip55_permissions SET decision = :decision WHERE id = :id")
     suspend fun updateDecision(id: Long, decision: String)
 
+    // Moving a row to allow can tighten its lifetime, which has to land with the
+    // decision rather than after it: a row that is allow with its old unbounded
+    // lifetime is the thing being prevented, so the two are one write.
+    @Query("""
+        UPDATE nip55_permissions
+        SET decision = :decision, expiresAt = :expiresAt, createdAt = :createdAt,
+            createdAtElapsed = :createdAtElapsed, durationMs = :durationMs
+        WHERE id = :id
+    """)
+    suspend fun updateDecisionWithLifetime(
+        id: Long,
+        decision: String,
+        expiresAt: Long?,
+        createdAt: Long,
+        createdAtElapsed: Long,
+        durationMs: Long?
+    )
+
+    // A flip offers no duration, so a row moved to deny or ask drops whatever
+    // lifetime it was carrying rather than inheriting one nobody chose. An
+    // expiring refusal is swept by deleteExpired, which has no decision filter,
+    // and the resolver skips an expired row whatever its decision, so a bound
+    // left here ends the refusal rather than the grant. A deny the user time-boxed
+    // at the prompt is a different thing and is not written through here.
+    @Query("UPDATE nip55_permissions SET decision = :decision, expiresAt = NULL, durationMs = NULL WHERE id = :id")
+    suspend fun updateDecisionClearingLifetime(id: Long, decision: String)
+
     @Query("SELECT * FROM nip55_permissions WHERE id = :id")
     suspend fun getById(id: Long): Nip55Permission?
 
