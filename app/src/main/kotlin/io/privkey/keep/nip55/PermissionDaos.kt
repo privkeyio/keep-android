@@ -108,11 +108,12 @@ interface Nip55PermissionDao {
         durationMs: Long?
     )
 
-    // Deny and ask are never offered with a duration, so a flip to either drops
-    // whatever lifetime the row was carrying. An expiring refusal is swept by
-    // deleteExpired, which has no decision filter, and the resolver skips an
-    // expired row whatever its decision, so a bound left on a deny ends the
-    // refusal rather than the grant.
+    // A flip offers no duration, so a row moved to deny or ask drops whatever
+    // lifetime it was carrying rather than inheriting one nobody chose. An
+    // expiring refusal is swept by deleteExpired, which has no decision filter,
+    // and the resolver skips an expired row whatever its decision, so a bound
+    // left here ends the refusal rather than the grant. A deny the user time-boxed
+    // at the prompt is a different thing and is not written through here.
     @Query("UPDATE nip55_permissions SET decision = :decision, expiresAt = NULL, durationMs = NULL WHERE id = :id")
     suspend fun updateDecisionClearingLifetime(id: Long, decision: String)
 

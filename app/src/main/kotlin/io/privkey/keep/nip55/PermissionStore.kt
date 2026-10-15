@@ -531,7 +531,7 @@ class PermissionStore(private val database: Nip55Database) {
      * lifetime is already no looser than what a fresh grant of it would get, and
      * re-deriving one would hand back time the row had already spent.
      *
-     * A toggle carries no duration, so the duration asked for here is forever, which
+     * A flip carries no duration, so the duration asked for here is forever, which
      * is what a grant with no time box requests. The clamp itself stays in Rust.
      *
      * Tested on the millis rather than on forever: forever and just-this-time are both

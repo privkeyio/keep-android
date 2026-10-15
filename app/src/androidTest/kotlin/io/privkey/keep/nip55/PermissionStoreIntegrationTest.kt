@@ -631,7 +631,7 @@ class PermissionStoreIntegrationTest {
         // Same rule from the other side, and the lifetime here is the grant's own
         // rather than the clamp's. An ask that expires stops blocking both the policy
         // auto-approve and the whitelisted-relay auto-accept, which is the setting the
-        // user just switched on.
+        // user just switched on, and the flip that set it offered no duration.
         store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.ONE_HOUR)
         val row = store.getPermissionsForCaller("com.test.app").single()
         assertEquals("precondition: the grant is bounded", HOUR_MS, row.durationMs)
