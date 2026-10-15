@@ -107,7 +107,11 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         internal const val APP_OVERRIDE_MIGRATION_MARKER = "keep_sign_policy_app_overrides_migrated"
         const val GLOBAL_POLICY_KEY = "global_sign_policy"
 
-        internal const val APP_OVERRIDE_MARKER_PREFIX = APP_OVERRIDE_MIGRATION_MARKER + "_"
+        // Deliberately not derived from APP_OVERRIDE_MIGRATION_MARKER. Every key with this
+        // prefix is swept from the marker file once the run-wide marker lands, and that
+        // file is shared with LegacyPrefsMigration, whose keys are built from a prefs file
+        // name. A prefix spelled out here cannot be produced by that scheme by accident.
+        internal const val APP_OVERRIDE_MARKER_PREFIX = "keep_app_override_pkg_"
 
         /**
          * Marker key recording that the per-app copy was attempted for one package.
@@ -123,9 +127,12 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
          * also enumerate, so recovering a name is a dictionary lookup, and the number of
          * markers shows how many apps are pinned. It is here because the rest of this
          * app does not spell caller package names into storage, and because a stable
-         * digest is all a marker needs. The markers are deleted as soon as the run-wide
-         * marker makes them redundant, which is what actually keeps this from becoming a
-         * standing list.
+         * digest is all a marker needs.
+         *
+         * The markers are swept once the run-wide marker lands, which is the ordinary
+         * case. An install holding an expired override row that the sweep could not clear
+         * never completes a run, so it keeps its markers until that row goes, and the
+         * digest is the only thing covering them in the meantime.
          */
         internal fun appOverrideMarkerKey(callerPackage: String): String {
             val digest = MessageDigest.getInstance("SHA-256")

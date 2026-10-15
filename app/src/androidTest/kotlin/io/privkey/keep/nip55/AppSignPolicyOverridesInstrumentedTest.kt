@@ -712,7 +712,8 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         assertTrue(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
         // The per-package markers are only read before the run-wide one is set, so keeping
-        // them would leave a standing list of which apps the user pinned.
+        // them would leave a standing list of which apps the user pinned. That they are
+        // written at all is covered by aPartialRunKeepsThePerPackageMarkersItRecorded.
         assertTrue(
             "per-package markers should be gone: ${markers.all.keys}",
             markers.all.keys.none {
@@ -743,6 +744,42 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
         assertTrue(markers.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), false))
+        // The point of withholding the run-wide marker: the expired row must not come out
+        // of this recorded as attempted, or its tier becomes uncopyable once the window is
+        // refreshed. Covered end to end by aRefreshedWindowIsCopiedByALaterRun.
+        assertFalse(
+            markers.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(OTHER_PKG), false)
+        )
+    }
+
+    /**
+     * The positive control for withholding the run-wide marker on an expired row. The sweep
+     * can retain such a row, `setAppExpiry` can refresh its window while preserving the
+     * tier, and a later run then has to be able to copy it.
+     */
+    @Test
+    fun aRefreshedWindowIsCopiedByALaterRun() = runBlocking {
+        val now = System.currentTimeMillis()
+        val expired = Nip55AppSettings(
+            callerPackage = PKG,
+            expiresAt = now - 1_000L,
+            signPolicyOverride = SignPolicy.AUTO.ordinal,
+            createdAt = now - 2_000L,
+            createdAtElapsed = 0L,
+            durationMs = null
+        )
+        database.appSettingsDao().insertOrUpdate(expired)
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertNull("an expired row must not be copied", core.appOverride(PKG))
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
+
+        database.appSettingsDao().insertOrUpdate(expired.copy(expiresAt = now + 600_000L))
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(PKG))
     }
 
     /**
@@ -824,6 +861,29 @@ class AppSignPolicyOverridesInstrumentedTest {
             SignPolicySelection.MANUAL,
             SignPolicyStore(uncommittable).appOverride(PKG)
         )
+    }
+
+    /**
+     * A marker whose write never reaches the disk must not leave the package marked. The
+     * platform applies an edit to its in-memory map before it reports the disk result, and
+     * a write serializes the whole map, so a marker left behind would be persisted by the
+     * next successful write in the same run, for a package nothing was copied for.
+     */
+    @Test
+    fun aMarkerThatDoesNotPersistLeavesThePackageUnmarked() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        val unwritable = UncommittablePrefs()
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, unwritable)
+
+        assertFalse(
+            unwritable.getBoolean(SignPolicySelectionPrefs.appOverrideMarkerKey(PKG), false)
+        )
+        assertFalse(
+            unwritable.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)
+        )
+        // And nothing was copied, since the attempt could not be recorded.
+        assertNull(core.appOverride(PKG))
     }
 
     /**
@@ -948,4 +1008,101 @@ private class UnreadableStorage : SignPolicySelectionStorage {
     }
 
     override fun remove(key: String): Boolean = true
+}
+
+/**
+ * Prefs whose edits reach the in-memory map but never the disk, which is what the platform
+ * does when a `commit()` fails: it applies to memory first and its result reports only the
+ * durable write. Only booleans are exercised; the rest satisfies the interface.
+ */
+private class UncommittablePrefs : SharedPreferences {
+
+    private val values = HashMap<String, Any?>()
+
+    override fun getAll(): MutableMap<String, *> = HashMap(values)
+
+    override fun getString(key: String, defValue: String?): String? =
+        values[key] as? String ?: defValue
+
+    @Suppress("UNCHECKED_CAST")
+    override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
+        values[key] as? MutableSet<String> ?: defValues
+
+    override fun getInt(key: String, defValue: Int): Int = values[key] as? Int ?: defValue
+
+    override fun getLong(key: String, defValue: Long): Long = values[key] as? Long ?: defValue
+
+    override fun getFloat(key: String, defValue: Float): Float = values[key] as? Float ?: defValue
+
+    override fun getBoolean(key: String, defValue: Boolean): Boolean =
+        values[key] as? Boolean ?: defValue
+
+    override fun contains(key: String): Boolean = values.containsKey(key)
+
+    override fun edit(): SharedPreferences.Editor = FailingEditor()
+
+    override fun registerOnSharedPreferenceChangeListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener?
+    ) = Unit
+
+    override fun unregisterOnSharedPreferenceChangeListener(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener?
+    ) = Unit
+
+    private inner class FailingEditor : SharedPreferences.Editor {
+
+        private val pending = HashMap<String, Any?>()
+        private val removals = HashSet<String>()
+        private var clearRequested = false
+
+        private fun put(key: String, value: Any?): SharedPreferences.Editor {
+            pending[key] = value
+            return this
+        }
+
+        override fun putString(key: String, value: String?): SharedPreferences.Editor =
+            put(key, value)
+
+        override fun putStringSet(
+            key: String,
+            values: MutableSet<String>?
+        ): SharedPreferences.Editor = put(key, values)
+
+        override fun putInt(key: String, value: Int): SharedPreferences.Editor = put(key, value)
+
+        override fun putLong(key: String, value: Long): SharedPreferences.Editor = put(key, value)
+
+        override fun putFloat(key: String, value: Float): SharedPreferences.Editor = put(key, value)
+
+        override fun putBoolean(key: String, value: Boolean): SharedPreferences.Editor =
+            put(key, value)
+
+        override fun remove(key: String): SharedPreferences.Editor {
+            removals += key
+            return this
+        }
+
+        override fun clear(): SharedPreferences.Editor {
+            clearRequested = true
+            return this
+        }
+
+        override fun commit(): Boolean {
+            applyToMemory()
+            return false
+        }
+
+        override fun apply() {
+            applyToMemory()
+        }
+
+        private fun applyToMemory() {
+            if (clearRequested) values.clear()
+            removals.forEach { values.remove(it) }
+            values.putAll(pending)
+            pending.clear()
+            removals.clear()
+            clearRequested = false
+        }
+    }
 }
