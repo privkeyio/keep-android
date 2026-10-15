@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.uniffi.SigningRateLimiterStorage
 import io.privkey.keep.uniffi.StorageRead
 
@@ -35,13 +36,11 @@ class AndroidSigningRateLimiterStorage(context: Context) : SigningRateLimiterSto
 
     override fun load(key: String): StorageRead =
         runCatching {
-            // `contains` resolves the stored key name without decrypting its
-            // value, which separates "never written" from "present but could not
-            // be read". The backing store returns the default on a decrypt,
-            // key-derivation, or decode failure, so without this check every
-            // fault would masquerade as "no usage recorded".
+            // The store reports the case itself, so "never written" and "present
+            // but could not be read" arrive already separated rather than being
+            // inferred from a `contains` probe before the read.
             //
-            // What it does NOT cover: the lookup hashes the key name with the
+            // What that does NOT cover: the lookup hashes the key name with the
             // current derivation key, so an entry written under a previous key
             // epoch is invisible and still reports absent. Reaching that needs a
             // write failure that drops the store to its fallback key, followed by
@@ -49,10 +48,10 @@ class AndroidSigningRateLimiterStorage(context: Context) : SigningRateLimiterSto
             // the ceiling. Closing it belongs to the key-registry handling, not
             // here. During the failure itself writes report false, so the core
             // refuses regardless.
-            if (!prefs.contains(key)) {
-                StorageRead.Absent
-            } else {
-                prefs.getString(key, null)?.let { StorageRead.Found(it) } ?: StorageRead.Unavailable
+            when (val read = prefs.readString(key)) {
+                is PrefRead.Found -> StorageRead.Found(read.value)
+                PrefRead.Absent -> StorageRead.Absent
+                PrefRead.Unreadable -> StorageRead.Unavailable
             }
         }.getOrElse {
             warn("load failed for $key", it)
