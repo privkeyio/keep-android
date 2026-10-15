@@ -9,16 +9,33 @@ import android.content.SharedPreferences
  * default, which gives "nothing is stored" and "something is stored and could not be
  * read" the same answer. That is the right shape for a preference whose default is
  * genuinely correct, and the wrong one for a value that gates authentication or holds
- * the only copy of something: losing a Keystore alias, which an OS update, a restore to
- * new hardware or a lock-screen change can do, leaves the file intact and every value in
- * it undecryptable, so a default-on-fault read reports an intact store as an empty one.
+ * the only copy of something: a store holding real values then reports itself as a store
+ * holding nothing, and a caller that writes what it believes is a first value destroys
+ * what it could not read.
+ *
+ * A [ReadablePrefs] read is total, and deliberately so. Two different faults reach it:
+ * a value that will not decrypt, where the ordinary getter returns the default, and a
+ * name that will not resolve, where the getter raises instead, because resolving a name
+ * goes through the file's own HMAC key whose decrypt is unguarded. Losing a Keystore
+ * alias, which an OS update, a restore to new hardware or a lock-screen change can do,
+ * produces the second. Both answer [Unreadable] here, so a caller deciding what to do
+ * about an unreadable value never has to also handle an exception from the read.
  *
  * Mirrors the core's [io.privkey.keep.uniffi.StorageRead]. [Unreadable] is what its
  * `Unavailable` becomes when a read crosses the FFI.
  */
 sealed interface PrefRead<out T> {
-    /** Stored, decrypted and parsed. */
-    data class Found<out T>(val value: T) : PrefRead<T>
+    /**
+     * Stored, decrypted and parsed.
+     *
+     * [toString] is overridden rather than derived: the values this carries include the
+     * PIN hash, the database passphrase and share material, and a derived one would put
+     * the plaintext into any log line, `check` message or exception that ever
+     * interpolates a read. Equality stays derived, which is what tests compare on.
+     */
+    data class Found<out T>(val value: T) : PrefRead<T> {
+        override fun toString(): String = "Found(...)"
+    }
 
     /** Nothing is stored under this name, so a first use is the honest reading. */
     object Absent : PrefRead<Nothing>

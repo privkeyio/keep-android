@@ -643,6 +643,14 @@ object KeystoreEncryptedPrefs {
          * A parse that throws counts as unreadable rather than absent: the value is
          * there and this layer cannot produce it, which is the same answer a failed
          * decrypt gives.
+         *
+         * So does a name that resolved while its value is gone. [findEncryptedKey]
+         * returns a name only after finding a value at it, so reaching that needs a
+         * remove or clear landing between the two, and "the name is still indexed and
+         * the value is not there" is something this layer cannot account for rather
+         * than proof nothing was ever written. Both of these resolve to the caller's
+         * default through [getTypedValue] either way, so the distinction is only
+         * visible to a [ReadablePrefs] caller, where it is the safe direction.
          */
         private inline fun <T> readTyped(
             key: String,
@@ -650,7 +658,7 @@ object KeystoreEncryptedPrefs {
             crossinline parse: (String) -> T
         ): PrefRead<T> {
             val encKey = findEncryptedKey(key) ?: return PrefRead.Absent
-            val encValue = basePrefs.getString(encKey, null) ?: return PrefRead.Absent
+            val encValue = basePrefs.getString(encKey, null) ?: return PrefRead.Unreadable
             return try {
                 val decrypted = decrypt(secretKey, encValue, key)
                 if (decrypted.startsWith(prefix)) {
@@ -674,22 +682,46 @@ object KeystoreEncryptedPrefs {
             else -> defValue
         }
 
+        /**
+         * [readTyped] with name resolution inside the guard, which is what makes a
+         * [ReadablePrefs] read total.
+         *
+         * Resolving a name goes through this file's own HMAC key, and that decrypt is
+         * unguarded, so losing the Keystore alias makes every lookup here raise instead
+         * of answering. The ordinary getters let it propagate, which is what callers of
+         * this class have always seen and what the share storage above converts at the
+         * FFI boundary. A three-way read cannot propagate it: a caller choosing what to
+         * do about an unreadable value is exactly the caller that must not be handed an
+         * exception from the read instead. Exception rather than Throwable, since an
+         * Error is not a storage fault.
+         */
+        private inline fun <T> guardedRead(
+            key: String,
+            prefix: String,
+            crossinline parse: (String) -> T
+        ): PrefRead<T> = try {
+            readTyped(key, prefix, parse)
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Could not resolve key $key", e)
+            PrefRead.Unreadable
+        }
+
         override fun readString(key: String): PrefRead<String> =
-            readTyped(key, PREFIX_STRING) { it }
+            guardedRead(key, PREFIX_STRING) { it }
 
         override fun readStringSet(key: String): PrefRead<Set<String>> =
-            readTyped(key, PREFIX_STRING_SET) { raw ->
+            guardedRead(key, PREFIX_STRING_SET) { raw ->
                 raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toSet()
             }
 
         override fun readInt(key: String): PrefRead<Int> =
-            readTyped(key, PREFIX_INT) { it.toInt() }
+            guardedRead(key, PREFIX_INT) { it.toInt() }
 
         override fun readLong(key: String): PrefRead<Long> =
-            readTyped(key, PREFIX_LONG) { it.toLong() }
+            guardedRead(key, PREFIX_LONG) { it.toLong() }
 
         override fun readBoolean(key: String): PrefRead<Boolean> =
-            readTyped(key, PREFIX_BOOL) { it == "true" }
+            guardedRead(key, PREFIX_BOOL) { it == "true" }
 
         override fun getString(key: String, defValue: String?): String? =
             getTypedValue(key, defValue, PREFIX_STRING) { it }

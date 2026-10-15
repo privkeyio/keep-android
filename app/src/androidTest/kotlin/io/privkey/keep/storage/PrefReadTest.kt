@@ -7,18 +7,25 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.SecretKey
 
 /**
  * The typed getters answer with the caller's default whether a value was never stored or
- * is stored and will not decrypt, so a store whose Keystore alias is gone reports itself
- * as empty rather than as unreadable. [ReadablePrefs] reports which of the two it saw.
+ * is stored and will not decrypt, so a store holding real values reports itself as empty.
+ * [ReadablePrefs] reports which of the two it saw.
  *
- * These stage the second case the way the platform produces it, by corrupting a stored
- * value's ciphertext so its GCM tag check fails, and assert the ordinary getters still
- * behave exactly as before for every caller whose default is correct.
+ * Two faults have to arrive as the same answer here, because they do not through the
+ * getters: a value that will not decrypt, which a getter resolves to the default, and a
+ * name that will not resolve, which a getter raises on, since name resolution goes
+ * through the file's HMAC key and that decrypt is unguarded. These stage both, and assert
+ * the getters still behave exactly as they did for every caller whose default is correct.
  */
 @RunWith(AndroidJUnit4::class)
 class PrefReadTest {
@@ -52,12 +59,43 @@ class PrefReadTest {
      */
     private fun corruptStoredValue(storedName: String) {
         val stored = raw().getString(storedName, null)!!
-        val marked = stored.startsWith(BOUND_PREFIX)
+        assertTrue(
+            "this flips a byte of the body, so the value has to carry the marker it is written with",
+            stored.startsWith(BOUND_PREFIX)
+        )
+        val bytes = Base64.decode(stored.removePrefix(BOUND_PREFIX), Base64.NO_WRAP)
+        bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
+        raw().edit()
+            .putString(storedName, BOUND_PREFIX + Base64.encodeToString(bytes, Base64.NO_WRAP))
+            .commit()
+    }
+
+    /**
+     * A value written the way values were before they were bound to their key name, so it
+     * decrypts without the AAD step and its plaintext is whatever is passed here. The only
+     * way to stage a body that decrypts and then will not parse.
+     */
+    private fun unboundCiphertext(plaintext: String): String {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = keyStore.getKey("keep_prefs_$PREFS_NAME", null) as SecretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        return Base64.encodeToString(
+            cipher.iv + cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8)),
+            Base64.NO_WRAP
+        )
+    }
+
+    /**
+     * Breaks name resolution for the whole file the way losing the Keystore alias breaks
+     * it: the stored HMAC key no longer decrypts, so every lookup raises.
+     */
+    private fun breakNameResolution() {
+        val stored = raw().getString(HMAC_KEY, null)!!
         val bytes = Base64.decode(stored.removePrefix(BOUND_PREFIX), Base64.NO_WRAP)
         bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
         val corrupted = Base64.encodeToString(bytes, Base64.NO_WRAP)
         raw().edit()
-            .putString(storedName, if (marked) BOUND_PREFIX + corrupted else corrupted)
+            .putString(HMAC_KEY, if (stored.startsWith(BOUND_PREFIX)) BOUND_PREFIX + corrupted else corrupted)
             .commit()
     }
 
@@ -85,10 +123,24 @@ class PrefReadTest {
     }
 
     @Test
+    fun an_empty_set_round_trips_as_an_empty_set() {
+        // It stores as the bare type prefix with no body, which is the one value whose
+        // parse has nothing to split.
+        open().edit().putStringSet("s", mutableSetOf()).commit()
+
+        assertEquals(PrefRead.Found(emptySet<String>()), open().readStringSet("s"))
+    }
+
+    @Test
     fun a_name_that_was_never_written_reads_as_absent() {
         open().edit().putString("other", "v").commit()
 
-        assertEquals(PrefRead.Absent, open().readString("k"))
+        val prefs = open()
+        assertEquals(PrefRead.Absent, prefs.readString("k"))
+        assertEquals(PrefRead.Absent, prefs.readStringSet("k"))
+        assertEquals(PrefRead.Absent, prefs.readInt("k"))
+        assertEquals(PrefRead.Absent, prefs.readLong("k"))
+        assertEquals(PrefRead.Absent, prefs.readBoolean("k"))
     }
 
     @Test
@@ -110,13 +162,29 @@ class PrefReadTest {
     }
 
     @Test
-    fun a_value_that_will_not_parse_reads_as_unreadable_rather_than_absent() {
-        // The parse runs inside the read, so a well-formed decrypt carrying a number this
-        // type cannot hold is still the value being unusable, not the name being unused.
-        open().edit().putString("k", "not-a-number").commit()
-        assertEquals(PrefRead.Found("not-a-number"), open().readString("k"))
+    fun a_body_that_will_not_parse_reads_as_unreadable_rather_than_absent() {
+        // Needs a crafted value: a body reaches the parse only behind a matching type
+        // prefix, so anything written through the API fails the prefix check first and
+        // never exercises the parse at all.
+        val storedName = writeAndFindStoredName { it.edit().putInt("k", 7).commit() }
+        raw().edit().putString(storedName, unboundCiphertext("i:not-a-number")).commit()
 
         assertEquals(PrefRead.Unreadable, open().readInt("k"))
+    }
+
+    @Test
+    fun a_name_that_will_not_resolve_reads_as_unreadable_rather_than_raising() {
+        // What makes the type total. This fault is the one a lost Keystore alias produces,
+        // and it comes out of the getters as an exception rather than as a default, so a
+        // caller choosing what to do about an unreadable value would otherwise have to
+        // handle both an answer and a throw.
+        open().edit().putString("k", "v").commit()
+        breakNameResolution()
+
+        val prefs = open()
+        assertEquals(PrefRead.Unreadable, prefs.readString("k"))
+        assertEquals(PrefRead.Unreadable, prefs.readBoolean("k"))
+        assertThrows(Exception::class.java) { prefs.getString("k", null) }
     }
 
     @Test
@@ -126,6 +194,7 @@ class PrefReadTest {
         corruptStoredValue(writeAndFindStoredName { it.edit().putString("k", "v").commit() })
 
         val prefs = open()
+        assertTrue("the premise of Unreadable: the name is still indexed", prefs.contains("k"))
         assertNull(prefs.getString("k", null))
         assertEquals("fallback", prefs.getString("k", "fallback"))
         assertEquals(PrefRead.Unreadable, prefs.readString("k"))
@@ -133,6 +202,7 @@ class PrefReadTest {
 
     private companion object {
         const val PREFS_NAME = "pref_read_test"
+        const val HMAC_KEY = "__hmac_key__"
         // The marker KeystoreEncryptedPrefs puts on a value bound to its key name.
         const val BOUND_PREFIX = "v2:"
     }
