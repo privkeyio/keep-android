@@ -55,7 +55,7 @@ object KeystoreEncryptedPrefs {
     /** Refolds tolerated before an unreadable current registry stops being retried. */
     private const val MAX_FOLD_ATTEMPTS = 3
 
-    fun create(context: Context, prefsName: String): SharedPreferences {
+    fun create(context: Context, prefsName: String): ReadablePrefs {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
         val secretKey = getOrCreateKey(context, keyAlias)
         val basePrefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
@@ -171,7 +171,7 @@ object KeystoreEncryptedPrefs {
         private val basePrefs: SharedPreferences,
         private val secretKey: SecretKey,
         private val prefsName: String
-    ) : SharedPreferences {
+    ) : ReadablePrefs {
 
         private val keyCache = ConcurrentHashMap<String, String>()
         private val reverseKeyCache = ConcurrentHashMap<String, String>()
@@ -634,22 +634,62 @@ object KeystoreEncryptedPrefs {
             return encrypt(secretKey, prefixed, plainKey)
         }
 
+        /**
+         * The one read path. [getTypedValue] resolves anything but a value to the
+         * caller's default, which is what [SharedPreferences] promises; a caller that
+         * cannot treat an unreadable value as absent asks through [ReadablePrefs]
+         * instead and gets the case itself.
+         *
+         * A parse that throws counts as unreadable rather than absent: the value is
+         * there and this layer cannot produce it, which is the same answer a failed
+         * decrypt gives.
+         */
+        private inline fun <T> readTyped(
+            key: String,
+            prefix: String,
+            crossinline parse: (String) -> T
+        ): PrefRead<T> {
+            val encKey = findEncryptedKey(key) ?: return PrefRead.Absent
+            val encValue = basePrefs.getString(encKey, null) ?: return PrefRead.Absent
+            return try {
+                val decrypted = decrypt(secretKey, encValue, key)
+                if (decrypted.startsWith(prefix)) {
+                    PrefRead.Found(parse(decrypted.removePrefix(prefix)))
+                } else {
+                    PrefRead.Unreadable
+                }
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt typed value for key $key", e)
+                PrefRead.Unreadable
+            }
+        }
+
         private inline fun <T> getTypedValue(
             key: String,
             defValue: T,
             prefix: String,
             crossinline parse: (String) -> T
-        ): T {
-            val encKey = findEncryptedKey(key) ?: return defValue
-            val encValue = basePrefs.getString(encKey, null) ?: return defValue
-            return try {
-                val decrypted = decrypt(secretKey, encValue, key)
-                if (decrypted.startsWith(prefix)) parse(decrypted.removePrefix(prefix)) else defValue
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Failed to decrypt typed value for key $key", e)
-                defValue
-            }
+        ): T = when (val read = readTyped(key, prefix, parse)) {
+            is PrefRead.Found -> read.value
+            else -> defValue
         }
+
+        override fun readString(key: String): PrefRead<String> =
+            readTyped(key, PREFIX_STRING) { it }
+
+        override fun readStringSet(key: String): PrefRead<Set<String>> =
+            readTyped(key, PREFIX_STRING_SET) { raw ->
+                raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toSet()
+            }
+
+        override fun readInt(key: String): PrefRead<Int> =
+            readTyped(key, PREFIX_INT) { it.toInt() }
+
+        override fun readLong(key: String): PrefRead<Long> =
+            readTyped(key, PREFIX_LONG) { it.toLong() }
+
+        override fun readBoolean(key: String): PrefRead<Boolean> =
+            readTyped(key, PREFIX_BOOL) { it == "true" }
 
         override fun getString(key: String, defValue: String?): String? =
             getTypedValue(key, defValue, PREFIX_STRING) { it }
