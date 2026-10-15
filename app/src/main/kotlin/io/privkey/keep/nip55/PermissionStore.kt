@@ -499,9 +499,47 @@ class PermissionStore(private val database: Nip55Database) {
         }
         val storedRequestType = findRequestType(permission.requestType)
             ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
+        val clamped = clampOnAllow(permission, decision)
         logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false) {
-            dao.updateDecision(id, decision.toString())
+            if (clamped == null) {
+                dao.updateDecision(id, decision.toString())
+            } else {
+                @Suppress("DEPRECATION")
+                dao.updateDecisionWithLifetime(
+                    id = id,
+                    decision = decision.toString(),
+                    expiresAt = clamped.expiresAt(),
+                    createdAt = System.currentTimeMillis(),
+                    createdAtElapsed = SystemClock.elapsedRealtime(),
+                    durationMs = clamped.millis
+                )
+            }
         }
+    }
+
+    /**
+     * The lifetime a row has to be rewritten with when it is moved to allow, or null
+     * when its stored lifetime already stands.
+     *
+     * A grant gets the sensitive-kind clamp applied at grant time, but a row stores
+     * the lifetime it was given rather than the duration it was asked for, so flipping
+     * only the decision would carry an unclamped lifetime into an allow. A deny is
+     * never clamped, and rightly so, which is exactly how an unbounded row for a
+     * sensitive kind comes to exist. Only forever is unbounded, so an unbounded row is
+     * the single case to re-derive: every other lifetime is already no looser than
+     * what a fresh grant of it would get. The clamp itself stays in Rust.
+     */
+    private fun clampOnAllow(
+        permission: Nip55Permission,
+        decision: PermissionDecision
+    ): PermissionDuration? {
+        if (decision != PermissionDecision.ALLOW) return null
+        if (permission.expiresAt != null || permission.durationMs != null) return null
+        val effective = nip55EffectiveGrantDuration(
+            permission.eventKindOrNull,
+            PermissionDuration.FOREVER.toUniffi()
+        ).toDomain()
+        return effective.takeIf { it != PermissionDuration.FOREVER }
     }
 
     suspend fun setPermissionToAsk(

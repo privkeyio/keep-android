@@ -510,4 +510,118 @@ class PermissionStoreIntegrationTest {
         val decision = store.getPermissionDecision("com.test.app", Nip55RequestType.NIP44_DECRYPT, null)
         assertEquals(PermissionDecision.ALLOW, decision)
     }
+
+    @Test
+    fun flippingADenyForeverToAllowClampsASensitiveKind() = runBlocking {
+        // A deny is not clamped, which is correct, so this is how an unbounded row
+        // for a sensitive kind comes to exist. Flipping the decision alone would
+        // turn it into an auto-approve with no expiry, which no grant through the
+        // prompt can produce.
+        store.denyPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.FOREVER)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+        assertNull("precondition: the deny row is unbounded", row.expiresAt)
+        assertNull("precondition: the deny row is unbounded", row.durationMs)
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(PermissionDecision.ALLOW.toString(), updated.decision)
+        assertEquals(
+            "a sensitive-kind allow must carry the one-day clamp",
+            DAY_MS,
+            updated.durationMs
+        )
+        assertNotNull("the clamped row must also carry a wall-clock bound", updated.expiresAt)
+        assertTrue("the clamped row must be timed from the flip", updated.createdAtElapsed > 0)
+    }
+
+    @Test
+    fun flippingADenyForeverToAllowLeavesANonSensitiveKindUnbounded() = runBlocking {
+        // The clamp is only about sensitive kinds; an ordinary kind keeps the
+        // forever the user chose.
+        store.denyPermission("com.test.app", Nip55RequestType.SIGN_EVENT, PLAIN_KIND, PermissionDuration.FOREVER)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            PLAIN_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(PermissionDecision.ALLOW.toString(), updated.decision)
+        assertNull(updated.durationMs)
+        assertNull(updated.expiresAt)
+    }
+
+    @Test
+    fun flippingAnAlreadyBoundedRowDoesNotRestartItsClock() = runBlocking {
+        // Re-deriving the lifetime of a row that already has one would hand back
+        // time the row had already spent.
+        store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.ONE_HOUR)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.DENY,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertEquals(HOUR_MS, updated.durationMs)
+        assertEquals(row.createdAtElapsed, updated.createdAtElapsed)
+        assertEquals(row.createdAt, updated.createdAt)
+    }
+
+    @Test
+    fun aClampedFlipStopsBeingAnAutoApproveOnceItsDayIsUp() = runBlocking {
+        // What the clamp is for, observed through the resolution path rather than
+        // through the row: the grant has to stop applying.
+        store.denyPermission("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND, PermissionDuration.FOREVER)
+        val row = store.getPermissionsForCaller("com.test.app").single()
+        store.updatePermissionDecision(
+            row.id,
+            PermissionDecision.ALLOW,
+            "com.test.app",
+            Nip55RequestType.SIGN_EVENT,
+            SENSITIVE_KIND
+        )
+        assertEquals(
+            PermissionDecision.ALLOW,
+            store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, SENSITIVE_KIND)
+        )
+
+        val updated = store.getPermissionsForCaller("com.test.app").single()
+        assertTrue(
+            "the clamped grant must read as expired a day later",
+            updated.isExpired(
+                currentElapsed = updated.createdAtElapsed + DAY_MS + 1,
+                currentTimeMillis = updated.createdAt + DAY_MS + 1
+            )
+        )
+    }
+
+    private companion object {
+        const val SENSITIVE_KIND = 4
+        const val PLAIN_KIND = 1
+        const val HOUR_MS = 60 * 60 * 1000L
+        const val DAY_MS = 24 * HOUR_MS
+    }
 }
