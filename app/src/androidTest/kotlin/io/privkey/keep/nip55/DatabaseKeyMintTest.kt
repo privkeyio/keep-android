@@ -1,11 +1,14 @@
 package io.privkey.keep.nip55
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Base64
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import io.privkey.keep.storage.PrefRead
+import io.privkey.keep.storage.ReadablePrefs
 import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.storage.rawPrefs
@@ -15,6 +18,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -58,11 +62,10 @@ class DatabaseKeyMintTest {
 
     private fun open() = KeystoreEncryptedPrefs.create(context, PREFS)
 
-    private fun keyFor(prefKey: String = KEY, commit: Boolean = true, existingDatabase: File? = null) =
+    private fun keyFor(prefKey: String = KEY, existingDatabase: File? = null) =
         Nip55Database.getOrCreateKey(
             context,
             prefKey,
-            commit = commit,
             prefsName = PREFS,
             existingDatabase = existingDatabase,
         )
@@ -156,6 +159,30 @@ class DatabaseKeyMintTest {
             keyFor(existingDatabase = staged)
         }
         assertEquals("No stored $KEY for a database that exists", thrown.msg)
+        assertEquals("the refusal must not have minted one on its way out", PrefRead.Absent, open().readString(KEY))
+    }
+
+    @Test
+    fun the_production_passphrase_path_refuses_over_its_own_database_path() {
+        // The seam the other refusal tests use stages a file of their choosing, so this is
+        // what pins the path production actually derives.
+        val path = context.getDatabasePath(DB).apply { parentFile?.mkdirs() }
+        path.writeText("not empty")
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) {
+            Nip55Database.getOrCreateDbKey(context, prefsName = PREFS, dbName = DB)
+        }
+        assertEquals("No stored $KEY for a database that exists", thrown.msg)
+    }
+
+    @Test
+    fun a_minted_key_that_could_not_be_stored_is_reported_rather_than_returned() {
+        // Returning it would have the database created under a key nothing stored, which
+        // is exactly the state the refusal above turns into a permanent one.
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) {
+            Nip55Database.getOrCreateKey(context, KEY, prefsName = PREFS, prefs = FailingCommitPrefs(open()))
+        }
+        assertEquals("Minted $KEY could not be stored", thrown.msg)
     }
 
     @Test
@@ -184,13 +211,30 @@ class DatabaseKeyMintTest {
             .openHelperFactory(SupportOpenHelperFactory(ByteArray(32)))
             .build()
         try {
-            assertEquals("a built database nothing has used holds nothing", 0L, path.length())
+            assertFalse("a built database nothing has used has no file at all", path.exists())
 
             db.openHelper.writableDatabase
 
             assertTrue("first use is what creates the file", path.length() > 0L)
         } finally {
             db.close()
+        }
+    }
+
+    /** Preferences whose writes report failure, which a full disk produces. */
+    private class FailingCommitPrefs(private val delegate: ReadablePrefs) : ReadablePrefs by delegate {
+        override fun edit(): SharedPreferences.Editor = FailingEditor(delegate.edit())
+
+        private class FailingEditor(private val delegate: SharedPreferences.Editor) :
+            SharedPreferences.Editor by delegate {
+            // Returns itself rather than the delegate, or the chained commit would be the
+            // real one and the staged failure would never be reached.
+            override fun putString(key: String?, value: String?): SharedPreferences.Editor {
+                delegate.putString(key, value)
+                return this
+            }
+
+            override fun commit(): Boolean = false
         }
     }
 

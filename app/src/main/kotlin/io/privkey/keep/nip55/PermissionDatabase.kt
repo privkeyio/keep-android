@@ -162,23 +162,30 @@ abstract class Nip55Database : RoomDatabase() {
          * over it loses nothing, and that is the state a first run can legitimately leave
          * behind.
          *
+         * Only the passphrase passes [existingDatabase]. The audit secret needs the same
+         * refusal and not from this signal: the file is non-empty from first use onward
+         * whether or not any audit row was ever chained, so keying on it would refuse a
+         * lost secret with nothing to lose and leave the app permanently unopenable. The
+         * signal that matches is the audit anchor, which belongs with the anchor reads.
+         *
          * [prefsName] is open for tests, which cannot stage a fault in the shared store the
-         * rest of the suite reads. It selects the file and the prefs together, so the two
-         * cannot be paired wrongly.
+         * rest of the suite reads, and selects both the file and the store so the two
+         * cannot disagree. [prefs] wraps whatever [prefsName] selected, for the one fault
+         * a real store will not produce on demand: a write that reports failure.
          */
         @androidx.annotation.VisibleForTesting
         internal fun getOrCreateKey(
             context: Context,
             prefKey: String,
-            commit: Boolean = false,
             prefsName: String = PREFS_NAME,
             existingDatabase: java.io.File? = null,
+            prefs: ReadablePrefs? = null,
         ): ByteArray {
-            val prefs =
-                if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
+            val store = prefs
+                ?: if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
                 else KeystoreEncryptedPrefs.create(context, prefsName)
 
-            when (val stored = prefs.readString(prefKey)) {
+            when (val stored = store.readString(prefKey)) {
                 // Decoding is inside the refusal: a value that decrypts and is not base64
                 // is stored and unusable, which is the case this reports rather than
                 // raising whatever the decoder happens to raise. Length is deliberately
@@ -195,7 +202,7 @@ abstract class Nip55Database : RoomDatabase() {
                     throw KeepMobileException.StorageException("Stored $prefKey could not be read")
             }
 
-            val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, prefs)
+            val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, store)
             if (existing != null) {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
@@ -205,26 +212,41 @@ abstract class Nip55Database : RoomDatabase() {
             }
 
             val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
-            val editor = prefs.edit().putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
-            if (commit) editor.commit() else editor.apply()
+            // Both keys commit rather than apply, and the result is checked: a key handed
+            // back without reaching disk is one the database gets created under and then
+            // cannot be opened with, which is the state the refusal above makes permanent.
+            val written = store.edit()
+                .putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
+                .commit()
+            if (!written) {
+                throw KeepMobileException.StorageException("Minted $prefKey could not be stored")
+            }
             return newKey
         }
 
-        // commit, not apply: the passphrase has to be on disk before Room uses it to
-        // create the database, or process death in between leaves a database encrypted
-        // under a key nothing stored. It narrows the window rather than closing it, since
-        // a commit is not fsynced either; the refusal above is what catches the rest.
-        private fun getOrCreateDbKey(context: Context): ByteArray =
+        // The write is committed and checked before Room can use the key, which still
+        // narrows rather than closes the window: the preferences file is fsynced but the
+        // directory holding it is not, so a commit that returned true can roll back. The
+        // refusal above is what catches that.
+        //
+        // [dbName] is open for tests, so the path this derives is the one under test
+        // rather than a file staged somewhere else.
+        @androidx.annotation.VisibleForTesting
+        internal fun getOrCreateDbKey(
+            context: Context,
+            prefsName: String = PREFS_NAME,
+            dbName: String = DB_NAME,
+        ): ByteArray =
             getOrCreateKey(
                 context,
                 KEY_DB_PASSPHRASE,
-                commit = true,
-                existingDatabase = context.getDatabasePath(DB_NAME),
+                prefsName = prefsName,
+                existingDatabase = context.getDatabasePath(dbName),
             )
 
         private fun getOrCreateHmacKey(context: Context): ByteArray {
             hmacKey?.let { return it }
-            return getOrCreateKey(context, KEY_HMAC_SECRET, commit = true).also { hmacKey = it }
+            return getOrCreateKey(context, KEY_HMAC_SECRET).also { hmacKey = it }
         }
 
         fun getHmacKey(): ByteArray? = hmacKey
