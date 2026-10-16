@@ -5,6 +5,9 @@ import androidx.room.*
 import androidx.room.migration.Migration
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
 import io.privkey.keep.storage.LegacyPrefsMigration
+import io.privkey.keep.storage.PrefRead
+import io.privkey.keep.storage.ReadablePrefs
+import io.privkey.keep.uniffi.KeepMobileException
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.security.SecureRandom
 
@@ -39,7 +42,7 @@ abstract class Nip55Database : RoomDatabase() {
         private var appContext: Context? = null
 
         @Volatile
-        private var auditPrefs: android.content.SharedPreferences? = null
+        private var auditPrefs: ReadablePrefs? = null
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
@@ -140,15 +143,50 @@ abstract class Nip55Database : RoomDatabase() {
                 auditPrefs ?: KeystoreEncryptedPrefs.create(context, PREFS_NAME).also { auditPrefs = it }
             }
 
-        private fun getOrCreateKey(context: Context, prefKey: String, commit: Boolean = false): ByteArray {
-            val prefs = getEncryptedPrefs(context)
+        /**
+         * The database passphrase or the audit HMAC secret, minted on a first run.
+         *
+         * A key that is stored and will not decrypt raises instead of minting a
+         * replacement, because minting one is not a recovery: the database stays
+         * encrypted under the old key, nothing here deletes or rebuilds it, and a fresh
+         * passphrase cannot open it, so every later query fails with an opaque SQLite
+         * error rather than this one naming the cause. The write would also replace the
+         * stored ciphertext, which is what a restored Keystore alias would need. For the
+         * audit HMAC the same mint would silently restart a tamper-evident chain.
+         *
+         * [prefsName] is open for tests, which cannot stage a fault in the shared store the
+         * rest of the suite reads. It selects the file and the prefs together, so the two
+         * cannot be paired wrongly.
+         */
+        @androidx.annotation.VisibleForTesting
+        internal fun getOrCreateKey(
+            context: Context,
+            prefKey: String,
+            commit: Boolean = false,
+            prefsName: String = PREFS_NAME,
+        ): ByteArray {
+            val prefs =
+                if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
+                else KeystoreEncryptedPrefs.create(context, prefsName)
 
-            var existing = prefs.getString(prefKey, null)
-            if (existing != null) {
-                return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
+            when (val stored = prefs.readString(prefKey)) {
+                // Decoding is inside the refusal: a value that decrypts and is not base64
+                // is stored and unusable, which is the case this reports rather than
+                // raising whatever the decoder happens to raise. Length is deliberately
+                // not checked, since a key of another length is a key this has always
+                // accepted and rejecting it now would close a database that opens today.
+                is PrefRead.Found ->
+                    return runCatching {
+                        android.util.Base64.decode(stored.value, android.util.Base64.NO_WRAP)
+                    }.getOrElse {
+                        throw KeepMobileException.StorageException("Stored $prefKey could not be read")
+                    }
+                PrefRead.Absent -> Unit
+                PrefRead.Unreadable ->
+                    throw KeepMobileException.StorageException("Stored $prefKey could not be read")
             }
 
-            existing = LegacyPrefsMigration.migrateStringIfNeeded(context, PREFS_NAME, prefKey, prefs)
+            val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, prefs)
             if (existing != null) {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
@@ -234,9 +272,11 @@ abstract class Nip55Database : RoomDatabase() {
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
-                    appContext = context.applicationContext
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
+                    // After the reads, so a refusal does not leave the companion holding a
+                    // context for an instance that was never built.
+                    appContext = context.applicationContext
                     val factory = SupportOpenHelperFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,
