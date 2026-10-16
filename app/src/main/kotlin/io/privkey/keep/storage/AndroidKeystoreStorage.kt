@@ -864,6 +864,18 @@ class AndroidKeystoreStorage(
             return
         }
 
+        // Read the registry before destroying anything. This write replaces the whole
+        // registry, and an empty read would deregister every remaining group rather than
+        // just this one, so an unreadable registry has to stop the delete. Refusing after
+        // the share data was already cleared would be the worst of both: the share gone,
+        // its registry entry left behind, and the call reporting failure.
+        val existingKeys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("Share registry could not be read")
+        }
+
         val sharePrefs = getSharePrefs(key)
         val cleared = sharePrefs.edit().clear().commit()
         if (!cleared) {
@@ -883,17 +895,6 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
         }
 
-        // Same rule as the add path: this replaces the whole registry, and an empty
-        // read would deregister every remaining group rather than just this one. The
-        // share data is already gone by now, so refusing leaves a registry entry with
-        // nothing behind it, which reads as absent rather than unreadable and so does
-        // not block a backup.
-        val existingKeys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
-            is PrefRead.Found -> read.value
-            PrefRead.Absent -> emptySet()
-            PrefRead.Unreadable ->
-                throw KeepMobileException.StorageException("Share registry could not be read")
-        }
         val updatedKeys = existingKeys - key
         val activeKey = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
         val editor = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys)

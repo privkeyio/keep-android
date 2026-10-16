@@ -204,6 +204,28 @@ class UnreadableReadGuardTest {
     }
 
     @Test
+    fun a_refused_delete_leaves_the_share_data_in_place() {
+        // The registry is read before anything is destroyed, so a delete that cannot
+        // complete leaves the account intact rather than removing the share and then
+        // reporting failure with its registry entry still listed.
+        val storage = shareStorage()
+        val storedName = writeAndFindStoredName(context, SHARE_REGISTRY_PREFS) {
+            seedShare(storage, FIRST_GROUP, 1)
+        }
+        seedShare(storage, SECOND_GROUP, 2)
+        corruptStoredValue(context, SHARE_REGISTRY_PREFS, storedName)
+
+        assertThrows(KeepMobileException.StorageException::class.java) {
+            shareStorage().deleteShareByKey(SECOND_GROUP)
+        }
+
+        assertTrue(
+            "the share data must survive a delete that could not finish",
+            rawPrefs(context, shareStoreName(SECOND_GROUP)).all.isNotEmpty()
+        )
+    }
+
+    @Test
     fun an_unreadable_registry_leaves_the_active_share_pointer_alone() {
         // hasShare clears the pointer when the registry looks empty, and it is one of
         // the methods that cannot report a fault, so an unreadable registry has to stop
