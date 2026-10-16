@@ -260,12 +260,14 @@ abstract class Nip55Database : RoomDatabase() {
         internal fun readAuditAnchorState(): AuditAnchorState {
             // Set after both key reads in getInstance, so there is no anchor to read yet
             // rather than an unreadable one.
-            val ctx = appContext ?: return AuditAnchorState(null, flagged = false, unreadable = false)
+            val ctx = appContext
+                ?: return AuditAnchorState(null, flagged = false, clearPending = false, unreadable = false)
             val prefs = getEncryptedPrefs(ctx)
             return resolveAuditAnchorState(
                 prefs.readLong(KEY_AUDIT_ANCHOR_COUNT),
                 prefs.readString(KEY_AUDIT_ANCHOR_HASH),
-                prefs.readBoolean(KEY_AUDIT_TAMPER)
+                prefs.readBoolean(KEY_AUDIT_TAMPER),
+                prefs.readBoolean(KEY_AUDIT_CLEAR_PENDING)
             )
         }
 
@@ -290,19 +292,9 @@ abstract class Nip55Database : RoomDatabase() {
         // the anchor reset needs a Keystore-backed (attacker-unforgeable) breadcrumb to
         // prove the empty DB is a sanctioned clear rather than a wipe.
         //
-        // The one read here that keeps its default on an unreadable value, deliberately.
-        // Reading a marker that will not decrypt as a pending clear sends the reconcile
-        // into resetAuditAnchor against a table nobody emptied, which completes a clear
-        // nobody asked for and destroys the evidence this is all protecting. A marker
-        // that reads false leaves the mismatch to the next write instead, where neither
-        // resumable case covers an emptied table against a non-empty anchor. The read
-        // still goes through readBoolean so losing the Keystore alias answers here
-        // rather than raising out of the getter into an audit write.
-        fun isAuditClearPending(): Boolean {
-            val ctx = appContext ?: return false
-            return getEncryptedPrefs(ctx).readBoolean(KEY_AUDIT_CLEAR_PENDING) == PrefRead.Found(true)
-        }
-
+        // Read with the anchor, in readAuditAnchorState, which is also where the one
+        // asymmetry in these four reads is documented: a marker that will not decrypt is
+        // recorded as a fault but is not acted on as a pending clear.
         fun setAuditClearPending() {
             val ctx = appContext ?: return
             getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_CLEAR_PENDING, true).commit()

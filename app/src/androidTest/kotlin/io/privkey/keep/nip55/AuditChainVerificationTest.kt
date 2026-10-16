@@ -175,11 +175,106 @@ class AuditChainVerificationTest {
         assertTrue("expected Tampered but was $result", result is ChainVerificationResult.Tampered)
     }
 
+    private fun removeStored(vararg keys: String) {
+        val editor = KeystoreEncryptedPrefs.create(context, DB_PREFS).edit()
+        keys.forEach { editor.remove(it) }
+        editor.commit()
+    }
+
+    @Test
+    fun anUnreadableAnchorHashIsTamperRatherThanAnEmptyTail() = runBlocking {
+        // The read whose old default was "", which pinned a bogus anchor with a real
+        // count rather than reporting that the tail could not be read.
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        val tail = store.getAuditLog(10).sortedBy { it.id }.last().entryHash
+
+        corruptStored(KEY_ANCHOR_HASH) {
+            KeystoreEncryptedPrefs.create(context, DB_PREFS).edit().putString(KEY_ANCHOR_HASH, tail).commit()
+        }
+
+        val result = store.verifyAuditChain()
+        assertTrue("expected Tampered but was $result", result is ChainVerificationResult.Tampered)
+    }
+
+    @Test
+    fun anUnreadableClearMarkerIsRecordedInTheStickyFlag() = runBlocking {
+        // The marker is not acted on as a pending clear, but the fault is still written
+        // down, and the verify pass is where this one is seen: nothing else in the file
+        // ever rewrites that entry.
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        corruptStored(KEY_CLEAR_PENDING) {
+            KeystoreEncryptedPrefs.create(context, DB_PREFS).edit().putBoolean(KEY_CLEAR_PENDING, false).commit()
+        }
+
+        val result = store.verifyAuditChain()
+        assertTrue("expected Tampered but was $result", result is ChainVerificationResult.Tampered)
+        assertTrue("the fault has to be recorded where it is sticky", Nip55Database.readAuditAnchorState().flagged)
+    }
+
+    @Test
+    fun theEvidenceOutlivesTheEntryThatCarriedIt() = runBlocking {
+        // One write observes the corrupted anchor and records it in the sticky flag,
+        // after which the anchor advance replaces the corrupted entry with a readable
+        // one. Deleting the anchor outright then reads as a fresh install, and only the
+        // flag still says otherwise.
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        val count = store.getAuditLogCount().toLong()
+        corruptStored(KEY_ANCHOR_COUNT) {
+            KeystoreEncryptedPrefs.create(context, DB_PREFS).edit().putLong(KEY_ANCHOR_COUNT, count).commit()
+        }
+
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        removeStored(KEY_ANCHOR_COUNT, KEY_ANCHOR_HASH)
+
+        val result = store.verifyAuditChain()
+        assertTrue("expected Tampered but was $result", result is ChainVerificationResult.Tampered)
+    }
+
+    @Test
+    fun aFaultSurvivesTheResetThatFinishesAnInterruptedClear() = runBlocking {
+        // A clear whose anchor reset was lost to a crash leaves a readable pending marker
+        // over an empty table, and the reconcile that finishes it rewrites all four
+        // entries readably. A fault seen by the read before it has to outlive that, or
+        // the reconcile erases the only evidence of it before anything records it.
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        database.openHelper.writableDatabase.execSQL("DELETE FROM nip55_audit_log")
+        corruptStored(KEY_TAMPER) {
+            KeystoreEncryptedPrefs.create(context, DB_PREFS).edit().putBoolean(KEY_TAMPER, false).commit()
+        }
+        Nip55Database.setAuditClearPending()
+
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+
+        assertTrue(
+            "the reset rewrote the entry that carried the fault, so only the flag is left",
+            Nip55Database.readAuditAnchorState().flagged
+        )
+    }
+
+    @Test
+    fun anInstallWithNoAnchorAtAllStillSeedsRatherThanFlagging() = runBlocking {
+        // The benign direction, and the regression this change could most plausibly
+        // cause in the field: an install that predates the anchor has a populated table
+        // and none of the four entries, and has to be seeded rather than flagged.
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        removeStored(KEY_ANCHOR_COUNT, KEY_ANCHOR_HASH, KEY_TAMPER, KEY_CLEAR_PENDING)
+
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+
+        val seeded = Nip55Database.readAuditAnchorState()
+        assertEquals(2L, seeded.anchor?.entryCount)
+        assertEquals(store.getAuditLog(10).sortedBy { it.id }.last().entryHash, seeded.anchor?.latestEntryHash)
+    }
+
     private companion object {
         // Mirrors of the names PermissionDatabase stores these under. A rename there
         // leaves the fault staged on an entry nothing reads, which fails these loudly.
         const val DB_PREFS = "nip55_db_prefs"
         const val KEY_ANCHOR_COUNT = "audit_anchor_count"
+        const val KEY_ANCHOR_HASH = "audit_anchor_hash"
         const val KEY_TAMPER = "audit_tamper_detected"
         const val KEY_CLEAR_PENDING = "audit_clear_pending"
     }
