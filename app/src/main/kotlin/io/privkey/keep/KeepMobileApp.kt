@@ -247,6 +247,7 @@ class KeepMobileApp : Application() {
             }
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize PermissionStore: ${e::class.simpleName}")
+            initError = getString(R.string.keep_mobile_permission_store_unavailable_error)
         }
     }
 

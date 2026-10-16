@@ -13,6 +13,7 @@
     <string name="unknown_app">Unknown app</string>
     <string name="keep_mobile_init_failed_error">Failed to initialize application</string>
     <string name="keep_mobile_audit_log_unavailable_error">Signing audit log unavailable</string>
+    <string name="keep_mobile_permission_store_unavailable_error">Permission database unavailable</string>
     <string name="keep_mobile_not_initialized_error">KeepMobile not initialized</string>
     <string name="keep_mobile_storage_unavailable_error">Storage not available</string>
     <string name="keep_mobile_no_relays_error">No relays configured</string>

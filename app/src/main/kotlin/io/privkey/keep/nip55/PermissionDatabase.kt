@@ -154,8 +154,9 @@ abstract class Nip55Database : RoomDatabase() {
          * stored ciphertext, which is what a restored Keystore alias would need. For the
          * audit HMAC the same mint would silently restart a tamper-evident chain.
          *
-         * [prefsName] and [prefs] are open for tests, which cannot stage a fault in the
-         * shared store that the rest of the suite reads.
+         * [prefsName] is open for tests, which cannot stage a fault in the shared store the
+         * rest of the suite reads. It selects the file and the prefs together, so the two
+         * cannot be paired wrongly.
          */
         @androidx.annotation.VisibleForTesting
         internal fun getOrCreateKey(
@@ -163,11 +164,23 @@ abstract class Nip55Database : RoomDatabase() {
             prefKey: String,
             commit: Boolean = false,
             prefsName: String = PREFS_NAME,
-            prefs: ReadablePrefs = getEncryptedPrefs(context),
         ): ByteArray {
+            val prefs =
+                if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
+                else KeystoreEncryptedPrefs.create(context, prefsName)
+
             when (val stored = prefs.readString(prefKey)) {
+                // Decoding is inside the refusal: a value that decrypts and is not base64
+                // is stored and unusable, which is the case this reports rather than
+                // raising whatever the decoder happens to raise. Length is deliberately
+                // not checked, since a key of another length is a key this has always
+                // accepted and rejecting it now would close a database that opens today.
                 is PrefRead.Found ->
-                    return android.util.Base64.decode(stored.value, android.util.Base64.NO_WRAP)
+                    return runCatching {
+                        android.util.Base64.decode(stored.value, android.util.Base64.NO_WRAP)
+                    }.getOrElse {
+                        throw KeepMobileException.StorageException("Stored $prefKey could not be read")
+                    }
                 PrefRead.Absent -> Unit
                 PrefRead.Unreadable ->
                     throw KeepMobileException.StorageException("Stored $prefKey could not be read")
@@ -259,9 +272,11 @@ abstract class Nip55Database : RoomDatabase() {
         fun getInstance(context: Context): Nip55Database {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
-                    appContext = context.applicationContext
                     val passphrase = getOrCreateDbKey(context.applicationContext)
                     getOrCreateHmacKey(context.applicationContext)
+                    // After the reads, so a refusal does not leave the companion holding a
+                    // context for an instance that was never built.
+                    appContext = context.applicationContext
                     val factory = SupportOpenHelperFactory(passphrase)
                     Room.databaseBuilder(
                         context.applicationContext,

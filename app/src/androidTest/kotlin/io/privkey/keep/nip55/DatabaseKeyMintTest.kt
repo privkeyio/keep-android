@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.storage.rawPrefs
 import io.privkey.keep.storage.writeAndFindStoredName
@@ -37,45 +38,80 @@ class DatabaseKeyMintTest {
 
     private fun clear() {
         context.deleteSharedPreferences(PREFS)
-        // The legacy lookup leaves a marker keyed by the prefs name, and a marker left
-        // behind would skip the migration branch the mint sits behind.
-        context.deleteSharedPreferences("keep_migration_markers")
+        // The legacy lookup the mint sits behind is one-shot, gated by a marker in a file
+        // the whole app shares. Only the two this test sets are removed, since clearing
+        // the file would re-open migrations other tests have already run.
+        context.getSharedPreferences(
+            SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+            Context.MODE_PRIVATE
+        ).edit()
+            .remove("${PREFS}_${KEY}_migrated")
+            .remove("${PREFS}_${HMAC_KEY}_migrated")
+            .commit()
     }
 
     private fun open() = KeystoreEncryptedPrefs.create(context, PREFS)
 
-    private fun keyFor(prefs: io.privkey.keep.storage.ReadablePrefs) =
-        Nip55Database.getOrCreateKey(context, KEY, commit = true, prefsName = PREFS, prefs = prefs)
+    private fun keyFor(prefKey: String = KEY, commit: Boolean = true) =
+        Nip55Database.getOrCreateKey(context, prefKey, commit = commit, prefsName = PREFS)
 
-    private fun storeUnreadableKey(): String {
+    private fun storeUnreadableKey(prefKey: String = KEY): String {
         val storedName = writeAndFindStoredName(context, PREFS) {
-            open().edit().putString(KEY, Base64.encodeToString(ByteArray(32), Base64.NO_WRAP)).commit()
+            open().edit().putString(prefKey, Base64.encodeToString(ByteArray(32), Base64.NO_WRAP)).commit()
         }
         corruptStoredValue(context, PREFS, storedName)
         return storedName
     }
 
+    private fun storedValue(storedName: String) = rawPrefs(context, PREFS).getString(storedName, null)
+
     @Test
     fun a_first_run_mints_a_key_and_reads_the_same_one_back() {
-        val minted = keyFor(open())
+        val minted = keyFor()
 
         assertEquals(32, minted.size)
-        assertArrayEquals(minted, keyFor(open()))
+        assertArrayEquals(minted, keyFor())
     }
 
     @Test
     fun a_stored_key_is_returned_rather_than_replaced() {
         val key = ByteArray(32) { it.toByte() }
-        open().edit().putString(KEY, Base64.encodeToString(key, Base64.NO_WRAP)).commit()
+        val storedName = writeAndFindStoredName(context, PREFS) {
+            open().edit().putString(KEY, Base64.encodeToString(key, Base64.NO_WRAP)).commit()
+        }
+        val stored = storedValue(storedName)
 
-        assertArrayEquals(key, keyFor(open()))
+        assertArrayEquals(key, keyFor())
+
+        assertEquals(stored, storedValue(storedName))
     }
 
     @Test
     fun an_unreadable_key_is_reported_rather_than_minted_over() {
         storeUnreadableKey()
 
-        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { keyFor(open()) }
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { keyFor() }
+        assertEquals("Stored $KEY could not be read", thrown.msg)
+    }
+
+    @Test
+    fun an_unreadable_audit_secret_is_reported_rather_than_minted_over() {
+        // The same refusal on the other key this mints. Restarting the chain under a new
+        // secret leaves every entry written under the old one unverifiable, and nothing
+        // in the log saying why.
+        storeUnreadableKey(HMAC_KEY)
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { keyFor(HMAC_KEY) }
+        assertEquals("Stored $HMAC_KEY could not be read", thrown.msg)
+    }
+
+    @Test
+    fun a_key_that_decrypts_but_will_not_decode_is_reported_the_same_way() {
+        // Reported as unreadable rather than raising out of the decoder: it is a stored
+        // value that cannot be used, which is the case this function refuses on.
+        open().edit().putString(KEY, "not base64").commit()
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { keyFor() }
         assertEquals("Stored $KEY could not be read", thrown.msg)
     }
 
@@ -84,15 +120,16 @@ class DatabaseKeyMintTest {
         // What the refusal buys: the ciphertext survives, so a restore that brings the
         // Keystore alias back brings the database and the audit chain back with it.
         val storedName = storeUnreadableKey()
-        val corrupted = rawPrefs(context, PREFS).getString(storedName, null)
+        val corrupted = storedValue(storedName)
 
-        runCatching { keyFor(open()) }
+        runCatching { keyFor() }
 
-        assertEquals(corrupted, rawPrefs(context, PREFS).getString(storedName, null))
+        assertEquals(corrupted, storedValue(storedName))
     }
 
     private companion object {
         const val PREFS = "database_key_mint_test"
         const val KEY = "db_passphrase"
+        const val HMAC_KEY = "hmac_secret"
     }
 }

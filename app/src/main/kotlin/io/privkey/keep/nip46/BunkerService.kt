@@ -300,7 +300,17 @@ class BunkerService : Service() {
 
         startForeground(NOTIFICATION_ID, createNotification(isActive = false))
 
-        val db = Nip55Database.getInstance(this)
+        // Stored keys that will not decrypt fail the open rather than being minted over,
+        // and this runs on the main thread after startForeground, so an uncaught failure
+        // here would take the process down on every launch.
+        val db = runCatching { Nip55Database.getInstance(this) }.getOrNull()
+        if (db == null) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Permission database not available")
+            _status.value = BunkerStatus.ERROR
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         permissionStore = PermissionStore(db)
         eventLogStore = EventLogStore.getInstance(db)
 
