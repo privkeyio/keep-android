@@ -146,6 +146,21 @@ class Nip55Activity : FragmentActivity() {
     private fun handleIntent(intent: Intent) {
         if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
         if (pinStore?.requiresAuthentication() == true) return finishWithError("locked")
+        // An approval that cannot be recorded is refused rather than taken, so the
+        // foreground path answers a dead permission store exactly as the background
+        // path does (Nip55ContentProvider, same message). Every store use below is
+        // null-safe, so without this the activity would prompt, decide against no
+        // stored DENY row, hand over a signature, and skip the audit append, with
+        // get_public_key losing the risk-based escalation to PIN as well.
+        //
+        // That state is unreachable today for an unrelated reason: the store and the
+        // caller-verification store are assigned in that order out of one try block,
+        // so a store this is null leaves identifyCaller with nothing and the caller
+        // check below refuses first. That is an accident of two adjacent lines in
+        // KeepMobileApp, it reports a signer storage fault as a caller fault, and
+        // reordering them is a plausible change, so the refusal is stated here
+        // rather than inherited from it.
+        if (permissionStore == null) return finishWithError("store_unavailable")
         // The user has already committed a decision on the displayed set; do not
         // fold a late-arriving request into it. The activity is finishing.
         if (!gate.admitsAction) {
@@ -801,6 +816,7 @@ class Nip55Activity : FragmentActivity() {
         "signing_disabled" -> "Signing is disabled (kill switch is active)"
         "locked" -> "Keep is locked, please unlock it first"
         "unknown_caller" -> "Request from unverified app"
+        "store_unavailable" -> "Permission store is not available"
         "Storage unavailable" -> "Key storage is not available"
         "Storage error" -> "Failed to access stored keys"
         "No share stored" -> "No key is stored in Keep"
