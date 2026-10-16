@@ -20,13 +20,18 @@ import org.junit.runner.RunWith
  * moment lookup recovers, which for the rate limiter is a cooling-off the user
  * was told had been cleared.
  *
- * Names here are resolved through a registry this store keeps encrypted beside
- * the values, so the case the editor cannot answer on its own is a registry it
- * could not read. These tests stage exactly that, by flipping a byte of the
- * registry's ciphertext so it fails its GCM tag check the way a lost Keystore
- * alias would, and pin all three outcomes: uncertified absence reports false,
- * an entry that was found is still deleted and reports true, and a readable
- * registry still certifies absence.
+ * A lookup here resolves forward from the plaintext key, hashing it under the
+ * current derivation key and under the deterministic fallback epoch, so a miss
+ * is conclusive while this store holds the key the names on disk were derived
+ * with. The state where it is not is a file that already held entries when the
+ * key in use was minted: their names were derived with a key that is gone, so
+ * nothing can compute where they live, and a rollback of this file is what
+ * produces it, the same rollback that can later bring the old key back.
+ *
+ * These tests stage that by removing the stored derivation key out from under
+ * entries written with it, and pin the three outcomes: a miss in that state is
+ * refused, a miss in a store whose key accounts for its entries is a successful
+ * delete, and an entry that is found is deleted and reported either way.
  */
 @RunWith(AndroidJUnit4::class)
 class KeystoreEncryptedPrefsDeleteContractTest {
@@ -48,32 +53,29 @@ class KeystoreEncryptedPrefsDeleteContractTest {
 
     private fun reopen() = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
 
-    /**
-     * Seeds two keys and returns the registry's stored name.
-     *
-     * A test cannot name the registry: it is stored under a hash of a per-file
-     * derivation key it has no access to. What identifies it is being the one
-     * entry a commit rewrites rather than adds, since every commit writes the
-     * updated key list back.
-     */
-    private fun seedAndFindRegistryName(): String {
-        val prefs = reopen()
-        prefs.edit().putString(KEPT_KEY, "1").commit()
-        val before = rawPrefs(context, PREFS_NAME).all.toMap()
-        prefs.edit().putString("beta", "2").commit()
-        val after = rawPrefs(context, PREFS_NAME).all.toMap()
+    private fun raw() = rawPrefs(context, PREFS_NAME)
 
-        val rewritten = before.keys.filter { after[it] != before[it] }
-        assertEquals("expected exactly one rewritten entry, the registry: $rewritten", 1, rewritten.size)
-        return rewritten.first()
+    /**
+     * Writes an entry, then takes the store's derivation key away from it.
+     *
+     * The entry stays exactly where it was, at a name hashed with the key that
+     * is now gone. The next instance finds no key to load, mints a fresh one,
+     * and can no longer compute that name, which is the state a rollback of this
+     * file leaves behind: the values from before it, none of the key material
+     * written since.
+     */
+    private fun strandEntriesUnderALostKey() {
+        reopen().edit().putString(KEPT_KEY, "1").commit()
+        assertTrue("the store must have persisted a derivation key", raw().contains(HMAC_KEY_PREF))
+        raw().edit().remove(HMAC_KEY_PREF).commit()
     }
 
-    // The case the contract is about: nothing answered the lookup, and the index
-    // that says what this file holds could not be read, so absence was never
-    // established and the delete must not claim it.
+    // The case the contract is about: nothing answered the lookup, and this file
+    // holds entries whose names were derived with a key it no longer has, so a
+    // miss does not establish absence and the delete must not claim it.
     @Test
-    fun aRemovalThatFoundNothingIsRefusedWhileTheRegistryIsUnreadable() {
-        corruptStoredValue(context, PREFS_NAME, seedAndFindRegistryName())
+    fun aRemovalThatFoundNothingIsRefusedWhileEntriesPredateTheKey() {
+        strandEntriesUnderALostKey()
 
         assertFalse(
             "a removal that could not determine absence must not report success",
@@ -81,43 +83,97 @@ class KeystoreEncryptedPrefsDeleteContractTest {
         )
     }
 
-    // The same unreadable registry must not fail a delete that did resolve: the
-    // entry was found and dropped, so the deletion reached the durable store and
-    // the index was not needed to establish it.
+    // The stranded entry itself is the one the contract is protecting: its name
+    // cannot be computed any more, so the delete that would have removed it
+    // reports failure rather than reporting it gone while it waits on disk for
+    // the key to come back.
     @Test
-    fun aRemovalThatFoundTheEntryStillSucceedsWhileTheRegistryIsUnreadable() {
-        corruptStoredValue(context, PREFS_NAME, seedAndFindRegistryName())
+    fun aRemovalOfAStrandedEntryIsRefusedRatherThanReportedGone() {
+        strandEntriesUnderALostKey()
 
-        val prefs = reopen()
-        assertTrue(
-            "a removal that found its entry must still report success",
-            prefs.edit().remove(KEPT_KEY).commit()
+        assertFalse(
+            "an entry at an uncomputable name must not be reported deleted",
+            reopen().edit().remove(KEPT_KEY).commit()
         )
-        assertNull("the entry must be gone", reopen().getString(KEPT_KEY, null))
+        assertTrue("and it is still on disk", raw().all.keys.any { it != HMAC_KEY_PREF })
     }
 
-    // The baseline the refusal must not swallow: with the registry readable, a
-    // key that was never written is genuinely absent and deleting it succeeds.
+    // The baseline the refusal must not swallow: a store whose key accounts for
+    // what it holds resolves names conclusively, so a key that was never written
+    // is genuinely absent and deleting it succeeds.
     @Test
-    fun aRemovalOfAKeyThatWasNeverWrittenSucceedsWhileTheRegistryIsReadable() {
-        seedAndFindRegistryName()
+    fun aRemovalOfAKeyThatWasNeverWrittenSucceedsWhileTheKeyAccountsForTheEntries() {
+        reopen().edit().putString(KEPT_KEY, "1").commit()
 
         assertTrue(
-            "absence established against a readable registry is a successful delete",
+            "absence established under the store's own key is a successful delete",
             reopen().edit().remove("never_written").commit()
         )
     }
 
-    // A clear is the recovery path: it removes the unreadable registry with
-    // everything else, so it reports success and leaves the store certifying
-    // again rather than refusing every later delete.
+    // A found entry is deleted and reported deleted, which is what keeps the
+    // refusal from being a blanket failure on a faulted store.
     @Test
-    fun aClearRecoversTheStoreFromAnUnreadableRegistry() {
-        corruptStoredValue(context, PREFS_NAME, seedAndFindRegistryName())
+    fun aRemovalThatFoundTheEntryStillSucceeds() {
+        reopen().edit().putString(KEPT_KEY, "1").commit()
 
-        assertTrue("a clear must not be held back by the registry it wipes", reopen().edit().clear().commit())
+        assertTrue("a removal that found its entry must report success", reopen().edit().remove(KEPT_KEY).commit())
+        assertNull("the entry must be gone", reopen().getString(KEPT_KEY, null))
+    }
+
+    // The refusal has to outlive the instance that noticed: the open that mints
+    // a key over stranded entries is rarely the one a later delete runs on, and
+    // a restart that forgot would certify absence over the same entries.
+    @Test
+    fun theRefusalSurvivesTheInstanceThatNoticed() {
+        strandEntriesUnderALostKey()
+        // The mint happens here, in an instance that is then discarded.
+        assertFalse(reopen().edit().remove("never_written").commit())
+
+        assertFalse(
+            "a later instance, reading a key that is now its own, must still refuse",
+            reopen().edit().remove("never_written").commit()
+        )
+        assertFalse(
+            "and must still refuse for the stranded entry itself",
+            reopen().edit().remove(KEPT_KEY).commit()
+        )
+    }
+
+    // Recovery: a clear takes the stranded entries with everything else, so the
+    // store certifies again rather than refusing every later delete.
+    @Test
+    fun aClearRecoversTheStoreFromStrandedEntries() {
+        strandEntriesUnderALostKey()
+
+        assertTrue("a clear must not be held back by what it wipes", reopen().edit().clear().commit())
         assertTrue(
-            "deletes must certify again once the unreadable registry is gone",
+            "deletes must certify again once the stranded entries are gone",
+            reopen().edit().remove("never_written").commit()
+        )
+    }
+
+    // An unreadable registry is not this condition and must not be read as it.
+    // The registry lists plain key names, which is less than a caller passes to
+    // remove(), and a lookup never consults it; refusing on it would fail deletes
+    // that did establish absence. It is also the copy an attacker can write: the
+    // fallback registry's name is derivable from the APK and nothing drops a copy
+    // it cannot decode, so a guard there would latch on one planted value.
+    @Test
+    fun anUnreadableRegistryDoesNotRefuseARemoval() {
+        val prefs = reopen()
+        prefs.edit().putString(KEPT_KEY, "1").commit()
+        val before = raw().all.toMap()
+        prefs.edit().putString("beta", "2").commit()
+        // The registry cannot be named from here: it is stored under a hash of
+        // the per-file derivation key. What identifies it is being the one entry
+        // a commit rewrites rather than adds.
+        val rewritten = raw().all.toMap().let { after -> before.keys.filter { after[it] != before[it] } }
+        assertEquals("expected exactly one rewritten entry, the registry: $rewritten", 1, rewritten.size)
+        corruptStoredValue(context, PREFS_NAME, rewritten.first())
+
+        assertTrue(
+            "an unreadable index must not fail a delete the lookup could settle",
             reopen().edit().remove("never_written").commit()
         )
     }
@@ -125,5 +181,8 @@ class KeystoreEncryptedPrefsDeleteContractTest {
     private companion object {
         const val PREFS_NAME = "delete_contract_test_prefs"
         const val KEPT_KEY = "alpha"
+
+        /** The one entry this store keeps under its literal name. */
+        const val HMAC_KEY_PREF = "__hmac_key__"
     }
 }

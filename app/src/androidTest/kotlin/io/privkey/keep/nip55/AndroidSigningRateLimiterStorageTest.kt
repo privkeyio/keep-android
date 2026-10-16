@@ -3,7 +3,6 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.uniffi.StorageRead
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -83,12 +82,14 @@ class AndroidSigningRateLimiterStorageTest {
         assertEquals(StorageRead.Found("counter=1"), storage.load("com.example.a"))
     }
 
-    // The core reads a true from remove() as "that key is gone from the durable
-    // store" and clears its cooling-off on it. Names here resolve through a
-    // registry stored beside the values, so when that registry cannot be read a
-    // lookup that finds nothing has not established absence. Reporting success
-    // there would let a cooling-off entry survive the clear that was supposed to
-    // remove it and enforce again once lookup recovered.
+    // clear_cooling_off discards these results today, so this is about the store
+    // being truthful rather than about a caller acting on it: the same editor
+    // backs the sign-policy selection, whose remove() the core does consume, and
+    // a store that reports "I cannot see it" as "it is gone" would leave a
+    // cooling-off entry on disk to enforce again once lookup recovered. Names
+    // here are hashed with a per-file derivation key, so the state where a miss
+    // settles nothing is a file holding entries from a key that is gone, which
+    // is what taking the stored key away from them stages.
     @Test
     fun removeIsRefusedWhenAbsenceCannotBeEstablished() {
         storage.save("com.example.a", "counter=1")
@@ -97,18 +98,10 @@ class AndroidSigningRateLimiterStorageTest {
             "backing prefs must receive entries; empty means prefs-name drift",
             basePrefs.all.isNotEmpty()
         )
+        assertTrue("the store must have persisted a derivation key", basePrefs.contains(HMAC_KEY_PREF))
+        basePrefs.edit().remove(HMAC_KEY_PREF).commit()
 
-        // The registry cannot be named from here: it is stored under a hash of a
-        // per-file derivation key. What identifies it is being the one entry the
-        // next save rewrites rather than adds.
-        val before = basePrefs.all.toMap()
-        storage.save("com.example.b", "counter=2")
-        val rewritten = basePrefs.all.toMap().let { after -> before.keys.filter { after[it] != before[it] } }
-        assertEquals("expected exactly one rewritten entry, the registry: $rewritten", 1, rewritten.size)
-        corruptStoredValue(context, PREFS_NAME, rewritten.first())
-
-        // A fresh adapter, so the refusal comes from reading the broken registry
-        // rather than from state the instance that wrote it still holds.
+        // A fresh adapter, so it mints a key over entries it cannot name.
         val reopened = AndroidSigningRateLimiterStorage(context)
         assertFalse(
             "a removal that could not determine absence must report false",
@@ -116,7 +109,7 @@ class AndroidSigningRateLimiterStorageTest {
         )
         assertTrue(
             "a removal that found its entry must still report true",
-            reopened.remove("com.example.a")
+            reopened.save("com.example.b", "counter=2").let { reopened.remove("com.example.b") }
         )
     }
 
@@ -209,5 +202,8 @@ class AndroidSigningRateLimiterStorageTest {
 
     companion object {
         private const val PREFS_NAME = "nip55_rate_limiter"
+
+        /** The one entry the encrypted store keeps under its literal name. */
+        private const val HMAC_KEY_PREF = "__hmac_key__"
     }
 }
