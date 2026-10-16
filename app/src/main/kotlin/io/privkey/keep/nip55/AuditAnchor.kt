@@ -1,11 +1,112 @@
 package io.privkey.keep.nip55
 
+import io.privkey.keep.storage.PrefRead
+
 /**
  * Tamper-resistant tail marker for the NIP-55 audit chain, persisted OUTSIDE Room
  * (in the Keystore-backed encrypted prefs that also hold the HMAC key) so an
  * attacker with on-device Room write access cannot forge it.
  */
 data class AuditAnchor(val latestEntryHash: String, val entryCount: Long)
+
+/**
+ * The four stored values that carry the anchor, as one read of them leaves it.
+ *
+ * [unreadable] is the case the ordinary getters cannot report. A value that is on disk
+ * and will not decrypt reads as the caller's default, which here means "nothing is
+ * pinned" for the anchor and "nothing seen" for the two markers, and those are the
+ * answer an attacker with write access to the preferences file wants: an unpinned anchor
+ * is re-pinned to whatever the audit table now holds, and a cleared flag drops the
+ * evidence that the table was ever mutated out of band. Corrupting one entry takes the
+ * same access as deleting it, so neither may be read as an absence.
+ *
+ * [flagged] is the stored flag alone, so the append path can tell evidence it has
+ * already recorded from evidence it still has to write down.
+ *
+ * The rule is not applied to an absent tamper flag, because [setAuditAnchor] writes only
+ * the two anchor halves and [resetAuditAnchor] is the only writer that touches all four,
+ * so a pinned anchor beside an absent flag is the steady state of every install that has
+ * never flagged a tamper and never cleared its history. Deleting the flag entry after it
+ * was set therefore reads as that state, which is a hole this cannot close from the read
+ * side; closing it means holding the four values in one entry so an absence is not
+ * representable. Tracked separately.
+ */
+internal data class AuditAnchorState(
+    val anchor: AuditAnchor?,
+    val flagged: Boolean,
+    val clearPending: Boolean,
+    val unreadable: Boolean
+) {
+    val tamperDetected: Boolean get() = flagged || unreadable
+}
+
+/**
+ * Decides the anchor from the four reads, treating one that produced no value as tamper
+ * rather than as a fresh install.
+ *
+ * Both halves of the anchor are written in a single commit and no writer stores a
+ * negative count, so a pair that is neither both absent nor both present is a pair no
+ * writer here produced. Only both-absent is a genuine absence: the first launch on an
+ * install that predates the anchor, which the caller trust-on-first-use seeds.
+ *
+ * [clearMarker] is the one value whose fault does not change what the caller does with
+ * it: only a stored true is a pending clear. Acting on a marker that will not decrypt
+ * sends the reconcile into resetAuditAnchor against a table nobody emptied, which
+ * completes a clear nobody asked for and destroys the anchor evidence of the truncation
+ * that left the table empty, and an emptied table against a pinned anchor is caught by
+ * the next write anyway, since neither resumable case covers an empty tail against a
+ * non-empty anchor hash. It is still evidence, so it counts toward [unreadable]: not
+ * acting on a fault and not recording it are separate decisions, and nothing else in the
+ * file ever rewrites that entry.
+ *
+ * Pure function: no storage, no native calls, fully unit-testable.
+ */
+internal fun resolveAuditAnchorState(
+    count: PrefRead<Long>,
+    hash: PrefRead<String>,
+    tamperFlag: PrefRead<Boolean>,
+    clearMarker: PrefRead<Boolean>
+): AuditAnchorState {
+    val flagged = tamperFlag is PrefRead.Found && tamperFlag.value
+    val clearPending = clearMarker is PrefRead.Found && clearMarker.value
+    val markerFault = tamperFlag is PrefRead.Unreadable || clearMarker is PrefRead.Unreadable
+    if (count is PrefRead.Absent && hash is PrefRead.Absent) {
+        return AuditAnchorState(null, flagged, clearPending, markerFault)
+    }
+    if (count is PrefRead.Found && hash is PrefRead.Found && count.value >= 0L) {
+        return AuditAnchorState(AuditAnchor(hash.value, count.value), flagged, clearPending, markerFault)
+    }
+    return AuditAnchorState(null, flagged, clearPending, unreadable = true)
+}
+
+/**
+ * Whether the rows an audit write is about to change disagree with the anchor they were
+ * pinned against, which is out-of-band mutation.
+ *
+ * An unreadable read takes precedence over every healing case below: those re-pin to an
+ * anchor they have read, and a fault means there is no anchor to heal toward.
+ *
+ * Pure function over the row facts the caller supplies: no storage, no DAO.
+ */
+internal fun anchorMismatchVerdict(
+    state: AuditAnchorState,
+    entryCount: Long,
+    latestEntryHash: String,
+    newestPreviousHash: String?
+): Boolean {
+    if (state.unreadable) return true
+    val anchor = state.anchor ?: return false
+    if (latestEntryHash == anchor.latestEntryHash && entryCount == anchor.entryCount) return false
+    // A legit append whose post-commit anchor advance was lost to a crash leaves the DB
+    // one row ahead, chained onto the anchored tail. Re-pin without flagging.
+    if (isResumableAppend(anchor, entryCount, newestPreviousHash, latestEntryHash, rustIntact = true)) {
+        return false
+    }
+    // Likewise a crash-interrupted head prune: fewer rows but the same tail. The Rust
+    // walk at verify time is authoritative for the rustIntact assumption here.
+    if (isResumablePrune(anchor, entryCount, latestEntryHash, rustIntact = true)) return false
+    return true
+}
 
 /**
  * Reconciles the Rust chain walk against the stored [anchor] to catch attacks the

@@ -18,11 +18,10 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         buildLog: (previousHash: String?) -> Nip55AuditLog,
         extraInTransaction: (suspend () -> Unit)? = null
     ) = mutex.withLock {
-        reconcilePendingClear()
-        val anchor = Nip55Database.getAuditAnchor()
+        val state = reconcile()
         var tamper = false
         database.withTransaction {
-            tamper = anchorMismatch(anchor)
+            tamper = anchorMismatch(state)
             extraInTransaction?.invoke()
             auditDao.insert(buildLog(auditDao.getLastEntryHash()))
         }
@@ -34,11 +33,10 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     // mismatch against the anchor is out-of-band tampering. Re-pin to the post-prune
     // state regardless so the legitimately shrunk count is recorded.
     suspend fun prune(before: Long, extraInTransaction: suspend () -> Unit) = mutex.withLock {
-        reconcilePendingClear()
-        val anchor = Nip55Database.getAuditAnchor()
+        val state = reconcile()
         var tamper = false
         database.withTransaction {
-            tamper = anchorMismatch(anchor)
+            tamper = anchorMismatch(state)
             auditDao.deleteOlderThan(before)
             extraInTransaction()
         }
@@ -47,7 +45,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     }
 
     // Two-phase clear: the pending marker is committed before the wipe so a crash
-    // between the DB commit and the anchor reset is recoverable (see reconcilePendingClear).
+    // between the DB commit and the anchor reset is recoverable (see reconcile).
     suspend fun clear(extraInTransaction: (suspend () -> Unit)? = null) = mutex.withLock {
         Nip55Database.setAuditClearPending()
         database.withTransaction {
@@ -60,12 +58,12 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     // Atomic read of rows + anchor + tamper flag under the same lock every write takes,
     // so no append/prune/clear can interleave between the reads and skew the snapshot.
     suspend fun snapshot(): Triple<List<Nip55AuditLog>, AuditAnchor?, Boolean> = mutex.withLock {
-        reconcilePendingClear()
-        Triple(
-            auditDao.getAllOrdered(),
-            Nip55Database.getAuditAnchor(),
-            Nip55Database.isAuditTamperDetected()
-        )
+        val state = reconcile()
+        // The verify pass sees an unreadable read too, and the next write is not
+        // guaranteed to see it again: the only other record is the corrupted entry
+        // itself, which whoever wrote it can replace. Record it where it is sticky.
+        if (state.unreadable) Nip55Database.setAuditTamperDetected()
+        Triple(auditDao.getAllOrdered(), state.anchor, state.tamperDetected)
     }
 
     // Compare-and-set the anchor under the write lock: only pin to (expectedHash, expectedCount)
@@ -79,35 +77,36 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         }
     }
 
-    // Finish a clear() whose post-commit anchor reset was lost to a crash: an empty DB
-    // means the wipe committed, so complete the reset; a non-empty DB means the clear
-    // transaction rolled back, so just drop the (attacker-unforgeable) marker.
-    private suspend fun reconcilePendingClear() {
-        if (!Nip55Database.isAuditClearPending()) return
-        if (auditDao.getCount() == 0) {
-            Nip55Database.resetAuditAnchor()
-        } else {
+    // One read of the four anchor values, then finish a clear() whose post-commit anchor
+    // reset was lost to a crash: an empty DB means the wipe committed, so complete the
+    // reset; a non-empty DB means the clear transaction rolled back, so just drop the
+    // (attacker-unforgeable) marker.
+    //
+    // The reset rewrites all four entries readably, so the state it leaves has to be
+    // read again, and a fault the first read saw has to be carried across it. Otherwise
+    // the reconcile erases the only evidence of that fault before anything records it.
+    private suspend fun reconcile(): AuditAnchorState {
+        val state = Nip55Database.readAuditAnchorState()
+        if (!state.clearPending) return state
+        if (auditDao.getCount() != 0) {
             Nip55Database.clearAuditClearPending()
+            return state
         }
+        Nip55Database.resetAuditAnchor()
+        val afterReset = Nip55Database.readAuditAnchorState()
+        return if (state.unreadable) afterReset.copy(unreadable = true) else afterReset
     }
 
-    private suspend fun anchorMismatch(anchor: AuditAnchor?): Boolean {
-        if (anchor == null) return false
-        val tail = auditDao.getLastEntryHash() ?: ""
-        val count = auditDao.getCount().toLong()
-        if (tail == anchor.latestEntryHash && count == anchor.entryCount) return false
-        // A legit append whose post-commit anchor advance was lost to a crash leaves the
-        // DB one row ahead, chained onto the anchored tail. Re-pin without flagging.
-        if (isResumableAppend(anchor, count, auditDao.getLastPreviousHash(), tail, rustIntact = true)) {
-            return false
-        }
-        // Likewise a crash-interrupted head prune: fewer rows but the same tail. The Rust
-        // walk at verify time is authoritative for the rustIntact assumption here.
-        if (isResumablePrune(anchor, count, tail, rustIntact = true)) {
-            return false
-        }
-        return true
-    }
+    // The row facts the verdict is over. An unreadable read is already tamper, and the
+    // caller records it in the sticky flag: the anchor advance that follows every write
+    // re-pins the corrupted entry to a readable one, so a write pass sees it once.
+    private suspend fun anchorMismatch(state: AuditAnchorState): Boolean =
+        anchorMismatchVerdict(
+            state,
+            auditDao.getCount().toLong(),
+            auditDao.getLastEntryHash() ?: "",
+            auditDao.getLastPreviousHash()
+        )
 
     private suspend fun advanceAnchor() {
         Nip55Database.setAuditAnchor(

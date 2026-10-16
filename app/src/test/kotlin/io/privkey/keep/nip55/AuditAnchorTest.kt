@@ -1,7 +1,9 @@
 package io.privkey.keep.nip55
 
+import io.privkey.keep.storage.PrefRead
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -266,4 +268,274 @@ class AuditAnchorTest {
         // wipe by state alone, so it is not excused here (the clear marker handles clears).
         assertFalse(isResumablePrune(AuditAnchor("hashB", 5L), 0L, "", rustIntact = true))
     }
+
+    @Test
+    fun anchorIsPinnedWhenBothHalvesRead() {
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertEquals(AuditAnchor("hashB", 2L), state.anchor)
+        assertFalse(state.unreadable)
+        assertFalse(state.tamperDetected)
+    }
+
+    @Test
+    fun resetAnchorIsPinnedRatherThanTreatedAsAbsent() {
+        // What resetAuditAnchor writes. The zero anchor is a pin: it says the table is
+        // empty, which is what makes a row appearing under it detectable.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(0L),
+            PrefRead.Found(""),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertEquals(AuditAnchor("", 0L), state.anchor)
+        assertFalse(state.tamperDetected)
+    }
+
+    @Test
+    fun bothHalvesAbsentIsAFirstRunRatherThanTamper() {
+        // The only absence any writer here produces, and the one the caller seeds from.
+        val state = resolveAuditAnchorState(PrefRead.Absent, PrefRead.Absent, PrefRead.Absent, PrefRead.Absent)
+
+        assertNull(state.anchor)
+        assertFalse(state.unreadable)
+        assertFalse(state.tamperDetected)
+    }
+
+    @Test
+    fun unreadableCountIsTamperRatherThanAFirstRun() {
+        // The whole point: reading it as unpinned has the caller re-pin the anchor to
+        // whatever the table now holds, which is what an attacker who corrupted this
+        // entry after truncating the table is asking for.
+        val state = resolveAuditAnchorState(
+            PrefRead.Unreadable,
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.unreadable)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun unreadableHashIsTamper() {
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Unreadable,
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun halfAbsentPairIsTamper() {
+        // Both halves are written in one commit, so one of them alone is a pair that no
+        // writer here produced. Deleting an entry takes the same access as corrupting it.
+        assertTrue(
+            resolveAuditAnchorState(
+                PrefRead.Absent,
+                PrefRead.Found("hashB"),
+                PrefRead.Found(false),
+                PrefRead.Found(false)
+            ).tamperDetected
+        )
+        assertTrue(
+            resolveAuditAnchorState(
+                PrefRead.Found(2L),
+                PrefRead.Absent,
+                PrefRead.Found(false),
+                PrefRead.Found(false)
+            ).tamperDetected
+        )
+    }
+
+    @Test
+    fun negativeCountIsTamper() {
+        // No writer stores one: the anchor count comes from a COUNT(*) or from the reset.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(-1L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun storedTamperFlagIsReportedWithoutBeingRewritten() {
+        // flagged, not unreadable: the evidence is already recorded readably, so the
+        // append path has nothing to write down again.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(true),
+            PrefRead.Found(false)
+        )
+
+        assertEquals(AuditAnchor("hashB", 2L), state.anchor)
+        assertTrue(state.flagged)
+        assertFalse(state.unreadable)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun absentTamperFlagIsNotTamper() {
+        assertFalse(
+            resolveAuditAnchorState(PrefRead.Absent, PrefRead.Absent, PrefRead.Absent, PrefRead.Absent).tamperDetected
+        )
+    }
+
+    @Test
+    fun unreadableTamperFlagIsTamperAndKeepsTheAnchorItReadsWith() {
+        // Sticky evidence that will not decrypt is still evidence. The anchor halves read
+        // fine here, so they stay pinned and only the flag drives the verdict.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Found("hashB"),
+            PrefRead.Unreadable,
+            PrefRead.Found(false)
+        )
+
+        assertEquals(AuditAnchor("hashB", 2L), state.anchor)
+        assertFalse(state.flagged)
+        assertTrue(state.unreadable)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun aPinnedAnchorBesideAnAbsentTamperFlagIsTheSteadyState() {
+        // Not tamper, and deliberately: setAuditAnchor writes only the two halves, so
+        // this is where every install that has never flagged a tamper and never cleared
+        // its history sits. The half-pair rule the anchor gets cannot be applied here
+        // without flagging all of them, which is why the deletion hole this leaves is
+        // closed by storing the four values as one entry rather than from the read side.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Found("hashB"),
+            PrefRead.Absent,
+            PrefRead.Absent
+        )
+
+        assertEquals(AuditAnchor("hashB", 2L), state.anchor)
+        assertFalse(state.tamperDetected)
+    }
+
+    @Test
+    fun aStoredTamperFlagSurvivesAnAnchorThatIsGone() {
+        // Both halves deleted reads as a fresh install, so the flag is the only thing
+        // that still says otherwise. It has to outweigh the absence.
+        val state = resolveAuditAnchorState(
+            PrefRead.Absent,
+            PrefRead.Absent,
+            PrefRead.Found(true),
+            PrefRead.Absent
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
+    fun aStoredClearMarkerIsPendingAndNotTamper() {
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(0L),
+            PrefRead.Found(""),
+            PrefRead.Found(false),
+            PrefRead.Found(true)
+        )
+
+        assertTrue(state.clearPending)
+        assertFalse(state.tamperDetected)
+    }
+
+    @Test
+    fun anAbsentOrFalseClearMarkerIsNotPending() {
+        assertFalse(
+            resolveAuditAnchorState(
+                PrefRead.Found(2L),
+                PrefRead.Found("hashB"),
+                PrefRead.Found(false),
+                PrefRead.Absent
+            ).clearPending
+        )
+        assertFalse(
+            resolveAuditAnchorState(
+                PrefRead.Found(2L),
+                PrefRead.Found("hashB"),
+                PrefRead.Found(false),
+                PrefRead.Found(false)
+            ).clearPending
+        )
+    }
+
+    @Test
+    fun anUnreadableClearMarkerIsNotPendingButIsStillRecorded() {
+        // The asymmetry. Acting on it would complete a clear nobody requested against an
+        // emptied table, which is the one state where the anchor still holds the evidence
+        // of the truncation that emptied it. Recording it costs nothing and is the only
+        // place that fault is ever written down.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(2L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Unreadable
+        )
+
+        assertFalse(state.clearPending)
+        assertTrue(state.unreadable)
+        assertTrue(state.tamperDetected)
+        assertEquals("the anchor halves read fine, so they stay pinned", AuditAnchor("hashB", 2L), state.anchor)
+    }
+
+    @Test
+    fun verdictIsFalseWhenTheRowsMatchTheAnchor() {
+        assertFalse(anchorMismatchVerdict(pinned(AuditAnchor("hashB", 2L)), 2L, "hashB", "hashA"))
+    }
+
+    @Test
+    fun verdictIsFalseWithNoAnchorToCompareAgainst() {
+        assertFalse(anchorMismatchVerdict(pinned(null), 2L, "hashB", "hashA"))
+    }
+
+    @Test
+    fun verdictIsTrueWhenTheRowsDisagree() {
+        assertTrue(anchorMismatchVerdict(pinned(AuditAnchor("hashB", 2L)), 1L, "hashA", null))
+    }
+
+    @Test
+    fun verdictHealsTheResumableCases() {
+        assertFalse(anchorMismatchVerdict(pinned(AuditAnchor("hashB", 2L)), 3L, "hashC", "hashB"))
+        assertFalse(anchorMismatchVerdict(pinned(AuditAnchor("hashB", 5L)), 3L, "hashB", "hashA"))
+    }
+
+    @Test
+    fun anUnreadableReadBeatsTheResumableCases() {
+        // The footprint of a crash-resumed append, which would heal on its own. A fault
+        // in the same pass has to win: the healing re-pins to an anchor it has read, and
+        // there is no read to heal toward.
+        val faulted = AuditAnchorState(
+            anchor = AuditAnchor("hashB", 2L),
+            flagged = false,
+            clearPending = false,
+            unreadable = true
+        )
+
+        assertTrue(anchorMismatchVerdict(faulted, 3L, "hashC", "hashB"))
+    }
+
+    private fun pinned(anchor: AuditAnchor?) =
+        AuditAnchorState(anchor, flagged = false, clearPending = false, unreadable = false)
 }
