@@ -19,10 +19,10 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         extraInTransaction: (suspend () -> Unit)? = null
     ) = mutex.withLock {
         reconcilePendingClear()
-        val anchor = Nip55Database.getAuditAnchor()
+        val state = Nip55Database.readAuditAnchorState()
         var tamper = false
         database.withTransaction {
-            tamper = anchorMismatch(anchor)
+            tamper = anchorMismatch(state)
             extraInTransaction?.invoke()
             auditDao.insert(buildLog(auditDao.getLastEntryHash()))
         }
@@ -35,10 +35,10 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     // state regardless so the legitimately shrunk count is recorded.
     suspend fun prune(before: Long, extraInTransaction: suspend () -> Unit) = mutex.withLock {
         reconcilePendingClear()
-        val anchor = Nip55Database.getAuditAnchor()
+        val state = Nip55Database.readAuditAnchorState()
         var tamper = false
         database.withTransaction {
-            tamper = anchorMismatch(anchor)
+            tamper = anchorMismatch(state)
             auditDao.deleteOlderThan(before)
             extraInTransaction()
         }
@@ -61,11 +61,8 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     // so no append/prune/clear can interleave between the reads and skew the snapshot.
     suspend fun snapshot(): Triple<List<Nip55AuditLog>, AuditAnchor?, Boolean> = mutex.withLock {
         reconcilePendingClear()
-        Triple(
-            auditDao.getAllOrdered(),
-            Nip55Database.getAuditAnchor(),
-            Nip55Database.isAuditTamperDetected()
-        )
+        val state = Nip55Database.readAuditAnchorState()
+        Triple(auditDao.getAllOrdered(), state.anchor, state.tamperDetected)
     }
 
     // Compare-and-set the anchor under the write lock: only pin to (expectedHash, expectedCount)
@@ -91,8 +88,12 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         }
     }
 
-    private suspend fun anchorMismatch(anchor: AuditAnchor?): Boolean {
-        if (anchor == null) return false
+    // An unreadable read is already tamper, and is reported here so the caller records
+    // it in the sticky flag: the anchor advance that follows every write re-pins the
+    // corrupted entry to a readable one, so this is the only pass that still sees it.
+    private suspend fun anchorMismatch(state: AuditAnchorState): Boolean {
+        if (state.unreadable) return true
+        val anchor = state.anchor ?: return false
         val tail = auditDao.getLastEntryHash() ?: ""
         val count = auditDao.getCount().toLong()
         if (tail == anchor.latestEntryHash && count == anchor.entryCount) return false

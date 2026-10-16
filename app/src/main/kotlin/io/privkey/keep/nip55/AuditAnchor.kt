@@ -1,11 +1,62 @@
 package io.privkey.keep.nip55
 
+import io.privkey.keep.storage.PrefRead
+
 /**
  * Tamper-resistant tail marker for the NIP-55 audit chain, persisted OUTSIDE Room
  * (in the Keystore-backed encrypted prefs that also hold the HMAC key) so an
  * attacker with on-device Room write access cannot forge it.
  */
 data class AuditAnchor(val latestEntryHash: String, val entryCount: Long)
+
+/**
+ * The anchor as the three stored values that carry it read back.
+ *
+ * [unreadable] is the case the ordinary getters cannot report. A value that is on disk
+ * and will not decrypt reads as the caller's default, which here means "nothing is
+ * pinned" for the anchor and "no tamper seen" for the sticky flag, and both of those are
+ * the answer an attacker with write access to the preferences file wants: an unpinned
+ * anchor is re-pinned to whatever the audit table now holds, and a cleared flag drops
+ * the evidence that the table was ever mutated out of band. Corrupting one entry takes
+ * the same access as deleting it, so neither may be read as an absence.
+ *
+ * [flagged] is the stored flag alone, so the append path can tell evidence it has
+ * already recorded from evidence it still has to write down.
+ */
+internal data class AuditAnchorState(
+    val anchor: AuditAnchor?,
+    val flagged: Boolean,
+    val unreadable: Boolean
+) {
+    val tamperDetected: Boolean get() = flagged || unreadable
+}
+
+/**
+ * Decides the anchor from the three reads, treating one that produced no value as
+ * tamper rather than as a fresh install.
+ *
+ * Both halves of the anchor are written in a single commit and no writer stores a
+ * negative count, so a pair that is neither both absent nor both present is a pair no
+ * writer here produced. Only both-absent is a genuine absence: the first launch on an
+ * install that predates the anchor, which the caller trust-on-first-use seeds.
+ *
+ * Pure function: no storage, no native calls, fully unit-testable.
+ */
+internal fun resolveAuditAnchorState(
+    count: PrefRead<Long>,
+    hash: PrefRead<String>,
+    tamperFlag: PrefRead<Boolean>
+): AuditAnchorState {
+    val flagged = tamperFlag is PrefRead.Found && tamperFlag.value
+    val flagUnreadable = tamperFlag is PrefRead.Unreadable
+    if (count is PrefRead.Absent && hash is PrefRead.Absent) {
+        return AuditAnchorState(null, flagged, flagUnreadable)
+    }
+    if (count is PrefRead.Found && hash is PrefRead.Found && count.value >= 0L) {
+        return AuditAnchorState(AuditAnchor(hash.value, count.value), flagged, flagUnreadable)
+    }
+    return AuditAnchorState(null, flagged, unreadable = true)
+}
 
 /**
  * Reconciles the Rust chain walk against the stored [anchor] to catch attacks the

@@ -253,13 +253,20 @@ abstract class Nip55Database : RoomDatabase() {
 
         // Audit tail anchor lives in the Keystore-backed encrypted prefs (same trust
         // tier as the HMAC key), out of reach of an attacker with Room write access.
-        fun getAuditAnchor(): AuditAnchor? {
-            val ctx = appContext ?: return null
+        //
+        // Read three-way, and in one call: the decision is over all three values, and
+        // reporting a value that will not decrypt as the default it would have had is
+        // what lets the anchor be re-pinned to a table that was truncated under it.
+        internal fun readAuditAnchorState(): AuditAnchorState {
+            // Set after both key reads in getInstance, so there is no anchor to read yet
+            // rather than an unreadable one.
+            val ctx = appContext ?: return AuditAnchorState(null, flagged = false, unreadable = false)
             val prefs = getEncryptedPrefs(ctx)
-            if (!prefs.contains(KEY_AUDIT_ANCHOR_COUNT)) return null
-            val count = prefs.getLong(KEY_AUDIT_ANCHOR_COUNT, -1L)
-            if (count < 0L) return null
-            return AuditAnchor(prefs.getString(KEY_AUDIT_ANCHOR_HASH, "") ?: "", count)
+            return resolveAuditAnchorState(
+                prefs.readLong(KEY_AUDIT_ANCHOR_COUNT),
+                prefs.readString(KEY_AUDIT_ANCHOR_HASH),
+                prefs.readBoolean(KEY_AUDIT_TAMPER)
+            )
         }
 
         fun setAuditAnchor(anchor: AuditAnchor) {
@@ -272,11 +279,7 @@ abstract class Nip55Database : RoomDatabase() {
 
         // Sticky evidence that the audit table was mutated out-of-band between two
         // sanctioned writes; once set it stays set until a full clearAuditLog reset.
-        fun isAuditTamperDetected(): Boolean {
-            val ctx = appContext ?: return false
-            return getEncryptedPrefs(ctx).getBoolean(KEY_AUDIT_TAMPER, false)
-        }
-
+        // Read with the anchor, in readAuditAnchorState.
         fun setAuditTamperDetected() {
             val ctx = appContext ?: return
             getEncryptedPrefs(ctx).edit().putBoolean(KEY_AUDIT_TAMPER, true).commit()
@@ -286,9 +289,18 @@ abstract class Nip55Database : RoomDatabase() {
         // indistinguishable from total truncation, so a crash between the clear commit and
         // the anchor reset needs a Keystore-backed (attacker-unforgeable) breadcrumb to
         // prove the empty DB is a sanctioned clear rather than a wipe.
+        //
+        // The one read here that keeps its default on an unreadable value, deliberately.
+        // Reading a marker that will not decrypt as a pending clear sends the reconcile
+        // into resetAuditAnchor against a table nobody emptied, which completes a clear
+        // nobody asked for and destroys the evidence this is all protecting. A marker
+        // that reads false leaves the mismatch to the next write instead, where neither
+        // resumable case covers an emptied table against a non-empty anchor. The read
+        // still goes through readBoolean so losing the Keystore alias answers here
+        // rather than raising out of the getter into an audit write.
         fun isAuditClearPending(): Boolean {
             val ctx = appContext ?: return false
-            return getEncryptedPrefs(ctx).getBoolean(KEY_AUDIT_CLEAR_PENDING, false)
+            return getEncryptedPrefs(ctx).readBoolean(KEY_AUDIT_CLEAR_PENDING) == PrefRead.Found(true)
         }
 
         fun setAuditClearPending() {

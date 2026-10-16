@@ -46,6 +46,14 @@ internal fun corruptStoredValue(context: Context, prefsName: String, storedName:
         .commit()
 }
 
+/**
+ * Removes what [writeAndFindStoredName] stages, which a file the app itself reads should
+ * not be left holding.
+ */
+internal fun forgetWriteProbe(context: Context, prefsName: String) {
+    KeystoreEncryptedPrefs.create(context, prefsName).edit().remove(ANCHOR_KEY).commit()
+}
+
 private const val ANCHOR_KEY = "__test_anchor__"
 
 /** The marker KeystoreEncryptedPrefs puts on a value bound to its key name. */
