@@ -157,6 +157,29 @@ class DatabaseKeyMintTest {
     }
 
     @Test
+    fun a_stored_audit_secret_is_returned_over_an_anchored_chain() {
+        // The refusal is on the absent branch and must stay there: a count above zero
+        // beside a stored secret is the steady state of every install past its first
+        // audit row, so a refusal reaching it would throw out of getInstance on every
+        // launch. Nothing else pins which branch the refusal sits on.
+        val key = ByteArray(32) { (it + 7).toByte() }
+        open().edit().putString(HMAC_KEY, Base64.encodeToString(key, Base64.NO_WRAP)).commit()
+        stageAnchor(count = 3L, hash = "hashB")
+
+        assertArrayEquals(key, auditSecret())
+    }
+
+    @Test
+    fun a_stored_passphrase_is_returned_over_a_database_that_exists() {
+        // The same branch, on the key whose refusal predates it.
+        val key = ByteArray(32) { it.toByte() }
+        open().edit().putString(KEY, Base64.encodeToString(key, Base64.NO_WRAP)).commit()
+        stagedDatabase("not empty")
+
+        assertArrayEquals(key, dbKey())
+    }
+
+    @Test
     fun an_unreadable_anchor_count_refuses_the_audit_secret_mint() {
         // The read has to be three-way for the refusal to hold: a count that will not
         // decrypt reads as zero through the ordinary getter, which is the one anchor

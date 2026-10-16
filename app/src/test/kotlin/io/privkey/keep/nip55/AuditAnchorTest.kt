@@ -361,6 +361,22 @@ class AuditAnchorTest {
     }
 
     @Test
+    fun aZeroCountBesideANonEmptyTailIsTamper() {
+        // The pair the anchor read and the mint refusal used to disagree on. Both halves
+        // come from one table read, so a zero count carries the empty tail the reset
+        // writes; this is one half restored from an older copy of the file.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(0L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
     fun negativeCountIsTamper() {
         // No writer stores one: the anchor count comes from a COUNT(*) or from the reset.
         val state = resolveAuditAnchorState(
@@ -570,6 +586,14 @@ class AuditAnchorTest {
         // past this check, not a state to mint on.
         assertTrue(auditChainExists(PrefRead.Absent, PrefRead.Found("hashB")))
         assertTrue(auditChainExists(PrefRead.Found(2L), PrefRead.Absent))
+    }
+
+    @Test
+    fun aZeroCountBesideANonEmptyTailRefusesTheMint() {
+        // Both halves come from the same table read, so a zero count carries an empty
+        // tail. This pair is one half of a readable anchor beside a replayed or planted
+        // other half, and taking the count at face value is what restarts the chain.
+        assertTrue(auditChainExists(PrefRead.Found(0L), PrefRead.Found("hashB")))
     }
 
     @Test
