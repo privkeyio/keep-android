@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.content.Context
 import android.util.Base64
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.storage.KeystoreEncryptedPrefs
@@ -10,13 +11,16 @@ import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.storage.rawPrefs
 import io.privkey.keep.storage.writeAndFindStoredName
 import io.privkey.keep.uniffi.KeepMobileException
+import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /**
  * The database passphrase and the audit HMAC secret are each read once and minted when
@@ -38,6 +42,8 @@ class DatabaseKeyMintTest {
 
     private fun clear() {
         context.deleteSharedPreferences(PREFS)
+        context.deleteDatabase(DB)
+        File(context.cacheDir, STAGED_DB).delete()
         // The legacy lookup the mint sits behind is one-shot, gated by a marker in a file
         // the whole app shares. Only the two this test sets are removed, since clearing
         // the file would re-open migrations other tests have already run.
@@ -52,8 +58,20 @@ class DatabaseKeyMintTest {
 
     private fun open() = KeystoreEncryptedPrefs.create(context, PREFS)
 
-    private fun keyFor(prefKey: String = KEY, commit: Boolean = true) =
-        Nip55Database.getOrCreateKey(context, prefKey, commit = commit, prefsName = PREFS)
+    private fun keyFor(prefKey: String = KEY, commit: Boolean = true, existingDatabase: File? = null) =
+        Nip55Database.getOrCreateKey(
+            context,
+            prefKey,
+            commit = commit,
+            prefsName = PREFS,
+            existingDatabase = existingDatabase,
+        )
+
+    private fun stagedDatabase(content: String?): File =
+        File(context.cacheDir, STAGED_DB).apply {
+            delete()
+            if (content != null) writeText(content)
+        }
 
     private fun storeUnreadableKey(prefKey: String = KEY): String {
         val storedName = writeAndFindStoredName(context, PREFS) {
@@ -127,8 +145,59 @@ class DatabaseKeyMintTest {
         assertEquals(corrupted, storedValue(storedName))
     }
 
+    @Test
+    fun an_absent_key_over_a_database_that_exists_is_refused() {
+        // Deleting the stored entry produces this, and so does losing a queued write to
+        // process death. Minting here replaces the key the existing database was encrypted
+        // under, which cannot open it again.
+        val staged = stagedDatabase("not empty")
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) {
+            keyFor(existingDatabase = staged)
+        }
+        assertEquals("No stored $KEY for a database that exists", thrown.msg)
+    }
+
+    @Test
+    fun an_absent_key_with_no_database_still_mints() {
+        val missing = stagedDatabase(null)
+
+        assertEquals(32, keyFor(existingDatabase = missing).size)
+    }
+
+    @Test
+    fun an_absent_key_with_an_empty_database_file_still_mints() {
+        // The state a first run can legitimately leave behind, which the next test pins.
+        // An empty file holds nothing, so refusing here would break a genuine first run.
+        val empty = stagedDatabase("")
+
+        assertEquals(32, keyFor(existingDatabase = empty).size)
+    }
+
+    @Test
+    fun room_writes_nothing_to_the_file_until_the_database_is_first_used() {
+        // The premise the refusal keys on. If building the database wrote a header, then a
+        // launch that built it and died before storing the key would look like a database
+        // that exists, and the refusal would brick a first run instead of saving one.
+        val path = context.getDatabasePath(DB)
+        val db = Room.databaseBuilder(context, Nip55Database::class.java, DB)
+            .openHelperFactory(SupportOpenHelperFactory(ByteArray(32)))
+            .build()
+        try {
+            assertEquals("a built database nothing has used holds nothing", 0L, path.length())
+
+            db.openHelper.writableDatabase
+
+            assertTrue("first use is what creates the file", path.length() > 0L)
+        } finally {
+            db.close()
+        }
+    }
+
     private companion object {
         const val PREFS = "database_key_mint_test"
+        const val DB = "database_key_mint_test.db"
+        const val STAGED_DB = "database_key_mint_test_staged.db"
         const val KEY = "db_passphrase"
         const val HMAC_KEY = "hmac_secret"
     }

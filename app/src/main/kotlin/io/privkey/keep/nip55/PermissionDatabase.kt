@@ -28,6 +28,7 @@ abstract class Nip55Database : RoomDatabase() {
         private var INSTANCE: Nip55Database? = null
 
         private const val PREFS_NAME = "nip55_db_prefs"
+        private const val DB_NAME = "nip55_permissions.db"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
         private const val KEY_HMAC_SECRET = "hmac_secret"
         private const val KEY_AUDIT_ANCHOR_HASH = "audit_anchor_hash"
@@ -154,6 +155,13 @@ abstract class Nip55Database : RoomDatabase() {
          * stored ciphertext, which is what a restored Keystore alias would need. For the
          * audit HMAC the same mint would silently restart a tamper-evident chain.
          *
+         * An absent key is refused the same way when [existingDatabase] is a file with
+         * content, because a database that exists was encrypted under a key this is about
+         * to replace. Deleting the entry produces this, and so does losing a queued write
+         * to process death. An empty file is not refused: it holds nothing, so minting
+         * over it loses nothing, and that is the state a first run can legitimately leave
+         * behind.
+         *
          * [prefsName] is open for tests, which cannot stage a fault in the shared store the
          * rest of the suite reads. It selects the file and the prefs together, so the two
          * cannot be paired wrongly.
@@ -164,6 +172,7 @@ abstract class Nip55Database : RoomDatabase() {
             prefKey: String,
             commit: Boolean = false,
             prefsName: String = PREFS_NAME,
+            existingDatabase: java.io.File? = null,
         ): ByteArray {
             val prefs =
                 if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
@@ -191,14 +200,27 @@ abstract class Nip55Database : RoomDatabase() {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
 
+            if ((existingDatabase?.length() ?: 0L) > 0L) {
+                throw KeepMobileException.StorageException("No stored $prefKey for a database that exists")
+            }
+
             val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
             val editor = prefs.edit().putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
             if (commit) editor.commit() else editor.apply()
             return newKey
         }
 
+        // commit, not apply: the passphrase has to be on disk before Room uses it to
+        // create the database, or process death in between leaves a database encrypted
+        // under a key nothing stored. It narrows the window rather than closing it, since
+        // a commit is not fsynced either; the refusal above is what catches the rest.
         private fun getOrCreateDbKey(context: Context): ByteArray =
-            getOrCreateKey(context, KEY_DB_PASSPHRASE)
+            getOrCreateKey(
+                context,
+                KEY_DB_PASSPHRASE,
+                commit = true,
+                existingDatabase = context.getDatabasePath(DB_NAME),
+            )
 
         private fun getOrCreateHmacKey(context: Context): ByteArray {
             hmacKey?.let { return it }
@@ -281,7 +303,7 @@ abstract class Nip55Database : RoomDatabase() {
                     Room.databaseBuilder(
                         context.applicationContext,
                         Nip55Database::class.java,
-                        "nip55_permissions.db"
+                        DB_NAME
                     )
                         .openHelperFactory(factory)
                         .addMigrations(*MIGRATIONS)
