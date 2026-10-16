@@ -28,6 +28,7 @@ abstract class Nip55Database : RoomDatabase() {
         private var INSTANCE: Nip55Database? = null
 
         private const val PREFS_NAME = "nip55_db_prefs"
+        private const val DB_NAME = "nip55_permissions.db"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
         private const val KEY_HMAC_SECRET = "hmac_secret"
         private const val KEY_AUDIT_ANCHOR_HASH = "audit_anchor_hash"
@@ -154,22 +155,37 @@ abstract class Nip55Database : RoomDatabase() {
          * stored ciphertext, which is what a restored Keystore alias would need. For the
          * audit HMAC the same mint would silently restart a tamper-evident chain.
          *
+         * An absent key is refused the same way when [existingDatabase] is a file with
+         * content, because a database that exists was encrypted under a key this is about
+         * to replace. Deleting the entry produces this, and so does losing a queued write
+         * to process death. An empty file is not refused: it holds nothing, so minting
+         * over it loses nothing, and that is the state a first run can legitimately leave
+         * behind.
+         *
+         * Only the passphrase passes [existingDatabase]. The audit secret needs the same
+         * refusal and not from this signal: the file is non-empty from first use onward
+         * whether or not any audit row was ever chained, so keying on it would refuse a
+         * lost secret with nothing to lose and leave the app permanently unopenable. The
+         * signal that matches is the audit anchor, which belongs with the anchor reads.
+         *
          * [prefsName] is open for tests, which cannot stage a fault in the shared store the
-         * rest of the suite reads. It selects the file and the prefs together, so the two
-         * cannot be paired wrongly.
+         * rest of the suite reads, and selects both the file and the store so the two
+         * cannot disagree. [prefs] wraps whatever [prefsName] selected, for the one fault
+         * a real store will not produce on demand: a write that reports failure.
          */
         @androidx.annotation.VisibleForTesting
         internal fun getOrCreateKey(
             context: Context,
             prefKey: String,
-            commit: Boolean = false,
             prefsName: String = PREFS_NAME,
+            existingDatabase: java.io.File? = null,
+            prefs: ReadablePrefs? = null,
         ): ByteArray {
-            val prefs =
-                if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
+            val store = prefs
+                ?: if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
                 else KeystoreEncryptedPrefs.create(context, prefsName)
 
-            when (val stored = prefs.readString(prefKey)) {
+            when (val stored = store.readString(prefKey)) {
                 // Decoding is inside the refusal: a value that decrypts and is not base64
                 // is stored and unusable, which is the case this reports rather than
                 // raising whatever the decoder happens to raise. Length is deliberately
@@ -186,23 +202,51 @@ abstract class Nip55Database : RoomDatabase() {
                     throw KeepMobileException.StorageException("Stored $prefKey could not be read")
             }
 
-            val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, prefs)
+            val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, store)
             if (existing != null) {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
 
+            if ((existingDatabase?.length() ?: 0L) > 0L) {
+                throw KeepMobileException.StorageException("No stored $prefKey for a database that exists")
+            }
+
             val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
-            val editor = prefs.edit().putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
-            if (commit) editor.commit() else editor.apply()
+            // Both keys commit rather than apply, and the result is checked: a key handed
+            // back without reaching disk is one the database gets created under and then
+            // cannot be opened with, which is the state the refusal above makes permanent.
+            val written = store.edit()
+                .putString(prefKey, android.util.Base64.encodeToString(newKey, android.util.Base64.NO_WRAP))
+                .commit()
+            if (!written) {
+                throw KeepMobileException.StorageException("Minted $prefKey could not be stored")
+            }
             return newKey
         }
 
-        private fun getOrCreateDbKey(context: Context): ByteArray =
-            getOrCreateKey(context, KEY_DB_PASSPHRASE)
+        // The write is committed and checked before Room can use the key, which still
+        // narrows rather than closes the window: the preferences file is fsynced but the
+        // directory holding it is not, so a commit that returned true can roll back. The
+        // refusal above is what catches that.
+        //
+        // [dbName] is open for tests, so the path this derives is the one under test
+        // rather than a file staged somewhere else.
+        @androidx.annotation.VisibleForTesting
+        internal fun getOrCreateDbKey(
+            context: Context,
+            prefsName: String = PREFS_NAME,
+            dbName: String = DB_NAME,
+        ): ByteArray =
+            getOrCreateKey(
+                context,
+                KEY_DB_PASSPHRASE,
+                prefsName = prefsName,
+                existingDatabase = context.getDatabasePath(dbName),
+            )
 
         private fun getOrCreateHmacKey(context: Context): ByteArray {
             hmacKey?.let { return it }
-            return getOrCreateKey(context, KEY_HMAC_SECRET, commit = true).also { hmacKey = it }
+            return getOrCreateKey(context, KEY_HMAC_SECRET).also { hmacKey = it }
         }
 
         fun getHmacKey(): ByteArray? = hmacKey
@@ -281,7 +325,7 @@ abstract class Nip55Database : RoomDatabase() {
                     Room.databaseBuilder(
                         context.applicationContext,
                         Nip55Database::class.java,
-                        "nip55_permissions.db"
+                        DB_NAME
                     )
                         .openHelperFactory(factory)
                         .addMigrations(*MIGRATIONS)
