@@ -3,6 +3,7 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.uniffi.StorageRead
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -80,6 +81,43 @@ class AndroidSigningRateLimiterStorageTest {
         storage.save("com.example.a", "counter=1")
         storage.remove("com.example.missing")
         assertEquals(StorageRead.Found("counter=1"), storage.load("com.example.a"))
+    }
+
+    // The core reads a true from remove() as "that key is gone from the durable
+    // store" and clears its cooling-off on it. Names here resolve through a
+    // registry stored beside the values, so when that registry cannot be read a
+    // lookup that finds nothing has not established absence. Reporting success
+    // there would let a cooling-off entry survive the clear that was supposed to
+    // remove it and enforce again once lookup recovered.
+    @Test
+    fun removeIsRefusedWhenAbsenceCannotBeEstablished() {
+        storage.save("com.example.a", "counter=1")
+        val basePrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        assertTrue(
+            "backing prefs must receive entries; empty means prefs-name drift",
+            basePrefs.all.isNotEmpty()
+        )
+
+        // The registry cannot be named from here: it is stored under a hash of a
+        // per-file derivation key. What identifies it is being the one entry the
+        // next save rewrites rather than adds.
+        val before = basePrefs.all.toMap()
+        storage.save("com.example.b", "counter=2")
+        val rewritten = basePrefs.all.toMap().let { after -> before.keys.filter { after[it] != before[it] } }
+        assertEquals("expected exactly one rewritten entry, the registry: $rewritten", 1, rewritten.size)
+        corruptStoredValue(context, PREFS_NAME, rewritten.first())
+
+        // A fresh adapter, so the refusal comes from reading the broken registry
+        // rather than from state the instance that wrote it still holds.
+        val reopened = AndroidSigningRateLimiterStorage(context)
+        assertFalse(
+            "a removal that could not determine absence must report false",
+            reopened.remove("com.example.missing")
+        )
+        assertTrue(
+            "a removal that found its entry must still report true",
+            reopened.remove("com.example.a")
+        )
     }
 
     @Test

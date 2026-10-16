@@ -826,16 +826,42 @@ object KeystoreEncryptedPrefs {
             // tearing against a clear. The monitor is reentrant, so the nested
             // derivation-key lookup is safe.
             override fun commit(): Boolean = synchronized(initLockFor(prefsName)) {
-                applyChanges()
-                baseEditor.commit()
+                // Both have to hold. The write reaching disk is not enough when a
+                // removal could not be certified: the core reads a true here as
+                // "that key is gone from the durable store", and acts on it.
+                val certified = applyChanges()
+                baseEditor.commit() && certified
             }
 
+            // apply() has no result to carry an uncertified removal in, which is
+            // the reason every storage class here commits instead.
             override fun apply() = synchronized(initLockFor(prefsName)) {
-                applyChanges()
+                if (!applyChanges() && BuildConfig.DEBUG) {
+                    Log.w("KeystoreEncryptedPrefs", "apply() cannot report an uncertified removal")
+                }
                 baseEditor.apply()
             }
 
-            private fun applyChanges() {
+            /**
+             * Stages this editor onto [baseEditor], and reports whether every
+             * removal in it was certified.
+             *
+             * A removal is certified when the entry was found and dropped, or when
+             * the key is genuinely absent. Those are not the same as "no entry
+             * answered the lookup": the index this store resolves names through may
+             * itself be unreadable, and then nothing here can tell an absent key
+             * from one it cannot currently see. The core's delete contract names
+             * exactly that case and asks for the honest answer, because a live
+             * entry reported as deleted stays on disk and becomes enforceable again
+             * the moment lookup recovers, which for the rate limiter means a
+             * cooling-off the user was told had been cleared.
+             *
+             * Uncertified removals do not hold back the rest of the editor. The
+             * puts and the removals that did resolve are real work, and discarding
+             * them would trade a wrong answer for lost writes; the caller is told
+             * instead, through the one channel it has.
+             */
+            private fun applyChanges(): Boolean {
                 if (clearRequested) {
                     baseEditor.clear()
                     keyCache.clear()
@@ -867,8 +893,18 @@ object KeystoreEncryptedPrefs {
                     ensureRegistrySeeded(countAttempt = true)
                 }
 
+                var certified = true
                 for (plainKey in pendingRemoves) {
                     val encKey = findEncryptedKey(plainKey)
+                    if (encKey == null && !allRegistriesReadable) {
+                        // Nothing answered, and the index that says what this file
+                        // holds could not be read, so absence is not established.
+                        // Keep the name: dropping it would deregister a key that
+                        // may still exist, which is the same truncation the
+                        // registry rewrite below refuses for the same reason.
+                        certified = false
+                        continue
+                    }
                     if (encKey != null) {
                         baseEditor.remove(encKey)
                         reverseKeyCache.remove(encKey)
@@ -889,6 +925,7 @@ object KeystoreEncryptedPrefs {
                 }
 
                 updateKeyRegistry()
+                return certified
             }
 
             /// Removes a copy stranded under the fallback derivation epoch, so a
