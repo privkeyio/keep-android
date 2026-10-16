@@ -41,13 +41,46 @@ internal data class AuditAnchorState(
 }
 
 /**
+ * What one read of the two anchor halves found. Both the verdict and the mint refusal
+ * decide over this, and they held a copy of the rule each until the copies disagreed on a
+ * zero count beside a non-empty tail hash.
+ */
+private sealed interface AnchorPair {
+    /** Neither half is stored: the first launch on an install that predates the anchor. */
+    object Absent : AnchorPair
+
+    /** Both halves read, and together they are a pair a writer here produces. */
+    data class Pinned(val anchor: AuditAnchor) : AnchorPair
+
+    /** A pair nothing here wrote, which is the access an attacker needs to forge one. */
+    object Unusable : AnchorPair
+}
+
+/**
+ * Reads the pair under the one rule both callers need: the halves are written in a single
+ * commit out of a single table read, so the only pairs a writer here produces are both
+ * absent, a positive count beside the tail hash it was counted with, and the zero count
+ * beside the empty hash the reset writes.
+ *
+ * Everything else is a pair nothing here wrote, and deleting or corrupting an entry takes
+ * the same access as replacing it: a half-present pair, an unreadable half, a negative
+ * count, and a zero count beside a non-empty hash, which is what restoring one half from
+ * an older copy of the file produces.
+ */
+private fun anchorPair(count: PrefRead<Long>, hash: PrefRead<String>): AnchorPair {
+    if (count is PrefRead.Absent && hash is PrefRead.Absent) return AnchorPair.Absent
+    if (count !is PrefRead.Found || hash !is PrefRead.Found) return AnchorPair.Unusable
+    if (count.value < 0L) return AnchorPair.Unusable
+    if (count.value == 0L && hash.value.isNotEmpty()) return AnchorPair.Unusable
+    return AnchorPair.Pinned(AuditAnchor(hash.value, count.value))
+}
+
+/**
  * Decides the anchor from the four reads, treating one that produced no value as tamper
  * rather than as a fresh install.
  *
- * Both halves of the anchor are written in a single commit and no writer stores a
- * negative count, so a pair that is neither both absent nor both present is a pair no
- * writer here produced. Only both-absent is a genuine absence: the first launch on an
- * install that predates the anchor, which the caller trust-on-first-use seeds.
+ * Only [AnchorPair.Absent] is a genuine absence: the first launch on an install that
+ * predates the anchor, which the caller trust-on-first-use seeds.
  *
  * [clearMarker] is the one value whose fault does not change what the caller does with
  * it: only a stored true is a pending clear. Acting on a marker that will not decrypt
@@ -70,14 +103,55 @@ internal fun resolveAuditAnchorState(
     val flagged = tamperFlag is PrefRead.Found && tamperFlag.value
     val clearPending = clearMarker is PrefRead.Found && clearMarker.value
     val markerFault = tamperFlag is PrefRead.Unreadable || clearMarker is PrefRead.Unreadable
-    if (count is PrefRead.Absent && hash is PrefRead.Absent) {
-        return AuditAnchorState(null, flagged, clearPending, markerFault)
+    return when (val pair = anchorPair(count, hash)) {
+        AnchorPair.Absent -> AuditAnchorState(null, flagged, clearPending, markerFault)
+        is AnchorPair.Pinned -> AuditAnchorState(pair.anchor, flagged, clearPending, markerFault)
+        AnchorPair.Unusable -> AuditAnchorState(null, flagged, clearPending, unreadable = true)
     }
-    if (count is PrefRead.Found && hash is PrefRead.Found && count.value >= 0L) {
-        return AuditAnchorState(AuditAnchor(hash.value, count.value), flagged, clearPending, markerFault)
-    }
-    return AuditAnchorState(null, flagged, clearPending, unreadable = true)
 }
+
+/**
+ * Whether rows are chained under the audit HMAC secret, which is what refuses to mint a
+ * replacement over an absent one.
+ *
+ * Minting restarts the chain: every row written under the old secret stops verifying, and
+ * nothing records that the secret changed. The Rust walk does report the first old-secret
+ * row as tampered, but only when something asks it to, and the 30-day prune that runs on
+ * every launch deletes those rows, after which the walk reports a dangling head that
+ * [resolveChainVerification] trusts the anchor over and calls valid.
+ *
+ * The anchor count is the signal rather than the database file, which is non-empty from
+ * first use onward whether or not an audit row was ever chained, so refusing on it would
+ * refuse a lost secret with nothing to lose. The anchor advance follows every append and
+ * prune and [resetAuditAnchor] zeroes the count after a sanctioned clear, so a count
+ * above zero means rows are chained under the secret being replaced.
+ *
+ * Both halves absent has to mint, and the state that needs it is a genuine first run, not
+ * an upgrade: an install that still holds its secret returns before this is consulted, so
+ * an install from before the anchor shipped never reaches it. What the concession leaves
+ * open is deleting both halves beside the secret, which reads as that first run. Telling
+ * the two apart takes the one signal that is not available here, whether the audit table
+ * has rows, since the mint runs before Room is built; the database file is no substitute,
+ * being non-empty from first use onward, so keying on it would refuse an install from
+ * before the secret shipped (v0.4.0) and never open again. Tracked separately, with the
+ * deferral it needs.
+ *
+ * Every other shape refuses: a count above zero, and every pair nothing here wrote, since
+ * the access that produces one is the access that deletes the secret.
+ *
+ * The anchor is unforgeable without the Keystore, and it is replayable: a stored value is
+ * bound to its name and not to a version, so an older authentic pair still decrypts. A
+ * pair restored from a snapshot taken while the table was empty mints. Tracked separately
+ * with the rest of the rollback exposure.
+ *
+ * Pure function: no storage, no native calls, fully unit-testable.
+ */
+internal fun auditChainExists(count: PrefRead<Long>, hash: PrefRead<String>): Boolean =
+    when (val pair = anchorPair(count, hash)) {
+        AnchorPair.Absent -> false
+        is AnchorPair.Pinned -> pair.anchor.entryCount > 0L
+        AnchorPair.Unusable -> true
+    }
 
 /**
  * Whether the rows an audit write is about to change disagree with the anchor they were

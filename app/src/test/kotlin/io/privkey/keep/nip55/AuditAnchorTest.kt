@@ -361,6 +361,22 @@ class AuditAnchorTest {
     }
 
     @Test
+    fun aZeroCountBesideANonEmptyTailIsTamper() {
+        // The pair the anchor read and the mint refusal used to disagree on. Both halves
+        // come from one table read, so a zero count carries the empty tail the reset
+        // writes; this is one half restored from an older copy of the file.
+        val state = resolveAuditAnchorState(
+            PrefRead.Found(0L),
+            PrefRead.Found("hashB"),
+            PrefRead.Found(false),
+            PrefRead.Found(false)
+        )
+
+        assertNull(state.anchor)
+        assertTrue(state.tamperDetected)
+    }
+
+    @Test
     fun negativeCountIsTamper() {
         // No writer stores one: the anchor count comes from a COUNT(*) or from the reset.
         val state = resolveAuditAnchorState(
@@ -534,6 +550,55 @@ class AuditAnchorTest {
         )
 
         assertTrue(anchorMismatchVerdict(faulted, 3L, "hashC", "hashB"))
+    }
+
+    @Test
+    fun anAbsentAnchorMintsTheAuditSecret() {
+        // The one absence a writer here produces, and an install from before the anchor
+        // shipped sits in it with rows in the table. Refusing would close the app on it.
+        assertFalse(auditChainExists(PrefRead.Absent, PrefRead.Absent))
+    }
+
+    @Test
+    fun aZeroAnchorMintsTheAuditSecret() {
+        // What resetAuditAnchor leaves behind: a sanctioned clear emptied the table, so a
+        // new secret restarts a chain that has nothing in it.
+        assertFalse(auditChainExists(PrefRead.Found(0L), PrefRead.Found("")))
+    }
+
+    @Test
+    fun rowsChainedUnderTheSecretRefuseTheMint() {
+        assertTrue(auditChainExists(PrefRead.Found(2L), PrefRead.Found("hashB")))
+    }
+
+    @Test
+    fun anUnreadableAnchorHalfRefusesTheMint() {
+        // Reading it as an absence is what lets the secret be replaced and the chain
+        // restarted, which is the same reason the anchor reads refuse it.
+        assertTrue(auditChainExists(PrefRead.Unreadable, PrefRead.Found("hashB")))
+        assertTrue(auditChainExists(PrefRead.Found(2L), PrefRead.Unreadable))
+        assertTrue(auditChainExists(PrefRead.Unreadable, PrefRead.Unreadable))
+    }
+
+    @Test
+    fun aHalfAbsentAnchorRefusesTheMint() {
+        // Both halves are written in one commit, so deleting only the count is the way
+        // past this check, not a state to mint on.
+        assertTrue(auditChainExists(PrefRead.Absent, PrefRead.Found("hashB")))
+        assertTrue(auditChainExists(PrefRead.Found(2L), PrefRead.Absent))
+    }
+
+    @Test
+    fun aZeroCountBesideANonEmptyTailRefusesTheMint() {
+        // Both halves come from the same table read, so a zero count carries an empty
+        // tail. This pair is one half of a readable anchor beside a replayed or planted
+        // other half, and taking the count at face value is what restarts the chain.
+        assertTrue(auditChainExists(PrefRead.Found(0L), PrefRead.Found("hashB")))
+    }
+
+    @Test
+    fun aNegativeCountRefusesTheMint() {
+        assertTrue(auditChainExists(PrefRead.Found(-1L), PrefRead.Found("hashB")))
     }
 
     private fun pinned(anchor: AuditAnchor?) =
