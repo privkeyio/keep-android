@@ -44,6 +44,11 @@ import java.util.Calendar
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 
+// Both NIP-55 entrypoints refuse a request they cannot record, and the refusal is
+// the same one: the foreground path (Nip55Activity) reports it from here so a reword
+// cannot leave the two paths describing the same fault differently.
+internal const val STORE_UNAVAILABLE_MESSAGE = "Permission store is not available"
+
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -228,7 +233,7 @@ class Nip55ContentProvider : ContentProvider() {
             else -> null
         }
 
-        if (store == null) return errorCursor("Permission store is not available", null)
+        if (store == null) return errorCursor(STORE_UNAVAILABLE_MESSAGE, null)
 
         return decideBackgroundRequest(
             currentApp, store, h, callerPackage, requestType, rawContent, rawPubkey, eventKind, currentUser, v3Kind, v3Scope

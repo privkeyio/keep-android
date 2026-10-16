@@ -155,7 +155,7 @@ class Nip55Activity : FragmentActivity() {
         //
         // That state is unreachable today for an unrelated reason: the store and the
         // caller-verification store are assigned in that order out of one try block,
-        // so a store this is null leaves identifyCaller with nothing and the caller
+        // so a null store leaves identifyCaller with nothing and the caller
         // check below refuses first. That is an accident of two adjacent lines in
         // KeepMobileApp, it reports a signer storage fault as a caller fault, and
         // reordering them is a plausible change, so the refusal is stated here
@@ -816,7 +816,7 @@ class Nip55Activity : FragmentActivity() {
         "signing_disabled" -> "Signing is disabled (kill switch is active)"
         "locked" -> "Keep is locked, please unlock it first"
         "unknown_caller" -> "Request from unverified app"
-        "store_unavailable" -> "Permission store is not available"
+        "store_unavailable" -> STORE_UNAVAILABLE_MESSAGE
         "Storage unavailable" -> "Key storage is not available"
         "Storage error" -> "Failed to access stored keys"
         "No share stored" -> "No key is stored in Keep"

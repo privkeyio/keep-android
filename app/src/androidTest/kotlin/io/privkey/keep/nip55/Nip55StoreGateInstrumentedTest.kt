@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -102,19 +101,23 @@ class Nip55StoreGateInstrumentedTest {
             }
             assertEquals(
                 "A request that cannot be recorded must be refused with the storage message",
-                "Permission store is not available",
+                STORE_UNAVAILABLE_MESSAGE,
                 errorOf(scenario.result)
             )
         }
 
         ActivityScenario.launchActivityForResult<Nip55Activity>(requestFromTheCallingPackage("gate-live-1")).use { scenario ->
             val second = requestFromTheCallingPackage("gate-live-2")
-            scenario.onActivity { activity -> deliver(activity, second) }
-            assertEquals(
-                "With the store in place the same second intent must not be refused",
-                Lifecycle.State.RESUMED,
-                scenario.state
-            )
+            scenario.onActivity { activity ->
+                deliver(activity, second)
+                // Read in the same block that delivered the intent: finish() sets this
+                // synchronously, where the destroy a lifecycle-state read waits for
+                // arrives from the system later and could still read RESUMED.
+                assertFalse(
+                    "With the store in place the same second intent must not be refused",
+                    activity.isFinishing
+                )
+            }
         }
     }
 
@@ -140,7 +143,7 @@ class Nip55StoreGateInstrumentedTest {
             }
             assertEquals(
                 "The store gate must refuse before the caller-verification branch",
-                "Permission store is not available",
+                STORE_UNAVAILABLE_MESSAGE,
                 errorOf(scenario.result)
             )
         }
@@ -162,7 +165,10 @@ class Nip55StoreGateInstrumentedTest {
     @After
     fun sweepCallerVerificationStore() {
         // These tests issue nonces on the shared production CallerVerificationStore
-        // singleton; sweep them so none leaks into a sibling test.
+        // singleton. A gated intent is refused before identifyCaller consumes its
+        // nonce, so this drops the expired ones and leaves the rest to age out of
+        // their own 5-minute window: in-memory, single-use and package-bound, and
+        // every sibling test mints its own.
         app().getCallerVerificationStore()?.cleanupExpiredNonces()
     }
 }
