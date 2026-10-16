@@ -80,6 +80,38 @@ internal fun resolveAuditAnchorState(
 }
 
 /**
+ * Whether rows are chained under the audit HMAC secret, which is what refuses to mint a
+ * replacement over an absent one.
+ *
+ * Minting restarts the chain: every row written under the old secret stops verifying, and
+ * nothing records that the secret changed. The Rust walk does report the first old-secret
+ * row as tampered, but only when something asks it to, and the 30-day prune that runs on
+ * every launch deletes those rows, after which the walk reports a dangling head that
+ * [resolveChainVerification] trusts the anchor over and calls valid.
+ *
+ * The anchor count is the signal rather than the database file, which is non-empty from
+ * first use onward whether or not an audit row was ever chained, so refusing on it would
+ * refuse a lost secret with nothing to lose. The anchor advance follows every append and
+ * prune and [resetAuditAnchor] zeroes the count after a sanctioned clear, so a count
+ * above zero means rows are chained under the secret being replaced.
+ *
+ * Both halves absent has to mint: an install from before the anchor shipped (v1.1.5) has
+ * none, and can upgrade at any later date with rows still inside the prune window, so
+ * refusing would close the app on it. Deleting both halves is therefore a way past this,
+ * and not closable from the read side for the same reason.
+ *
+ * Every other shape refuses, on the pair rule [resolveAuditAnchorState] uses: a
+ * half-present pair or an unreadable half is a pair no writer here produced, and a
+ * negative count is one no writer stores.
+ *
+ * Pure function: no storage, no native calls, fully unit-testable.
+ */
+internal fun auditChainExists(count: PrefRead<Long>, hash: PrefRead<String>): Boolean {
+    if (count is PrefRead.Absent && hash is PrefRead.Absent) return false
+    return !(count is PrefRead.Found && hash is PrefRead.Found && count.value == 0L)
+}
+
+/**
  * Whether the rows an audit write is about to change disagree with the anchor they were
  * pinned against, which is out-of-band mutation.
  *

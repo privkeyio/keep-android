@@ -155,18 +155,17 @@ abstract class Nip55Database : RoomDatabase() {
          * stored ciphertext, which is what a restored Keystore alias would need. For the
          * audit HMAC the same mint would silently restart a tamper-evident chain.
          *
-         * An absent key is refused the same way when [existingDatabase] is a file with
-         * content, because a database that exists was encrypted under a key this is about
-         * to replace. Deleting the entry produces this, and so does losing a queued write
-         * to process death. An empty file is not refused: it holds nothing, so minting
-         * over it loses nothing, and that is the state a first run can legitimately leave
-         * behind.
-         *
-         * Only the passphrase passes [existingDatabase]. The audit secret needs the same
-         * refusal and not from this signal: the file is non-empty from first use onward
-         * whether or not any audit row was ever chained, so keying on it would refuse a
-         * lost secret with nothing to lose and leave the app permanently unopenable. The
-         * signal that matches is the audit anchor, which belongs with the anchor reads.
+         * An absent key is refused the same way when [mintRefusal] names a reason, which
+         * is where each caller holds the evidence that what the key protects already
+         * exists. The passphrase refuses over a database file with content, because a
+         * database that exists was encrypted under a key this is about to replace.
+         * Deleting the entry produces this, and so does losing a queued write to process
+         * death. An empty file is not refused: it holds nothing, so minting over it loses
+         * nothing, and that is the state a first run can legitimately leave behind. The
+         * audit secret cannot use that signal, since the file is non-empty from first use
+         * onward whether or not any audit row was ever chained, so it refuses on the
+         * audit anchor instead (see [auditChainExists]). The reason is read from the store
+         * this resolved, so a test that redirects [prefsName] redirects it too.
          *
          * [prefsName] is open for tests, which cannot stage a fault in the shared store the
          * rest of the suite reads, and selects both the file and the store so the two
@@ -178,8 +177,8 @@ abstract class Nip55Database : RoomDatabase() {
             context: Context,
             prefKey: String,
             prefsName: String = PREFS_NAME,
-            existingDatabase: java.io.File? = null,
             prefs: ReadablePrefs? = null,
+            mintRefusal: ((ReadablePrefs) -> String?)? = null,
         ): ByteArray {
             val store = prefs
                 ?: if (prefsName == PREFS_NAME) getEncryptedPrefs(context)
@@ -207,9 +206,7 @@ abstract class Nip55Database : RoomDatabase() {
                 return android.util.Base64.decode(existing, android.util.Base64.NO_WRAP)
             }
 
-            if ((existingDatabase?.length() ?: 0L) > 0L) {
-                throw KeepMobileException.StorageException("No stored $prefKey for a database that exists")
-            }
+            mintRefusal?.invoke(store)?.let { throw KeepMobileException.StorageException(it) }
 
             val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
             // Both keys commit rather than apply, and the result is checked: a key handed
@@ -237,16 +234,40 @@ abstract class Nip55Database : RoomDatabase() {
             prefsName: String = PREFS_NAME,
             dbName: String = DB_NAME,
         ): ByteArray =
-            getOrCreateKey(
-                context,
-                KEY_DB_PASSPHRASE,
-                prefsName = prefsName,
-                existingDatabase = context.getDatabasePath(dbName),
-            )
+            getOrCreateKey(context, KEY_DB_PASSPHRASE, prefsName = prefsName) { _ ->
+                if (context.getDatabasePath(dbName).length() > 0L) {
+                    "No stored $KEY_DB_PASSPHRASE for a database that exists"
+                } else {
+                    null
+                }
+            }
+
+        // The anchor is read through the store this was handed rather than through
+        // readAuditAnchorState, which answers from appContext: the mint runs inside
+        // getInstance before that is assigned, so it would read an empty state and never
+        // refuse. readLong rather than getLong, so a count that will not decrypt refuses
+        // instead of reading as the absence that mints.
+        //
+        // [prefsName] is open for tests, which is also what keeps the companion-wide
+        // hmacKey cache in the caller below rather than here: a test minting into prefs
+        // of its own must not leave the rest of the process signing audit entries with
+        // the key it produced.
+        @androidx.annotation.VisibleForTesting
+        internal fun getOrCreateAuditSecret(
+            context: Context,
+            prefsName: String = PREFS_NAME,
+        ): ByteArray =
+            getOrCreateKey(context, KEY_HMAC_SECRET, prefsName = prefsName) { store ->
+                val chained = auditChainExists(
+                    store.readLong(KEY_AUDIT_ANCHOR_COUNT),
+                    store.readString(KEY_AUDIT_ANCHOR_HASH)
+                )
+                if (chained) "No stored $KEY_HMAC_SECRET for an audit chain that exists" else null
+            }
 
         private fun getOrCreateHmacKey(context: Context): ByteArray {
             hmacKey?.let { return it }
-            return getOrCreateKey(context, KEY_HMAC_SECRET).also { hmacKey = it }
+            return getOrCreateAuditSecret(context).also { hmacKey = it }
         }
 
         fun getHmacKey(): ByteArray? = hmacKey

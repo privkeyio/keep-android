@@ -31,7 +31,9 @@ import java.io.File
  * the read finds nothing, so a read that reports an undecryptable key as nothing mints
  * over it. That is not a recovery. Room opens the existing encrypted file with the new
  * passphrase and cannot, since nothing deletes or rebuilds it, and the audit chain would
- * restart with nothing recording that it had. An unreadable key has to fail the open.
+ * restart with nothing recording that it had. An unreadable key has to fail the open, and
+ * so does an absent one over state the key it replaces already protects: the database file
+ * for the passphrase, the audit anchor for the secret.
  *
  * Staged in prefs of their own: the fault has to be written to disk, and the file the
  * production path uses is the one much of this suite depends on.
@@ -47,7 +49,6 @@ class DatabaseKeyMintTest {
     private fun clear() {
         context.deleteSharedPreferences(PREFS)
         context.deleteDatabase(DB)
-        File(context.cacheDir, STAGED_DB).delete()
         // The legacy lookup the mint sits behind is one-shot, gated by a marker in a file
         // the whole app shares. Only the two this test sets are removed, since clearing
         // the file would re-open migrations other tests have already run.
@@ -62,19 +63,31 @@ class DatabaseKeyMintTest {
 
     private fun open() = KeystoreEncryptedPrefs.create(context, PREFS)
 
-    private fun keyFor(prefKey: String = KEY, existingDatabase: File? = null) =
-        Nip55Database.getOrCreateKey(
-            context,
-            prefKey,
-            prefsName = PREFS,
-            existingDatabase = existingDatabase,
-        )
+    private fun keyFor(prefKey: String = KEY) =
+        Nip55Database.getOrCreateKey(context, prefKey, prefsName = PREFS)
+
+    private fun dbKey() = Nip55Database.getOrCreateDbKey(context, prefsName = PREFS, dbName = DB)
+
+    private fun auditSecret() = Nip55Database.getOrCreateAuditSecret(context, prefsName = PREFS)
 
     private fun stagedDatabase(content: String?): File =
-        File(context.cacheDir, STAGED_DB).apply {
+        context.getDatabasePath(DB).apply {
+            parentFile?.mkdirs()
             delete()
             if (content != null) writeText(content)
         }
+
+    private fun stageAnchor(count: Long, hash: String) {
+        open().edit().putLong(ANCHOR_COUNT, count).putString(ANCHOR_HASH, hash).commit()
+    }
+
+    private fun stageUnreadableAnchorCount() {
+        open().edit().putString(ANCHOR_HASH, "hashB").commit()
+        val storedName = writeAndFindStoredName(context, PREFS) {
+            open().edit().putLong(ANCHOR_COUNT, 3L).commit()
+        }
+        corruptStoredValue(context, PREFS, storedName)
+    }
 
     private fun storeUnreadableKey(prefKey: String = KEY): String {
         val storedName = writeAndFindStoredName(context, PREFS) {
@@ -122,8 +135,63 @@ class DatabaseKeyMintTest {
         // in the log saying why.
         storeUnreadableKey(HMAC_KEY)
 
-        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { keyFor(HMAC_KEY) }
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { auditSecret() }
         assertEquals("Stored $HMAC_KEY could not be read", thrown.msg)
+    }
+
+    @Test
+    fun an_absent_audit_secret_over_an_anchored_chain_is_refused() {
+        // Minting here restarts the chain under a new secret, which leaves every row
+        // written under the old one unverifiable and nothing recording that it changed.
+        // The anchor is the evidence that there are such rows: it is advanced after every
+        // append, out of reach of whoever deleted the secret.
+        stageAnchor(count = 3L, hash = "hashB")
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { auditSecret() }
+        assertEquals("No stored $HMAC_KEY for an audit chain that exists", thrown.msg)
+        assertEquals(
+            "the refusal must not have minted one on its way out",
+            PrefRead.Absent,
+            open().readString(HMAC_KEY)
+        )
+    }
+
+    @Test
+    fun an_unreadable_anchor_count_refuses_the_audit_secret_mint() {
+        // The read has to be three-way for the refusal to hold: a count that will not
+        // decrypt reads as zero through the ordinary getter, which is the one anchor
+        // state that mints.
+        stageUnreadableAnchorCount()
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { auditSecret() }
+        assertEquals("No stored $HMAC_KEY for an audit chain that exists", thrown.msg)
+    }
+
+    @Test
+    fun an_absent_audit_secret_beside_half_an_anchor_is_refused() {
+        // Both halves are written in one commit, so deleting only the count is the way
+        // past the check above. It is closed by reading both halves, which is what this
+        // pins: the count alone reads as an absence here.
+        open().edit().putString(ANCHOR_HASH, "hashB").commit()
+
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { auditSecret() }
+        assertEquals("No stored $HMAC_KEY for an audit chain that exists", thrown.msg)
+    }
+
+    @Test
+    fun an_absent_audit_secret_with_no_anchor_still_mints() {
+        // A first run, and an install from before the anchor shipped. Refusing here would
+        // close the app on both.
+        assertEquals(32, auditSecret().size)
+    }
+
+    @Test
+    fun an_absent_audit_secret_with_a_zero_anchor_still_mints() {
+        // What a sanctioned clear leaves: the table is empty, so a new secret restarts a
+        // chain with nothing in it.
+        stageAnchor(count = 0L, hash = "")
+
+        assertEquals(32, auditSecret().size)
     }
 
     @Test
@@ -152,27 +220,13 @@ class DatabaseKeyMintTest {
     fun an_absent_key_over_a_database_that_exists_is_refused() {
         // Deleting the stored entry produces this, and so does losing a queued write to
         // process death. Minting here replaces the key the existing database was encrypted
-        // under, which cannot open it again.
-        val staged = stagedDatabase("not empty")
+        // under, which cannot open it again. Staged at the path production derives, so the
+        // refusal is pinned to that path and not to a file of the test's choosing.
+        stagedDatabase("not empty")
 
-        val thrown = assertThrows(KeepMobileException.StorageException::class.java) {
-            keyFor(existingDatabase = staged)
-        }
+        val thrown = assertThrows(KeepMobileException.StorageException::class.java) { dbKey() }
         assertEquals("No stored $KEY for a database that exists", thrown.msg)
         assertEquals("the refusal must not have minted one on its way out", PrefRead.Absent, open().readString(KEY))
-    }
-
-    @Test
-    fun the_production_passphrase_path_refuses_over_its_own_database_path() {
-        // The seam the other refusal tests use stages a file of their choosing, so this is
-        // what pins the path production actually derives.
-        val path = context.getDatabasePath(DB).apply { parentFile?.mkdirs() }
-        path.writeText("not empty")
-
-        val thrown = assertThrows(KeepMobileException.StorageException::class.java) {
-            Nip55Database.getOrCreateDbKey(context, prefsName = PREFS, dbName = DB)
-        }
-        assertEquals("No stored $KEY for a database that exists", thrown.msg)
     }
 
     @Test
@@ -187,18 +241,18 @@ class DatabaseKeyMintTest {
 
     @Test
     fun an_absent_key_with_no_database_still_mints() {
-        val missing = stagedDatabase(null)
+        stagedDatabase(null)
 
-        assertEquals(32, keyFor(existingDatabase = missing).size)
+        assertEquals(32, dbKey().size)
     }
 
     @Test
     fun an_absent_key_with_an_empty_database_file_still_mints() {
         // The state a first run can legitimately leave behind, which the next test pins.
         // An empty file holds nothing, so refusing here would break a genuine first run.
-        val empty = stagedDatabase("")
+        stagedDatabase("")
 
-        assertEquals(32, keyFor(existingDatabase = empty).size)
+        assertEquals(32, dbKey().size)
     }
 
     @Test
@@ -241,8 +295,9 @@ class DatabaseKeyMintTest {
     private companion object {
         const val PREFS = "database_key_mint_test"
         const val DB = "database_key_mint_test.db"
-        const val STAGED_DB = "database_key_mint_test_staged.db"
         const val KEY = "db_passphrase"
         const val HMAC_KEY = "hmac_secret"
+        const val ANCHOR_COUNT = "audit_anchor_count"
+        const val ANCHOR_HASH = "audit_anchor_hash"
     }
 }
