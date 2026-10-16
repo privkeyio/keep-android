@@ -1,7 +1,6 @@
 package io.privkey.keep.storage
 
 import android.content.Context
-import android.content.SharedPreferences
 import io.privkey.keep.uniffi.KeepMobileException
 import org.json.JSONArray
 import org.json.JSONException
@@ -16,7 +15,7 @@ class AndroidAuditStorage(context: Context) {
         private const val MAX_ENTRY_SIZE_BYTES = 64 * 1024
     }
 
-    private val prefs: SharedPreferences = run {
+    private val prefs: ReadablePrefs = run {
         val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
         LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
     }
@@ -47,7 +46,16 @@ class AndroidAuditStorage(context: Context) {
     }
 
     private fun loadEntriesInternal(): MutableList<String> {
-        val stored = prefs.getString(KEY_ENTRIES, null) ?: return mutableListOf()
+        val stored = when (val read = prefs.readString(KEY_ENTRIES)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> return mutableListOf()
+            // The log is on disk and this read cannot produce it. An empty list would
+            // send storeEntry on to write a single entry over the whole of it, which is
+            // the one outcome a tamper-evident log must not have; entries that will not
+            // parse already throw below, and this is the same answer for a worse fault.
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("Failed to load audit entries")
+        }
         return try {
             val jsonArray = JSONArray(stored)
             (0 until jsonArray.length()).mapTo(mutableListOf()) { jsonArray.getString(it) }
