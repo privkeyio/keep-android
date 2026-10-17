@@ -383,6 +383,16 @@ object KeystoreEncryptedPrefs {
             }
             val hash = calculateKeyHash(plainKey)
             if (basePrefs.contains(hash)) {
+                // While this store is on its deterministic key, the name it just
+                // computed is one anything that can write this directory can
+                // compute too, so it takes the same rule the fallback name does.
+                // The registry is excluded here as it is below: it resolves
+                // through its own decode rather than this lookup.
+                if (plainKey != KEY_REGISTRY && hash == fallbackHashOf(plainKey) &&
+                    acceptableValueAt(plainKey, hash) == null
+                ) {
+                    return null
+                }
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
                 return hash
@@ -409,13 +419,13 @@ object KeystoreEncryptedPrefs {
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || readableFallbackValue(plainKey, fallbackHash) == null) return null
+            if (fallbackHash == hash || acceptableValueAt(plainKey, fallbackHash) == null) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
                 // Re-read under the lock, and through the same rule: what is
                 // there now is what gets relocated to a name this will trust
                 // from then on.
-                val value = readableFallbackValue(plainKey, fallbackHash)
+                val value = acceptableValueAt(plainKey, fallbackHash)
                 value != null &&
                     basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
@@ -473,7 +483,8 @@ object KeystoreEncryptedPrefs {
             hmacWithKey(plainKey, deterministicHmacKey())
 
         /**
-         * The value at a fallback-epoch name, if it may be read as [plainKey]'s.
+         * The value at a name anything could have written, if it may be read as
+         * [plainKey]'s.
          *
          * That name is an HMAC over the plaintext key under a key derived from a
          * constant in the APK and the file name, so anything that can write this
@@ -497,17 +508,19 @@ object KeystoreEncryptedPrefs {
          * settings of exactly the shape that is never rewritten, up to the PIN
          * flag whose absence reads as no PIN at all.
          *
-         * None of this reaches the one state where the current name is derivable
-         * too: a store left on the deterministic key hashes every name with it,
-         * so this is never consulted and an unbound value is read wherever it
-         * sits. Closing that is a separate change, since the names themselves
-         * are the problem there rather than which of them a value sits at.
+         * A store left on its deterministic key hashes every name with it, so
+         * the current name is derivable too and earns no more trust than the
+         * fallback one; the lookup applies this there as well. The index stays
+         * the discriminator, and it is the right one: a file that genuinely
+         * holds deterministic-epoch entries migrates off that key on first
+         * access, so the state where the store stays on it is the state where
+         * its index was replaced by something it cannot read.
          */
-        private fun readableFallbackValue(plainKey: String, fallbackName: String): String? {
+        private fun acceptableValueAt(plainKey: String, storedName: String): String? {
             // A non-String planted at this name makes the platform getter throw
             // on its unchecked cast, which is the same writer this is defending
             // against, so it answers as nothing rather than raising.
-            val value = runCatching { basePrefs.getString(fallbackName, null) }.getOrNull() ?: return null
+            val value = runCatching { basePrefs.getString(storedName, null) }.getOrNull() ?: return null
             if (!value.startsWith(BOUND_PREFIX)) {
                 synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
                 if (!keyCache.containsKey(plainKey)) return null

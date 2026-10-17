@@ -225,6 +225,49 @@ class KeystoreEncryptedPrefsTransplantTest {
         )
     }
 
+    /**
+     * Forces the store onto its deterministic key, permanently.
+     *
+     * Deleting the stored derivation key makes the next open mint a fresh one,
+     * and a blob it cannot decrypt at the deterministic registry name makes the
+     * migration that would persist it fail before it commits anything, so the
+     * open falls back to the deterministic key and every later open repeats it.
+     * Both names are pure functions of constants in the APK and the file name.
+     */
+    private fun forceDeterministicEpoch() {
+        reopen().edit().putBoolean(OPTED_IN_VICTIM, true).commit()
+        raw().edit()
+            .remove(HMAC_KEY_PREF)
+            .putString(fallbackNameOf(KEY_REGISTRY), "not a registry this can read")
+            .commit()
+    }
+
+    // In that state every name the store computes is one the attacker can
+    // compute, so the current name earns no more trust than the fallback one.
+    // Without the same rule there, the transplant lands at what the store now
+    // calls the key's own name.
+    @Test
+    fun aPlantedValueIsNotReadWhileTheStoreIsOnItsDeterministicKey() {
+        forceDeterministicEpoch()
+        raw().edit().putString(fallbackNameOf(OPTED_IN_ATTACKER), legacyValue("b:true")).commit()
+
+        assertFalse(
+            "a derivable current name must not grant the key it was planted under",
+            reopen().getBoolean(OPTED_IN_ATTACKER, false)
+        )
+    }
+
+    // And the store still works for what it writes itself in that state, so the
+    // rule is not a blanket refusal of a file whose key never persisted.
+    @Test
+    fun theStoreStillReadsItsOwnWritesOnTheDeterministicKey() {
+        forceDeterministicEpoch()
+
+        val prefs = reopen()
+        assertTrue("a write must still commit", prefs.edit().putString(LEGACY_KEY, "mine").commit())
+        assertEquals("and read back", "mine", reopen().getString(LEGACY_KEY, null))
+    }
+
     private companion object {
         const val PREFS_NAME = "transplant_test_prefs"
         const val PIN_PREFS_NAME = "keep_pin_protection"
@@ -234,5 +277,7 @@ class KeystoreEncryptedPrefsTransplantTest {
         const val OPTED_IN_VICTIM = "opted_in_com.example.victim"
         const val OPTED_IN_ATTACKER = "opted_in_com.example.attacker"
         const val LEGACY_KEY = "legacy_setting"
+        const val HMAC_KEY_PREF = "__hmac_key__"
+        const val KEY_REGISTRY = "__keys__"
     }
 }
