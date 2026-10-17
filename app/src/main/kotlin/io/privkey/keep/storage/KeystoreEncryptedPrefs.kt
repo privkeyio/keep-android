@@ -409,13 +409,13 @@ object KeystoreEncryptedPrefs {
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || boundFallbackValue(fallbackHash) == null) return null
+            if (fallbackHash == hash || readableFallbackValue(plainKey, fallbackHash) == null) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
-                // Re-read under the lock, and through the same guard: what is
+                // Re-read under the lock, and through the same rule: what is
                 // there now is what gets relocated to a name this will trust
                 // from then on.
-                val value = boundFallbackValue(fallbackHash)
+                val value = readableFallbackValue(plainKey, fallbackHash)
                 value != null &&
                     basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
@@ -473,30 +473,39 @@ object KeystoreEncryptedPrefs {
             hmacWithKey(plainKey, deterministicHmacKey())
 
         /**
-         * The value stored at a fallback-epoch name, if it is bound to the key
-         * it is stored under.
+         * The value at a fallback-epoch name, if it may be read as [plainKey]'s.
          *
-         * That name is an HMAC over the plaintext key under a key derived from
-         * a constant in the APK and the file name, so anything that can write
-         * this directory can place a value there, and values here are otherwise
-         * interchangeable: authentication covers the value alone, and a file
-         * like the auto-signing one stores the same plaintext for every opted-in
-         * package. Copying one onto another package's fallback name is what the
-         * binding refuses, because a bound value decrypts only under the logical
-         * name it was written for and producing a new one needs the Keystore
-         * key.
+         * That name is an HMAC over the plaintext key under a key derived from a
+         * constant in the APK and the file name, so anything that can write this
+         * directory can place a value at a name of its choosing, and values in
+         * one file are otherwise interchangeable: authentication covers the value
+         * alone, and the auto-signing file stores the same plaintext for every
+         * opted-in package. Copying one onto another package's fallback name is
+         * the transplant this refuses.
          *
-         * An unbound value predates the binding and says nothing about where it
-         * belongs, so it is read only at the current name, which is hashed under
-         * a key that never leaves the Keystore and is therefore not a name an
-         * attacker can choose. The cost is a genuine pre-binding value stranded
-         * under the previous epoch, which stops being recoverable through this
-         * probe and reads as absent; it is the same answer the probe gave before
-         * it existed, and the alternative is leaving every install that predates
-         * the binding transplantable for its whole life.
+         * A bound value answers it by itself: it decrypts only under the logical
+         * name it was written for, and producing a new one needs the Keystore
+         * key. A value from before the binding carries no such statement, so it
+         * is accepted only for a key this store's own index lists, which is the
+         * difference between a value stranded by an epoch this store moved
+         * through and a value planted for a key it has never written. An
+         * attacker cannot list a name of their choosing: the index is encrypted,
+         * and a copied blob only ever lists names that were already in it.
+         *
+         * Refusing an unlisted unbound value costs nothing legitimate, since
+         * nothing wrote it, while refusing a listed one would silently drop
+         * settings of exactly the shape that is never rewritten, up to the PIN
+         * flag whose absence reads as no PIN at all.
          */
-        private fun boundFallbackValue(fallbackName: String): String? =
-            basePrefs.getString(fallbackName, null)?.takeIf { it.startsWith(BOUND_PREFIX) }
+        private fun readableFallbackValue(plainKey: String, fallbackName: String): String? {
+            // A non-String planted at this name makes the platform getter throw
+            // on its unchecked cast, which is the same writer this is defending
+            // against, so it answers as nothing rather than raising.
+            val value = runCatching { basePrefs.getString(fallbackName, null) }.getOrNull() ?: return null
+            if (value.startsWith(BOUND_PREFIX)) return value
+            synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
+            return value.takeIf { keyCache.containsKey(plainKey) }
+        }
 
         /**
          * The outcome of reading one registry copy.
@@ -655,13 +664,12 @@ object KeystoreEncryptedPrefs {
             for (plainKey in keyCache.keys.toList()) {
                 if (plainKey == KEY_REGISTRY) continue
                 val currentName = calculateKeyHash(plainKey)
+                // No marker check here: this loop only ever walks keys the index
+                // lists, which is the condition the probe admits an unbound value
+                // under, so enumeration and a direct read answer the same.
                 val name = when {
                     stored.containsKey(currentName) -> currentName
-                    // Same rule as the lookup probe: at a name an attacker can
-                    // derive, only a value bound to this key is this key's.
-                    else -> fallbackHashOf(plainKey).takeIf {
-                        it != currentName && (stored[it] as? String)?.startsWith(BOUND_PREFIX) == true
-                    }
+                    else -> fallbackHashOf(plainKey).takeIf { it != currentName && stored.containsKey(it) }
                 } ?: continue
                 // Only encrypted String entries. Anything else was never written
                 // by this class, and returning it verbatim would hand back
