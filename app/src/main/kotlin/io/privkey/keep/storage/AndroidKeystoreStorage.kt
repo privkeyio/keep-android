@@ -971,13 +971,22 @@ class AndroidKeystoreStorage(
                 }
             }
         }
-        if (keys.isEmpty()) return null
-        val active = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
-        if (active != null && keys.contains(active) && storesShareData(active, onFault = true)) return active
-        val fallbackKey = keys.sorted().firstOrNull { storesShareData(it, onFault = false) }
-            ?: return null
-        setActiveShareKey(fallbackKey)
-        return fallbackKey
+        // Read the pointer through [PrefRead] and decide without writing. The
+        // getString this replaces resolved an unreadable pointer to null, which
+        // read as "no pointer" and sent the scan on to pin whichever account
+        // sorts first; and the inferred key used to be persisted here, which is
+        // the write keep-mobile's resolve_active_share removed from its own layer
+        // for turning a transient fault into a permanent repoint. Inference now
+        // answers only when the registry leaves nothing to choose.
+        val decided = activePointer(
+            registry = keys,
+            pointer = multiSharePrefs.readString(KEY_ACTIVE_SHARE),
+            holdsShareData = ::storesShareData,
+        )
+        return when (decided) {
+            is ActivePointer.Use -> decided.key
+            ActivePointer.None -> null
+        }
     }
 
     @Synchronized
@@ -1071,8 +1080,9 @@ class AndroidKeystoreStorage(
         // storage fault behind null, and repointing the active share on a fault would
         // move the account out from under the NIP-55 grants, which are keyed on the
         // calling package alone and are cleared only by an explicit account switch. A
-        // pointer left dangling is harmless by comparison, since the resolver heals it
-        // on the next read.
+        // pointer left dangling is the lesser cost: the resolver no longer heals it,
+        // because it writes nothing now, but it still answers an unambiguous registry,
+        // so one readable share keeps working and several ask for a choice.
         if (multiSharePrefs.getString(KEY_ACTIVE_SHARE, null) == null) {
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
         }
