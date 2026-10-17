@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import android.os.SystemClock
 import android.util.Log
+import android.content.SharedPreferences
 import androidx.room.withTransaction
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.storage.SignPolicy
@@ -12,6 +13,7 @@ import io.privkey.keep.uniffi.Nip55PermissionDuration
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
 import io.privkey.keep.uniffi.Nip55VelocityResult
+import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.nip55AuditEntryHash
 import io.privkey.keep.uniffi.nip55CheckVelocity
@@ -589,7 +591,23 @@ class PermissionStore(private val database: Nip55Database) {
      * core store cannot be enumerated, so a tier whose row is already gone
      * is only reachable through some other record of that package.
      */
-    suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
+    suspend fun clearAllAppSettings(
+        signPolicyStore: SignPolicyStore? = null,
+        overrideMarkers: SharedPreferences? = null,
+    ) {
+        // First, and whatever else this can confirm: the per-package markers are
+        // residue of the previous account either way. The migration sweeps them
+        // when a run completes, so what reaches here is the install whose run
+        // never does, keeping one plaintext key per package that account had
+        // pinned. The run-wide markers stay set; clearing those would let the
+        // legacy copies run again and bring the previous choices back.
+        overrideMarkers?.let { markers ->
+            wipeStep("clear per-app override markers") {
+                val edit = markers.edit()
+                SignPolicySelectionPrefs.removeAppOverrideMarkers(markers, edit)
+                edit.commit()
+            }
+        }
         if (signPolicyStore == null) {
             // Nothing can be cleared or confirmed this session. Rows carrying no override
             // go. A row that carries one has to stay, because it is the only index of a

@@ -1,6 +1,7 @@
 package io.privkey.keep.storage
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
@@ -134,6 +135,28 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
          * never completes a run, so it keeps its markers until that row goes, and the
          * digest is the only thing covering them in the meantime.
          */
+        /**
+         * Stages the removal of every per-package override marker in [markers].
+         *
+         * Shared because two places need the same rule and for different
+         * reasons: the migration drops them as it sets the run-wide marker, in
+         * that one editor, and the account-switch wipe drops whatever an
+         * incomplete run left behind. Takes the editor rather than committing,
+         * so the first of those stays one commit.
+         *
+         * The run-wide markers are deliberately untouched: clearing them would
+         * let the legacy copies run again, which is how a previous account's
+         * choices would come back.
+         */
+        internal fun removeAppOverrideMarkers(
+            markers: SharedPreferences,
+            edit: SharedPreferences.Editor,
+        ) {
+            markers.all.keys
+                .filter { it.startsWith(APP_OVERRIDE_MARKER_PREFIX) }
+                .forEach { edit.remove(it) }
+        }
+
         internal fun appOverrideMarkerKey(callerPackage: String): String {
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(callerPackage.toByteArray(Charsets.UTF_8))

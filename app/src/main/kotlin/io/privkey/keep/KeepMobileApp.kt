@@ -483,7 +483,15 @@ class KeepMobileApp : Application() {
             // Before the revoke: clearAllAppSettings enumerates permission callers to
             // find overrides whose mirror row is already gone, and revokeAllPermissions
             // empties that index.
-            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings(signPolicyStore) }
+            runAccountSwitchCleanup("clear app settings") {
+                permissionStore?.clearAllAppSettings(
+                    signPolicyStore,
+                    getSharedPreferences(
+                        SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+                        Context.MODE_PRIVATE
+                    )
+                )
+            }
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
