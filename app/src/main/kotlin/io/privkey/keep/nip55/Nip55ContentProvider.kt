@@ -49,6 +49,9 @@ import java.util.concurrent.atomic.AtomicInteger
 // cannot leave the two paths describing the same fault differently.
 internal const val STORE_UNAVAILABLE_MESSAGE = "Permission store is not available"
 
+/** An auto-signed request whose audit row was not observed to land. */
+private class AuditAppendIncomplete : Exception("Audit append did not complete")
+
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -74,6 +77,14 @@ class Nip55ContentProvider : ContentProvider() {
 
         private const val BACKGROUND_SIGNING_CHANNEL_ID = "background_signing"
 
+        // How many provider operations may be in flight at once.
+        private const val REQUEST_PERMITS = 4
+
+        // How long a caller waits for its audit row before the request is
+        // refused. The append itself is not cancelled at it; see appendAudited.
+        private const val AUDIT_APPEND_BUDGET_MS = 5_000L
+
+
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
         private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
         private val REJECTED_COLUMNS = arrayOf("rejected")
@@ -87,7 +98,7 @@ class Nip55ContentProvider : ContentProvider() {
 
     private val rateLimiter by lazy { Nip55RequestRateLimiter() }
     private val backgroundNotificationId = AtomicInteger(0)
-    private val concurrentRequestSemaphore = Semaphore(4)
+    private val concurrentRequestSemaphore = Semaphore(REQUEST_PERMITS)
 
     // Scope for orphaned FFI work. A policy-store / rate-limiter call reaches a
     // blocking, non-cancellable UniFFI call (e.g. SigningRateLimiter.checkAndRecord,
@@ -99,6 +110,15 @@ class Nip55ContentProvider : ContentProvider() {
     // SupervisorJob so one orphaned failure cannot cancel the others.
     private val orphanScope = CoroutineScope(
         Dispatchers.IO.limitedParallelism(ORPHAN_IO_PARALLELISM) + SupervisorJob(),
+    )
+
+    // Audit appends, off the caller's thread so a stalled anchor write cannot
+    // hold a request past its budget. Single-threaded because every append
+    // serializes on the writer's own lock anyway, so more threads would only
+    // queue in a second place; a stalled append therefore delays the next one,
+    // which then reports itself not landed and refuses, in that order.
+    private val auditScope = CoroutineScope(
+        Dispatchers.IO.limitedParallelism(1) + SupervisorJob(),
     )
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
@@ -380,7 +400,13 @@ class Nip55ContentProvider : ContentProvider() {
                         currentApp.getAutoSigningSafeguards()
                     )
                 }
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, outcome.reason, wasAutomatic = true) }
+                if (!recordAutoDecision(store, callerPackage, requestType, eventKind, outcome.reason)) {
+                    // The refusal still stands, since nothing was released and a
+                    // policy rejection tells the caller more than a failure would.
+                    // Logged in every build because the row that would have
+                    // carried it is the thing that did not land.
+                    Log.w(TAG, "Auto-refused request not recorded: ${outcome.reason}")
+                }
                 rejectedCursor(null)
             }
             is Nip55Outcome.Error -> errorCursor(outcome.message, null)
@@ -442,12 +468,22 @@ class Nip55ContentProvider : ContentProvider() {
                 checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
                     throw IllegalStateException("Pubkey verification failed")
                 }
-                runCatching {
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
-                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
-                }.onFailure { e ->
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
+                // The row is the operation's only record: the user sees nothing
+                // else for a request answered in the background, and the velocity
+                // and frequency inputs of later decisions are counted from these
+                // rows, so an unrecorded auto-sign also lowers the bar for the
+                // next one. An operation that cannot be recorded is refused, which
+                // is a real refusal here because the signature has not left the
+                // process, and it matches what the foreground path now does with
+                // a request it cannot record.
+                if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
+                    throw AuditAppendIncomplete()
                 }
+                // The notification is not the record and stays best effort.
+                runCatching { showBackgroundSigningNotification(callerPackage, requestType, eventKind) }
+                    .onFailure { e ->
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Background signing notification failed: ${e::class.simpleName}")
+                    }
                 when (requestType) {
                     Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
                         MatrixCursor(SIGN_COLUMNS).apply {
@@ -460,6 +496,9 @@ class Nip55ContentProvider : ContentProvider() {
                 }
             }
             .getOrElse { e ->
+                // Logged in every build for this one: it is the case whose record
+                // is the thing that failed, so nothing else would carry it.
+                if (e is AuditAppendIncomplete) Log.w(TAG, "Auto-signed request refused: audit append did not complete")
                 if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
                 if (e is BiometricHelper.BiometricNotReadyException) {
                     errorCursor(e.message ?: "Biometric authentication is unavailable", id)
@@ -467,6 +506,95 @@ class Nip55ContentProvider : ContentProvider() {
                     errorCursor("Request failed", id)
                 }
             }
+    }
+
+    /**
+     * Appends the audit row for an auto-signed request, and reports whether it
+     * landed.
+     *
+     * Deliberately not through [runWithTimeout]. That wrapper takes one of the
+     * few permits before it does anything, so contention alone could skip the
+     * append entirely, which is how a response came to be returned with no row
+     * at all: nothing raised and nothing was logged, because no attempt was
+     * made.
+     *
+     * It runs on its own scope instead, waited for under a budget the caller is
+     * released at, with no permit to lose. The writer serializes every append on
+     * its own lock, so ordering is unchanged.
+     *
+     * `internal` so a test can drive it against a real store, since the provider
+     * itself refuses a same-uid caller and cannot be exercised end to end from
+     * instrumentation.
+     */
+    internal fun recordAutoSigned(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, "allow")
+
+    /**
+     * The same bounded, caller-thread append for a decision that refused.
+     *
+     * Nothing was released, so the result is not a gate here, but the row still
+     * has to land: the frequency input of later risk assessments counts rows
+     * without regard to their decision, and a deny burst is the pattern that
+     * input exists to catch, so skipped rows lower the bar for what follows.
+     *
+     * The result is still not checked, and that is the choice rather than an
+     * omission: the caller is being refused either way, and turning a refusal
+     * into a failure would tell it less about what happened. What it costs is
+     * that an unrecorded refusal is invisible, which is why the append runs on
+     * this path too rather than only on the one that returns something.
+     */
+    internal fun recordAutoDecision(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        decision: String,
+    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, decision)
+
+    /**
+     * One bounded append, reporting whether it landed within the budget.
+     *
+     * Bounded for the caller, and not through the permit wrapper: the append is
+     * the step that must be attempted, and losing a permit to contention is how
+     * it came to be skipped in the first place.
+     *
+     * The budget is kept honest by starting the append outside the wait rather
+     * than by cancelling it. Cancellation cannot reach the anchor write that
+     * follows the row, which is synchronous and has no suspension point, and a
+     * structured call would make the caller wait for it anyway however the
+     * budget expired: switching dispatchers moves where that work runs, not
+     * whether its parent waits for it. So the append is launched on its own
+     * scope and only the wait is cancelled.
+     *
+     * The price is that an append still running when the budget expires is
+     * reported as not landed, and its row may commit a moment later, so the log
+     * can hold an approval for a response that was never returned. That is the
+     * same shape as an append interrupted by process death, which the chain
+     * verification already heals, and it is the direction that holds more
+     * record rather than less. Asking the log instead of answering from the
+     * call would narrow it, and was tried: a row cannot be tied to the append
+     * that wrote it without a per-append identity it does not carry, so one
+     * request's row answers for another's, which is a weaker gate than the one
+     * this exists to be.
+     */
+    private fun appendAudited(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        decision: String,
+    ): Boolean {
+        val append = auditScope.async {
+            store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
+            true
+        }
+        return runCatching {
+            runBlocking { withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) { append.await() } }
+        }.getOrNull() == true
     }
 
     @SuppressLint("MissingPermission")
