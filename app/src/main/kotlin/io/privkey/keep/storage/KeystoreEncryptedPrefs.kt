@@ -253,6 +253,34 @@ object KeystoreEncryptedPrefs {
 
         private fun deterministicHmacKey(): ByteArray = deterministicKey
 
+        /**
+         * The derivation key a build in the v0.6.0 window persisted into any
+         * file that already held entries: the seed alone, with no file name.
+         *
+         * It is a constant in this repository's history and in released APKs,
+         * and nothing migrates a file off it, because a stored key is read and
+         * used rather than re-derived. A file still carrying it hashes every
+         * name under something anyone can compute, which is the same exposure
+         * as the fallback epoch and not a name-by-name one.
+         */
+        private val legacyGlobalKey: ByteArray by lazy {
+            MessageDigest.getInstance("SHA-256")
+                .digest(DETERMINISTIC_HMAC_SEED.toByteArray(Charsets.UTF_8))
+        }
+
+        /**
+         * Whether the names this store computes are ones anything that can read
+         * the APK can compute too.
+         *
+         * Asked of the key rather than of a name: both exposures are the key
+         * being public, and comparing the key covers the one that is persisted
+         * as this file's own and would otherwise look like any other.
+         */
+        private fun namesAreDerivable(): Boolean {
+            val key = getHmacKey()
+            return key.contentEquals(deterministicKey) || key.contentEquals(legacyGlobalKey)
+        }
+
         private fun getHmacKey(): ByteArray {
             hmacKey?.let { return it }
             synchronized(initLockFor(prefsName)) {
@@ -275,14 +303,8 @@ object KeystoreEncryptedPrefs {
                 val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
                 val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
                 val hasExistingEntries = basePrefs.contains(registryHash)
-                // Entries beside no registry this can read are from an epoch
-                // whose key is gone: a deterministic-epoch file is migrated just
-                // below, and a file still holding its own key never reaches here.
-                // Reaching this with entries present takes that key going missing
-                // under them, which a rollback of this file does.
-                val stranded = !hasExistingEntries &&
+                val fileHoldsEntries =
                     basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
-                namesPredateThisKey = namesPredateThisKey || stranded
                 val persisted = if (hasExistingEntries) {
                     migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
                         if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
@@ -292,11 +314,26 @@ object KeystoreEncryptedPrefs {
                     // or a restart reads a key that looks like it has always been
                     // this file's and certifies deletes over the stranded entries.
                     val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
-                    if (stranded) editor.putString(STRANDED_EPOCH_PREF, "1")
+                    if (fileHoldsEntries) editor.putString(STRANDED_EPOCH_PREF, "1")
                     editor.commit().also { ok ->
                         if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
                     }
                 }
+                // Entries this cannot name: either nothing here could read an
+                // index for them, so they predate the key being minted now, or
+                // the key just minted did not persist and the store carries on
+                // under its deterministic one while they sit at names derived
+                // with neither. A rollback of this file produces the first; a
+                // value planted at the deterministic index name, which anything
+                // that can write this directory can derive, produces the second
+                // and would otherwise read as a deterministic-epoch file whose
+                // entries are all accounted for.
+                //
+                // Not durable in the second case, and it does not need to be:
+                // nothing committed, so every later open resolves the same way
+                // and recomputes it.
+                val stranded = fileHoldsEntries && (!hasExistingEntries || !persisted)
+                namesPredateThisKey = namesPredateThisKey || stranded
                 val result = if (persisted) key else deterministicHmacKey()
                 hmacKey = result
                 return result
@@ -383,6 +420,16 @@ object KeystoreEncryptedPrefs {
             }
             val hash = calculateKeyHash(plainKey)
             if (basePrefs.contains(hash)) {
+                // While this store's derivation key is one anything can compute,
+                // the name it just computed is one anything can compute too, so
+                // it takes the same rule the fallback name does. The registry is
+                // excluded here as it is below: it resolves through its own
+                // decode rather than this lookup.
+                if (plainKey != KEY_REGISTRY && namesAreDerivable() &&
+                    acceptableValueAt(plainKey, hash) == null
+                ) {
+                    return null
+                }
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
                 return hash
@@ -409,13 +456,13 @@ object KeystoreEncryptedPrefs {
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || readableFallbackValue(plainKey, fallbackHash) == null) return null
+            if (fallbackHash == hash || acceptableValueAt(plainKey, fallbackHash) == null) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
                 // Re-read under the lock, and through the same rule: what is
                 // there now is what gets relocated to a name this will trust
                 // from then on.
-                val value = readableFallbackValue(plainKey, fallbackHash)
+                val value = acceptableValueAt(plainKey, fallbackHash)
                 value != null &&
                     basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
@@ -473,7 +520,8 @@ object KeystoreEncryptedPrefs {
             hmacWithKey(plainKey, deterministicHmacKey())
 
         /**
-         * The value at a fallback-epoch name, if it may be read as [plainKey]'s.
+         * The value at a name anything could have written, if it may be read as
+         * [plainKey]'s.
          *
          * That name is an HMAC over the plaintext key under a key derived from a
          * constant in the APK and the file name, so anything that can write this
@@ -497,17 +545,28 @@ object KeystoreEncryptedPrefs {
          * settings of exactly the shape that is never rewritten, up to the PIN
          * flag whose absence reads as no PIN at all.
          *
-         * None of this reaches the one state where the current name is derivable
-         * too: a store left on the deterministic key hashes every name with it,
-         * so this is never consulted and an unbound value is read wherever it
-         * sits. Closing that is a separate change, since the names themselves
-         * are the problem there rather than which of them a value sits at.
+         * A store whose derivation key is itself public hashes every name under
+         * it, so the current name is derivable too and earns no more trust than
+         * the fallback one; the lookup applies this there as well, for a store
+         * left on its deterministic key and for one carrying the global key a
+         * build in the v0.6.0 window persisted. What discriminates
+         * there is mostly boundness rather than the index: reaching that state
+         * takes an index this cannot decode, which is also what stops the index
+         * being rebuilt, so nothing is listed and nothing unbound is admitted.
+         * That is the intended answer, since a file genuinely holding
+         * deterministic-epoch entries migrates off that key on first access and
+         * never reads through this at all. The index still decides the narrow
+         * case where the index decoded and the minted key failed to commit.
+         *
+         * The cost is paid on a cold hit only, and it is one decrypt the read
+         * repeats a moment later; a repeat read answers from the name cache
+         * without reaching here.
          */
-        private fun readableFallbackValue(plainKey: String, fallbackName: String): String? {
+        private fun acceptableValueAt(plainKey: String, storedName: String): String? {
             // A non-String planted at this name makes the platform getter throw
             // on its unchecked cast, which is the same writer this is defending
             // against, so it answers as nothing rather than raising.
-            val value = runCatching { basePrefs.getString(fallbackName, null) }.getOrNull() ?: return null
+            val value = runCatching { basePrefs.getString(storedName, null) }.getOrNull() ?: return null
             if (!value.startsWith(BOUND_PREFIX)) {
                 synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
                 if (!keyCache.containsKey(plainKey)) return null

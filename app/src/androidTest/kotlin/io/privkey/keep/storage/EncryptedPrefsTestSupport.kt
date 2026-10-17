@@ -2,6 +2,9 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.util.Base64
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 
@@ -54,7 +57,43 @@ internal fun forgetWriteProbe(context: Context, prefsName: String) {
     KeystoreEncryptedPrefs.create(context, prefsName).edit().remove(ANCHOR_KEY).commit()
 }
 
+/**
+ * The stored name the deterministic fallback epoch gives [plainKey].
+ *
+ * Mirrors the store's own derivation rather than calling it, which is the point:
+ * every input is a constant in the APK plus the file name, so a test derives it
+ * exactly as anything able to write the directory would.
+ */
+internal fun fallbackNameIn(prefsName: String, plainKey: String): String = hmacName(
+    MessageDigest.getInstance("SHA-256")
+        .digest("$DETERMINISTIC_HMAC_SEED:$prefsName".toByteArray(Charsets.UTF_8)),
+    plainKey
+)
+
+/** The derivation key a build in the v0.6.0 window persisted: the seed alone, no file name. */
+internal fun publishedGlobalKey(): ByteArray =
+    MessageDigest.getInstance("SHA-256").digest(DETERMINISTIC_HMAC_SEED.toByteArray(Charsets.UTF_8))
+
+/** The stored name [plainKey] takes in a file still carrying [publishedGlobalKey]. */
+internal fun globalEpochNameOf(plainKey: String): String = hmacName(publishedGlobalKey(), plainKey)
+
+private fun hmacName(key: ByteArray, plainKey: String): String {
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(key, "HmacSHA256"))
+    return Base64.encodeToString(
+        mac.doFinal(plainKey.toByteArray(Charsets.UTF_8)),
+        Base64.NO_WRAP or Base64.URL_SAFE
+    )
+}
+
 private const val ANCHOR_KEY = "__test_anchor__"
+private const val DETERMINISTIC_HMAC_SEED = "keystore_prefs_hmac_key"
+
+/** The one entry the store keeps under its literal name. */
+internal const val HMAC_KEY_PREF = "__hmac_key__"
+
+/** The store's own index, under the name the fallback epoch gives it. */
+internal const val KEY_REGISTRY = "__keys__"
 
 /** The marker KeystoreEncryptedPrefs puts on a value bound to its key name. */
 internal const val BOUND_PREFIX = "v2:"
