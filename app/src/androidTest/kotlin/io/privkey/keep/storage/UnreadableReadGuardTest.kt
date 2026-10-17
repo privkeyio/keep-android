@@ -255,7 +255,7 @@ class UnreadableReadGuardTest {
         assertEquals("relay.example.com", store.add("wss://relay.example.com"))
         assertEquals("other.example.com", store.add("wss://other.example.com"))
 
-        assertEquals(listOf("other.example.com", "relay.example.com"), store.getHosts())
+        assertEquals(listOf("other.example.com", "relay.example.com"), store.hosts())
     }
 
     private fun shareStorage() = AndroidKeystoreStorage(

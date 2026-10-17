@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
+import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,7 +32,16 @@ fun RelayAuthWhitelistScreen(
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
-        hosts = withContext(Dispatchers.IO) { store.getHosts() }
+        // A fault leaves the rows as they were rather than replacing them with an
+        // empty list, so the screen cannot report "nothing is whitelisted" for a
+        // list it merely failed to read. It still cannot say which of the two it
+        // is, since that needs a string this does not have; what it must not do
+        // is assert the wrong one. Previously this also raised out of the
+        // coroutine on a name-resolution fault and took the screen down.
+        val read = withContext(Dispatchers.IO) {
+            runCatching { store.readHosts() }.getOrDefault(PrefRead.Unreadable)
+        }
+        if (read is PrefRead.Found) hosts = read.value
     }
 
     LaunchedEffect(Unit) { reload() }

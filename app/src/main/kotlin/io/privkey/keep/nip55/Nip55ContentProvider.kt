@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
+import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.uniffi.AutoSignDecision
 import io.privkey.keep.uniffi.Nip55DecisionInputs
 import io.privkey.keep.uniffi.Nip55Handler
@@ -291,16 +292,27 @@ class Nip55ContentProvider : ContentProvider() {
 
         // Relay-auth whitelist (kind 22242): the raw hosts plus a read-failed flag.
         // No store or an empty list defers; a read error fails closed to auto-reject.
+        //
+        // The flag used to be set only by the catch, which caught the fault that
+        // raises. A value that would not decrypt came back as an empty list with
+        // the flag clear, so the core saw a person who had configured no gate and
+        // deferred to per-app grants, letting a grant auto-approve a relay the
+        // list may have been excluding, with nobody present to see it.
         val whitelistStore = currentApp.getRelayAuthWhitelistStore()
         var relayReadFailed = false
         val relayWhitelist: List<String> = if (whitelistStore == null) {
             emptyList()
         } else {
-            try {
-                whitelistStore.getHosts()
-            } catch (_: Exception) {
-                relayReadFailed = true
-                emptyList()
+            when (val read = try { whitelistStore.readHosts() } catch (_: Exception) { PrefRead.Unreadable }) {
+                is PrefRead.Found -> read.value
+                PrefRead.Unreadable -> {
+                    relayReadFailed = true
+                    emptyList()
+                }
+                // Unreachable: readHosts folds a never-configured list into an
+                // empty one. Kept off the failed leg so unfolding it later cannot
+                // turn "no gate configured" into a denial of every 22242 request.
+                PrefRead.Absent -> emptyList()
             }
         }
 
