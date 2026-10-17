@@ -442,12 +442,22 @@ class Nip55ContentProvider : ContentProvider() {
                 checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
                     throw IllegalStateException("Pubkey verification failed")
                 }
-                runCatching {
-                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true) }
-                    showBackgroundSigningNotification(callerPackage, requestType, eventKind)
-                }.onFailure { e ->
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Post-success side effects failed: ${e::class.simpleName}")
+                // The row is the operation's only record: the user sees nothing
+                // else for a request answered in the background, and the velocity
+                // and frequency inputs of later decisions are counted from these
+                // rows, so an unrecorded auto-sign also lowers the bar for the
+                // next one. An operation that cannot be recorded is refused, which
+                // is a real refusal here because the signature has not left the
+                // process, and it matches what the foreground path now does with
+                // a request it cannot record.
+                if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
+                    throw IllegalStateException("Audit append did not complete")
                 }
+                // The notification is not the record and stays best effort.
+                runCatching { showBackgroundSigningNotification(callerPackage, requestType, eventKind) }
+                    .onFailure { e ->
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Background signing notification failed: ${e::class.simpleName}")
+                    }
                 when (requestType) {
                     Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
                         MatrixCursor(SIGN_COLUMNS).apply {
@@ -468,6 +478,33 @@ class Nip55ContentProvider : ContentProvider() {
                 }
             }
     }
+
+    /**
+     * Appends the audit row for an auto-signed request, and reports whether it
+     * reached the database.
+     *
+     * [runWithTimeout] answers `null` for a budget overrun, for a failure inside
+     * the block, and for the concurrency permits being exhausted, and the last
+     * of those is neither an error nor rare: the permits are process-wide and a
+     * caller holding a standing permission can occupy them while another
+     * request is between its signature and this row. So the result is checked
+     * rather than only the absence of a throw, which is what let a skipped
+     * append pass as a completed one.
+     *
+     * `internal` so a test can drive it against a real store, since the provider
+     * itself refuses a same-uid caller and cannot be exercised end to end from
+     * instrumentation.
+     */
+    internal fun recordAutoSigned(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+    ): Boolean =
+        runWithTimeout {
+            store.logOperation(callerPackage, requestType, eventKind, "allow", wasAutomatic = true)
+            true
+        } ?: false
 
     @SuppressLint("MissingPermission")
     private fun showBackgroundSigningNotification(
