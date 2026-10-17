@@ -414,9 +414,34 @@ object KeystoreEncryptedPrefs {
             return hash
         }
 
-        private fun findEncryptedKey(plainKey: String): String? {
+        /**
+         * What a lookup found at the names a key can live under.
+         *
+         * [Absent] and [Refused] are both "no name answered with a value this
+         * will hand back", and they must not be conflated: one says nothing is
+         * there, the other says something is and this will not read it as this
+         * key's. Reporting the second as the first is how a record that exists
+         * reaches a caller as a positive absence, which several of them treat as
+         * licence to overwrite or as a control that was never set.
+         */
+        private sealed interface KeyLookup {
+            /** A name holding a value that may be read as this key's. */
+            data class Found(val encKey: String) : KeyLookup
+
+            /** No name holds anything for this key. */
+            object Absent : KeyLookup
+
+            /** [encKey] holds a value this will not read as this key's. */
+            data class Refused(val encKey: String) : KeyLookup
+        }
+
+        /** The name to read, for callers that have nothing to do with a refusal. */
+        private fun findEncryptedKey(plainKey: String): String? =
+            (locateKey(plainKey) as? KeyLookup.Found)?.encKey
+
+        private fun locateKey(plainKey: String): KeyLookup {
             keyCache[plainKey]?.let { encKey ->
-                if (basePrefs.contains(encKey)) return encKey
+                if (basePrefs.contains(encKey)) return KeyLookup.Found(encKey)
             }
             val hash = calculateKeyHash(plainKey)
             if (basePrefs.contains(hash)) {
@@ -428,11 +453,11 @@ object KeystoreEncryptedPrefs {
                 if (plainKey != KEY_REGISTRY && namesAreDerivable() &&
                     acceptableValueAt(plainKey, hash) == null
                 ) {
-                    return null
+                    return KeyLookup.Refused(hash)
                 }
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
-                return hash
+                return KeyLookup.Found(hash)
             }
             // An entry written while the store was using its fallback derivation
             // key stays hashed under that key after the store recovers, so a
@@ -454,9 +479,15 @@ object KeystoreEncryptedPrefs {
             // The registry is excluded: it is resolved directly elsewhere, and a
             // relocation racing that lookup could leave readers and writers
             // disagreeing about where the index lives.
-            if (plainKey == KEY_REGISTRY) return null
+            if (plainKey == KEY_REGISTRY) return KeyLookup.Absent
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || acceptableValueAt(plainKey, fallbackHash) == null) return null
+            if (fallbackHash == hash) return KeyLookup.Absent
+            if (acceptableValueAt(plainKey, fallbackHash) == null) {
+                // Present and refused, or not there at all. Only the first is a
+                // refusal, and contains() is what separates them without reading.
+                return if (basePrefs.contains(fallbackHash)) KeyLookup.Refused(fallbackHash)
+                else KeyLookup.Absent
+            }
 
             val relocated = synchronized(initLockFor(prefsName)) {
                 // Re-read under the lock, and through the same rule: what is
@@ -469,13 +500,13 @@ object KeystoreEncryptedPrefs {
             return if (relocated) {
                 keyCache[plainKey] = hash
                 reverseKeyCache[hash] = plainKey
-                hash
+                KeyLookup.Found(hash)
             } else {
                 // Consolidation did not stick. Report where the entry actually is
                 // so this lookup is still correct, but do not cache it: a cached
                 // old location would send the next write there and leave a second
                 // copy behind it.
-                fallbackHash
+                KeyLookup.Found(fallbackHash)
             }
         }
 
@@ -810,7 +841,14 @@ object KeystoreEncryptedPrefs {
             prefix: String,
             crossinline parse: (String) -> T
         ): PrefRead<T> {
-            val encKey = findEncryptedKey(key) ?: return PrefRead.Absent
+            val encKey = when (val found = locateKey(key)) {
+                is KeyLookup.Found -> found.encKey
+                KeyLookup.Absent -> return PrefRead.Absent
+                // On disk and not readable as this key's, which is what this
+                // answer means. Reporting it absent is what let a record that
+                // exists reach a caller as a control that was never set.
+                is KeyLookup.Refused -> return PrefRead.Unreadable
+            }
             val encValue = basePrefs.getString(encKey, null) ?: return PrefRead.Unreadable
             return try {
                 val decrypted = decrypt(secretKey, encValue, key)
@@ -1057,7 +1095,15 @@ object KeystoreEncryptedPrefs {
 
                 var certified = true
                 for (plainKey in pendingRemoves) {
-                    val encKey = findEncryptedKey(plainKey)
+                    // A refused value is removed like any other: the caller asked
+                    // for this key to be gone, and what sits at its name is not
+                    // something any read will hand back, so leaving it would let
+                    // it survive its own delete.
+                    val encKey = when (val found = locateKey(plainKey)) {
+                        is KeyLookup.Found -> found.encKey
+                        is KeyLookup.Refused -> found.encKey
+                        KeyLookup.Absent -> null
+                    }
                     if (encKey == null && namesPredateThisKey) {
                         // Nothing answered, and this file holds entries at names
                         // derived with a key that is gone, so a miss here does not
