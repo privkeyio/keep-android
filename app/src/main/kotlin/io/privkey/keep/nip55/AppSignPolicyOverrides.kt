@@ -309,9 +309,7 @@ object AppSignPolicyOverrides {
             // run-wide marker cannot be set without them going with it.
             val edit = markers.edit()
                 .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
-            markers.all.keys
-                .filter { it.startsWith(SignPolicySelectionPrefs.APP_OVERRIDE_MARKER_PREFIX) }
-                .forEach { edit.remove(it) }
+            SignPolicySelectionPrefs.removeAppOverrideMarkers(markers, edit)
             edit.commit()
         }
     }
