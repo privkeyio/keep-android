@@ -309,6 +309,82 @@ class KeystoreEncryptedPrefsTransplantTest {
         assertEquals("the write must not be listed", null, reopen().all[LEGACY_KEY])
     }
 
+    // The refusal has to reach the caller as what it is. A record that is on
+    // disk and cannot be authenticated as this key's is not an absence, and
+    // several callers read an absence as licence to overwrite, or as a control
+    // that was never set: the kill switch maps a missing record to disengaged
+    // and the velocity counters map one to a fresh window.
+    @Test
+    fun aRefusedValueReadsUnreadableRatherThanAbsent() {
+        reopen().edit().putBoolean(OPTED_IN_VICTIM, true).commit()
+        raw().edit().putString(fallbackNameOf(OPTED_IN_ATTACKER), legacyValue("b:true")).commit()
+
+        assertEquals(
+            "a value refused at a derivable name must not read as never written",
+            PrefRead.Unreadable,
+            reopen().readBoolean(OPTED_IN_ATTACKER)
+        )
+        // In the same fixture, so a store failing wholesale cannot satisfy the
+        // assertion above: every read would be Unreadable then, including this.
+        assertEquals(
+            "and a key with nothing behind it must still read absent",
+            PrefRead.Absent,
+            reopen().readBoolean(NEVER_WRITTEN)
+        )
+    }
+
+    // And a key that genuinely has nothing must still read absent, or every
+    // caller that treats absence as a fresh start fails closed forever.
+    @Test
+    fun aKeyWithNothingBehindItStillReadsAbsent() {
+        reopen().edit().putBoolean(OPTED_IN_VICTIM, true).commit()
+
+        assertEquals(
+            "a key nothing was ever written for must read absent",
+            PrefRead.Absent,
+            reopen().readBoolean(NEVER_WRITTEN)
+        )
+    }
+
+    // The same on the current name, which is the other refusal leg: while the
+    // derivation key is public, that name is one anything can write too.
+    @Test
+    fun aRefusedValueAtADerivableCurrentNameAlsoReadsUnreadable() {
+        carryThePublishedGlobalKey()
+        raw().edit().putString(globalEpochNameOf(OPTED_IN_ATTACKER), legacyValue("b:true")).commit()
+
+        assertEquals(
+            "the current-name leg must answer the same way as the fallback one",
+            PrefRead.Unreadable,
+            reopen().readBoolean(OPTED_IN_ATTACKER)
+        )
+        assertEquals(
+            "and a key with nothing behind it must still read absent",
+            PrefRead.Absent,
+            reopen().readBoolean(NEVER_WRITTEN)
+        )
+    }
+
+    // A delete over a refused value establishes nothing, so it reports failure
+    // and leaves the value alone. Every reason a value is refused can be a
+    // property of this process: a decrypt that may succeed later, a minted key
+    // that did not commit so every name is derivable for now, an index that
+    // could not be read so a listed key looks unlisted. Removing it would be a
+    // transient fault read as proof, which is the shape taken out of the audit
+    // chain and the share metadata already.
+    @Test
+    fun aDeleteOverARefusedValueIsRefusedAndLeavesItAlone() {
+        reopen().edit().putBoolean(OPTED_IN_VICTIM, true).commit()
+        val planted = fallbackNameOf(OPTED_IN_ATTACKER)
+        raw().edit().putString(planted, legacyValue("b:true")).commit()
+
+        assertFalse(
+            "a delete that could not establish absence must not report success",
+            reopen().edit().remove(OPTED_IN_ATTACKER).commit()
+        )
+        assertTrue("and must leave the value where it was", raw().contains(planted))
+    }
+
     private companion object {
         const val PREFS_NAME = "transplant_test_prefs"
         const val PIN_PREFS_NAME = "keep_pin_protection"
@@ -317,5 +393,6 @@ class KeystoreEncryptedPrefsTransplantTest {
         const val OPTED_IN_VICTIM = "opted_in_com.example.victim"
         const val OPTED_IN_ATTACKER = "opted_in_com.example.attacker"
         const val LEGACY_KEY = "legacy_setting"
+        const val NEVER_WRITTEN = "opted_in_com.example.never.written"
     }
 }
