@@ -121,6 +121,26 @@ class KeystoreEncryptedPrefsDeleteContractTest {
         assertNull("the entry must be gone", reopen().getString(KEPT_KEY, null))
     }
 
+    // The same state reached the other way: a value planted at the index name
+    // the fallback epoch derives makes the store read the file as a
+    // deterministic-epoch one whose entries are all accounted for, while the
+    // migration that would have moved them fails and leaves them at names
+    // derived with a key that is gone. Without that counting as stranded, a
+    // delete over them reports success.
+    @Test
+    fun aPlantedIndexDoesNotLetDeletesCertifyOverEntriesItCannotName() {
+        reopen().edit().putString(KEPT_KEY, "1").commit()
+        rawPrefs(context, PREFS_NAME).edit()
+            .remove(HMAC_KEY_PREF)
+            .putString(fallbackNameIn(PREFS_NAME, KEY_REGISTRY), "not an index this can read")
+            .commit()
+
+        assertFalse(
+            "a delete must not certify absence over entries at names it cannot derive",
+            reopen().edit().remove(KEPT_KEY).commit()
+        )
+    }
+
     // The refusal has to outlive the instance that noticed: the open that mints
     // a key over stranded entries is rarely the one a later delete runs on, and
     // a restart that forgot would certify absence over the same entries.

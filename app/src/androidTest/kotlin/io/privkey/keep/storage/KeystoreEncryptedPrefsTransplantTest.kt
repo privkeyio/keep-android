@@ -12,11 +12,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.KeyStore
-import java.security.MessageDigest
 import javax.crypto.Cipher
-import javax.crypto.Mac
 import javax.crypto.SecretKey
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * Transplanting a value onto another key's name.
@@ -64,18 +61,6 @@ class KeystoreEncryptedPrefsTransplantTest {
 
     private fun fallbackNameOf(plainKey: String): String = fallbackNameIn(PREFS_NAME, plainKey)
 
-    /** Mirrors the store's fallback key derivation, which is what makes the name derivable at all. */
-    private fun fallbackNameIn(prefsName: String, plainKey: String): String {
-        val key = MessageDigest.getInstance("SHA-256")
-            .digest("$DETERMINISTIC_SEED:$prefsName".toByteArray(Charsets.UTF_8))
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key, "HmacSHA256"))
-        return Base64.encodeToString(
-            mac.doFinal(plainKey.toByteArray(Charsets.UTF_8)),
-            Base64.NO_WRAP or Base64.URL_SAFE
-        )
-    }
-
     /**
      * A value in the pre-binding format: encrypted with the file's own Keystore
      * key, with no associated data and no marker. Only the app's uid can produce
@@ -91,6 +76,55 @@ class KeystoreEncryptedPrefsTransplantTest {
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val body = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
         return Base64.encodeToString(cipher.iv + body, Base64.NO_WRAP)
+    }
+
+    /** A value in the bound format, which only the app's own uid can produce. */
+    private fun boundValueFor(prefsName: String, plaintext: String, aad: String): String {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = keyStore.getKey(KEY_ALIAS_PREFIX + prefsName, null) as SecretKey
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        cipher.updateAAD(aad.toByteArray(Charsets.UTF_8))
+        val body = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        return BOUND_PREFIX + Base64.encodeToString(cipher.iv + body, Base64.NO_WRAP)
+    }
+
+    /**
+     * Leaves the file carrying the derivation key a build in the v0.6.0 window
+     * persisted into any file that already had entries: the seed alone, with no
+     * file name, so it is a constant anyone can read out of the APK or this
+     * repository's history. Nothing migrates a file off it, because a stored key
+     * is read and used rather than re-derived.
+     */
+    private fun carryThePublishedGlobalKey() {
+        reopen().edit().putBoolean(OPTED_IN_VICTIM, true).commit()
+        val encoded = Base64.encodeToString(publishedGlobalKey(), Base64.NO_WRAP)
+        raw().edit()
+            .putString(HMAC_KEY_PREF, boundValueFor(PREFS_NAME, encoded, HMAC_KEY_PREF))
+            .commit()
+    }
+
+    // The same exposure one step further out: here the public key is the file's
+    // own persisted one, so the store never looks like it is on a fallback at
+    // all, and a name-by-name test would miss it.
+    @Test
+    fun aPlantedValueIsNotReadWhileTheStoreCarriesThePublishedGlobalKey() {
+        carryThePublishedGlobalKey()
+        raw().edit().putString(globalEpochNameOf(OPTED_IN_ATTACKER), legacyValue("b:true")).commit()
+
+        assertFalse(
+            "a name derived from a published key must not grant the key it was planted under",
+            reopen().getBoolean(OPTED_IN_ATTACKER, false)
+        )
+    }
+
+    // And the store still works for what it writes itself there.
+    @Test
+    fun theStoreStillReadsItsOwnWritesUnderThePublishedGlobalKey() {
+        carryThePublishedGlobalKey()
+
+        assertTrue("a write must still commit", reopen().edit().putString(LEGACY_KEY, "mine").commit())
+        assertEquals("and read back", "mine", reopen().getString(LEGACY_KEY, null))
     }
 
     /** Moves [plainKey]'s stored entry to the name the fallback epoch would have used. */
@@ -265,7 +299,14 @@ class KeystoreEncryptedPrefsTransplantTest {
 
         val prefs = reopen()
         assertTrue("a write must still commit", prefs.edit().putString(LEGACY_KEY, "mine").commit())
+        // Through the bound branch: a value this store writes carries the
+        // binding, so this pins that the rule is not a blanket refusal for
+        // anything written since. An unbound value is unreachable here, because
+        // reaching this state at all takes an index the store cannot decode.
         assertEquals("and read back", "mine", reopen().getString(LEGACY_KEY, null))
+        // And it is written unlisted, since that same index is what the rewrite
+        // refuses to overwrite.
+        assertEquals("the write must not be listed", null, reopen().all[LEGACY_KEY])
     }
 
     private companion object {
@@ -273,11 +314,8 @@ class KeystoreEncryptedPrefsTransplantTest {
         const val PIN_PREFS_NAME = "keep_pin_protection"
         const val PIN_ENABLED_KEY = "pin_enabled"
         const val KEY_ALIAS_PREFIX = "keep_prefs_"
-        const val DETERMINISTIC_SEED = "keystore_prefs_hmac_key"
         const val OPTED_IN_VICTIM = "opted_in_com.example.victim"
         const val OPTED_IN_ATTACKER = "opted_in_com.example.attacker"
         const val LEGACY_KEY = "legacy_setting"
-        const val HMAC_KEY_PREF = "__hmac_key__"
-        const val KEY_REGISTRY = "__keys__"
     }
 }
