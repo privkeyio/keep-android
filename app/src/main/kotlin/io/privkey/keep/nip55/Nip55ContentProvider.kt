@@ -528,6 +528,12 @@ class Nip55ContentProvider : ContentProvider() {
      * has to land: the frequency input of later risk assessments counts rows
      * without regard to their decision, and a deny burst is the pattern that
      * input exists to catch, so skipped rows lower the bar for what follows.
+     *
+     * The result is still not checked, and that is the choice rather than an
+     * omission: the caller is being refused either way, and turning a refusal
+     * into a failure would tell it less about what happened. What it costs is
+     * that an unrecorded refusal is invisible, which is why the append runs on
+     * this path too rather than only on the one that returns something.
      */
     internal fun recordAutoDecision(
         store: PermissionStore,
@@ -537,6 +543,28 @@ class Nip55ContentProvider : ContentProvider() {
         decision: String,
     ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, decision)
 
+    /**
+     * One bounded append on the caller's thread, reporting whether it landed.
+     *
+     * Two costs of doing it here rather than through the orphaning wrapper, both
+     * accepted deliberately, because the alternative is the thing this exists to
+     * remove: a response returned with no record.
+     *
+     * The bound only reaches what can be cancelled. The anchor advance that
+     * follows the row is a synchronous Keystore write with no suspension point,
+     * so a stalled Keystore holds the caller past the budget rather than
+     * answering at it. Handing that back to the wrapper would bound the wait
+     * again, at the price of a refusal that means "not observed" while the work
+     * finishes on its own, which is where a row for a refused request comes
+     * from.
+     *
+     * And the window between the row committing and the anchor advancing is not
+     * covered: a cancellation landing there leaves the row durable while this
+     * reports failure, so the log can hold an approval for a request the caller
+     * was told failed. That is the same shape as an append interrupted by
+     * process death, which the chain verification already heals, and it errs
+     * toward holding more record rather than less.
+     */
     private fun appendAudited(
         store: PermissionStore,
         callerPackage: String,
