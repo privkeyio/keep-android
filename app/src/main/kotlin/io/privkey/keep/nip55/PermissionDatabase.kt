@@ -215,8 +215,13 @@ abstract class Nip55Database : RoomDatabase() {
                 // contains() separates them, because it answers through the
                 // lookup's Found case alone: the stored one is Found and the
                 // refused one is not.
+                // A presence check resolves the name, which needs the derivation
+                // key, so the fault that made the read unreadable can raise here
+                // too. That failure proves nothing about what is stored, so it
+                // is read as "something is", which keeps this path answering with
+                // the exception it documents rather than a raw crypto one.
                 PrefRead.Unreadable ->
-                    if (store.contains(prefKey)) {
+                    if (runCatching { store.contains(prefKey) }.getOrDefault(true)) {
                         throw KeepMobileException.StorageException("Stored $prefKey could not be read")
                     }
             }
