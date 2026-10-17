@@ -27,11 +27,11 @@ import org.junit.runner.RunWith
  * returning the signature rather than a side effect attempted after it, and the
  * append has to report what it actually did.
  *
- * The append runs on the caller's own thread under a bound, not through the
- * provider's orphaning wrapper. That is what lets a refusal mean the row did not
- * land: the wrapper would answer the same `null` for a skipped call, a failed
- * one and an overrun whose work is still running, and the last of those can
- * commit a row for a request the caller was already told had failed.
+ * The append does not go through the provider's permit wrapper, which is how it
+ * came to be skipped without anything raising or being logged: that wrapper
+ * takes a permit before it does anything, and contention alone could mean no
+ * attempt was made. It runs on its own scope under a budget instead, so a
+ * stalled write cannot hold the caller either.
  *
  * What is not covered here, by design rather than omission: the provider refuses
  * a same-uid caller, so instrumentation cannot drive a request through it end to
@@ -111,36 +111,6 @@ class AutoSignAuditRecordTest {
 
         assertTrue("a refused decision must be recorded", recorded)
         assertEquals("and must have written exactly one row", 1, runBlocking { store.getAuditLogCount() })
-    }
-
-    // The question the gate falls back on when the append does not report
-    // completion, which is the only honest way to answer it: the budget can
-    // expire after the row commits, and a stalled anchor write leaves the row
-    // there regardless. The race itself cannot be staged, so this drives the
-    // predicate it turns on.
-    @Test
-    fun aLandedRowIsFoundAndAnEarlierOneIsNot() {
-        val provider = Nip55ContentProvider()
-        val since = System.currentTimeMillis()
-        runBlocking {
-            store.logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true)
-        }
-
-        assertTrue(
-            "a row written since the append began must be found",
-            provider.rowLanded(store, CALLER, Nip55RequestType.SIGN_EVENT, "allow", since)
-        )
-        assertFalse(
-            "a row that predates the window must not answer for this append",
-            provider.rowLanded(
-                store, CALLER, Nip55RequestType.SIGN_EVENT, "allow",
-                System.currentTimeMillis() + 1
-            )
-        )
-        assertFalse(
-            "nor must a row that recorded a different decision",
-            provider.rowLanded(store, CALLER, Nip55RequestType.SIGN_EVENT, "deny_velocity", since)
-        )
     }
 
     private companion object {

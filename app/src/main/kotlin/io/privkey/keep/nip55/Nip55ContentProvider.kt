@@ -38,7 +38,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.Calendar
@@ -81,13 +80,10 @@ class Nip55ContentProvider : ContentProvider() {
         // How many provider operations may be in flight at once.
         private const val REQUEST_PERMITS = 4
 
-        // The audit append runs on the caller's thread, so its bound is what the
-        // caller waits for rather than what a stuck call is left to finish.
+        // How long a caller waits for its audit row before the request is
+        // refused. The append itself is not cancelled at it; see appendAudited.
         private const val AUDIT_APPEND_BUDGET_MS = 5_000L
 
-        // Enough recent rows to find one written since an append began, which is
-        // a window of a few seconds however busy the signer is.
-        private const val AUDIT_VERIFY_SCAN = 32
 
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
         private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
@@ -114,6 +110,15 @@ class Nip55ContentProvider : ContentProvider() {
     // SupervisorJob so one orphaned failure cannot cancel the others.
     private val orphanScope = CoroutineScope(
         Dispatchers.IO.limitedParallelism(ORPHAN_IO_PARALLELISM) + SupervisorJob(),
+    )
+
+    // Audit appends, off the caller's thread so a stalled anchor write cannot
+    // hold a request past its budget. Single-threaded because every append
+    // serializes on the writer's own lock anyway, so more threads would only
+    // queue in a second place; a stalled append therefore delays the next one,
+    // which then reports itself not landed and refuses, in that order.
+    private val auditScope = CoroutineScope(
+        Dispatchers.IO.limitedParallelism(1) + SupervisorJob(),
     )
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
@@ -507,19 +512,15 @@ class Nip55ContentProvider : ContentProvider() {
      * Appends the audit row for an auto-signed request, and reports whether it
      * landed.
      *
-     * Deliberately not through [runWithTimeout]. That wrapper exists for calls
-     * that can block with no suspension point, and it answers them by orphaning
-     * the work and giving up on the await, which is the wrong shape for the one
-     * call whose whole purpose is to have happened: a `null` there would mean
-     * "not observed", the orphan could commit the row seconds later, and the log
-     * would then assert an allow for a request the caller was told failed. It
-     * also takes one of the few permits, so contention alone could discard work
-     * the key has already done and burn the caller's velocity budget with it.
+     * Deliberately not through [runWithTimeout]. That wrapper takes one of the
+     * few permits before it does anything, so contention alone could skip the
+     * append entirely, which is how a response came to be returned with no row
+     * at all: nothing raised and nothing was logged, because no attempt was
+     * made.
      *
-     * This runs on the caller's own thread instead, where the append is
-     * cancellable at its own suspension points, a cancelled transaction rolls
-     * back, and nothing else is competing for a permit. The writer serializes
-     * every append on its own lock, so ordering is unchanged.
+     * It runs on its own scope instead, waited for under a budget the caller is
+     * released at, with no permit to lose. The writer serializes every append on
+     * its own lock, so ordering is unchanged.
      *
      * `internal` so a test can drive it against a real store, since the provider
      * itself refuses a same-uid caller and cannot be exercised end to end from
@@ -555,25 +556,30 @@ class Nip55ContentProvider : ContentProvider() {
     ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, decision)
 
     /**
-     * One bounded append on the caller's thread, reporting whether it landed.
+     * One bounded append, reporting whether it landed within the budget.
      *
-     * Two costs of doing it here rather than through the orphaning wrapper, both
-     * accepted deliberately, because the alternative is the thing this exists to
-     * remove: a response returned with no record.
+     * Bounded for the caller, and not through the permit wrapper: the append is
+     * the step that must be attempted, and losing a permit to contention is how
+     * it came to be skipped in the first place.
      *
-     * Two things the budget cannot do on its own, which is why the answer does
-     * not come from the call's fate. It cannot interrupt the anchor write that
-     * follows the row, which is synchronous and has no suspension point, so the
-     * append runs on IO and the caller is released at the budget while that
-     * finishes over there. And it cannot tell a call that never committed from
-     * one that committed just as the budget expired, so when the call does not
-     * report completion the log itself is asked whether the row is there.
+     * The budget is kept honest by starting the append outside the wait rather
+     * than by cancelling it. Cancellation cannot reach the anchor write that
+     * follows the row, which is synchronous and has no suspension point, and a
+     * structured call would make the caller wait for it anyway however the
+     * budget expired: switching dispatchers moves where that work runs, not
+     * whether its parent waits for it. So the append is launched on its own
+     * scope and only the wait is cancelled.
      *
-     * What remains uncovered is a row that lands after that question is
-     * answered. The request is refused by then, so the log can hold an approval
-     * for a response that was never returned: the same shape as an append
-     * interrupted by process death, which the chain verification already heals,
-     * and the direction that holds more record rather than less.
+     * The price is that an append still running when the budget expires is
+     * reported as not landed, and its row may commit a moment later, so the log
+     * can hold an approval for a response that was never returned. That is the
+     * same shape as an append interrupted by process death, which the chain
+     * verification already heals, and it is the direction that holds more
+     * record rather than less. Asking the log instead of answering from the
+     * call would narrow it, and was tried: a row cannot be tied to the append
+     * that wrote it without a per-append identity it does not carry, so one
+     * request's row answers for another's, which is a weaker gate than the one
+     * this exists to be.
      */
     private fun appendAudited(
         store: PermissionStore,
@@ -582,57 +588,14 @@ class Nip55ContentProvider : ContentProvider() {
         eventKind: Int?,
         decision: String,
     ): Boolean {
-        val startedAt = System.currentTimeMillis()
-        val completed = runCatching {
-            runBlocking {
-                withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) {
-                    // On IO, so the budget is enforced at a thread boundary: the
-                    // anchor write that follows the row is synchronous and cannot
-                    // be cancelled, and if it stalls the caller is released at the
-                    // budget while it finishes over there.
-                    withContext(Dispatchers.IO) {
-                        store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
-                    }
-                    true
-                }
-            }
-        }.getOrNull()
-        if (completed == true) return true
-        // The call did not report completion, which does not settle whether the
-        // row is there: the budget can expire after the commit and before the
-        // result comes back, and a stalled anchor write leaves the row durable
-        // either way. So ask the log rather than infer from the call's fate,
-        // because the answer gates a signature.
-        return rowLanded(store, callerPackage, requestType, decision, startedAt)
-    }
-
-    /**
-     * Whether the log holds a row for this operation, written since [since].
-     *
-     * The window is what keeps an earlier row for the same caller and decision
-     * from answering for this one. `internal` so a test can drive the predicate
-     * the gate decides on, since the race it exists for cannot be staged.
-     */
-    internal fun rowLanded(
-        store: PermissionStore,
-        callerPackage: String,
-        requestType: Nip55RequestType,
-        decision: String,
-        since: Long,
-    ): Boolean = runCatching {
-        runBlocking {
-            withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) {
-                withContext(Dispatchers.IO) {
-                    store.getAuditLog(AUDIT_VERIFY_SCAN).any {
-                        it.timestamp >= since &&
-                            it.callerPackage == callerPackage &&
-                            it.requestType == requestType.name &&
-                            it.decision == decision
-                    }
-                }
-            }
+        val append = auditScope.async {
+            store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
+            true
         }
-    }.getOrNull() == true
+        return runCatching {
+            runBlocking { withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) { append.await() } }
+        }.getOrNull() == true
+    }
 
     @SuppressLint("MissingPermission")
     private fun showBackgroundSigningNotification(
