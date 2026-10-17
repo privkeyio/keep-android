@@ -9,9 +9,6 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.privkey.keep.BuildConfig
 
-class LegacyPrefsUnavailableException(prefsName: String) :
-    Exception("Legacy prefs unavailable or unreadable: $prefsName")
-
 object LegacyPrefsMigration {
 
     private const val MIGRATION_MARKER_SUFFIX = "_migrated_v1"
@@ -99,35 +96,68 @@ object LegacyPrefsMigration {
         return null
     }
 
-    fun migrateBooleanIfNeeded(
+    /**
+     * Reads [key] for a caller that carries legacy state forward, reporting the
+     * three answers apart rather than collapsing them to a default.
+     *
+     * A value that cannot be read is the case this exists to separate. Collapsing
+     * it to a default says the value was confirmed when it was not, and a caller
+     * that acts on that confirmation resumes on a restriction it never saw.
+     *
+     * Both copies are consulted, because they fail independently: [newPrefs] and
+     * the legacy store share one underlying file but name their entries
+     * differently and encrypt under different keys, and nothing ever deletes the
+     * legacy entry. So a value the new store cannot decrypt, or cannot find
+     * because the file's name key was replaced, is still answerable from the
+     * legacy copy. [PrefRead.Absent] is returned only when neither copy holds
+     * anything, and [PrefRead.Unreadable] whenever an answer was owed and could
+     * not be had.
+     *
+     * A pure read: nothing is written, nothing is marked, and no state carries
+     * between calls. The caller's own record of having carried the value is what
+     * stops this running twice, and unlike a marker file it is authenticated.
+     */
+    fun readBooleanForMigration(
         context: Context,
         prefsName: String,
         key: String,
-        newPrefs: SharedPreferences,
-        safeDefault: Boolean
-    ): Boolean {
-        if (newPrefs.contains(key)) {
-            return newPrefs.getBoolean(key, safeDefault)
-        }
+        newPrefs: ReadablePrefs,
+    ): PrefRead<Boolean> {
+        val fromNewStore = newPrefs.readBoolean(key)
+        if (fromNewStore is PrefRead.Found) return fromNewStore
 
-        val migrationMarker = "${prefsName}_${key}_migrated"
-        val markerPrefs = context.getSharedPreferences("keep_migration_markers", Context.MODE_PRIVATE)
-        if (markerPrefs.getBoolean(migrationMarker, false)) {
-            return safeDefault
-        }
+        // Null means the legacy store could not be opened at all, so this is a
+        // read that was owed an answer and did not get one.
+        val legacyPrefs = openLegacyPrefs(context, prefsName) ?: return PrefRead.Unreadable
 
-        val legacyPrefs = openLegacyPrefs(context, prefsName)
-            ?: throw LegacyPrefsUnavailableException(prefsName)
-        if (legacyPrefs.contains(key)) {
-            val legacyValue = legacyPrefs.getBoolean(key, safeDefault)
-            if (newPrefs.edit().putBoolean(key, legacyValue).commit()) {
-                markerPrefs.edit().putBoolean(migrationMarker, true).apply()
-                return legacyValue
+        // The legacy read fails in two directions and neither may reach the caller
+        // as a confirmed value. A value that will not decrypt raises, and letting
+        // that escape is worse here than a wrong answer: it lands in the carry's
+        // outer handler, which engages the switch without retiring the carry, so
+        // the carry re-applies itself on every launch and re-engages after the
+        // user has deliberately cleared it. A value that decrypts to some other
+        // type does not raise at all; this API answers with the caller's default,
+        // which is the exact conflation this function exists to remove. Reading
+        // under both defaults separates them: a stored boolean ignores the
+        // default, so two different answers mean the value is not a boolean.
+        val fromLegacy: PrefRead<Boolean>? = runCatching {
+            if (legacyPrefs.contains(key)) {
+                val asFalse = legacyPrefs.getBoolean(key, false)
+                if (asFalse == legacyPrefs.getBoolean(key, true)) {
+                    PrefRead.Found(asFalse)
+                } else {
+                    PrefRead.Unreadable
+                }
+            } else {
+                null
             }
-            throw LegacyPrefsUnavailableException(prefsName)
-        }
-        markerPrefs.edit().putBoolean(migrationMarker, true).apply()
-        return safeDefault
+        }.getOrElse { PrefRead.Unreadable }
+        if (fromLegacy != null) return fromLegacy
+
+        // The legacy store has nothing. If the new store held something it could
+        // not read, that is still the state of the setting, and no absence has
+        // been established.
+        return if (fromNewStore == PrefRead.Unreadable) PrefRead.Unreadable else PrefRead.Absent
     }
 
     private fun openLegacyPrefs(context: Context, prefsName: String): SharedPreferences? {
