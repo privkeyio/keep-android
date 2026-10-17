@@ -97,10 +97,11 @@ class AndroidKeystoreStorage(
         private const val KEY_DKG_WRAPPED = "dkg_wrapped_key"
         private const val KEY_DKG_IV = "dkg_iv"
         private const val KEY_DKG_DATA = "dkg_data"
-        // Non-sensitive marker written by the Rust layer; keeping it (and the secret)
-        // intact on a decrypt failure is what makes a live pending share survive a
-        // transient read error instead of being wiped (INVARIANTS #1).
-        private const val DKG_MARKER_STORAGE_KEY = "__keep_dkg_pending_v1"
+        // The pending-DKG marker ("__keep_dkg_pending_v1") used to be named here
+        // as the one record exempt from the wipe on a decrypt failure, because
+        // losing it loses the only record that recovery is owed (INVARIANTS #1).
+        // No read wipes anything now, so every record has that protection and the
+        // exemption has nothing left to say.
         private const val RSA_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
     }
 
@@ -143,33 +144,56 @@ class AndroidKeystoreStorage(
     @Synchronized
     private fun loadMetadata(key: String): ByteArray {
         val sharePrefs = getSharePrefs(key)
-        val encryptedData = sharePrefs.getString(KEY_SHARE_DATA, null)
-            ?: throw KeepMobileException.StorageNotFound()
-        val ivBase64 = sharePrefs.getString(KEY_SHARE_IV, null)
-            ?: throw KeepMobileException.StorageNotFound()
+        // Read through [PrefRead] rather than getString, which resolves an
+        // unreadable value to the caller default and so would report a blob that
+        // is present but will not decrypt as a positive absence. The core maps
+        // StorageNotFound to a permissive default for several of these records,
+        // so that answer disengages the co-signing kill switch, empties the
+        // descriptor index before a rewrite that drops what it could not see,
+        // and resets the velocity counters, each of which is written to fail
+        // closed on a fault.
+        val data = sharePrefs.readString(KEY_SHARE_DATA)
+        val iv = sharePrefs.readString(KEY_SHARE_IV)
+        when (metadataRead(data, iv)) {
+            MetadataRead.NotStored -> throw KeepMobileException.StorageNotFound()
+            MetadataRead.Faulted -> throw KeepMobileException.StorageException(
+                "metadata at $key is stored but unreadable"
+            )
+            MetadataRead.Stored -> Unit
+        }
+        check(data is PrefRead.Found && iv is PrefRead.Found) { "Stored means both entries read" }
         return try {
-            val cipher = initCipherForDecryption(getOrCreateMetadataKey(), ivBase64)
-            decryptWithCipher(cipher, encryptedData)
+            val cipher = initCipherForDecryption(getOrCreateMetadataKey(), iv.value)
+            decryptWithCipher(cipher, data.value)
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.e(TAG, "Metadata key recovery: ${e::class.simpleName}", e)
-            // For a pending-DKG stash a decrypt failure may be transient (e.g. the
-            // metadata key is momentarily unavailable), and the marker points at a
-            // completed share the peers already treat as live. Wiping it here would
-            // destroy the only record that recovery is owed (INVARIANTS #1), so
-            // preserve it and let the caller retry. Other metadata is
-            // reconstructible, so the corrupt entry is still flushed to unblock reads.
-            if (!shouldPreserveOnDecryptFailure(key)) {
-                // Durably flush the wipe of the undecryptable entry before propagating, so a
-                // crash right after this cannot leave the corrupt prefs behind. Runs on a
-                // background FFI-callback thread (@Synchronized), so commit() won't jank the UI.
-                sharePrefs.edit().clear().commit()
-            }
-            throw KeepMobileException.StorageException("No metadata stored")
+            // Nothing is wiped here. A decrypt failure can be a transient
+            // Keystore fault and this is the only copy, which is why the registry
+            // read in KeystoreEncryptedPrefs preserves an unreadable copy too.
+            // The wipe this replaces was justified by "other metadata is
+            // reconstructible", which does not hold across the
+            // METADATA_KEY_PREFIX space: for the kill switch, the sign policy,
+            // the velocity counters, the certificate pins and the proxy config it
+            // replaced a readable record with the absence the core reads as no
+            // restriction, and the descriptor index and share records cannot be
+            // rebuilt at all.
+            //
+            // The cost is real and is the trade: a record that is permanently
+            // corrupt fails every read instead of clearing itself. Most records
+            // still have a way back, which is why that is acceptable. The
+            // pending-DKG stash, the one the removed exemption existed for, is
+            // cleared from the UI through discard_pending_dkg_share, which
+            // reaches deleteShareByKey's metadata branch. The settings records
+            // heal on their next write, because persist_kill_switch and its
+            // siblings write without reading first. What has no way back is the
+            // descriptor index and the per-descriptor, health and relay records,
+            // whose writers read before writing and so refuse once the read
+            // faults. Surfacing a fault the operator can act on still beats
+            // silently reverting a security control to its permissive default,
+            // but for those records the recovery path is owed.
+            throw KeepMobileException.StorageException("metadata at $key could not be decrypted")
         }
     }
-
-    private fun shouldPreserveOnDecryptFailure(key: String): Boolean =
-        key == DKG_MARKER_STORAGE_KEY
 
     /**
      * Resolves a [SecureStorage] read that uniffi generates without an error type.
@@ -1065,7 +1089,7 @@ class AndroidKeystoreStorage(
     // under AES-GCM, whose key is the only thing RSA-wrapped (RSA-OAEP can't span
     // it directly).
 
-    private val dkgSecretPrefs: SharedPreferences by lazy { createEncryptedPrefs(DKG_SECRET_PREFS) }
+    private val dkgSecretPrefs: ReadablePrefs by lazy { createEncryptedPrefs(DKG_SECRET_PREFS) }
 
     @Synchronized
     private fun getOrCreateDkgSecretKeypair() {
@@ -1184,12 +1208,30 @@ class AndroidKeystoreStorage(
         val rsa = consumePendingCipher(requestId, CipherRole.DECRYPT)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
 
-        val wrapped = dkgSecretPrefs.getString(KEY_DKG_WRAPPED, null)
-            ?: throw KeepMobileException.StorageNotFound()
-        val ivB64 = dkgSecretPrefs.getString(KEY_DKG_IV, null)
-            ?: throw KeepMobileException.StorageNotFound()
-        val dataB64 = dkgSecretPrefs.getString(KEY_DKG_DATA, null)
-            ?: throw KeepMobileException.StorageNotFound()
+        // Through [PrefRead] for the same reason as loadMetadata: getString
+        // resolves an unreadable entry to null, which reports a stash that is
+        // present and will not decrypt as never having been written. Here that
+        // surfaces as "pending DKG marker has no matching secret to recover"
+        // rather than as a permissive default, so it is the wrong reason rather
+        // than a silent one, but it is the same collapse.
+        val wrappedRead = dkgSecretPrefs.readString(KEY_DKG_WRAPPED)
+        val ivRead = dkgSecretPrefs.readString(KEY_DKG_IV)
+        val dataRead = dkgSecretPrefs.readString(KEY_DKG_DATA)
+        when (metadataRead(wrappedRead, ivRead, dataRead)) {
+            MetadataRead.NotStored -> throw KeepMobileException.StorageNotFound()
+            MetadataRead.Faulted -> throw KeepMobileException.StorageException(
+                "the DKG secret is stored but unreadable"
+            )
+            MetadataRead.Stored -> Unit
+        }
+        check(
+            wrappedRead is PrefRead.Found &&
+                ivRead is PrefRead.Found &&
+                dataRead is PrefRead.Found
+        ) { "Stored means all three entries read" }
+        val wrapped = wrappedRead.value
+        val ivB64 = ivRead.value
+        val dataB64 = dataRead.value
 
         val aesKey = runCatching { rsa.doFinal(Base64.decode(wrapped, Base64.NO_WRAP)) }
             .getOrElse { throw KeepMobileException.StorageException("Failed to unwrap DKG secret") }
