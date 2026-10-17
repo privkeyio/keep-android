@@ -31,6 +31,7 @@ import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
 import io.privkey.keep.storage.KillSwitchStore
+import io.privkey.keep.storage.carryKillSwitch
 import io.privkey.keep.storage.OnboardingStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayAuthWhitelistStore
@@ -63,6 +64,9 @@ private const val TAG = "KeepMobileApp"
 private const val EVENT_LOG_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
 
 class KeepMobileApp : Application() {
+    // Volatile: written on the main thread during onCreate and read from binder
+    // threads, where the signing gates consult it.
+    @Volatile
     private var keepMobile: KeepMobile? = null
     private var storage: AndroidKeystoreStorage? = null
     private var killSwitchStore: KillSwitchStore? = null
@@ -73,6 +77,10 @@ class KeepMobileApp : Application() {
     private var pinStore: PinStore? = null
     private var biometricTimeoutStore: BiometricTimeoutStore? = null
     private var onboardingStore: OnboardingStore? = null
+    // Volatile for the same reason as keepMobile: the provider's gate reads it on
+    // a binder thread, and it is what incidentally refuses requests that arrive
+    // while onCreate is still running.
+    @Volatile
     private var nip55Handler: Nip55Handler? = null
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
@@ -130,8 +138,12 @@ class KeepMobileApp : Application() {
             pinStore = PinStore(this)
             biometricTimeoutStore = BiometricTimeoutStore(this)
             onboardingStore = OnboardingStore(this)
-            keepMobile = newKeepMobile
+            // Carried before the instance is published, not after: content providers
+            // are installed before Application.onCreate, so a binder thread reaching
+            // isSigningKilled() while this runs would otherwise see a non-null core
+            // that has not been told about an engaged legacy switch yet.
             migrateKillSwitch(newKeepMobile)
+            keepMobile = newKeepMobile
             nip55Handler = Nip55Handler(newKeepMobile)
             newKeepMobile.setStateCallback(object : KeepStateCallback {
                 override fun onStateChanged(state: KeepLiveState) {
@@ -298,20 +310,26 @@ class KeepMobileApp : Application() {
 
     // Transfer the legacy SharedPreferences kill-switch state into the Rust core
     // exactly once, at startup before any signing gate or FROST round can run, so a
-    // previously engaged kill switch survives an upgrade. Failure to read or write
-    // leaves the store un-migrated so it retries; it never marks migrated on failure.
-    // On failure the session fails closed: the core kill switch is engaged so signing
-    // cannot resume, because the legacy state could not be confirmed disengaged.
+    // previously engaged kill switch survives an upgrade. A state that cannot be read
+    // is carried as engaged rather than as disengaged, so signing never resumes on a
+    // restriction that was never seen.
+    //
+    // Raising out of here instead leaves the store un-migrated so the carry retries,
+    // and engages the core switch on the way out; only an engage that itself fails
+    // falls back to killSwitchMigrationFailed, which no authenticated disengage can
+    // clear. The ordinary path does not use that flag: it puts the restriction in the
+    // core, where the user can see it and clear it behind an auth factor.
     private fun migrateKillSwitch(mobile: KeepMobile) {
         val store = killSwitchStore ?: return
         val migrated = runCatching { store.hasMigrated() }
         if (migrated.getOrNull() == true) return
         runCatching {
             migrated.getOrThrow()
-            if (store.legacyEnabled()) {
-                mobile.setKillSwitch(true)
-            }
-            store.markMigrated()
+            carryKillSwitch(
+                legacy = store.legacyState(),
+                engage = { mobile.setKillSwitch(true) },
+                retire = { store.markMigrated() },
+            )
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Kill switch migration failed: ${e::class.simpleName}", e)
             if (runCatching { mobile.setKillSwitch(true) }.isFailure) {
