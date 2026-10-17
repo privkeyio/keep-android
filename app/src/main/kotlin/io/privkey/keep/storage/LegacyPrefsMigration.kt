@@ -130,10 +130,29 @@ object LegacyPrefsMigration {
         // read that was owed an answer and did not get one.
         val legacyPrefs = openLegacyPrefs(context, prefsName) ?: return PrefRead.Unreadable
 
-        // A legacy value that will not decrypt, or holds another type, raises out
-        // of here rather than resolving to this default, so the default cannot be
-        // mistaken for a confirmed false.
-        if (legacyPrefs.contains(key)) return PrefRead.Found(legacyPrefs.getBoolean(key, false))
+        // The legacy read fails in two directions and neither may reach the caller
+        // as a confirmed value. A value that will not decrypt raises, and letting
+        // that escape is worse here than a wrong answer: it lands in the carry's
+        // outer handler, which engages the switch without retiring the carry, so
+        // the carry re-applies itself on every launch and re-engages after the
+        // user has deliberately cleared it. A value that decrypts to some other
+        // type does not raise at all; this API answers with the caller's default,
+        // which is the exact conflation this function exists to remove. Reading
+        // under both defaults separates them: a stored boolean ignores the
+        // default, so two different answers mean the value is not a boolean.
+        val fromLegacy: PrefRead<Boolean>? = runCatching {
+            if (legacyPrefs.contains(key)) {
+                val asFalse = legacyPrefs.getBoolean(key, false)
+                if (asFalse == legacyPrefs.getBoolean(key, true)) {
+                    PrefRead.Found(asFalse)
+                } else {
+                    PrefRead.Unreadable
+                }
+            } else {
+                null
+            }
+        }.getOrElse { PrefRead.Unreadable }
+        if (fromLegacy != null) return fromLegacy
 
         // The legacy store has nothing. If the new store held something it could
         // not read, that is still the state of the setting, and no absence has

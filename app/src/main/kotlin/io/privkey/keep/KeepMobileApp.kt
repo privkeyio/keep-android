@@ -314,11 +314,13 @@ class KeepMobileApp : Application() {
     // is carried as engaged rather than as disengaged, so signing never resumes on a
     // restriction that was never seen.
     //
-    // Raising out of here instead leaves the store un-migrated so the carry retries,
-    // and engages the core switch on the way out; only an engage that itself fails
-    // falls back to killSwitchMigrationFailed, which no authenticated disengage can
-    // clear. The ordinary path does not use that flag: it puts the restriction in the
-    // core, where the user can see it and clear it behind an auth factor.
+    // A read fault is classified rather than raised, so it takes the ordinary path:
+    // the restriction goes into the core, where the user can see it and clear it
+    // behind an auth factor, and the carry is retired so it cannot re-apply itself
+    // on a later launch. Only a fault outside that classification reaches the
+    // handler below, which leaves the store un-migrated and engages on the way out;
+    // only an engage that itself fails falls back to killSwitchMigrationFailed,
+    // which no authenticated disengage can clear.
     private fun migrateKillSwitch(mobile: KeepMobile) {
         val store = killSwitchStore ?: return
         val migrated = runCatching { store.hasMigrated() }

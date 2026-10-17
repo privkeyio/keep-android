@@ -103,6 +103,28 @@ class KillSwitchCarryStoreTest {
         )
     }
 
+    /** The stored name a legacy write lands on, found by what the write added. */
+    private fun legacyStoredNameOf(write: () -> Unit): String {
+        // Primed first: the legacy store's opening write also lays down its own
+        // keyset entries, so the delta would not be the value alone.
+        assertTrue(legacyStore().edit().putString("legacy_anchor", "0").commit())
+        val before = raw().all.keys.toSet()
+        write()
+        val added = raw().all.keys.toSet() - before
+        assertEquals("expected exactly one new legacy entry", 1, added.size)
+        return added.first()
+    }
+
+    /** Breaks a legacy value so its decrypt fails rather than its decode. */
+    private fun corruptLegacy(storedName: String) {
+        val stored = raw().getString(storedName, null)!!
+        val bytes = Base64.decode(stored, Base64.DEFAULT)
+        bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
+        assertTrue(
+            raw().edit().putString(storedName, Base64.encodeToString(bytes, Base64.DEFAULT)).commit()
+        )
+    }
+
     @Test
     fun anEngagedSwitchIsReadAsEngaged() {
         engageInNewStore()
@@ -159,6 +181,37 @@ class KillSwitchCarryStoreTest {
 
         assertEquals(PrefRead.Found(false), store().legacyState())
         assertFalse(carryEngagesKillSwitch(store().legacyState()))
+    }
+
+    /**
+     * The legacy read raises on a value that will not decrypt, and letting that
+     * escape is worse than a wrong answer: it reaches the carry's outer handler,
+     * which engages without retiring, so the carry re-applies on every launch and
+     * re-engages after the user has cleared it. Classified instead, the carry
+     * engages once and retires.
+     */
+    @Test
+    fun aLegacyValueThatWillNotDecryptIsClassifiedRatherThanRaised() {
+        val legacyName = legacyStoredNameOf { engageInLegacyStore() }
+        corruptLegacy(legacyName)
+
+        val state = store().legacyState()
+
+        assertEquals(PrefRead.Unreadable, state)
+        assertTrue("and is carried as engaged", carryEngagesKillSwitch(state))
+    }
+
+    // A legacy entry holding some other type does not raise at all: the API
+    // answers with the caller's default, which is the conflation the whole change
+    // exists to remove. Reading under both defaults is what separates them.
+    @Test
+    fun aLegacyValueOfAnotherTypeIsNotReadAsAConfirmedFalse() {
+        assertTrue(legacyStore().edit().putString(KillSwitchStore.KEY_ENABLED, "not-a-boolean").commit())
+
+        val state = store().legacyState()
+
+        assertEquals(PrefRead.Unreadable, state)
+        assertTrue("a value that is not a boolean must not resume signing", carryEngagesKillSwitch(state))
     }
 
     /**
