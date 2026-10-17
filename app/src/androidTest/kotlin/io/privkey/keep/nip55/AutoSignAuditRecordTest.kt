@@ -113,6 +113,36 @@ class AutoSignAuditRecordTest {
         assertEquals("and must have written exactly one row", 1, runBlocking { store.getAuditLogCount() })
     }
 
+    // The question the gate falls back on when the append does not report
+    // completion, which is the only honest way to answer it: the budget can
+    // expire after the row commits, and a stalled anchor write leaves the row
+    // there regardless. The race itself cannot be staged, so this drives the
+    // predicate it turns on.
+    @Test
+    fun aLandedRowIsFoundAndAnEarlierOneIsNot() {
+        val provider = Nip55ContentProvider()
+        val since = System.currentTimeMillis()
+        runBlocking {
+            store.logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true)
+        }
+
+        assertTrue(
+            "a row written since the append began must be found",
+            provider.rowLanded(store, CALLER, Nip55RequestType.SIGN_EVENT, "allow", since)
+        )
+        assertFalse(
+            "a row that predates the window must not answer for this append",
+            provider.rowLanded(
+                store, CALLER, Nip55RequestType.SIGN_EVENT, "allow",
+                System.currentTimeMillis() + 1
+            )
+        )
+        assertFalse(
+            "nor must a row that recorded a different decision",
+            provider.rowLanded(store, CALLER, Nip55RequestType.SIGN_EVENT, "deny_velocity", since)
+        )
+    }
+
     private companion object {
         const val CALLER = "io.privkey.keep.test.autosign.audit"
     }

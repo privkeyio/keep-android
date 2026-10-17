@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.Calendar
@@ -83,6 +84,10 @@ class Nip55ContentProvider : ContentProvider() {
         // The audit append runs on the caller's thread, so its bound is what the
         // caller waits for rather than what a stuck call is left to finish.
         private const val AUDIT_APPEND_BUDGET_MS = 5_000L
+
+        // Enough recent rows to find one written since an append began, which is
+        // a window of a few seconds however busy the signer is.
+        private const val AUDIT_VERIFY_SCAN = 32
 
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
         private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
@@ -390,7 +395,13 @@ class Nip55ContentProvider : ContentProvider() {
                         currentApp.getAutoSigningSafeguards()
                     )
                 }
-                recordAutoDecision(store, callerPackage, requestType, eventKind, outcome.reason)
+                if (!recordAutoDecision(store, callerPackage, requestType, eventKind, outcome.reason)) {
+                    // The refusal still stands, since nothing was released and a
+                    // policy rejection tells the caller more than a failure would.
+                    // Logged in every build because the row that would have
+                    // carried it is the thing that did not land.
+                    Log.w(TAG, "Auto-refused request not recorded: ${outcome.reason}")
+                }
                 rejectedCursor(null)
             }
             is Nip55Outcome.Error -> errorCursor(outcome.message, null)
@@ -550,20 +561,19 @@ class Nip55ContentProvider : ContentProvider() {
      * accepted deliberately, because the alternative is the thing this exists to
      * remove: a response returned with no record.
      *
-     * The bound only reaches what can be cancelled. The anchor advance that
-     * follows the row is a synchronous Keystore write with no suspension point,
-     * so a stalled Keystore holds the caller past the budget rather than
-     * answering at it. Handing that back to the wrapper would bound the wait
-     * again, at the price of a refusal that means "not observed" while the work
-     * finishes on its own, which is where a row for a refused request comes
-     * from.
+     * Two things the budget cannot do on its own, which is why the answer does
+     * not come from the call's fate. It cannot interrupt the anchor write that
+     * follows the row, which is synchronous and has no suspension point, so the
+     * append runs on IO and the caller is released at the budget while that
+     * finishes over there. And it cannot tell a call that never committed from
+     * one that committed just as the budget expired, so when the call does not
+     * report completion the log itself is asked whether the row is there.
      *
-     * And the window between the row committing and the anchor advancing is not
-     * covered: a cancellation landing there leaves the row durable while this
-     * reports failure, so the log can hold an approval for a request the caller
-     * was told failed. That is the same shape as an append interrupted by
-     * process death, which the chain verification already heals, and it errs
-     * toward holding more record rather than less.
+     * What remains uncovered is a row that lands after that question is
+     * answered. The request is refused by then, so the log can hold an approval
+     * for a response that was never returned: the same shape as an append
+     * interrupted by process death, which the chain verification already heals,
+     * and the direction that holds more record rather than less.
      */
     private fun appendAudited(
         store: PermissionStore,
@@ -571,14 +581,58 @@ class Nip55ContentProvider : ContentProvider() {
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
+    ): Boolean {
+        val startedAt = System.currentTimeMillis()
+        val completed = runCatching {
+            runBlocking {
+                withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) {
+                    // On IO, so the budget is enforced at a thread boundary: the
+                    // anchor write that follows the row is synchronous and cannot
+                    // be cancelled, and if it stalls the caller is released at the
+                    // budget while it finishes over there.
+                    withContext(Dispatchers.IO) {
+                        store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
+                    }
+                    true
+                }
+            }
+        }.getOrNull()
+        if (completed == true) return true
+        // The call did not report completion, which does not settle whether the
+        // row is there: the budget can expire after the commit and before the
+        // result comes back, and a stalled anchor write leaves the row durable
+        // either way. So ask the log rather than infer from the call's fate,
+        // because the answer gates a signature.
+        return rowLanded(store, callerPackage, requestType, decision, startedAt)
+    }
+
+    /**
+     * Whether the log holds a row for this operation, written since [since].
+     *
+     * The window is what keeps an earlier row for the same caller and decision
+     * from answering for this one. `internal` so a test can drive the predicate
+     * the gate decides on, since the race it exists for cannot be staged.
+     */
+    internal fun rowLanded(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        decision: String,
+        since: Long,
     ): Boolean = runCatching {
         runBlocking {
             withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) {
-                store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
-                true
+                withContext(Dispatchers.IO) {
+                    store.getAuditLog(AUDIT_VERIFY_SCAN).any {
+                        it.timestamp >= since &&
+                            it.callerPackage == callerPackage &&
+                            it.requestType == requestType.name &&
+                            it.decision == decision
+                    }
+                }
             }
         }
-    }.getOrNull() ?: false
+    }.getOrNull() == true
 
     @SuppressLint("MissingPermission")
     private fun showBackgroundSigningNotification(
