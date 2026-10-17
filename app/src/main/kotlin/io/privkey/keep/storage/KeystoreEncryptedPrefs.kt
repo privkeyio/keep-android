@@ -496,15 +496,29 @@ object KeystoreEncryptedPrefs {
          * nothing wrote it, while refusing a listed one would silently drop
          * settings of exactly the shape that is never rewritten, up to the PIN
          * flag whose absence reads as no PIN at all.
+         *
+         * None of this reaches the one state where the current name is derivable
+         * too: a store left on the deterministic key hashes every name with it,
+         * so this is never consulted and an unbound value is read wherever it
+         * sits. Closing that is a separate change, since the names themselves
+         * are the problem there rather than which of them a value sits at.
          */
         private fun readableFallbackValue(plainKey: String, fallbackName: String): String? {
             // A non-String planted at this name makes the platform getter throw
             // on its unchecked cast, which is the same writer this is defending
             // against, so it answers as nothing rather than raising.
             val value = runCatching { basePrefs.getString(fallbackName, null) }.getOrNull() ?: return null
-            if (value.startsWith(BOUND_PREFIX)) return value
-            synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
-            return value.takeIf { keyCache.containsKey(plainKey) }
+            if (!value.startsWith(BOUND_PREFIX)) {
+                synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
+                if (!keyCache.containsKey(plainKey)) return null
+            }
+            // Decrypt before answering, because answering also moves the value
+            // to the current name and caches it there. A marker is only a prefix
+            // and an attacker can write one, so without this a blob that will
+            // never decrypt is laundered onto a name nothing can plant at, where
+            // it reads as unreadable rather than absent for the life of the
+            // install. One decrypt, on a cold miss that found something.
+            return value.takeIf { runCatching { decrypt(secretKey, it, plainKey) }.isSuccess }
         }
 
         /**
@@ -990,7 +1004,10 @@ object KeystoreEncryptedPrefs {
                         // derived with a key that is gone, so a miss here does not
                         // separate "never written" from "written under that key".
                         // Keep the name rather than deregistering a key that may
-                        // still exist at a name nothing can compute.
+                        // still exist at a name nothing can compute. The copy at
+                        // the name this can compute is still swept: the caller
+                        // asked for that key to be gone, and leaving a refused
+                        // value there would survive its own delete.
                         //
                         // Deliberately not keyed on the registry: it lists plain
                         // key names, which is less than the caller just passed in,
@@ -1002,6 +1019,7 @@ object KeystoreEncryptedPrefs {
                         // file a latch: the fallback copy's name is derivable from
                         // the APK and nothing drops a copy it cannot decode.
                         certified = false
+                        dropFallbackCopy(plainKey, null)
                         continue
                     }
                     if (encKey != null) {

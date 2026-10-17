@@ -205,6 +205,26 @@ class KeystoreEncryptedPrefsTransplantTest {
         }
     }
 
+    // A marker is only a prefix, and anything that can write the directory can
+    // write one. Such a blob must not be laundered onto the current name, where
+    // nothing can plant and where it would then report the key as present, and
+    // unreadable, for good.
+    @Test
+    fun aMarkedButUndecryptableValueIsNotMovedToTheCurrentName() {
+        reopen().edit().putString(LEGACY_KEY, "written").commit()
+        val planted = BOUND_PREFIX + Base64.encodeToString(ByteArray(32) { 7 }, Base64.NO_WRAP)
+        raw().edit().putString(fallbackNameOf(OPTED_IN_ATTACKER), planted).commit()
+
+        assertFalse(
+            "a marked blob that cannot decrypt must not report the key as present",
+            reopen().contains(OPTED_IN_ATTACKER)
+        )
+        assertTrue(
+            "and it must be left where it was planted rather than relocated",
+            raw().contains(fallbackNameOf(OPTED_IN_ATTACKER))
+        )
+    }
+
     private companion object {
         const val PREFS_NAME = "transplant_test_prefs"
         const val PIN_PREFS_NAME = "keep_pin_protection"
