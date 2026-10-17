@@ -147,11 +147,14 @@ abstract class Nip55Database : RoomDatabase() {
         /**
          * The database passphrase or the audit HMAC secret, minted on a first run.
          *
-         * A key that is stored and will not decrypt raises instead of minting a
-         * replacement, because minting one is not a recovery: the database stays
+         * A key that is stored and will not decrypt does not mint a replacement over
+         * anything, because minting one is not a recovery: the database stays
          * encrypted under the old key, nothing here deletes or rebuilds it, and a fresh
          * passphrase cannot open it, so every later query fails with an opaque SQLite
-         * error rather than this one naming the cause. The write would also replace the
+         * error rather than this one naming the cause. That refusal comes from
+         * [mintRefusal], which asks what a mint would destroy, rather than from the read
+         * itself: a store holding nothing a mint can harm is better served by minting
+         * than by raising, and the write sweeps whatever could not be read with it. The write would also replace the
          * stored ciphertext, which is what a restored Keystore alias would need. For the
          * audit HMAC the same mint would silently restart a tamper-evident chain.
          *
@@ -197,8 +200,25 @@ abstract class Nip55Database : RoomDatabase() {
                         throw KeepMobileException.StorageException("Stored $prefKey could not be read")
                     }
                 PrefRead.Absent -> Unit
+                // Two different things read this way and they are not owed the
+                // same answer. A value stored under this key's own name, which a
+                // lost Keystore alias leaves undecryptable, is this store's and
+                // is kept: minting over it would replace the key the database was
+                // encrypted under, and the ciphertext surviving is what lets a
+                // restored alias bring the database and the audit chain back. A
+                // value the lookup refuses to read as this key's is not this
+                // store's and may be a string anything able to write this
+                // directory put at a name derived from constants in the build;
+                // raising on that would brick an install that has nothing worth
+                // protecting, where minting overwrites it and sweeps it.
+                //
+                // contains() separates them, because it answers through the
+                // lookup's Found case alone: the stored one is Found and the
+                // refused one is not.
                 PrefRead.Unreadable ->
-                    throw KeepMobileException.StorageException("Stored $prefKey could not be read")
+                    if (store.contains(prefKey)) {
+                        throw KeepMobileException.StorageException("Stored $prefKey could not be read")
+                    }
             }
 
             val existing = LegacyPrefsMigration.migrateStringIfNeeded(context, prefsName, prefKey, store)

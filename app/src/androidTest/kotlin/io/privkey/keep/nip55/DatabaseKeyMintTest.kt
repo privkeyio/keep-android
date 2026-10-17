@@ -11,6 +11,7 @@ import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.storage.ReadablePrefs
 import io.privkey.keep.storage.SignPolicySelectionPrefs
 import io.privkey.keep.storage.corruptStoredValue
+import io.privkey.keep.storage.fallbackNameIn
 import io.privkey.keep.storage.rawPrefs
 import io.privkey.keep.storage.writeAndFindStoredName
 import io.privkey.keep.uniffi.KeepMobileException
@@ -313,6 +314,25 @@ class DatabaseKeyMintTest {
 
             override fun commit(): Boolean = false
         }
+    }
+
+    // A value this store will not read as the passphrase's, at a name derived
+    // from constants in the build, used to read as a positive absence and was
+    // overwritten by the mint. Once a refusal reports itself unreadable, raising
+    // on that read would brick an install with nothing worth protecting, so the
+    // mint refusal decides: nothing on disk to lose, so mint, and the write
+    // sweeps what could not be read.
+    @Test
+    fun an_unreadable_passphrase_still_mints_when_there_is_nothing_to_lose() {
+        val planted = fallbackNameIn(PREFS, KEY)
+        rawPrefs(context, PREFS).edit().putString(planted, "not a value this can read").commit()
+
+        // A database name nothing has created, so the mint refusal has nothing
+        // to refuse over.
+        val key = Nip55Database.getOrCreateDbKey(context, prefsName = PREFS, dbName = "never_created.db")
+
+        assertEquals("a minted passphrase is 32 bytes", 32, key.size)
+        assertFalse("and the write sweeps what it could not read", rawPrefs(context, PREFS).contains(planted))
     }
 
     private companion object {

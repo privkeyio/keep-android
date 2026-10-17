@@ -489,24 +489,36 @@ object KeystoreEncryptedPrefs {
                 else KeyLookup.Absent
             }
 
-            val relocated = synchronized(initLockFor(prefsName)) {
+            // Three outcomes, kept apart because they are not the same answer:
+            // the value is no longer there to move, the move stuck, or the move
+            // did not stick and the value is still at the old name.
+            val movedTo = synchronized(initLockFor(prefsName)) {
                 // Re-read under the lock, and through the same rule: what is
                 // there now is what gets relocated to a name this will trust
                 // from then on.
                 val value = acceptableValueAt(plainKey, fallbackHash)
-                value != null &&
-                    basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
+                when {
+                    value == null -> null
+                    basePrefs.edit().putString(hash, value).remove(fallbackHash).commit() -> hash
+                    else -> fallbackHash
+                }
             }
-            return if (relocated) {
-                keyCache[plainKey] = hash
-                reverseKeyCache[hash] = plainKey
-                KeyLookup.Found(hash)
-            } else {
+            return when (movedTo) {
+                // Gone or no longer acceptable between the two reads. Saying
+                // Found here would report a name holding nothing readable, which
+                // a delete would then certify as an absence it never established.
+                null -> if (basePrefs.contains(fallbackHash)) KeyLookup.Refused(fallbackHash)
+                else KeyLookup.Absent
+                hash -> {
+                    keyCache[plainKey] = hash
+                    reverseKeyCache[hash] = plainKey
+                    KeyLookup.Found(hash)
+                }
                 // Consolidation did not stick. Report where the entry actually is
                 // so this lookup is still correct, but do not cache it: a cached
                 // old location would send the next write there and leave a second
                 // copy behind it.
-                KeyLookup.Found(fallbackHash)
+                else -> KeyLookup.Found(fallbackHash)
             }
         }
 
@@ -573,8 +585,14 @@ object KeystoreEncryptedPrefs {
          *
          * Refusing an unlisted unbound value costs nothing legitimate, since
          * nothing wrote it, while refusing a listed one would silently drop
-         * settings of exactly the shape that is never rewritten, up to the PIN
-         * flag whose absence reads as no PIN at all.
+         * settings of exactly the shape that is never rewritten.
+         *
+         * The PIN flag is the example to keep in mind and the one this does not
+         * reach: its store reads through the ordinary getters, which collapse an
+         * unreadable value to the caller's default exactly as they collapse an
+         * absent one, so a refusal there still reads as no PIN. Closing that
+         * means moving those reads onto the three-way ones, which is its own
+         * change.
          *
          * A store whose derivation key is itself public hashes every name under
          * it, so the current name is derivable too and earns no more trust than
@@ -828,13 +846,18 @@ object KeystoreEncryptedPrefs {
          * there and this layer cannot produce it, which is the same answer a failed
          * decrypt gives.
          *
-         * So does a name that resolved while its value is gone. [findEncryptedKey]
+         * So does a name that resolved while its value is gone. [locateKey]
          * returns a name only after finding a value at it, so reaching that needs a
          * remove or clear landing between the two, and "the name is still indexed and
          * the value is not there" is something this layer cannot account for rather
          * than proof nothing was ever written. Both of these resolve to the caller's
          * default through [getTypedValue] either way, so the distinction is only
          * visible to a [ReadablePrefs] caller, where it is the safe direction.
+         *
+         * So does a value [locateKey] refuses, which is on disk and not readable as
+         * this key's. That is the third outcome it reports and the one an absence
+         * would misdescribe: several callers read an absence as a control that was
+         * never set, or as licence to overwrite what they could not read.
          */
         private inline fun <T> readTyped(
             key: String,
@@ -1095,24 +1118,33 @@ object KeystoreEncryptedPrefs {
 
                 var certified = true
                 for (plainKey in pendingRemoves) {
-                    // A refused value is removed like any other: the caller asked
-                    // for this key to be gone, and what sits at its name is not
-                    // something any read will hand back, so leaving it would let
-                    // it survive its own delete.
-                    val encKey = when (val found = locateKey(plainKey)) {
-                        is KeyLookup.Found -> found.encKey
-                        is KeyLookup.Refused -> found.encKey
-                        KeyLookup.Absent -> null
+                    val located = locateKey(plainKey)
+                    if (located is KeyLookup.Refused) {
+                        // Present, and not established as absent, so the delete
+                        // says so rather than claiming it. Not removed either:
+                        // every reason this answer is given can be a property of
+                        // this process rather than of the value. A decrypt that
+                        // failed can succeed on the next open, the minted key may
+                        // simply not have committed, which leaves this process on
+                        // the deterministic key with every name derivable, and an
+                        // index that could not be read lists nothing, so a key
+                        // that is listed looks unlisted. Removing it here is the
+                        // shape the audit chain and the share metadata both had
+                        // taken out of them: a transient fault read as proof, and
+                        // the record destroyed on the strength of it.
+                        certified = false
+                        continue
                     }
+                    val encKey = (located as? KeyLookup.Found)?.encKey
                     if (encKey == null && namesPredateThisKey) {
                         // Nothing answered, and this file holds entries at names
                         // derived with a key that is gone, so a miss here does not
                         // separate "never written" from "written under that key".
                         // Keep the name rather than deregistering a key that may
                         // still exist at a name nothing can compute. The copy at
-                        // the name this can compute is still swept: the caller
-                        // asked for that key to be gone, and leaving a refused
-                        // value there would survive its own delete.
+                        // the name this can compute is still swept, since nothing
+                        // answered for it and the caller asked for that key to be
+                        // gone.
                         //
                         // Deliberately not keyed on the registry: it lists plain
                         // key names, which is less than the caller just passed in,
