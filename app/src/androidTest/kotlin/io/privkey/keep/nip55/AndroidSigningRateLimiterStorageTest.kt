@@ -82,6 +82,37 @@ class AndroidSigningRateLimiterStorageTest {
         assertEquals(StorageRead.Found("counter=1"), storage.load("com.example.a"))
     }
 
+    // clear_cooling_off discards these results today, so this is about the store
+    // being truthful rather than about a caller acting on it: the same editor
+    // backs the sign-policy selection, whose remove() the core does consume, and
+    // a store that reports "I cannot see it" as "it is gone" would leave a
+    // cooling-off entry on disk to enforce again once lookup recovered. Names
+    // here are hashed with a per-file derivation key, so the state where a miss
+    // settles nothing is a file holding entries from a key that is gone, which
+    // is what taking the stored key away from them stages.
+    @Test
+    fun removeIsRefusedWhenAbsenceCannotBeEstablished() {
+        storage.save("com.example.a", "counter=1")
+        val basePrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        assertTrue(
+            "backing prefs must receive entries; empty means prefs-name drift",
+            basePrefs.all.isNotEmpty()
+        )
+        assertTrue("the store must have persisted a derivation key", basePrefs.contains(HMAC_KEY_PREF))
+        basePrefs.edit().remove(HMAC_KEY_PREF).commit()
+
+        // A fresh adapter, so it mints a key over entries it cannot name.
+        val reopened = AndroidSigningRateLimiterStorage(context)
+        assertFalse(
+            "a removal that could not determine absence must report false",
+            reopened.remove("com.example.missing")
+        )
+        assertTrue(
+            "a removal that found its entry must still report true",
+            reopened.save("com.example.b", "counter=2").let { reopened.remove("com.example.b") }
+        )
+    }
+
     @Test
     fun clearWipesAllEntries() {
         storage.save("com.example.a", "counter=1")
@@ -171,5 +202,8 @@ class AndroidSigningRateLimiterStorageTest {
 
     companion object {
         private const val PREFS_NAME = "nip55_rate_limiter"
+
+        /** The one entry the encrypted store keeps under its literal name. */
+        private const val HMAC_KEY_PREF = "__hmac_key__"
     }
 }

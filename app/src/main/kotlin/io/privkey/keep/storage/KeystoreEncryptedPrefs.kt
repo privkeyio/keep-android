@@ -42,6 +42,12 @@ object KeystoreEncryptedPrefs {
     private const val KEY_REGISTRY = "__keys__"
     private const val KEY_REGISTRY_DELIMITER = "\u0000"
     private const val HMAC_KEY_PREF = "__hmac_key__"
+
+    // Set beside a derivation key minted over entries that predate it, and kept
+    // under a literal name like the key itself, since the point of it is that the
+    // hashed names on this file cannot all be computed any more. Read on every
+    // open: the instance that mints is rarely the one a later delete runs on.
+    private const val STRANDED_EPOCH_PREF = "__stranded_epoch__"
     private const val HMAC_KEY_LENGTH = 32
     private const val DETERMINISTIC_HMAC_SEED = "keystore_prefs_hmac_key"
 
@@ -211,6 +217,25 @@ object KeystoreEncryptedPrefs {
          * being maintained at all.
          */
         private var allRegistriesReadable = false
+
+        /**
+         * Whether this file already held entries when the derivation key in use
+         * was minted, named with a key that is not on disk any more.
+         *
+         * Names are hashed with a per-file key, so this store can only look
+         * under the key it holds. Entries named with a previous one are at names
+         * nothing here can compute: a lookup for them misses exactly as a key
+         * that was never written does. That is the state the core's delete
+         * contract calls key derivation being unavailable, and the reason it
+         * asks for a failed delete rather than a claimed absence, because a
+         * restore that brings the old key back brings those entries back with
+         * it, enforcing again after something was told they were gone.
+         *
+         * Minting over them is still the only move available: their key is gone,
+         * so nothing can be read or rewritten under it. What changes is only
+         * what a delete is then allowed to claim.
+         */
+        private var namesPredateThisKey = false
         @Volatile
         private var hmacKey: ByteArray? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
@@ -233,6 +258,7 @@ object KeystoreEncryptedPrefs {
             synchronized(initLockFor(prefsName)) {
                 hmacKey?.let { return it }
                 val stored = basePrefs.getString(HMAC_KEY_PREF, null)
+                namesPredateThisKey = basePrefs.contains(STRANDED_EPOCH_PREF)
                 if (stored != null) {
                     val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
                     val key = Base64.decode(decrypted, Base64.NO_WRAP)
@@ -249,12 +275,25 @@ object KeystoreEncryptedPrefs {
                 val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
                 val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
                 val hasExistingEntries = basePrefs.contains(registryHash)
+                // Entries beside no registry this can read are from an epoch
+                // whose key is gone: a deterministic-epoch file is migrated just
+                // below, and a file still holding its own key never reaches here.
+                // Reaching this with entries present takes that key going missing
+                // under them, which a rollback of this file does.
+                val stranded = !hasExistingEntries &&
+                    basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
+                namesPredateThisKey = namesPredateThisKey || stranded
                 val persisted = if (hasExistingEntries) {
                     migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
                         if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
                     }
                 } else {
-                    basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey).commit().also { ok ->
+                    // One commit: the marker has to land with the key it describes,
+                    // or a restart reads a key that looks like it has always been
+                    // this file's and certifies deletes over the stranded entries.
+                    val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
+                    if (stranded) editor.putString(STRANDED_EPOCH_PREF, "1")
+                    editor.commit().also { ok ->
                         if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
                     }
                 }
@@ -826,16 +865,51 @@ object KeystoreEncryptedPrefs {
             // tearing against a clear. The monitor is reentrant, so the nested
             // derivation-key lookup is safe.
             override fun commit(): Boolean = synchronized(initLockFor(prefsName)) {
-                applyChanges()
-                baseEditor.commit()
+                // Both have to hold. The write reaching disk is not enough when a
+                // removal could not be certified: the core reads a true here as
+                // "that key is gone from the durable store", and acts on it.
+                val certified = applyChanges()
+                baseEditor.commit() && certified
             }
 
+            // apply() has no result to carry an uncertified removal in, which is
+            // the reason every storage class here commits instead.
             override fun apply() = synchronized(initLockFor(prefsName)) {
-                applyChanges()
+                // Hoisted, like commit(): as an operand it would be skipped
+                // wherever the DEBUG check short-circuits, which is every release
+                // build, and nothing would be staged at all.
+                val certified = applyChanges()
+                if (!certified && BuildConfig.DEBUG) {
+                    Log.w("KeystoreEncryptedPrefs", "apply() cannot report an uncertified removal")
+                }
                 baseEditor.apply()
             }
 
-            private fun applyChanges() {
+            /**
+             * Stages this editor onto [baseEditor], and reports whether every
+             * removal in it was certified.
+             *
+             * A removal is certified when the entry was found and dropped, or
+             * when the key is genuinely absent. "No entry answered the lookup" is
+             * not by itself the second of those: the core's delete contract asks
+             * an implementation whose key derivation or index is unavailable to
+             * report failure rather than read its own blindness as absence, since
+             * a live entry reported as deleted stays on disk and becomes
+             * enforceable again once lookup recovers.
+             *
+             * A named lookup here resolves forward: it recomputes the hash from
+             * the plaintext key and probes both derivation epochs for it. So a
+             * miss is conclusive whenever this store holds the key those names
+             * were derived with, and the one state where it is not is the file
+             * that already held entries when the key in use was minted. That is
+             * what [namesPredateThisKey] records and all this refuses on.
+             *
+             * Uncertified removals do not hold back the rest of the editor. The
+             * puts and the removals that did resolve are real work, and discarding
+             * them would trade a wrong answer for lost writes; the caller is told
+             * instead, through the one channel it has.
+             */
+            private fun applyChanges(): Boolean {
                 if (clearRequested) {
                     baseEditor.clear()
                     keyCache.clear()
@@ -867,8 +941,28 @@ object KeystoreEncryptedPrefs {
                     ensureRegistrySeeded(countAttempt = true)
                 }
 
+                var certified = true
                 for (plainKey in pendingRemoves) {
                     val encKey = findEncryptedKey(plainKey)
+                    if (encKey == null && namesPredateThisKey) {
+                        // Nothing answered, and this file holds entries at names
+                        // derived with a key that is gone, so a miss here does not
+                        // separate "never written" from "written under that key".
+                        // Keep the name rather than deregistering a key that may
+                        // still exist at a name nothing can compute.
+                        //
+                        // Deliberately not keyed on the registry: it lists plain
+                        // key names, which is less than the caller just passed in,
+                        // and a lookup resolves forward from that name under both
+                        // derivation epochs without consulting it. An unreadable
+                        // registry makes a lookup slower, not less conclusive, so
+                        // refusing on it would fail deletes that did establish
+                        // absence, and would hand an attacker who can write the
+                        // file a latch: the fallback copy's name is derivable from
+                        // the APK and nothing drops a copy it cannot decode.
+                        certified = false
+                        continue
+                    }
                     if (encKey != null) {
                         baseEditor.remove(encKey)
                         reverseKeyCache.remove(encKey)
@@ -889,6 +983,7 @@ object KeystoreEncryptedPrefs {
                 }
 
                 updateKeyRegistry()
+                return certified
             }
 
             /// Removes a copy stranded under the fallback derivation epoch, so a
