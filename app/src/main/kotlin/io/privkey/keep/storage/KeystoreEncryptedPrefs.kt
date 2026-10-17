@@ -409,10 +409,13 @@ object KeystoreEncryptedPrefs {
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || !basePrefs.contains(fallbackHash)) return null
+            if (fallbackHash == hash || readableFallbackValue(plainKey, fallbackHash) == null) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
-                val value = basePrefs.getString(fallbackHash, null)
+                // Re-read under the lock, and through the same rule: what is
+                // there now is what gets relocated to a name this will trust
+                // from then on.
+                val value = readableFallbackValue(plainKey, fallbackHash)
                 value != null &&
                     basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
@@ -468,6 +471,55 @@ object KeystoreEncryptedPrefs {
 
         private fun fallbackHashOf(plainKey: String): String =
             hmacWithKey(plainKey, deterministicHmacKey())
+
+        /**
+         * The value at a fallback-epoch name, if it may be read as [plainKey]'s.
+         *
+         * That name is an HMAC over the plaintext key under a key derived from a
+         * constant in the APK and the file name, so anything that can write this
+         * directory can place a value at a name of its choosing, and values in
+         * one file are otherwise interchangeable: authentication covers the value
+         * alone, and the auto-signing file stores the same plaintext for every
+         * opted-in package. Copying one onto another package's fallback name is
+         * the transplant this refuses.
+         *
+         * A bound value answers it by itself: it decrypts only under the logical
+         * name it was written for, and producing a new one needs the Keystore
+         * key. A value from before the binding carries no such statement, so it
+         * is accepted only for a key this store's own index lists, which is the
+         * difference between a value stranded by an epoch this store moved
+         * through and a value planted for a key it has never written. An
+         * attacker cannot list a name of their choosing: the index is encrypted,
+         * and a copied blob only ever lists names that were already in it.
+         *
+         * Refusing an unlisted unbound value costs nothing legitimate, since
+         * nothing wrote it, while refusing a listed one would silently drop
+         * settings of exactly the shape that is never rewritten, up to the PIN
+         * flag whose absence reads as no PIN at all.
+         *
+         * None of this reaches the one state where the current name is derivable
+         * too: a store left on the deterministic key hashes every name with it,
+         * so this is never consulted and an unbound value is read wherever it
+         * sits. Closing that is a separate change, since the names themselves
+         * are the problem there rather than which of them a value sits at.
+         */
+        private fun readableFallbackValue(plainKey: String, fallbackName: String): String? {
+            // A non-String planted at this name makes the platform getter throw
+            // on its unchecked cast, which is the same writer this is defending
+            // against, so it answers as nothing rather than raising.
+            val value = runCatching { basePrefs.getString(fallbackName, null) }.getOrNull() ?: return null
+            if (!value.startsWith(BOUND_PREFIX)) {
+                synchronized(initLockFor(prefsName)) { ensureRegistrySeeded() }
+                if (!keyCache.containsKey(plainKey)) return null
+            }
+            // Decrypt before answering, because answering also moves the value
+            // to the current name and caches it there. A marker is only a prefix
+            // and an attacker can write one, so without this a blob that will
+            // never decrypt is laundered onto a name nothing can plant at, where
+            // it reads as unreadable rather than absent for the life of the
+            // install. One decrypt, on a cold miss that found something.
+            return value.takeIf { runCatching { decrypt(secretKey, it, plainKey) }.isSuccess }
+        }
 
         /**
          * The outcome of reading one registry copy.
@@ -626,6 +678,9 @@ object KeystoreEncryptedPrefs {
             for (plainKey in keyCache.keys.toList()) {
                 if (plainKey == KEY_REGISTRY) continue
                 val currentName = calculateKeyHash(plainKey)
+                // No marker check here: this loop only ever walks keys the index
+                // lists, which is the condition the probe admits an unbound value
+                // under, so enumeration and a direct read answer the same.
                 val name = when {
                     stored.containsKey(currentName) -> currentName
                     else -> fallbackHashOf(plainKey).takeIf { it != currentName && stored.containsKey(it) }
@@ -949,7 +1004,10 @@ object KeystoreEncryptedPrefs {
                         // derived with a key that is gone, so a miss here does not
                         // separate "never written" from "written under that key".
                         // Keep the name rather than deregistering a key that may
-                        // still exist at a name nothing can compute.
+                        // still exist at a name nothing can compute. The copy at
+                        // the name this can compute is still swept: the caller
+                        // asked for that key to be gone, and leaving a refused
+                        // value there would survive its own delete.
                         //
                         // Deliberately not keyed on the registry: it lists plain
                         // key names, which is less than the caller just passed in,
@@ -961,6 +1019,7 @@ object KeystoreEncryptedPrefs {
                         // file a latch: the fallback copy's name is derivable from
                         // the APK and nothing drops a copy it cannot decode.
                         certified = false
+                        dropFallbackCopy(plainKey, null)
                         continue
                     }
                     if (encKey != null) {
