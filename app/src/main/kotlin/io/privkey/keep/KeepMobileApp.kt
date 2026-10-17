@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -483,15 +484,7 @@ class KeepMobileApp : Application() {
             // Before the revoke: clearAllAppSettings enumerates permission callers to
             // find overrides whose mirror row is already gone, and revokeAllPermissions
             // empties that index.
-            runAccountSwitchCleanup("clear app settings") {
-                permissionStore?.clearAllAppSettings(
-                    signPolicyStore,
-                    getSharedPreferences(
-                        SignPolicySelectionPrefs.MARKER_PREFS_NAME,
-                        Context.MODE_PRIVATE
-                    )
-                )
-            }
+            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings(signPolicyStore) }
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
@@ -505,6 +498,64 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("record account-switch audit") {
                 permissionStore?.logSelfEvent(AUDIT_OP_ACCOUNT_SWITCH)
             }
+            // Last, and not through the permission store: this file has no
+            // database behind it, so a store that never opened must not take it
+            // down too, and running after the row steps means the marker that
+            // protects a row is only dropped once the work on that row is done.
+            // The startup migration writes these same keys and an account switch
+            // does not cancel it, so going last also narrows the window in which
+            // it can re-stamp what was just cleared.
+            runAccountSwitchCleanup("retire the override migration") {
+                clearAppOverrideMarkers(
+                    getSharedPreferences(
+                        SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+                        Context.MODE_PRIVATE
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Retires the override migration and drops the per-package markers it left.
+     *
+     * The markers are the residue: one plaintext key per package the previous
+     * account had pinned, which is a record of which applications that identity
+     * used and how many. The migration sweeps them itself once a run completes,
+     * so what reaches here is the install whose run never completes, because it
+     * still holds a row the sweep could not clear. The digest over the package
+     * name is obfuscation and not confidentiality, so it is no answer to that.
+     *
+     * Clearing them alone would not be safe, which is why the run-wide marker is
+     * set in the same commit. Each per-package marker is also what stops the
+     * migration copying that row's tier into the core, so dropping one hands
+     * that protection away: a row whose clear failed earlier in this wipe
+     * survives carrying the previous account's tier, and the next launch would
+     * copy it into the core, where the row and the core then agree on it and the
+     * new account inherits it. Leaving the row one-sided instead resolves to the
+     * strictest tier.
+     *
+     * Setting the marker costs nothing legitimate. After a switch no surviving
+     * row's tier should ever be copied: it belongs to the previous account, and
+     * on a clean wipe what survives are tombstones already rewritten to the
+     * strictest tier. New choices are written to both sides directly and never
+     * went through this migration.
+     *
+     * [markers] is a parameter so a test can drive this against a file of its
+     * own: the real one is shared with the other migrations and with the
+     * migration this app runs at startup, which writes and sweeps the same keys.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun clearAppOverrideMarkers(markers: SharedPreferences) {
+        val edit = markers.edit()
+            .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
+        // Reads the committed state, so the marker staged above is not swept with
+        // the per-package ones; it carries a different prefix either way.
+        SignPolicySelectionPrefs.removeAppOverrideMarkers(markers, edit)
+        if (!edit.commit() && BuildConfig.DEBUG) {
+            // A wipe step that reports nothing is indistinguishable from a clean
+            // one, which is what this file's own cleanup contract argues against.
+            Log.e(TAG, "Per-app override markers could not be cleared")
         }
     }
 

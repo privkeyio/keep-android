@@ -135,6 +135,16 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
          * never completes a run, so it keeps its markers until that row goes, and the
          * digest is the only thing covering them in the meantime.
          */
+        internal fun appOverrideMarkerKey(callerPackage: String): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(callerPackage.toByteArray(Charsets.UTF_8))
+            val suffix = Base64.encodeToString(
+                digest,
+                Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
+            )
+            return APP_OVERRIDE_MARKER_PREFIX + suffix
+        }
+
         /**
          * Stages the removal of every per-package override marker in [markers].
          *
@@ -144,9 +154,16 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
          * incomplete run left behind. Takes the editor rather than committing,
          * so the first of those stays one commit.
          *
-         * The run-wide markers are deliberately untouched: clearing them would
-         * let the legacy copies run again, which is how a previous account's
-         * choices would come back.
+         * Only the per-package keys. What the run-wide markers should hold is
+         * each caller's business: the migration sets its own as it sweeps, and
+         * the account-switch wipe sets it too, so that no surviving row's tier
+         * can be copied forward afterwards. Neither clears one, because a
+         * cleared run-wide marker reopens a legacy copy for the next account.
+         *
+         * Filters the committed state rather than the editor's pending writes,
+         * so a caller that stages a marker and then calls this in the same
+         * editor keeps the one it staged. Neither caller does that, and a third
+         * that wants to should commit first.
          */
         internal fun removeAppOverrideMarkers(
             markers: SharedPreferences,
@@ -155,16 +172,6 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
             markers.all.keys
                 .filter { it.startsWith(APP_OVERRIDE_MARKER_PREFIX) }
                 .forEach { edit.remove(it) }
-        }
-
-        internal fun appOverrideMarkerKey(callerPackage: String): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-                .digest(callerPackage.toByteArray(Charsets.UTF_8))
-            val suffix = Base64.encodeToString(
-                digest,
-                Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
-            )
-            return APP_OVERRIDE_MARKER_PREFIX + suffix
         }
     }
 }
