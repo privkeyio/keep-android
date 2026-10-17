@@ -409,10 +409,13 @@ object KeystoreEncryptedPrefs {
             // disagreeing about where the index lives.
             if (plainKey == KEY_REGISTRY) return null
             val fallbackHash = fallbackHashOf(plainKey)
-            if (fallbackHash == hash || !basePrefs.contains(fallbackHash)) return null
+            if (fallbackHash == hash || boundFallbackValue(fallbackHash) == null) return null
 
             val relocated = synchronized(initLockFor(prefsName)) {
-                val value = basePrefs.getString(fallbackHash, null)
+                // Re-read under the lock, and through the same guard: what is
+                // there now is what gets relocated to a name this will trust
+                // from then on.
+                val value = boundFallbackValue(fallbackHash)
                 value != null &&
                     basePrefs.edit().putString(hash, value).remove(fallbackHash).commit()
             }
@@ -468,6 +471,32 @@ object KeystoreEncryptedPrefs {
 
         private fun fallbackHashOf(plainKey: String): String =
             hmacWithKey(plainKey, deterministicHmacKey())
+
+        /**
+         * The value stored at a fallback-epoch name, if it is bound to the key
+         * it is stored under.
+         *
+         * That name is an HMAC over the plaintext key under a key derived from
+         * a constant in the APK and the file name, so anything that can write
+         * this directory can place a value there, and values here are otherwise
+         * interchangeable: authentication covers the value alone, and a file
+         * like the auto-signing one stores the same plaintext for every opted-in
+         * package. Copying one onto another package's fallback name is what the
+         * binding refuses, because a bound value decrypts only under the logical
+         * name it was written for and producing a new one needs the Keystore
+         * key.
+         *
+         * An unbound value predates the binding and says nothing about where it
+         * belongs, so it is read only at the current name, which is hashed under
+         * a key that never leaves the Keystore and is therefore not a name an
+         * attacker can choose. The cost is a genuine pre-binding value stranded
+         * under the previous epoch, which stops being recoverable through this
+         * probe and reads as absent; it is the same answer the probe gave before
+         * it existed, and the alternative is leaving every install that predates
+         * the binding transplantable for its whole life.
+         */
+        private fun boundFallbackValue(fallbackName: String): String? =
+            basePrefs.getString(fallbackName, null)?.takeIf { it.startsWith(BOUND_PREFIX) }
 
         /**
          * The outcome of reading one registry copy.
@@ -628,7 +657,11 @@ object KeystoreEncryptedPrefs {
                 val currentName = calculateKeyHash(plainKey)
                 val name = when {
                     stored.containsKey(currentName) -> currentName
-                    else -> fallbackHashOf(plainKey).takeIf { it != currentName && stored.containsKey(it) }
+                    // Same rule as the lookup probe: at a name an attacker can
+                    // derive, only a value bound to this key is this key's.
+                    else -> fallbackHashOf(plainKey).takeIf {
+                        it != currentName && (stored[it] as? String)?.startsWith(BOUND_PREFIX) == true
+                    }
                 } ?: continue
                 // Only encrypted String entries. Anything else was never written
                 // by this class, and returning it verbatim would hand back
