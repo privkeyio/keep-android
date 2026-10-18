@@ -20,9 +20,11 @@ class RelayAuthWhitelistStoreIntegrationTest {
 
     @Before
     fun setup() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        store = RelayAuthWhitelistStore(context)
+        // Cleared before the store is built, not after: deleting the file under a
+        // live SharedPreferences instance leaves that instance able to write its
+        // cached contents back.
         clear()
+        store = RelayAuthWhitelistStore(ApplicationProvider.getApplicationContext())
     }
 
     @After
@@ -31,7 +33,12 @@ class RelayAuthWhitelistStoreIntegrationTest {
     }
 
     private fun clear() {
-        store.getHosts().forEach { store.remove(it) }
+        // The whole file, rather than removing the hosts one at a time. A host-by-host
+        // clear reads first, and hosts() raises on a fault, so a file another class
+        // left unreadable would fail every test here in setup rather than being
+        // recovered. The old read answered an empty list and self-healed by accident.
+        ApplicationProvider.getApplicationContext<Context>()
+            .deleteSharedPreferences(RelayAuthWhitelistStore.PREFS_NAME)
     }
 
     @Test
@@ -41,14 +48,14 @@ class RelayAuthWhitelistStoreIntegrationTest {
         assertEquals("relay.example.com", store.add("relay.example.com"))
         assertEquals("relay.example.com", store.add("ws://relay.example.com:80"))
 
-        assertEquals(listOf("relay.example.com"), store.getHosts())
+        assertEquals(listOf("relay.example.com"), store.hosts())
     }
 
     @Test
     fun rejectsUnnormalizableInput() {
         assertNull(store.add("   "))
         assertNull(store.add(""))
-        assertTrue(store.getHosts().isEmpty())
+        assertTrue(store.hosts().isEmpty())
     }
 
     @Test
@@ -56,27 +63,27 @@ class RelayAuthWhitelistStoreIntegrationTest {
         repeat(256) { i ->
             assertNotNull(store.add("relay$i.example.com"))
         }
-        assertEquals(256, store.getHosts().size)
+        assertEquals(256, store.hosts().size)
 
         // A brand-new host at the cap is rejected.
         assertNull(store.add("overflow.example.com"))
-        assertFalse(store.getHosts().contains("overflow.example.com"))
+        assertFalse(store.hosts().contains("overflow.example.com"))
 
         // Re-adding an existing host at the cap is still allowed (idempotent).
         assertEquals("relay0.example.com", store.add("relay0.example.com"))
-        assertEquals(256, store.getHosts().size)
+        assertEquals(256, store.hosts().size)
     }
 
     @Test
     fun removeDeletesEntry() {
         assertEquals("relay.example.com", store.add("relay.example.com"))
-        assertTrue(store.getHosts().contains("relay.example.com"))
+        assertTrue(store.hosts().contains("relay.example.com"))
 
         store.remove("relay.example.com")
-        assertFalse(store.getHosts().contains("relay.example.com"))
+        assertFalse(store.hosts().contains("relay.example.com"))
 
         // Removing a non-existent host is a no-op.
         store.remove("relay.example.com")
-        assertTrue(store.getHosts().isEmpty())
+        assertTrue(store.hosts().isEmpty())
     }
 }

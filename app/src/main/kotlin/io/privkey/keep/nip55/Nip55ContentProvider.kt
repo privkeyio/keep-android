@@ -289,20 +289,18 @@ class Nip55ContentProvider : ContentProvider() {
             VelocityResult.Allowed -> Nip55VelocityCheck.ALLOWED
         }
 
-        // Relay-auth whitelist (kind 22242): the raw hosts plus a read-failed flag.
-        // No store or an empty list defers; a read error fails closed to auto-reject.
-        val whitelistStore = currentApp.getRelayAuthWhitelistStore()
-        var relayReadFailed = false
-        val relayWhitelist: List<String> = if (whitelistStore == null) {
-            emptyList()
-        } else {
-            try {
-                whitelistStore.getHosts()
-            } catch (_: Exception) {
-                relayReadFailed = true
-                emptyList()
-            }
-        }
+        // Relay-auth whitelist (kind 22242): the raw hosts plus a read-failed flag,
+        // folded in the same helper the foreground gate uses so the two cannot
+        // diverge on what an unreadable list means. No store or an empty list
+        // defers; a read error fails closed, which the core turns into auto-reject.
+        //
+        // The flag used to be set only by a catch, which caught the fault that
+        // raises. A value that would not decrypt came back as an empty list with
+        // the flag clear, so the core saw a person who had configured no gate and
+        // deferred to per-app grants, letting a grant auto-approve a relay the
+        // list may have been excluding, with nobody present to see it.
+        val (relayWhitelist, relayReadFailed) =
+            relayWhitelistInputs(currentApp.getRelayAuthWhitelistStore())
 
         // Sign-policy precedence: per-app override -> core-owned global -> MANUAL
         // default, resolved in AppSignPolicyOverrides so this and the settings UI

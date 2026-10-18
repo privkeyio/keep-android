@@ -13,7 +13,12 @@ import io.privkey.keep.uniffi.nip55NormalizeRelayHost
 class RelayAuthWhitelistStore(context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "keep_relay_auth_whitelist"
+        /**
+         * Not private: the tests that stage an unreadable list have to clear the real
+         * file, and a copy of the literal there would silently stop matching if this
+         * one ever changed, leaving a corrupted file behind for every later test.
+         */
+        internal const val PREFS_NAME = "keep_relay_auth_whitelist"
         private const val KEY_HOSTS = "relay_auth_whitelist_hosts"
         private const val MAX_ENTRIES = 256
     }
@@ -23,9 +28,28 @@ class RelayAuthWhitelistStore(context: Context) {
         LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
     }
 
-    /** The normalized whitelisted relay hosts, sorted for stable display. */
-    fun getHosts(): List<String> =
-        (prefs.getStringSet(KEY_HOSTS, emptySet()) ?: emptySet()).sorted()
+    /**
+     * The normalized whitelisted relay hosts, sorted for stable display.
+     *
+     * Three-way, because this list is a hard gate and so "nothing is listed" and
+     * "the list could not be read" must not arrive as one answer. The first
+     * defers to per-app grant resolution by design; the second doing so would
+     * let a grant the person gave earlier auto-approve a relay this list may
+     * have been excluding, which is the one direction a deliberately configured
+     * gate must never fail in.
+     *
+     * It replaced a [getStringSet] read whose empty default collapsed both, and
+     * which left the two fault kinds behaving differently: a value that would
+     * not decrypt read as an empty list, while a name that would not resolve
+     * raised. Callers handled one or the other, never both.
+     */
+    fun readHosts(): PrefRead<List<String>> = when (val read = prefs.readStringSet(KEY_HOSTS)) {
+        is PrefRead.Found -> PrefRead.Found(read.value.sorted())
+        // Never configured and configured empty are the same thing to this gate,
+        // so they are folded here and callers are left with two cases.
+        PrefRead.Absent -> PrefRead.Found(emptyList())
+        PrefRead.Unreadable -> PrefRead.Unreadable
+    }
 
     /**
      * Normalizes [rawUrl] and adds it. Returns the normalized host on success, or null

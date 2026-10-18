@@ -86,6 +86,18 @@ private fun hmacName(key: ByteArray, plainKey: String): String {
     )
 }
 
+/**
+ * The whitelist as a plain list, for tests whose subject is not the read.
+ *
+ * Raises on a fault rather than answering an empty list, so a test that stages
+ * one by accident fails instead of quietly asserting against the collapse this
+ * store no longer performs.
+ */
+internal fun RelayAuthWhitelistStore.hosts(): List<String> = when (val read = readHosts()) {
+    is PrefRead.Found -> read.value
+    PrefRead.Absent, PrefRead.Unreadable -> error("the whitelist read answered $read")
+}
+
 private const val ANCHOR_KEY = "__test_anchor__"
 private const val DETERMINISTIC_HMAC_SEED = "keystore_prefs_hmac_key"
 

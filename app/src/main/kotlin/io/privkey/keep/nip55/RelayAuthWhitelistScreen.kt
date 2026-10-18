@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
+import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,12 +27,25 @@ fun RelayAuthWhitelistScreen(
     onDismiss: () -> Unit
 ) {
     var hosts by remember { mutableStateOf<List<String>>(emptyList()) }
+    var readFailed by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
-        hosts = withContext(Dispatchers.IO) { store.getHosts() }
+        // A fault keeps whatever rows were already read instead of replacing them
+        // with an empty list, and raises [readFailed], which withholds the "nothing
+        // is whitelisted" line below. That line is a claim about what the gate will
+        // enforce, and on a cold open the list is empty because nothing has been
+        // read yet, so making it for a list that failed to read would state the
+        // opposite of the truth. Saying which of the two it is needs a string this
+        // screen does not have yet. Previously this also raised out of the
+        // coroutine on a name-resolution fault and took the screen down.
+        val read = withContext(Dispatchers.IO) {
+            runCatching { store.readHosts() }.getOrDefault(PrefRead.Unreadable)
+        }
+        if (read is PrefRead.Found) hosts = read.value
+        readFailed = read !is PrefRead.Found
     }
 
     LaunchedEffect(Unit) { reload() }
@@ -95,7 +109,7 @@ fun RelayAuthWhitelistScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (hosts.isEmpty()) {
+            if (hosts.isEmpty() && !readFailed) {
                 Text(
                     text = stringResource(R.string.connections_nip55_relay_auth_whitelist_empty),
                     style = MaterialTheme.typography.bodyMedium,
