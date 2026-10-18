@@ -30,6 +30,8 @@ fun RelayAuthWhitelistScreen(
     var readFailed by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
+    var resetFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
@@ -74,6 +76,32 @@ fun RelayAuthWhitelistScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Nothing below this is usable while the list cannot be read: add refuses
+            // to write over a list it could not read, there are no rows to remove, and
+            // the gate is rejecting every relay meanwhile. So the fault replaces them
+            // rather than sitting above an input whose every attempt would fail with
+            // the error a bad host gets.
+            if (readFailed) {
+                Text(
+                    text = stringResource(R.string.connections_nip55_relay_auth_whitelist_unreadable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                if (resetFailed) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { confirmReset = true }) {
+                    Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset))
+                }
+                return@Column
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -146,5 +174,33 @@ fun RelayAuthWhitelistScreen(
                 }
             }
         }
+    }
+
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_title)) },
+            text = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    scope.launch {
+                        // The store answers whether the delete was certified, and an
+                        // uncertified one leaves the list on disk and the gate still
+                        // rejecting. Reported rather than assumed, so the screen cannot
+                        // tell the person the whitelist is reset while it is not.
+                        resetFailed = !withContext(Dispatchers.IO) { store.clear() }
+                        reload()
+                    }
+                }) {
+                    Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            }
+        )
     }
 }

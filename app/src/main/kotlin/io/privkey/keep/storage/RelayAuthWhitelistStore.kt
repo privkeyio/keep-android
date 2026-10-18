@@ -73,6 +73,21 @@ class RelayAuthWhitelistStore(context: Context) {
         return host
     }
 
+    /**
+     * Deletes the stored list. The repair path for a list that cannot be read, which
+     * [add] and [remove] both refuse to write over and which the gate auto-rejects
+     * every kind 22242 request on, so without this one damaged entry denies NIP-42
+     * auth for the life of the install.
+     *
+     * Returns whether the deletion was certified. [KeystoreEncryptedPrefs] answers
+     * false when the entry is still on disk afterwards, and a reset reported as
+     * successful while the gate keeps rejecting is the one outcome a repair path must
+     * not have. Committed rather than applied for that reason: apply() discards the
+     * answer.
+     */
+    @Synchronized
+    fun clear(): Boolean = prefs.edit().remove(KEY_HOSTS).commit()
+
     @Synchronized
     fun remove(host: String) {
         // Safe today only because the default is an empty set, which makes the removal

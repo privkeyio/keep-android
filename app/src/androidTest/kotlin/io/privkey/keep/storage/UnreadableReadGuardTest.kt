@@ -3,7 +3,9 @@ package io.privkey.keep.storage
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.nip55.evaluateRelayAuthGate
 import io.privkey.keep.uniffi.KeepMobileException
+import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -129,6 +131,45 @@ class UnreadableReadGuardTest {
             corrupted,
             rawPrefs(context, WHITELIST_PREFS).getString(storedName, null)
         )
+    }
+
+    @Test
+    fun clearing_an_unreadable_whitelist_lets_the_gate_resume() {
+        // The whitelist's escape hatch, the counterpart of the audit log's below. The
+        // two guards above are what make it necessary: with add refusing to write over
+        // a list it could not read, and no rows on screen to remove, one damaged entry
+        // auto-rejects every kind 22242 request for the life of the install.
+        val seeded = RelayAuthWhitelistStore(context)
+        val storedName = writeAndFindStoredName(context, WHITELIST_PREFS) {
+            assertNotNull(seeded.add("wss://relay.example.com"))
+        }
+        corruptStoredValue(context, WHITELIST_PREFS, storedName)
+        assertEquals(
+            "the gate has to be closed before the reset, or this proves nothing",
+            Nip55RelayAuthGate.AUTO_REJECT,
+            evaluateRelayAuthGate(RelayAuthWhitelistStore(context), EVENT_22242).first
+        )
+
+        assertTrue(
+            "a reset that cannot certify the delete must not report success",
+            RelayAuthWhitelistStore(context).clear()
+        )
+
+        // Open again, rather than reusing the instance that cleared: what matters is
+        // that the fault is gone from disk, not from one instance's cache.
+        val repaired = RelayAuthWhitelistStore(context)
+        assertEquals(
+            "a reset list defers to per-app resolution, as a never-configured one does",
+            Nip55RelayAuthGate.DEFER,
+            evaluateRelayAuthGate(repaired, EVENT_22242).first
+        )
+        assertEquals("relay.example.com", repaired.add("wss://relay.example.com"))
+        assertEquals(
+            "and the gate works again afterwards",
+            Nip55RelayAuthGate.AUTO_ACCEPT,
+            evaluateRelayAuthGate(repaired, EVENT_22242).first
+        )
+        forgetWriteProbe(context, WHITELIST_PREFS)
     }
 
     @Test
@@ -286,6 +327,8 @@ class UnreadableReadGuardTest {
 
     private companion object {
         const val AUDIT_PREFS = "keep_audit_log"
+        const val EVENT_22242 =
+            """{"kind":22242,"tags":[["relay","wss://relay.example.com/"],["challenge","abc"]]}"""
         const val WHITELIST_PREFS = RelayAuthWhitelistStore.PREFS_NAME
         const val SHARE_SUFFIX = "_unreadable_read_guard_test"
         const val SHARE_REGISTRY_PREFS = "keep_multi_share_prefs$SHARE_SUFFIX"
