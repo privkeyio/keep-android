@@ -154,29 +154,15 @@ fun PinUnlockScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
-                // A biometric already unlocks this screen in its PIN-entry state, so it is
-                // offered here first as the way in that destroys nothing. The record stays
-                // as it is, and if the fault was transient it can read again later. It
-                // does not refresh the session, which writes to the file that just failed
-                // to read; signing stays blocked until the record is repaired, as the body
-                // text says.
-                if (onBiometricAuth != null) {
-                    Button(
-                        onClick = {
-                            coroutineScope.launch {
-                                if (onBiometricAuth()) {
-                                    onBiometricSuccess()
-                                    onUnlocked()
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(stringResource(R.string.pin_unlock_use_biometrics))
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-                OutlinedButton(
+                // Removal is the only way in from here, not a biometric unlock that leaves
+                // the record alone. Such an unlock cannot hold: the activity re-derives the
+                // unlock from isSessionValid on every resume, the session cannot be
+                // refreshed against a file that will not decrypt, and dismissing the
+                // prompt resumes the activity, so the lock screen comes straight back.
+                // Making it hold would mean overriding the session check on resume, which
+                // is a hole in the relock rather than a feature. A transient fault is
+                // covered instead by clearPin reading the record again before deleting.
+                Button(
                     onClick = {
                         coroutineScope.launch {
                             removeFailed = false

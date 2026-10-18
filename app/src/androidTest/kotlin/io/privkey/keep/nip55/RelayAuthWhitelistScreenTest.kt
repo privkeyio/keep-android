@@ -125,7 +125,12 @@ class RelayAuthWhitelistScreenTest {
         }
     }
 
-    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = 5_000) {
+    // 15s, not 5s. The unreadable state appears only after a Keystore decrypt fails on an
+    // IO dispatcher, which takes about 1s here and about 2s on the CI emulator, and on CI
+    // it has also run past 5s: the same wait then passed in one test and timed out in two
+    // others of the same run. waitUntil returns as soon as the text appears, so the larger
+    // bound costs nothing on a pass, and a screen that never shows it still fails.
+    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
     }
 
@@ -204,5 +209,9 @@ class RelayAuthWhitelistScreenTest {
         ).assertDoesNotExist()
 
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    private companion object {
+        const val AWAIT_MS = 15_000L
     }
 }

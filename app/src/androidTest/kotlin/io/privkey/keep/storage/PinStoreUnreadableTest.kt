@@ -168,15 +168,15 @@ class PinStoreUnreadableTest {
      */
     @Test
     fun an_unreadable_lockout_anchor_runs_once_and_then_counts_down() {
+        // A real PIN, so the record is SET on the strength of a usable hash, and a lockout
+        // in force whose start time is the one value broken.
+        assertTrue(PinStore(context).setPin(GOOD_PIN))
         KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit()
-            .putBoolean("pin_enabled", true)
             .putLong("lockout_duration", LONGEST_LOCKOUT_MS)
             .commit()
-        val storedName = writeAndFindStoredName(context, PinStore.PREFS_NAME) {
-            KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME)
-                .edit().putLong("lockout_set_at_elapsed", 1L).commit()
+        corruptExistingValue(context, PinStore.PREFS_NAME, "lockout_set_at_elapsed") {
+            it.putLong("lockout_set_at_elapsed", 1L)
         }
-        corruptStoredValue(context, PinStore.PREFS_NAME, storedName)
 
         assertEquals(PinRecord.SET, PinStore(context).pinRecord())
         val first = PinStore(context).getLockoutRemainingMs()
@@ -188,7 +188,6 @@ class PinStoreUnreadableTest {
             "the lockout has to count down rather than restart on every read: $first then $second",
             first - second >= COUNTDOWN_PROBE_MS - COUNTDOWN_SLACK_MS
         )
-        forgetWriteProbe(context, PinStore.PREFS_NAME)
     }
 
     /**
@@ -216,6 +215,23 @@ class PinStoreUnreadableTest {
     }
 
     /**
+     * A flag saying SET with no hash at all. No PIN can ever verify against it, and as
+     * SET it showed the ordinary PIN field, refusing every entry with no way out. It is
+     * the same uncheckable state as a hash that will not decrypt, so it gets the same exit.
+     */
+    @Test
+    fun a_set_flag_with_no_hash_is_unreadable() {
+        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit()
+            .putBoolean("pin_enabled", true)
+            .commit()
+
+        val store = PinStore(context)
+        assertEquals(PinRecord.UNREADABLE, store.pinRecord())
+        assertTrue("and the way out is offered for it", store.clearPin())
+        assertEquals(PinRecord.NOT_SET, PinStore(context).pinRecord())
+    }
+
+    /**
      * The reverse: a broken flag beside a hash and salt that still read. disablePin removes
      * the hash and salt, so a usable pair means a PIN was set and never disabled. Reading
      * that as UNREADABLE would offer to delete a PIN that can still be verified.
@@ -223,14 +239,9 @@ class PinStoreUnreadableTest {
     @Test
     fun a_broken_flag_beside_a_usable_verifier_is_still_set() {
         assertTrue(PinStore(context).setPin(GOOD_PIN))
-        // The stored name is an HMAC of the key under the file's own random key, so it is
-        // found by removing the flag and seeing which entry goes, then writing it back,
-        // which lands on the same name.
-        val before = rawPrefs(context, PinStore.PREFS_NAME).all.keys.toSet()
-        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit().remove("pin_enabled").commit()
-        val flagName = (before - rawPrefs(context, PinStore.PREFS_NAME).all.keys.toSet()).single()
-        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit().putBoolean("pin_enabled", true).commit()
-        corruptStoredValue(context, PinStore.PREFS_NAME, flagName)
+        corruptExistingValue(context, PinStore.PREFS_NAME, "pin_enabled") {
+            it.putBoolean("pin_enabled", true)
+        }
 
         val store = PinStore(context)
         assertEquals(PinRecord.SET, store.pinRecord())

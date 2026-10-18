@@ -51,6 +51,30 @@ internal fun corruptStoredValue(context: Context, prefsName: String, storedName:
 }
 
 /**
+ * Breaks the stored value of [plainKey], which must already be written.
+ *
+ * [writeAndFindStoredName] finds a name by what a write adds, which does not work for a
+ * key already present. Here the name is found the only other way available from outside:
+ * removing the key and seeing which entry goes. [restore] then writes it back, which lands
+ * on the same name because the file's HMAC key is unchanged, and that value is broken.
+ */
+internal fun corruptExistingValue(
+    context: Context,
+    prefsName: String,
+    plainKey: String,
+    restore: (android.content.SharedPreferences.Editor) -> Unit
+) {
+    val before = rawPrefs(context, prefsName).all.keys.toSet()
+    KeystoreEncryptedPrefs.create(context, prefsName).edit().remove(plainKey).commit()
+    val removed = before - rawPrefs(context, prefsName).all.keys.toSet()
+    assertEquals("expected exactly one entry to go with $plainKey: $removed", 1, removed.size)
+    val editor = KeystoreEncryptedPrefs.create(context, prefsName).edit()
+    restore(editor)
+    editor.commit()
+    corruptStoredValue(context, prefsName, removed.single())
+}
+
+/**
  * Breaks name resolution for a whole file, the other half of the fault a lost Keystore
  * alias produces.
  *

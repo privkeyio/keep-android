@@ -116,28 +116,36 @@ class BiometricHelper private constructor(
     }
 
     /**
-     * Prompts for the device's own lock-screen credential, for an action that has to be
-     * authorized when no biometric can be used.
+     * Prompts for a strong biometric or the device's own lock-screen credential, whichever
+     * the person uses, for an action that has to be authorized now.
+     *
+     * Both are allowed in one prompt so that a biometric in lockout, or a sensor that is
+     * unavailable, offers the credential instead of failing outright. Returns the
+     * [BiometricPrompt.AuthenticationResult.getAuthenticationType] of the success, so the
+     * caller can tell a biometric from a credential, or null if nothing was satisfied.
      *
      * A prompt that allows DEVICE_CREDENTIAL must not set a negative button, which is why
      * this does not go through [resolvePromptInfo]: the builder rejects the combination.
-     * Never short-circuited by the biometric timeout window, since the callers are
-     * removing an authentication factor and need a credential entered now.
+     * Never short-circuited by the biometric timeout window, and never opens one, since
+     * the callers are removing an authentication factor and need it presented now.
      */
-    suspend fun authenticateWithDeviceCredential(title: String, subtitle: String): Boolean {
+    suspend fun authenticateStrongOrDeviceCredential(title: String, subtitle: String): Int? {
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setAllowedAuthenticators(BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
             .build()
         return suspendCoroutine { continuation ->
             val callback = object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    continuation.resume(true)
+                    continuation.resume(result.authenticationType)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    continuation.resume(false)
+                    continuation.resume(null)
                 }
 
                 override fun onAuthenticationFailed() {}

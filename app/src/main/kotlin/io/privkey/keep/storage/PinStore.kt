@@ -99,30 +99,30 @@ class PinStore(private val context: Context) {
     fun pinRecord(): PinRecord = classify(prefs)
 
     /**
-     * Decided by the flag and the hash together, because a record is only usable when
-     * the flag says a PIN is set and the hash and salt can be read to verify one.
+     * Decided by the flag and the hash together. A PIN is SET only when one can actually
+     * be verified, which takes a readable hash and salt; anything that leaves a PIN
+     * possibly set but uncheckable is UNREADABLE, the state the unlock screen offers a
+     * way out of.
      *
-     * The flag alone left two cases wrong. A readable flag beside an unreadable hash read
-     * as SET, so every PIN was refused as incorrect, no attempt was spent, and the
-     * removal was never offered: a lockout with no way out. A broken flag beside a usable
-     * hash read as UNREADABLE and offered removal of a PIN that could still verify.
-     * disablePin removes the hash and salt, so a usable hash means a PIN was set and
-     * never disabled, which is what makes SET the right answer for the second case.
+     * The flag alone left three cases wrong. A flag saying SET beside a hash that would
+     * not decrypt, or that was missing, read as SET, so every PIN was refused as
+     * incorrect, no attempt was spent, and the removal was never offered: a lockout with
+     * no way out. And a broken flag beside a usable hash read as UNREADABLE, offering to
+     * delete a PIN that could still verify. disablePin removes the hash and salt, so a
+     * usable pair means a PIN was set and never disabled, which makes SET right there.
+     *
+     * The hash and salt are read only when the flag leaves the answer open, so a store
+     * with no PIN costs one Keystore decrypt rather than three. This runs on the
+     * background provider path, which any installed app can drive.
      */
     private fun classify(record: ReadablePrefs): PinRecord {
         val flag = record.readBoolean(KEY_PIN_ENABLED)
-        val hash = record.readString(KEY_PIN_HASH)
-        val salt = record.readString(KEY_PIN_SALT)
-        val verifierUnreadable = hash == PrefRead.Unreadable || salt == PrefRead.Unreadable
-        val verifierUsable = hash is PrefRead.Found && salt is PrefRead.Found
-        return when (flag) {
-            is PrefRead.Found ->
-                if (!flag.value) PinRecord.NOT_SET
-                else if (verifierUnreadable) PinRecord.UNREADABLE
-                else PinRecord.SET
-            PrefRead.Absent -> PinRecord.NOT_SET
-            PrefRead.Unreadable -> if (verifierUsable) PinRecord.SET else PinRecord.UNREADABLE
+        if (flag == PrefRead.Absent || (flag is PrefRead.Found && !flag.value)) {
+            return PinRecord.NOT_SET
         }
+        val verifierUsable = record.readString(KEY_PIN_HASH) is PrefRead.Found &&
+            record.readString(KEY_PIN_SALT) is PrefRead.Found
+        return if (verifierUsable) PinRecord.SET else PinRecord.UNREADABLE
     }
 
     /** True when a PIN may be set, which includes a record that cannot be read. */
@@ -160,7 +160,10 @@ class PinStore(private val context: Context) {
     }
 
     @Synchronized
-    fun requiresAuthentication(): Boolean = isPinEnabled() && !isSessionValid()
+    // One classification per call. Calling isPinEnabled and then isSessionValid, which
+    // asks again, decrypted the record twice on a path any installed app can drive
+    // through the provider, ahead of its rate limit.
+    fun requiresAuthentication(): Boolean = isPinEnabled() && !sessionOpen()
 
     @Synchronized
     fun isWeakPin(pin: String): Boolean {
@@ -299,8 +302,14 @@ class PinStore(private val context: Context) {
     }
 
     @Synchronized
-    fun isSessionValid(): Boolean {
-        if (!isPinEnabled()) return true
+    fun isSessionValid(): Boolean = !isPinEnabled() || sessionOpen()
+
+    /**
+     * Whether a session opened by a verified unlock is still open, without first asking
+     * whether a PIN is set. Split out so [requiresAuthentication] classifies the record
+     * once rather than twice.
+     */
+    private fun sessionOpen(): Boolean {
         // An unreadable timestamp answers 0, which is the no-session value, so an
         // unreadable session is not a valid one.
         val sessionStartedAtRealtime = prefs.readLong(KEY_SESSION_STARTED_AT_REALTIME).resolve(ifAbsent = 0, ifUnreadable = 0)

@@ -87,7 +87,10 @@ class PinUnlockScreenUnreadableTest {
         }
     }
 
-    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = 5_000) {
+    // 15s rather than 5s, for the reason RelayAuthWhitelistScreenTest gives: the state
+    // appears after a Keystore decrypt fails off the main thread, which runs well past
+    // its local time on the CI emulator. waitUntil returns as soon as it holds.
+    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
     }
 
@@ -129,7 +132,7 @@ class PinUnlockScreenUnreadableTest {
         awaitText(unreadableTitle)
         compose.onNodeWithText(removeLabel).performClick()
 
-        compose.waitUntil(timeoutMillis = 5_000) { unlocked }
+        compose.waitUntil(timeoutMillis = AWAIT_MS) { unlocked }
         assertTrue("removal has to unlock, or the screen has no exit", unlocked)
         assertEquals(PinRecord.NOT_SET, PinStore(context).pinRecord())
         assertFalse(PinStore(context).requiresAuthentication())
@@ -155,40 +158,18 @@ class PinUnlockScreenUnreadableTest {
     }
 
     /**
-     * With a biometric available the screen offers a way in that destroys nothing. The
-     * record has to survive it, since a transient fault may clear, and removing a PIN is
-     * the step that cannot be taken back.
+     * No biometric unlock is offered in this state, even with a biometric available.
+     *
+     * One that left the record alone could not hold: the activity re-derives the unlock
+     * from the session on every resume, the session cannot be refreshed against a file
+     * that will not decrypt, and dismissing the prompt resumes the activity, so the lock
+     * screen would come straight back. Pinned so it is not added back as a convenience.
      */
     @Test
-    fun aBiometricUnlocksWithoutRemovingTheRecord() {
+    fun theUnreadableStateOffersNoUnlockThatCannotHold() {
         PinStore(context).setPin(GOOD_PIN)
         breakNameResolution(context, PinStore.PREFS_NAME)
-        var unlocked = false
-        var removalAsked = false
-        showScreen(
-            onBiometricAuth = { true },
-            authorizePinRemoval = { removalAsked = true; true },
-            onUnlocked = { unlocked = true }
-        )
-
-        awaitText(unreadableTitle)
-        compose.onNodeWithText(context.getString(R.string.pin_unlock_use_biometrics)).performClick()
-
-        compose.waitUntil(timeoutMillis = 5_000) { unlocked }
-        assertFalse("the biometric path must not go through removal", removalAsked)
-        assertEquals(
-            "and the record must be left as it was",
-            PinRecord.UNREADABLE,
-            PinStore(context).pinRecord()
-        )
-    }
-
-    // Without a biometric there is no non-destructive way in, so it is not offered.
-    @Test
-    fun noBiometricMeansNoBiometricButton() {
-        PinStore(context).setPin(GOOD_PIN)
-        breakNameResolution(context, PinStore.PREFS_NAME)
-        showScreen(onBiometricAuth = null)
+        showScreen(onBiometricAuth = { true })
 
         awaitText(unreadableTitle)
         compose.onNodeWithText(context.getString(R.string.pin_unlock_use_biometrics))
@@ -244,5 +225,6 @@ class PinUnlockScreenUnreadableTest {
 
     private companion object {
         const val GOOD_PIN = "4917"
+        const val AWAIT_MS = 15_000L
     }
 }
