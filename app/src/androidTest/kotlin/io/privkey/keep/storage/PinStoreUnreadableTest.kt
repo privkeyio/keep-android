@@ -191,6 +191,76 @@ class PinStoreUnreadableTest {
         forgetWriteProbe(context, PinStore.PREFS_NAME)
     }
 
+    /**
+     * A hash that will not decrypt beside a flag that reads fine. The flag alone decided
+     * the record before, so this read as SET: every PIN was refused as incorrect, no
+     * attempt was spent, and the removal was never offered, which on a device with no
+     * biometric is a lockout with no way out.
+     */
+    @Test
+    fun an_unreadable_hash_beside_a_readable_flag_is_unreadable() {
+        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit()
+            .putBoolean("pin_enabled", true)
+            .putString("pin_salt", "AAAAAAAAAAAAAAAAAAAAAA==")
+            .commit()
+        val storedName = writeAndFindStoredName(context, PinStore.PREFS_NAME) {
+            KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME)
+                .edit().putString("pin_hash", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").commit()
+        }
+        corruptStoredValue(context, PinStore.PREFS_NAME, storedName)
+
+        val store = PinStore(context)
+        assertEquals(PinRecord.UNREADABLE, store.pinRecord())
+        assertTrue("and the way out is offered for it", store.clearPin())
+        assertEquals(PinRecord.NOT_SET, PinStore(context).pinRecord())
+    }
+
+    /**
+     * The reverse: a broken flag beside a hash and salt that still read. disablePin removes
+     * the hash and salt, so a usable pair means a PIN was set and never disabled. Reading
+     * that as UNREADABLE would offer to delete a PIN that can still be verified.
+     */
+    @Test
+    fun a_broken_flag_beside_a_usable_verifier_is_still_set() {
+        assertTrue(PinStore(context).setPin(GOOD_PIN))
+        // The stored name is an HMAC of the key under the file's own random key, so it is
+        // found by removing the flag and seeing which entry goes, then writing it back,
+        // which lands on the same name.
+        val before = rawPrefs(context, PinStore.PREFS_NAME).all.keys.toSet()
+        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit().remove("pin_enabled").commit()
+        val flagName = (before - rawPrefs(context, PinStore.PREFS_NAME).all.keys.toSet()).single()
+        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit().putBoolean("pin_enabled", true).commit()
+        corruptStoredValue(context, PinStore.PREFS_NAME, flagName)
+
+        val store = PinStore(context)
+        assertEquals(PinRecord.SET, store.pinRecord())
+        assertTrue("the PIN still verifies", store.verifyPin(GOOD_PIN))
+        assertFalse("so it must not be removable this way", store.clearPin())
+    }
+
+    /**
+     * Nothing in the app writes the session timeout, so a value here that will not read
+     * can never be rewritten. Answering 0 for it made every session invalid for good,
+     * which refuses all background signing while a PIN is set. A fresh session has to be
+     * valid again.
+     */
+    @Test
+    fun an_unreadable_session_timeout_still_lets_a_session_open() {
+        val store = PinStore(context)
+        assertTrue(store.setPin(GOOD_PIN))
+        val storedName = writeAndFindStoredName(context, PinStore.PREFS_NAME) {
+            KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME)
+                .edit().putLong("session_timeout", 300_000L).commit()
+        }
+        corruptStoredValue(context, PinStore.PREFS_NAME, storedName)
+
+        val reopened = PinStore(context)
+        reopened.refreshSession()
+        assertTrue("a session opened now has to count as open", reopened.isSessionValid())
+        assertFalse(reopened.requiresAuthentication())
+        forgetWriteProbe(context, PinStore.PREFS_NAME)
+    }
+
     @Test
     fun the_clear_refuses_when_no_pin_is_set() {
         assertFalse(PinStore(context).clearPin())

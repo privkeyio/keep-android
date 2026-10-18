@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
@@ -154,10 +155,46 @@ class MainActivity : FragmentActivity() {
 
                     val unlockTitle = stringResource(R.string.main_unlock_title)
                     val unlockSubtitle = stringResource(R.string.main_unlock_subtitle)
+                    val removeTitle = stringResource(R.string.pin_unlock_unreadable_remove)
+                    val removeSubtitle = stringResource(R.string.pin_unlock_unreadable_auth_subtitle)
                     if (pinStoreForUnlock != null) {
                         PinUnlockScreen(
                             pinStore = pinStoreForUnlock,
                             onUnlocked = { isPinUnlocked = true },
+                            // Removing an unreadable PIN takes away an authentication factor
+                            // before anyone has authenticated, so it asks for the strongest
+                            // factor the device can offer right now. A biometric first. If
+                            // none is usable, which includes a sensor that is only
+                            // temporarily unavailable, the device's own lock-screen
+                            // credential. Only a device with no secure lock at all runs it
+                            // unasked, because then there is nothing to ask for and refusing
+                            // would leave no way into the app. The secure-lock check is made
+                            // here against the platform rather than through the helper, so a
+                            // missing helper on a secure device refuses instead of falling
+                            // through to the unasked branch.
+                            authorizePinRemoval = {
+                                val deviceSecure =
+                                    getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true
+                                when {
+                                    biometricAvailable -> {
+                                        val ok = biometricHelper?.authenticate(
+                                            title = removeTitle,
+                                            subtitle = removeSubtitle,
+                                            forcePrompt = true
+                                        ) ?: false
+                                        // A biometric here is as good as the one the lock
+                                        // screen below would ask for, so it is not asked twice.
+                                        if (ok) isBiometricUnlocked = true
+                                        ok
+                                    }
+                                    deviceSecure ->
+                                        biometricHelper?.authenticateWithDeviceCredential(
+                                            removeTitle,
+                                            removeSubtitle
+                                        ) ?: false
+                                    else -> true
+                                }
+                            },
                             onBiometricAuth = if (biometricAvailable) {
                                 {
                                     biometricHelper?.authenticate(

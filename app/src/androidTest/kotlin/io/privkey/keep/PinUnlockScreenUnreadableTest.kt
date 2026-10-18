@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -61,16 +62,26 @@ class PinUnlockScreenUnreadableTest {
         context.deleteSharedPreferences(PinStore.PREFS_NAME)
     }
 
+    /**
+     * [authorizePinRemoval] stands in for whichever factor production asks for. It answers
+     * true by default so the cases below assert what the screen does once removal is
+     * authorized; the case that refuses it passes false.
+     */
     private fun showScreen(
         onBiometricAuth: (suspend () -> Boolean)? = null,
+        authorizePinRemoval: suspend () -> Boolean = { true },
         onUnlocked: () -> Unit = {}
     ) {
         compose.setContent {
+            // Remembered, not rebuilt per recomposition: production hands this screen one
+            // store for the life of the process.
+            val store = remember { PinStore(context) }
             KeepAndroidTheme {
                 PinUnlockScreen(
-                    pinStore = PinStore(context),
+                    pinStore = store,
                     onUnlocked = onUnlocked,
-                    onBiometricAuth = onBiometricAuth
+                    onBiometricAuth = onBiometricAuth,
+                    authorizePinRemoval = authorizePinRemoval
                 )
             }
         }
@@ -125,37 +136,92 @@ class PinUnlockScreenUnreadableTest {
     }
 
     /**
-     * With biometrics enrolled the removal waits on them, because it takes away an
-     * authentication factor and the person asking has not authenticated. A refused
-     * prompt must leave the record alone.
+     * Removal takes away an authentication factor before anyone has authenticated, so it
+     * waits on whatever the caller gates it with. A refusal must leave the record alone.
      */
     @Test
-    fun aRefusedBiometricLeavesTheRecordAlone() {
+    fun aRefusedAuthorizationLeavesTheRecordAlone() {
         PinStore(context).setPin(GOOD_PIN)
         breakNameResolution(context, PinStore.PREFS_NAME)
         var unlocked = false
-        showScreen(onBiometricAuth = { false }, onUnlocked = { unlocked = true })
+        showScreen(authorizePinRemoval = { false }, onUnlocked = { unlocked = true })
 
         awaitText(unreadableTitle)
         compose.onNodeWithText(removeLabel).performClick()
 
         compose.waitForIdle()
-        assertFalse("a refused prompt must not remove the PIN", unlocked)
+        assertFalse("a refused authorization must not remove the PIN", unlocked)
         assertEquals(PinRecord.UNREADABLE, PinStore(context).pinRecord())
     }
 
+    /**
+     * With a biometric available the screen offers a way in that destroys nothing. The
+     * record has to survive it, since a transient fault may clear, and removing a PIN is
+     * the step that cannot be taken back.
+     */
     @Test
-    fun anAcceptedBiometricRemovesTheRecord() {
+    fun aBiometricUnlocksWithoutRemovingTheRecord() {
         PinStore(context).setPin(GOOD_PIN)
         breakNameResolution(context, PinStore.PREFS_NAME)
         var unlocked = false
-        showScreen(onBiometricAuth = { true }, onUnlocked = { unlocked = true })
+        var removalAsked = false
+        showScreen(
+            onBiometricAuth = { true },
+            authorizePinRemoval = { removalAsked = true; true },
+            onUnlocked = { unlocked = true }
+        )
 
         awaitText(unreadableTitle)
-        compose.onNodeWithText(removeLabel).performClick()
+        compose.onNodeWithText(context.getString(R.string.pin_unlock_use_biometrics)).performClick()
 
         compose.waitUntil(timeoutMillis = 5_000) { unlocked }
-        assertEquals(PinRecord.NOT_SET, PinStore(context).pinRecord())
+        assertFalse("the biometric path must not go through removal", removalAsked)
+        assertEquals(
+            "and the record must be left as it was",
+            PinRecord.UNREADABLE,
+            PinStore(context).pinRecord()
+        )
+    }
+
+    // Without a biometric there is no non-destructive way in, so it is not offered.
+    @Test
+    fun noBiometricMeansNoBiometricButton() {
+        PinStore(context).setPin(GOOD_PIN)
+        breakNameResolution(context, PinStore.PREFS_NAME)
+        showScreen(onBiometricAuth = null)
+
+        awaitText(unreadableTitle)
+        compose.onNodeWithText(context.getString(R.string.pin_unlock_use_biometrics))
+            .assertDoesNotExist()
+        compose.onNodeWithText(removeLabel).assertIsDisplayed()
+    }
+
+    /**
+     * The record recovers between the screen being drawn and the tap. The clear refuses a
+     * record it can read, and before this the screen stayed in this state with a button
+     * that would refuse forever. It has to go back to asking for the PIN.
+     */
+    @Test
+    fun aRecordThatRecoversBeforeTheTapReturnsToPinEntry() {
+        val storedName = writeAndFindStoredName(context, PinStore.PREFS_NAME) {
+            KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME)
+                .edit().putBoolean("pin_enabled", true).commit()
+        }
+        corruptStoredValue(context, PinStore.PREFS_NAME, storedName)
+        var unlocked = false
+        showScreen(onUnlocked = { unlocked = true })
+        awaitText(unreadableTitle)
+
+        // Repaired underneath the screen: setPin overwrites the damaged flag and writes a
+        // usable hash, so the record now reads SET.
+        assertTrue(PinStore(context).setPin(GOOD_PIN))
+        compose.onNodeWithText(removeLabel).performClick()
+
+        awaitText(context.getString(R.string.pin_unlock_button))
+        compose.onNodeWithText(unreadableTitle).assertDoesNotExist()
+        assertFalse("a readable PIN has to be entered, not skipped", unlocked)
+        assertEquals("and it was not removed", PinRecord.SET, PinStore(context).pinRecord())
+        forgetWriteProbe(context, PinStore.PREFS_NAME)
     }
 
     /**

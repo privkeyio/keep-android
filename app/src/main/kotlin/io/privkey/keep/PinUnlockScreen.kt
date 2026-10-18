@@ -26,7 +26,14 @@ fun PinUnlockScreen(
     pinStore: PinStore,
     onUnlocked: () -> Unit,
     onBiometricAuth: (suspend () -> Boolean)? = null,
-    onBiometricSuccess: () -> Unit = {}
+    onBiometricSuccess: () -> Unit = {},
+    /**
+     * Authorizes removing a PIN record that cannot be read. Supplied by the caller rather
+     * than decided here, because which factor to ask for depends on what the device can
+     * offer at that moment, which this screen cannot see. Required, with no default, so
+     * no caller can get the removal without having decided how it is gated.
+     */
+    authorizePinRemoval: suspend () -> Boolean
 ) {
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -147,22 +154,52 @@ fun PinUnlockScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(24.dp))
-                Button(
+                // A biometric already unlocks this screen in its PIN-entry state, so it is
+                // offered here first as the way in that destroys nothing. The record stays
+                // as it is, and if the fault was transient it can read again later. It
+                // does not refresh the session, which writes to the file that just failed
+                // to read; signing stays blocked until the record is repaired, as the body
+                // text says.
+                if (onBiometricAuth != null) {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                if (onBiometricAuth()) {
+                                    onBiometricSuccess()
+                                    onUnlocked()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(stringResource(R.string.pin_unlock_use_biometrics))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                OutlinedButton(
                     onClick = {
                         coroutineScope.launch {
-                            // Behind biometrics when the device has them, since this
-                            // removes an authentication factor and the person asking
-                            // has not authenticated. With no factor enrolled there is
-                            // nothing to ask for, and refusing would leave the app with
-                            // no way in at all, which is the same convention
-                            // requireAuthThen follows elsewhere.
-                            val authed = onBiometricAuth?.invoke() ?: true
-                            if (!authed) return@launch
-                            removeFailed = !pinStore.clearPin()
-                            if (!removeFailed) {
+                            removeFailed = false
+                            if (!authorizePinRemoval()) return@launch
+                            if (pinStore.clearPin()) {
                                 pinRecord = pinStore.pinRecord()
                                 pinStore.refreshSession()
                                 onUnlocked()
+                                return@launch
+                            }
+                            // The clear refuses a record it can read, so a refusal can mean
+                            // the record recovered between the screen being drawn and the
+                            // tap. Read everything again rather than staying in this state,
+                            // whose only button would then refuse forever.
+                            pinRecord = pinStore.pinRecord()
+                            when (pinRecord) {
+                                PinRecord.UNREADABLE -> removeFailed = true
+                                PinRecord.NOT_SET -> onUnlocked()
+                                PinRecord.SET -> {
+                                    isLockedOut = pinStore.isLockedOut()
+                                    lockoutRemaining = pinStore.getLockoutRemainingMs()
+                                    biometricResetRequired = pinStore.requiresBiometricReset()
+                                }
                             }
                         }
                     },

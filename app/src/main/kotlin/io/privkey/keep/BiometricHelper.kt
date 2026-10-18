@@ -115,6 +115,37 @@ class BiometricHelper private constructor(
         }
     }
 
+    /**
+     * Prompts for the device's own lock-screen credential, for an action that has to be
+     * authorized when no biometric can be used.
+     *
+     * A prompt that allows DEVICE_CREDENTIAL must not set a negative button, which is why
+     * this does not go through [resolvePromptInfo]: the builder rejects the combination.
+     * Never short-circuited by the biometric timeout window, since the callers are
+     * removing an authentication factor and need a credential entered now.
+     */
+    suspend fun authenticateWithDeviceCredential(title: String, subtitle: String): Boolean {
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle(subtitle)
+            .setAllowedAuthenticators(BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    continuation.resume(true)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    continuation.resume(false)
+                }
+
+                override fun onAuthenticationFailed() {}
+            }
+            authenticator.authenticate(promptInfo, null, callback)
+        }
+    }
+
     suspend fun authenticateWithCrypto(
         cipher: Cipher,
         title: String? = null,
