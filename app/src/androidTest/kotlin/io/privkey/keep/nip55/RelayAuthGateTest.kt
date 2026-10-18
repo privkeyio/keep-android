@@ -10,6 +10,8 @@ import io.privkey.keep.storage.writeAndFindStoredName
 import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -92,6 +94,47 @@ class RelayAuthGateTest {
         forgetWriteProbe(context, WHITELIST_PREFS)
     }
 
+    /**
+     * The same fault on the background path, which decides in the core rather than
+     * here and so reads the whitelist as two inputs: the hosts to match, and the
+     * flag the core rejects on.
+     *
+     * The core's half is pinned by its own Rust test. The Kotlin that raises the flag
+     * was the unpinned link, and it is the path the fix exists for: no one is present
+     * to notice a 22242 request being auto-approved there.
+     */
+    @Test
+    fun aWhitelistThatCannotBeReadRaisesTheCoreReadFailedFlag() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val storedName = writeAndFindStoredName(context, WHITELIST_PREFS) {
+            store.add("relay.example.com")
+        }
+        corruptStoredValue(context, WHITELIST_PREFS, storedName)
+
+        val (hosts, readFailed) = relayWhitelistInputs(RelayAuthWhitelistStore(context))
+
+        assertTrue("the core rejects on this flag alone, so the read has to raise it", readFailed)
+        assertEquals(emptyList<String>(), hosts)
+        forgetWriteProbe(context, WHITELIST_PREFS)
+    }
+
+    // The readable and no-store cases, so the two assertions above cannot pass on a
+    // read that reported a fault, or an empty list, for everything.
+    @Test
+    fun aReadableWhitelistRaisesNoReadFailedFlag() {
+        store.add("relay.example.com")
+        val (hosts, readFailed) = relayWhitelistInputs(store)
+        assertFalse(readFailed)
+        assertEquals(listOf("relay.example.com"), hosts)
+    }
+
+    @Test
+    fun noStoreRaisesNoReadFailedFlag() {
+        val (hosts, readFailed) = relayWhitelistInputs(null)
+        assertFalse(readFailed)
+        assertEquals(emptyList<String>(), hosts)
+    }
+
     // The same relay, listed and readable, is accepted. Without this the test
     // above could pass on a gate that rejected everything.
     @Test
@@ -118,6 +161,6 @@ class RelayAuthGateTest {
     }
 
     private companion object {
-        const val WHITELIST_PREFS = "keep_relay_auth_whitelist"
+        const val WHITELIST_PREFS = RelayAuthWhitelistStore.PREFS_NAME
     }
 }

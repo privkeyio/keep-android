@@ -20,9 +20,11 @@ class RelayAuthWhitelistStoreIntegrationTest {
 
     @Before
     fun setup() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        store = RelayAuthWhitelistStore(context)
+        // Cleared before the store is built, not after: deleting the file under a
+        // live SharedPreferences instance leaves that instance able to write its
+        // cached contents back.
         clear()
+        store = RelayAuthWhitelistStore(ApplicationProvider.getApplicationContext())
     }
 
     @After
@@ -31,7 +33,12 @@ class RelayAuthWhitelistStoreIntegrationTest {
     }
 
     private fun clear() {
-        store.hosts().forEach { store.remove(it) }
+        // The whole file, rather than removing the hosts one at a time. A host-by-host
+        // clear reads first, and hosts() raises on a fault, so a file another class
+        // left unreadable would fail every test here in setup rather than being
+        // recovered. The old read answered an empty list and self-healed by accident.
+        ApplicationProvider.getApplicationContext<Context>()
+            .deleteSharedPreferences(RelayAuthWhitelistStore.PREFS_NAME)
     }
 
     @Test

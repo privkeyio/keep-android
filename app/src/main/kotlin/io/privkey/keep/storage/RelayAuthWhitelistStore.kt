@@ -13,7 +13,12 @@ import io.privkey.keep.uniffi.nip55NormalizeRelayHost
 class RelayAuthWhitelistStore(context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "keep_relay_auth_whitelist"
+        /**
+         * Not private: the tests that stage an unreadable list have to clear the real
+         * file, and a copy of the literal there would silently stop matching if this
+         * one ever changed, leaving a corrupted file behind for every later test.
+         */
+        internal const val PREFS_NAME = "keep_relay_auth_whitelist"
         private const val KEY_HOSTS = "relay_auth_whitelist_hosts"
         private const val MAX_ENTRIES = 256
     }

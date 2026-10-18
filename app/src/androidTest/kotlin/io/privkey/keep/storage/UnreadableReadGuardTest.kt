@@ -286,7 +286,7 @@ class UnreadableReadGuardTest {
 
     private companion object {
         const val AUDIT_PREFS = "keep_audit_log"
-        const val WHITELIST_PREFS = "keep_relay_auth_whitelist"
+        const val WHITELIST_PREFS = RelayAuthWhitelistStore.PREFS_NAME
         const val SHARE_SUFFIX = "_unreadable_read_guard_test"
         const val SHARE_REGISTRY_PREFS = "keep_multi_share_prefs$SHARE_SUFFIX"
         const val FIRST_ENTRY = "{\"event\":\"first\"}"
