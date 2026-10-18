@@ -204,7 +204,30 @@ class RelayAuthWhitelistScreenTest {
         return "The unreadable state never appeared. $diskState, with ${raw.all.size} raw " +
             "entries in that copy; the screen's own store answers $screenRead; a fresh store answers " +
             "$freshRead; the screen shows " +
-            "${shown.joinToString()}.\n$tree"
+            "${shown.joinToString()}.\n${describeThreads()}\n$tree"
+    }
+
+    /**
+     * Every other thread inside app or Keystore code, with its stack.
+     *
+     * The screen shows its initial empty state, which is also what it shows while its one
+     * read is still in flight, so the question is whether that read is stuck and where.
+     * The store answering this thread afterwards does not settle it: a read that fails for
+     * any reason, including a busy Keystore, also answers Unreadable.
+     */
+    private fun describeThreads(): String {
+        val current = Thread.currentThread()
+        val busy = Thread.getAllStackTraces().filter { (thread, stack) ->
+            thread !== current && stack.any {
+                it.className.startsWith("io.privkey.keep") || it.className.startsWith("android.security")
+            }
+        }
+        val workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") }
+        val header = "Dispatcher workers: ${workers.size}, " +
+            workers.groupingBy { it.state }.eachCount() + ". Threads in app or Keystore code: ${busy.size}."
+        return busy.entries.joinToString("\n", prefix = "$header\n") { (thread, stack) ->
+            "--- ${thread.name} (${thread.state})\n" + stack.take(40).joinToString("\n") { "    at $it" }
+        }
     }
 
     @Test
