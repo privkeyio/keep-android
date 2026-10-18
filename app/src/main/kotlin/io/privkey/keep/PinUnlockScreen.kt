@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.storage.PinRecord
 import io.privkey.keep.storage.PinStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -32,6 +33,8 @@ fun PinUnlockScreen(
     var isLockedOut by remember { mutableStateOf(pinStore.isLockedOut()) }
     var lockoutRemaining by remember { mutableStateOf(pinStore.getLockoutRemainingMs()) }
     var biometricResetRequired by remember { mutableStateOf(pinStore.requiresBiometricReset()) }
+    var pinRecord by remember { mutableStateOf(pinStore.pinRecord()) }
+    var removeFailed by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -116,7 +119,58 @@ fun PinUnlockScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (biometricResetRequired && onBiometricAuth != null && !isLockedOut) {
+            // Ahead of the lockout and biometric-reset branches, because an unreadable
+            // record makes both of those report their strictest answer and neither has
+            // a way out: no PIN can verify against a hash that will not decrypt, and
+            // waiting does not make the record readable. This is the only exit, so it
+            // has to be the state the screen shows.
+            if (pinRecord == PinRecord.UNREADABLE) {
+                Text(
+                    text = stringResource(R.string.pin_unlock_unreadable_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.pin_unlock_unreadable_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                if (removeFailed) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.pin_unlock_unreadable_remove_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            // Behind biometrics when the device has them, since this
+                            // removes an authentication factor and the person asking
+                            // has not authenticated. With no factor enrolled there is
+                            // nothing to ask for, and refusing would leave the app with
+                            // no way in at all, which is the same convention
+                            // requireAuthThen follows elsewhere.
+                            val authed = onBiometricAuth?.invoke() ?: true
+                            if (!authed) return@launch
+                            removeFailed = !pinStore.clearPin()
+                            if (!removeFailed) {
+                                pinRecord = pinStore.pinRecord()
+                                pinStore.refreshSession()
+                                onUnlocked()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.pin_unlock_unreadable_remove))
+                }
+            } else if (biometricResetRequired && onBiometricAuth != null && !isLockedOut) {
                 Text(
                     text = stringResource(R.string.pin_unlock_biometric_required_title),
                     style = MaterialTheme.typography.titleMedium,
