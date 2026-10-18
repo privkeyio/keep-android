@@ -24,23 +24,34 @@ import kotlinx.coroutines.withContext
 @Composable
 fun RelayAuthWhitelistScreen(
     store: RelayAuthWhitelistStore,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /**
+     * Runs the reset behind a verified auth factor.
+     *
+     * A reset moves this gate from rejecting every relay to deferring to per-app
+     * grants, and a grant can auto-approve a kind 22242 request in the background with
+     * nobody present. That is a security downgrade, and the app gates those on a live
+     * auth factor rather than on a dialog alone, the same way clearing a certificate
+     * pin or weakening the app lock is gated.
+     */
+    gateReset: (action: suspend () -> Unit) -> Unit
 ) {
     var hosts by remember { mutableStateOf<List<String>>(emptyList()) }
     var readFailed by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
+    var resetFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     suspend fun reload() {
         // A fault keeps whatever rows were already read instead of replacing them
-        // with an empty list, and raises [readFailed], which withholds the "nothing
-        // is whitelisted" line below. That line is a claim about what the gate will
-        // enforce, and on a cold open the list is empty because nothing has been
-        // read yet, so making it for a list that failed to read would state the
-        // opposite of the truth. Saying which of the two it is needs a string this
-        // screen does not have yet. Previously this also raised out of the
-        // coroutine on a name-resolution fault and took the screen down.
+        // with an empty list, and raises [readFailed], which replaces the list and
+        // the input with the fault below. Reporting "nothing is whitelisted" there
+        // would be a claim about what the gate enforces, and on a cold open the list
+        // is empty because nothing has been read yet, so for a list that failed to
+        // read it states the opposite of the truth. This also used to raise out of
+        // the coroutine on a name-resolution fault and take the screen down.
         val read = withContext(Dispatchers.IO) {
             runCatching { store.readHosts() }.getOrDefault(PrefRead.Unreadable)
         }
@@ -74,6 +85,38 @@ fun RelayAuthWhitelistScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(16.dp))
+
+            // Nothing below this is usable while the list cannot be read: add refuses
+            // to write over a list it could not read, there are no rows to remove, and
+            // the gate is rejecting every relay meanwhile. So the fault replaces them
+            // rather than sitting above an input whose every attempt would fail with
+            // the error a bad host gets.
+            // Outside the fault block below, because a reset can fail and still leave
+            // the next read succeeding: the delete is uncertified while the value is
+            // gone from this instance's view. Nested under the fault, that outcome
+            // would never be shown, and the screen would look recovered until a
+            // restart brought the list back.
+            if (resetFailed) {
+                Text(
+                    text = stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_failed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (readFailed) {
+                Text(
+                    text = stringResource(R.string.connections_nip55_relay_auth_whitelist_unreadable),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { confirmReset = true }) {
+                    Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset))
+                }
+                return@Column
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -109,7 +152,7 @@ fun RelayAuthWhitelistScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (hosts.isEmpty() && !readFailed) {
+            if (hosts.isEmpty()) {
                 Text(
                     text = stringResource(R.string.connections_nip55_relay_auth_whitelist_empty),
                     style = MaterialTheme.typography.bodyMedium,
@@ -146,5 +189,50 @@ fun RelayAuthWhitelistScreen(
                 }
             }
         }
+    }
+
+    // Gated on the fault as well as on the request, so the destructive action stays
+    // tied to the state that justifies it even if the read recovers while the dialog
+    // is open.
+    if (confirmReset && readFailed) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_title)) },
+            text = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    gateReset {
+                        resetFailed = false
+                        // Read again before destroying anything. The fault is latched
+                        // from the last read, an Unreadable can be transient, and the
+                        // gate is read per request rather than from this screen, so a
+                        // list that has become readable again is live and configured.
+                        // Confirming a fault that is over must not delete it.
+                        val current = withContext(Dispatchers.IO) {
+                            runCatching { store.readHosts() }.getOrDefault(PrefRead.Unreadable)
+                        }
+                        if (current is PrefRead.Found) {
+                            hosts = current.value
+                            readFailed = false
+                        } else {
+                            // The store answers whether the delete reached disk, and a
+                            // false leaves the list there and the gate still rejecting.
+                            // Reported rather than assumed, so the screen cannot tell
+                            // the person the whitelist is reset while it is not.
+                            resetFailed = !withContext(Dispatchers.IO) { store.clear() }
+                            reload()
+                        }
+                    }
+                }) {
+                    Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_reset_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            }
+        )
     }
 }

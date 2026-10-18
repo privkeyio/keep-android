@@ -73,6 +73,34 @@ class RelayAuthWhitelistStore(context: Context) {
         return host
     }
 
+    /**
+     * Deletes the stored list. The repair path for a list that cannot be read, which
+     * [add] and [remove] both refuse to write over and which the gate auto-rejects
+     * every kind 22242 request on, so without this one damaged entry denies NIP-42
+     * auth for the life of the install.
+     *
+     * Clears the whole file rather than removing the one key, because removing a key
+     * has to resolve its name first and that goes through the file's HMAC key, whose
+     * decrypt is unguarded: when a lost Keystore alias is what made the list
+     * unreadable, that entry will not decrypt either and the removal raises instead
+     * of answering. A clear resolves no names, so it is the one delete that works in
+     * both fault modes, and it takes the damaged key material with it so the next
+     * open mints fresh material. This file holds nothing but this list and that
+     * material, so clearing it loses nothing a reset means to keep.
+     *
+     * Returns whether the clear reached disk. Committed rather than applied so there
+     * is an answer at all: a reset reported as successful while the gate keeps
+     * rejecting is the one outcome a repair path must not have.
+     *
+     * Only call this for a list that could not be read. On a healthy file a read
+     * running concurrently can refill the key cache between the clear and the
+     * registry rewrite, which then writes a registry back over the emptied file and
+     * leaves it looking like a stranded epoch. In the fault this exists for that
+     * cannot happen, because such a read raises before it caches anything.
+     */
+    @Synchronized
+    fun clear(): Boolean = runCatching { prefs.edit().clear().commit() }.getOrDefault(false)
+
     @Synchronized
     fun remove(host: String) {
         // Safe today only because the default is an empty set, which makes the removal

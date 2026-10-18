@@ -855,7 +855,21 @@ fun MainScreen(
         if (whitelistStore != null) {
             RelayAuthWhitelistScreen(
                 store = whitelistStore,
-                onDismiss = { showRelayAuthWhitelistScreen = false }
+                onDismiss = { showRelayAuthWhitelistScreen = false },
+                // Resetting the whitelist drops the kind 22242 gate from rejecting
+                // every relay to deferring to per-app grants, which auto-approve in
+                // the background, so it is gated like the other downgrades here.
+                gateReset = { action ->
+                    requireAuthThen(
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_title),
+                        // Short, because this becomes the biometric prompt's subtitle and
+                        // a long one is clipped. The consequence is spelled out in the
+                        // dialog the person has already read to get here.
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_auth_subtitle),
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_confirm),
+                        action = action
+                    )
+                }
             )
             return
         }
