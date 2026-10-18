@@ -79,14 +79,21 @@ class RelayAuthWhitelistStore(context: Context) {
      * every kind 22242 request on, so without this one damaged entry denies NIP-42
      * auth for the life of the install.
      *
-     * Returns whether the deletion was certified. [KeystoreEncryptedPrefs] answers
-     * false when the entry is still on disk afterwards, and a reset reported as
-     * successful while the gate keeps rejecting is the one outcome a repair path must
-     * not have. Committed rather than applied for that reason: apply() discards the
-     * answer.
+     * Clears the whole file rather than removing the one key, because removing a key
+     * has to resolve its name first and that goes through the file's HMAC key, whose
+     * decrypt is unguarded: when a lost Keystore alias is what made the list
+     * unreadable, that entry will not decrypt either and the removal raises instead
+     * of answering. A clear resolves no names, so it is the one delete that works in
+     * both fault modes, and it takes the damaged key material with it so the next
+     * open mints fresh material. This file holds nothing but this list and that
+     * material, so clearing it loses nothing a reset means to keep.
+     *
+     * Returns whether the clear reached disk. Committed rather than applied so there
+     * is an answer at all: a reset reported as successful while the gate keeps
+     * rejecting is the one outcome a repair path must not have.
      */
     @Synchronized
-    fun clear(): Boolean = prefs.edit().remove(KEY_HOSTS).commit()
+    fun clear(): Boolean = runCatching { prefs.edit().clear().commit() }.getOrDefault(false)
 
     @Synchronized
     fun remove(host: String) {

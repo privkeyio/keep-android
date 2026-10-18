@@ -1,5 +1,7 @@
 package io.privkey.keep.nip55
 
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -8,12 +10,15 @@ import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.R
+import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.storage.forgetWriteProbe
 import io.privkey.keep.storage.writeAndFindStoredName
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import kotlinx.coroutines.launch
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -27,8 +32,11 @@ import org.junit.runner.RunWith
  * enforced. It is also the only place the state can be repaired from: add refuses to
  * write over a list it could not read, and there are no rows to remove.
  *
- * The fault is staged on disk rather than injected, so these run against the same
- * undecryptable value the store would meet on a device that lost its Keystore alias.
+ * The fault is staged on disk rather than injected, so these run against a real
+ * undecryptable list entry. The other half of a lost Keystore alias, where the file's
+ * own HMAC key will not decrypt either and resolving a name raises, is staged at the
+ * store level in UnreadableReadGuardTest, since what it changes is which delete works
+ * rather than what this screen shows.
  */
 @RunWith(AndroidJUnit4::class)
 class RelayAuthWhitelistScreenTest {
@@ -71,8 +79,20 @@ class RelayAuthWhitelistScreenTest {
 
     private fun showScreen() {
         compose.setContent {
+            // Remembered, not rebuilt per recomposition: production hands this screen
+            // the application's single store, and a fresh one each pass would give the
+            // launched read and the button handlers different per-instance caches.
+            val store = remember { RelayAuthWhitelistStore(context) }
+            val scope = rememberCoroutineScope()
             KeepAndroidTheme {
-                RelayAuthWhitelistScreen(RelayAuthWhitelistStore(context), onDismiss = {})
+                RelayAuthWhitelistScreen(
+                    store = store,
+                    onDismiss = {},
+                    // Production runs this behind requireAuthThen, which needs a live
+                    // biometric or PIN factor. Passed through here so these assert what
+                    // the screen does once the factor is verified.
+                    gateReset = { action -> scope.launch { action() } }
+                )
             }
         }
     }
@@ -108,6 +128,28 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(emptyText).assertIsDisplayed()
         compose.onNodeWithText(unreadableText).assertDoesNotExist()
         compose.onNodeWithText(resetText).assertDoesNotExist()
+    }
+
+    // Declining has to leave the list where it is. Without this, a confirmation that
+    // deleted on either answer would pass every other case here.
+    @Test
+    fun decliningTheResetLeavesTheListAlone() {
+        stageUnreadableList()
+        showScreen()
+
+        awaitText(unreadableText)
+        compose.onNodeWithText(resetText).performClick()
+        val cancel = context.getString(R.string.common_cancel)
+        awaitText(cancel)
+        compose.onNodeWithText(cancel).performClick()
+
+        compose.waitForIdle()
+        compose.onNodeWithText(unreadableText).assertIsDisplayed()
+        compose.onNodeWithText(emptyText).assertDoesNotExist()
+        // And on disk, not just on screen.
+        assertEquals(PrefRead.Unreadable, RelayAuthWhitelistStore(context).readHosts())
+
+        forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
 
     @Test

@@ -855,7 +855,18 @@ fun MainScreen(
         if (whitelistStore != null) {
             RelayAuthWhitelistScreen(
                 store = whitelistStore,
-                onDismiss = { showRelayAuthWhitelistScreen = false }
+                onDismiss = { showRelayAuthWhitelistScreen = false },
+                // Resetting the whitelist drops the kind 22242 gate from rejecting
+                // every relay to deferring to per-app grants, which auto-approve in
+                // the background, so it is gated like the other downgrades here.
+                gateReset = { action ->
+                    requireAuthThen(
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_title),
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_message),
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_confirm),
+                        action = action
+                    )
+                }
             )
             return
         }

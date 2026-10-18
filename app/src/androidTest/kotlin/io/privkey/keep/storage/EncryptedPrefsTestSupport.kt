@@ -6,6 +6,7 @@ import java.security.MessageDigest
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 
 /**
@@ -46,6 +47,30 @@ internal fun corruptStoredValue(context: Context, prefsName: String, storedName:
     bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
     raw.edit()
         .putString(storedName, BOUND_PREFIX + Base64.encodeToString(bytes, Base64.NO_WRAP))
+        .commit()
+}
+
+/**
+ * Breaks name resolution for a whole file, the other half of the fault a lost Keystore
+ * alias produces.
+ *
+ * [corruptStoredValue] breaks one value; this breaks the file's own HMAC key, which every
+ * lookup in the file goes through. That decrypt is unguarded, so the failure raises rather
+ * than resolving to a value, and reads survive it only because they are wrapped. The same
+ * last-byte flip, for the same reason: the failure stays the GCM tag check.
+ */
+internal fun breakNameResolution(context: Context, prefsName: String) {
+    val raw = rawPrefs(context, prefsName)
+    val stored = raw.getString(HMAC_KEY_PREF, null)
+    assertNotNull("the file must already hold an HMAC key to corrupt", stored)
+    val bytes = Base64.decode(stored!!.removePrefix(BOUND_PREFIX), Base64.NO_WRAP)
+    bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
+    val corrupted = Base64.encodeToString(bytes, Base64.NO_WRAP)
+    raw.edit()
+        .putString(
+            HMAC_KEY_PREF,
+            if (stored.startsWith(BOUND_PREFIX)) BOUND_PREFIX + corrupted else corrupted
+        )
         .commit()
 }
 

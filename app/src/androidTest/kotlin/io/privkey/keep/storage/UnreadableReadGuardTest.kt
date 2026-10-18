@@ -172,6 +172,38 @@ class UnreadableReadGuardTest {
         forgetWriteProbe(context, WHITELIST_PREFS)
     }
 
+    /**
+     * The other fault a lost Keystore alias produces, and the one the escape hatch has to
+     * survive: the file's own HMAC key will not decrypt, so resolving any name in it
+     * raises instead of answering.
+     *
+     * Reads are wrapped and report it; a write is not, so the reset must not be the one
+     * action in this state that takes the app down. Staged whole-file rather than per
+     * value, because a real alias loss breaks both.
+     */
+    @Test
+    fun clearing_a_whitelist_whose_names_cannot_resolve_recovers_it() {
+        assertNotNull(RelayAuthWhitelistStore(context).add("wss://relay.example.com"))
+        breakNameResolution(context, WHITELIST_PREFS)
+        assertEquals(
+            "the gate has to be closed before the reset, or this proves nothing",
+            Nip55RelayAuthGate.AUTO_REJECT,
+            evaluateRelayAuthGate(RelayAuthWhitelistStore(context), EVENT_22242).first
+        )
+
+        assertTrue(
+            "a reset has to answer on the fault that raises, not only the one that does not",
+            RelayAuthWhitelistStore(context).clear()
+        )
+
+        val repaired = RelayAuthWhitelistStore(context)
+        assertEquals(
+            Nip55RelayAuthGate.DEFER,
+            evaluateRelayAuthGate(repaired, EVENT_22242).first
+        )
+        assertEquals("relay.example.com", repaired.add("wss://relay.example.com"))
+    }
+
     @Test
     fun clearing_an_unreadable_audit_log_lets_writing_resume() {
         // The escape hatch. Without it an unreadable log refuses every read and write
