@@ -91,6 +91,12 @@ class RelayAuthWhitelistStore(context: Context) {
      * Returns whether the clear reached disk. Committed rather than applied so there
      * is an answer at all: a reset reported as successful while the gate keeps
      * rejecting is the one outcome a repair path must not have.
+     *
+     * Only call this for a list that could not be read. On a healthy file a read
+     * running concurrently can refill the key cache between the clear and the
+     * registry rewrite, which then writes a registry back over the emptied file and
+     * leaves it looking like a stranded epoch. In the fault this exists for that
+     * cannot happen, because such a read raises before it caches anything.
      */
     @Synchronized
     fun clear(): Boolean = runCatching { prefs.edit().clear().commit() }.getOrDefault(false)

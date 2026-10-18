@@ -266,7 +266,8 @@
     <string name="connections_nip55_relay_auth_whitelist_reset_title">Reset the whitelist?</string>
     <string name="connections_nip55_relay_auth_whitelist_reset_message">This deletes the stored list and any relays it still holds. NIP-42 auth will then follow normal per-app permissions, so an app you have already granted signing to can have kind 22242 events signed for any relay, in the background and without a prompt.</string>
     <string name="connections_nip55_relay_auth_whitelist_reset_confirm">Reset</string>
-    <string name="connections_nip55_relay_auth_whitelist_reset_failed">The whitelist could not be reset. The stored list is still on this device, so NIP-42 auth is still being rejected.</string>
+    <string name="connections_nip55_relay_auth_whitelist_reset_failed">The whitelist could not be reset. The stored list is still on this device and will come back when the app restarts.</string>
+    <string name="connections_nip55_relay_auth_whitelist_reset_auth_subtitle">Authenticate to reset the relay whitelist</string>
     <string name="connections_permissions_relay_scope">Relay: %1$s</string>
     <string name="connections_nip55_batch_auth_subtitle">%1$d signing requests</string>
     <string name="connections_nip55_type_label">Type</string>

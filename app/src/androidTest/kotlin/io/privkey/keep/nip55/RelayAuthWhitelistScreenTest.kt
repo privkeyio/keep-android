@@ -77,21 +77,49 @@ class RelayAuthWhitelistScreenTest {
         corruptStoredValue(context, RelayAuthWhitelistStore.PREFS_NAME, storedName)
     }
 
-    private fun showScreen() {
+    /**
+     * The reset has to go through the gate, not around it.
+     *
+     * Every other case here supplies a gate that runs the action straight away, so a
+     * change that moved the clear back into the screen's own scope would drop the auth
+     * factor and still leave them all green. This one never invokes the action, which
+     * is what a cancelled or unsatisfied auth does, and asserts nothing was deleted.
+     */
+    @Test
+    fun theResetDoesNotHappenWithoutTheAuthGate() {
+        stageUnreadableList()
+        showScreen(gateReset = { /* never runs the action */ })
+
+        awaitText(unreadableText)
+        compose.onNodeWithText(resetText).performClick()
+        val confirm = context.getString(R.string.connections_nip55_relay_auth_whitelist_reset_confirm)
+        awaitText(confirm)
+        compose.onNodeWithText(confirm).performClick()
+
+        compose.waitForIdle()
+        assertEquals(PrefRead.Unreadable, RelayAuthWhitelistStore(context).readHosts())
+
+        forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    /**
+     * [gateReset] defaults to running the action, standing in for an auth factor that
+     * was satisfied, so the cases below assert what the screen does after the gate
+     * rather than what the gate does. Production supplies `requireAuthThen`.
+     */
+    private fun showScreen(gateReset: ((suspend () -> Unit) -> Unit)? = null) {
         compose.setContent {
             // Remembered, not rebuilt per recomposition: production hands this screen
             // the application's single store, and a fresh one each pass would give the
             // launched read and the button handlers different per-instance caches.
             val store = remember { RelayAuthWhitelistStore(context) }
             val scope = rememberCoroutineScope()
+            val satisfiedGate: (suspend () -> Unit) -> Unit = { action -> scope.launch { action() } }
             KeepAndroidTheme {
                 RelayAuthWhitelistScreen(
                     store = store,
                     onDismiss = {},
-                    // Production runs this behind requireAuthThen, which needs a live
-                    // biometric or PIN factor. Passed through here so these assert what
-                    // the screen does once the factor is verified.
-                    gateReset = { action -> scope.launch { action() } }
+                    gateReset = gateReset ?: satisfiedGate
                 )
             }
         }

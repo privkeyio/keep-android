@@ -862,7 +862,10 @@ fun MainScreen(
                 gateReset = { action ->
                     requireAuthThen(
                         appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_title),
-                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_message),
+                        // Short, because this becomes the biometric prompt's subtitle and
+                        // a long one is clipped. The consequence is spelled out in the
+                        // dialog the person has already read to get here.
+                        appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_auth_subtitle),
                         appContext.getString(R.string.connections_nip55_relay_auth_whitelist_reset_confirm),
                         action = action
                     )
