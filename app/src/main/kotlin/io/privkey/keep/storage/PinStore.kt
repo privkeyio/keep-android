@@ -367,24 +367,24 @@ class PinStore(private val context: Context) {
             return 0
         }
 
-        // Treated as set now, so a duration that cannot be placed in time still runs
-        // its full length instead of reading as long expired.
-        val savedSetElapsed = longAt(
-            KEY_LOCKOUT_SET_AT_ELAPSED,
-            ifAbsent = 0,
-            ifUnreadable = SystemClock.elapsedRealtime()
-        )
+        // An anchor that will not decrypt is its own case rather than a number. Either
+        // number is wrong: 0 makes the subtraction below expire the lockout at once, and
+        // "now" substituted on each read re-anchors it to the moment of every call, which
+        // holds it at full length forever. With the PIN flag reading fine the screen
+        // shows the lockout and not the removal, so counting down is the only way out.
+        // Writing a fresh anchor makes the lockout run its full length once and then
+        // end, and the write heals the damaged value, since it does not read first.
+        val setAtRead = prefs.readLong(KEY_LOCKOUT_SET_AT_ELAPSED)
+        val wallRead = prefs.readLong(KEY_LOCKOUT_WALL_CLOCK)
+        if (setAtRead == PrefRead.Unreadable || wallRead == PrefRead.Unreadable) {
+            return reanchorLockout(lockoutDuration)
+        }
+        val savedSetElapsed = (setAtRead as? PrefRead.Found)?.value ?: 0L
         val currentElapsed = SystemClock.elapsedRealtime()
 
         val rebootDetected = currentElapsed < savedSetElapsed
         if (rebootDetected) {
-            // 0 here clears the lockout below, so an unreadable wall clock reports now
-            // instead, which leaves the full duration to run.
-            val lockoutWallClock = longAt(
-                KEY_LOCKOUT_WALL_CLOCK,
-                ifAbsent = 0,
-                ifUnreadable = System.currentTimeMillis()
-            )
+            val lockoutWallClock = (wallRead as? PrefRead.Found)?.value ?: 0L
             if (lockoutWallClock == 0L) {
                 clearLockoutTimestampsInternal()
                 return 0
@@ -413,6 +413,22 @@ class PinStore(private val context: Context) {
     }
 
     @Synchronized
+    /**
+     * Starts [duration] over from now, for a lockout whose anchor could not be read.
+     *
+     * If the write fails the next read finds the anchor still unreadable and comes back
+     * here, so the lockout holds rather than lifting. That is the strict direction, at
+     * the cost of a lockout that cannot end while storage refuses writes.
+     */
+    private fun reanchorLockout(duration: Long): Long {
+        prefs.edit()
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, SystemClock.elapsedRealtime())
+            .putLong(KEY_LOCKOUT_WALL_CLOCK, System.currentTimeMillis())
+            .putLong(KEY_LOCKOUT_DURATION, duration)
+            .commit()
+        return duration
+    }
+
     // A reset that is owed and cannot be read is still owed.
     fun requiresBiometricReset(): Boolean =
         boolAt(KEY_BIOMETRIC_RESET_REQUIRED, ifAbsent = false, ifUnreadable = true)

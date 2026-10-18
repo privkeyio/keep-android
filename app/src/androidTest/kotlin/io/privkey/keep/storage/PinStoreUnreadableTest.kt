@@ -157,6 +157,40 @@ class PinStoreUnreadableTest {
         assertTrue("and it still verifies", after.verifyPin(GOOD_PIN))
     }
 
+    /**
+     * One damaged lockout timestamp while the rest of the record reads fine.
+     *
+     * The flag reads as SET here, so the unlock screen shows the lockout rather than the
+     * state that offers removal, which makes counting down the only way out. A number
+     * substituted for the timestamp on each read would re-anchor the lockout to the
+     * moment of every call and hold it at its full length forever. The lockout has to run
+     * its full length once and then end.
+     */
+    @Test
+    fun an_unreadable_lockout_anchor_runs_once_and_then_counts_down() {
+        KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).edit()
+            .putBoolean("pin_enabled", true)
+            .putLong("lockout_duration", LONGEST_LOCKOUT_MS)
+            .commit()
+        val storedName = writeAndFindStoredName(context, PinStore.PREFS_NAME) {
+            KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME)
+                .edit().putLong("lockout_set_at_elapsed", 1L).commit()
+        }
+        corruptStoredValue(context, PinStore.PREFS_NAME, storedName)
+
+        assertEquals(PinRecord.SET, PinStore(context).pinRecord())
+        val first = PinStore(context).getLockoutRemainingMs()
+        assertTrue("a lost anchor must not read as an expired lockout", first > 0)
+
+        Thread.sleep(COUNTDOWN_PROBE_MS)
+        val second = PinStore(context).getLockoutRemainingMs()
+        assertTrue(
+            "the lockout has to count down rather than restart on every read: $first then $second",
+            first - second >= COUNTDOWN_PROBE_MS - COUNTDOWN_SLACK_MS
+        )
+        forgetWriteProbe(context, PinStore.PREFS_NAME)
+    }
+
     @Test
     fun the_clear_refuses_when_no_pin_is_set() {
         assertFalse(PinStore(context).clearPin())
@@ -167,5 +201,9 @@ class PinStoreUnreadableTest {
         const val GOOD_PIN = "4917"
         const val OTHER_PIN = "5283"
         const val WRONG_PIN = "7194"
+        // The top of PinStore's lockout ladder.
+        const val LONGEST_LOCKOUT_MS = 3_600_000L
+        const val COUNTDOWN_PROBE_MS = 200L
+        const val COUNTDOWN_SLACK_MS = 50L
     }
 }
