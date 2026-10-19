@@ -2,6 +2,7 @@ package io.privkey.keep.nip55
 
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -164,8 +165,23 @@ class RelayAuthWhitelistScreenTest {
         try {
             awaitText(unreadableText)
         } catch (e: ComposeTimeoutException) {
-            throw AssertionError(describe(staged), e)
+            val report = describe(staged)
+            throw AssertionError("$report\n${afterForcedApply()}", e)
         }
+    }
+
+    /**
+     * Whether the state arrives once pending snapshot writes are announced and the clock
+     * moves. If it does, the read's write happened and recomposition was never told; if
+     * not, the write itself never ran.
+     */
+    private fun afterForcedApply(): String {
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        val appeared = compose.onAllNodesWithText(unreadableText).fetchSemanticsNodes().isNotEmpty()
+        return "After announcing pending snapshot writes and advancing the clock, the unreadable " +
+            "state ${if (appeared) "appeared" else "still did not appear"}."
     }
 
     /**
