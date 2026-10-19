@@ -5,9 +5,8 @@ import org.junit.Test
 
 /**
  * The approval wait has to end before the core's own backstop on the same wait. If it
- * did not, the core could deny a connect at its deadline while this side, a moment
- * later, authorized the client and cleared it from the denylist for an approval the
- * core never honored.
+ * did not, the core could deny a request at its deadline while the user, a moment later,
+ * saw their approval accepted.
  */
 class ApprovalTimeoutTest {
 

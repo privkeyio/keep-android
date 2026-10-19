@@ -660,33 +660,25 @@ class KeepMobileApp : Application() {
         }
     }
 
-    // The bunker keeps the pin set it started with, so a pin edit reaches it only through
-    // a restart. Starting the running service restarts its bunker under its own lock.
-    private fun onCertificatePinsChanged() {
-        onLiveNodeDropped()
-        val enabled = runCatching { keepMobile?.getBunkerConfig()?.enabled }.getOrNull() == true
-        if (enabled) BunkerService.start(this)
-    }
-
     fun clearCertificatePin(hostname: String) {
         runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onSuccess { if (it != null) onCertificatePinsChanged() }
+            .onSuccess { if (it != null) onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
-            .onSuccess { if (it != null) onCertificatePinsChanged() }
+            .onSuccess { if (it != null) onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
     fun stageCertificatePin(hostname: String, spkiHash: String): Boolean =
         (keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false)
-            .also { if (it) onCertificatePinsChanged() }
+            .also { if (it) onLiveNodeDropped() }
 
     fun removeCertificatePin(hostname: String, spkiHash: String): CertPinRemoval? =
         keepMobile?.removeCertificatePinCompat(hostname, spkiHash)
-            ?.also { onCertificatePinsChanged() }
+            ?.also { onLiveNodeDropped() }
 
     fun dismissPinMismatch() {
         pinMismatch = null

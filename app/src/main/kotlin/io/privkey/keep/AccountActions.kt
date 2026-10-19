@@ -18,6 +18,7 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -46,6 +47,15 @@ sealed class CreateGroupState {
     data class Success(val name: String, val groupPubkey: String) : CreateGroupState()
     data class Error(val message: String) : CreateGroupState()
 }
+
+/**
+ * Whether storing a share replaced the account that was active before it. There is no
+ * previous account to clean up after when nothing was stored before; otherwise any change
+ * of the active pointer is one, and a pointer that cannot be read afterwards counts as a
+ * change rather than as proof that nothing moved.
+ */
+internal fun storeSwitchedAccount(hadShare: Boolean, activeBefore: String?, activeAfter: String?): Boolean =
+    hadShare && (activeAfter == null || activeAfter != activeBefore)
 
 internal class AccountActions(
     private val keepMobile: KeepMobile,
@@ -107,6 +117,33 @@ internal class AccountActions(
             }
         } finally {
             storage.clearPendingCipher(switchId)
+        }
+    }
+
+    /**
+     * Runs [store], a core call that stores a share and makes it the active one, on the IO
+     * dispatcher, and treats it as an account switch when it replaced another account.
+     * Without the switch cleanup the previous account's grants would apply to the new key
+     * and a running bunker would keep serving the previous one. Compared rather than
+     * assumed, so a call that switched and then failed is still cleaned up, while a
+     * failed attempt that changed nothing, or a first account, wipes nothing. A pointer or
+     * share list that cannot be read counts as a change.
+     */
+    private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
+        val before = withContext(Dispatchers.IO) {
+            val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
+            hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
+        }
+        try {
+            return withContext(Dispatchers.IO) { store() }
+        } finally {
+            withContext(NonCancellable) {
+                val (hadShare, activeBefore) = before
+                val activeAfter = withContext(Dispatchers.IO) {
+                    runCatching { storage.getActiveShareKey() }.getOrNull()
+                }
+                if (storeSwitchedAccount(hadShare, activeBefore, activeAfter)) onAccountSwitched()
+            }
         }
     }
 
@@ -546,7 +583,7 @@ internal class AccountActions(
                 try {
                     storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
                     pendingSet = true
-                    val result = withContext(Dispatchers.IO) {
+                    val result = storingNewActiveShare {
                         storage.setRequestIdContext(requestId)
                         try {
                             keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
@@ -708,7 +745,7 @@ internal class AccountActions(
                     storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
                     pendingSet = true
                     storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
-                    val info = withContext(Dispatchers.IO) {
+                    val info = storingNewActiveShare {
                         storage.setRequestIdContext(requestId)
                         try {
                             // Vault-protected: the passphrase is stashed in the secret.
@@ -903,7 +940,7 @@ internal class AccountActions(
                     try {
                         storage.setPendingCipher(importId, cipher)
                         pendingSet = true
-                        val result = withContext(Dispatchers.IO) {
+                        val result = storingNewActiveShare {
                             storage.setRequestIdContext(importId)
                             try {
                                 apiCall()

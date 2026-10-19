@@ -73,9 +73,9 @@ class BunkerService : Service() {
         private const val APPROVAL_NOTIFICATION_ID_BASE = 0x4E46
 
         // Kept clearly inside the core's own 60 second backstop on this same wait. With
-        // equal deadlines an approval landing at the boundary could be denied by the
-        // core after this side had already authorized the client, so this side has to
-        // be the one that decides.
+        // equal deadlines an approval landing at the boundary would be shown to the user
+        // as given while the core had already denied it, so this side has to be the one
+        // that decides.
         internal const val APPROVAL_TIMEOUT_MS = 55_000L
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
