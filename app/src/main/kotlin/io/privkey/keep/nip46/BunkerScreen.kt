@@ -16,7 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.privkey.keep.MAX_BUNKER_RELAYS
@@ -115,6 +117,7 @@ fun BunkerScreen(
     var authorizedClients by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showRevokeAllDialog by remember { mutableStateOf(false) }
+    var pendingRevoke by remember { mutableStateOf<String?>(null) }
     var showRotateUrlDialog by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
 
@@ -207,16 +210,17 @@ fun BunkerScreen(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = { showRotateUrlDialog = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(stringResource(R.string.connections_bunker_rotate_url_button))
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
+
+        // Offered while stopped too: a URL handed out earlier stays valid until rotated.
+        OutlinedButton(
+            onClick = { showRotateUrlDialog = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.connections_bunker_rotate_url_button))
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         BunkerToggleCard(
             enabled = isEnabled,
@@ -259,26 +263,7 @@ fun BunkerScreen(
 
         AuthorizedClientsCard(
             clients = authorizedClients,
-            onRevoke = { pubkey ->
-                scope.launch {
-                    runCatching {
-                        withContext(Dispatchers.IO) {
-                            Nip46ClientStore.addToDenylist(context, pubkey)
-                            val saved = BunkerConfigStore.update(keepMobile) { config ->
-                                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
-                            }
-                            BunkerService.forgetPendingAuth(pubkey)
-                            BunkerService.revokeClientInEngine(pubkey)
-                            saved
-                        }
-                    }.onSuccess { saved ->
-                        authorizedClients = saved.authorizedClients.toSet()
-                        Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
-                    }.onFailure {
-                        Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
+            onRevoke = { pubkey -> pendingRevoke = pubkey },
             onRevokeAll = { showRevokeAllDialog = true }
         )
     }
@@ -295,24 +280,55 @@ fun BunkerScreen(
         )
     }
 
+    pendingRevoke?.let { pubkey ->
+        RevokeClientDialog(
+            onConfirm = {
+                pendingRevoke = null
+                scope.launch {
+                    runCatching {
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            Nip46ClientStore.addToDenylist(context, pubkey)
+                            val saved = BunkerConfigStore.update(keepMobile) { config ->
+                                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
+                            }
+                            BunkerService.forgetPendingAuth(pubkey)
+                            BunkerService.revokeClientInEngine(pubkey)
+                            BunkerService.rotateBunkerCredentials(keepMobile)
+                            saved
+                        }
+                    }.onSuccess { saved ->
+                        authorizedClients = saved.authorizedClients.toSet()
+                        Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { pendingRevoke = null }
+        )
+    }
+
     if (showRevokeAllDialog) {
         RevokeAllClientsDialog(
             onConfirm = {
                 scope.launch {
                     val revoked = authorizedClients
                     runCatching {
-                        withContext(Dispatchers.IO) {
+                        withContext(NonCancellable + Dispatchers.IO) {
                             Nip46ClientStore.addAllToDenylist(context, revoked)
                             BunkerConfigStore.update(keepMobile) { config ->
                                 BunkerConfigInfo(config.enabled, emptyList())
                             }
                             revoked.forEach { BunkerService.forgetPendingAuth(it) }
                             BunkerService.revokeAllClientsInEngine()
+                            BunkerService.rotateBunkerCredentials(keepMobile)
                         }
                     }.onSuccess {
                         authorizedClients = emptySet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
+                        if (it is CancellationException) throw it
                         Toast.makeText(context, toastRevokeAllFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -327,12 +343,13 @@ fun BunkerScreen(
                 showRotateUrlDialog = false
                 scope.launch {
                     runCatching {
-                        withContext(Dispatchers.IO) {
-                            BunkerService.rotateBunkerUrlInService()
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            BunkerService.rotateBunkerCredentials(keepMobile)
                         }
                     }.onSuccess {
                         Toast.makeText(context, toastUrlRotated, Toast.LENGTH_SHORT).show()
                     }.onFailure {
+                        if (it is CancellationException) throw it
                         Toast.makeText(context, toastRotateUrlFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -466,6 +483,35 @@ private fun AddBunkerRelayDialog(
         dismissButton = {
             TextButton(onClick = ::dismissDialog) {
                 Text(stringResource(R.string.connections_bunker_add_dialog_cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun RevokeClientDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.connections_bunker_revoke_client_title)) },
+        text = {
+            Text(stringResource(R.string.connections_bunker_revoke_client_text))
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text(stringResource(R.string.connections_bunker_revoke_client_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.connections_bunker_revoke_all_cancel))
             }
         }
     )
