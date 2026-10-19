@@ -1,10 +1,12 @@
 package io.privkey.keep
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -154,10 +156,44 @@ class MainActivity : FragmentActivity() {
 
                     val unlockTitle = stringResource(R.string.main_unlock_title)
                     val unlockSubtitle = stringResource(R.string.main_unlock_subtitle)
+                    val removeTitle = stringResource(R.string.pin_unlock_unreadable_remove)
+                    val removeSubtitle = stringResource(R.string.pin_unlock_unreadable_auth_subtitle)
                     if (pinStoreForUnlock != null) {
                         PinUnlockScreen(
                             pinStore = pinStoreForUnlock,
                             onUnlocked = { isPinUnlocked = true },
+                            // Removing an unreadable PIN takes away an authentication factor
+                            // before anyone has authenticated, so on a device with a secure
+                            // lock it asks for a strong biometric or the lock-screen
+                            // credential in one prompt. Allowing both means a biometric in
+                            // lockout, or a sensor that is unavailable, offers the credential
+                            // rather than refusing, and enrolling a biometric requires a
+                            // secure lock, so this covers every device that has one. Only a
+                            // device with no secure lock at all runs it unasked, because then
+                            // there is nothing to ask for and refusing would leave no way
+                            // into the app.
+                            //
+                            // Both platform answers fail closed. The secure-lock check is made
+                            // against the platform rather than through the helper, so a
+                            // missing helper on a secure device refuses; and a missing
+                            // KeyguardManager refuses instead of counting as insecure, which
+                            // would be the one input that reached the unasked branch.
+                            authorizePinRemoval = authorize@{
+                                val keyguard = getSystemService(KeyguardManager::class.java)
+                                    ?: return@authorize false
+                                if (!keyguard.isDeviceSecure) return@authorize true
+                                val type = biometricHelper?.authenticateStrongOrDeviceCredential(
+                                    removeTitle,
+                                    removeSubtitle
+                                ) ?: return@authorize false
+                                // A biometric here is as good as the one the lock screen below
+                                // would ask for, so it is not asked twice. A credential is not,
+                                // so that screen still asks.
+                                if (type == BiometricPrompt.AUTHENTICATION_RESULT_TYPE_BIOMETRIC) {
+                                    isBiometricUnlocked = true
+                                }
+                                true
+                            },
                             onBiometricAuth = if (biometricAvailable) {
                                 {
                                     biometricHelper?.authenticate(

@@ -54,6 +54,19 @@ sealed interface PrefRead<out T> {
 }
 
 /**
+ * The value, or the answer the caller names for each of the two ways there is none.
+ *
+ * Both are required on purpose. A caller whose value is a restriction usually wants
+ * different answers for the two, and the bug this type exists to prevent is a single
+ * default standing in for both.
+ */
+fun <T> PrefRead<T>.resolve(ifAbsent: T, ifUnreadable: T): T = when (this) {
+    is PrefRead.Found -> value
+    PrefRead.Absent -> ifAbsent
+    PrefRead.Unreadable -> ifUnreadable
+}
+
+/**
  * Preferences that will say why a read produced no value.
  *
  * Extends [SharedPreferences] rather than replacing it, so a caller whose default is

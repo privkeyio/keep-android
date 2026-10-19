@@ -1,7 +1,6 @@
 package io.privkey.keep.storage
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
@@ -11,10 +10,25 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
+/**
+ * What the stored record can say about whether a PIN is set.
+ *
+ * Three-way for the same reason [PrefRead] is: this record carries a restriction, and
+ * the ordinary getters answer the caller's default for both "nothing is stored" and
+ * "something is stored and will not decrypt", which are opposite facts here. The first
+ * means no PIN gate; the second means a PIN may be set and cannot be verified.
+ */
+enum class PinRecord { NOT_SET, SET, UNREADABLE }
+
 class PinStore(private val context: Context) {
 
     companion object {
-        private const val PREFS_NAME = "keep_pin_protection"
+        /**
+         * Not private: the tests that stage an unreadable PIN record have to reach the
+         * real file, and a copy of the literal there would silently stop matching if
+         * this one changed.
+         */
+        internal const val PREFS_NAME = "keep_pin_protection"
         private const val KEY_PIN_HASH = "pin_hash"
         private const val KEY_PIN_SALT = "pin_salt"
         private const val KEY_PIN_ENABLED = "pin_enabled"
@@ -62,16 +76,94 @@ class PinStore(private val context: Context) {
         )
     }
 
-    private val prefs: SharedPreferences = run {
+    private val prefs: ReadablePrefs = run {
         val newPrefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
         LegacyPrefsMigration.migrateIfNeeded(context, PREFS_NAME, newPrefs)
     }
 
+    /**
+     * Every read below goes through [PrefRead] and resolves an unreadable value to the
+     * answer that keeps a restriction in force, never the one that lifts it. This file
+     * holds the PIN gate, the lockout, the attempt counter and the biometric-reset
+     * requirement, and all four are restrictions, so the collapsing getters turned a
+     * record that would not decrypt into no PIN, no lockout, no attempts used and no
+     * reset owed. The gates at MainActivity, Nip55Activity and Nip55ContentProvider all
+     * ask through [requiresAuthentication], so that answer stopped every one of them
+     * asking.
+     *
+     * Failing closed on its own would lock the person out of the app, since the hash in
+     * the same file is equally unreadable and no PIN can then verify, which is why
+     * [clearPin] exists and why the unlock screen offers it.
+     */
     @Synchronized
-    fun isPinEnabled(): Boolean = prefs.getBoolean(KEY_PIN_ENABLED, false)
+    fun pinRecord(): PinRecord = classify(prefs)
+
+    /**
+     * Decided by the flag and the hash together. A PIN is SET only when one can actually
+     * be verified, which takes a readable hash and salt; anything that leaves a PIN
+     * possibly set but uncheckable is UNREADABLE, the state the unlock screen offers a
+     * way out of.
+     *
+     * The flag alone left three cases wrong. A flag saying SET beside a hash that would
+     * not decrypt, or that was missing, read as SET, so every PIN was refused as
+     * incorrect, no attempt was spent, and the removal was never offered: a lockout with
+     * no way out. And a broken flag beside a usable hash read as UNREADABLE, offering to
+     * delete a PIN that could still verify. disablePin removes the hash and salt, so a
+     * usable pair means a PIN was set and never disabled, which makes SET right there.
+     *
+     * The hash and salt are read only when the flag leaves the answer open, so a store
+     * with no PIN costs one Keystore decrypt rather than three. This runs on the
+     * background provider path, which any installed app can drive.
+     */
+    private fun classify(record: ReadablePrefs): PinRecord {
+        val flag = record.readBoolean(KEY_PIN_ENABLED)
+        if (flag == PrefRead.Absent || (flag is PrefRead.Found && !flag.value)) {
+            return PinRecord.NOT_SET
+        }
+        val verifierUsable = record.readString(KEY_PIN_HASH) is PrefRead.Found &&
+            record.readString(KEY_PIN_SALT) is PrefRead.Found
+        return if (verifierUsable) PinRecord.SET else PinRecord.UNREADABLE
+    }
+
+    /** True when a PIN may be set, which includes a record that cannot be read. */
+    @Synchronized
+    fun isPinEnabled(): Boolean = pinRecord() != PinRecord.NOT_SET
+
+    /**
+     * Deletes the whole PIN record, the way back from a record that cannot be read.
+     *
+     * Refuses unless the record is actually unreadable, so this cannot become a way to
+     * remove a working PIN without verifying it. That is a check rather than a comment
+     * because the call is reachable from the unlock screen, which is the one screen
+     * shown to someone who has not authenticated yet.
+     *
+     * Clears the file rather than the keys, which is what works when the fault is the
+     * file's own HMAC key: resolving a name to remove it decrypts that key, so a
+     * targeted remove raises instead of answering, while a clear resolves no names and
+     * takes the damaged key material with it.
+     *
+     * The record is read a second time through a fresh instance before anything is
+     * deleted, which repeats the Keystore round trip rather than trusting this
+     * instance's earlier answer. [PrefRead.Unreadable] says a failed decrypt is
+     * permanent, but [KeystoreEncryptedPrefs] notes one can be transient, and StrongBox
+     * keys here have been seen to generate cleanly and then fail on use. A fault that
+     * clears between the screen being drawn and the tap must not cost a PIN that was
+     * fine. If the second read cannot even be attempted, nothing is deleted.
+     */
+    @Synchronized
+    fun clearPin(): Boolean {
+        if (classify(prefs) != PinRecord.UNREADABLE) return false
+        val fresh = runCatching { KeystoreEncryptedPrefs.create(context, PREFS_NAME) }.getOrNull()
+            ?: return false
+        if (classify(fresh) != PinRecord.UNREADABLE) return false
+        return runCatching { prefs.edit().clear().commit() }.getOrDefault(false)
+    }
 
     @Synchronized
-    fun requiresAuthentication(): Boolean = isPinEnabled() && !isSessionValid()
+    // One classification per call. Calling isPinEnabled and then isSessionValid, which
+    // asks again, decrypted the record twice on a path any installed app can drive
+    // through the provider, ahead of its rate limit.
+    fun requiresAuthentication(): Boolean = isPinEnabled() && !sessionOpen()
 
     @Synchronized
     fun isWeakPin(pin: String): Boolean {
@@ -122,8 +214,18 @@ class PinStore(private val context: Context) {
         val invalidLength = pin.length > MAX_PIN_LENGTH
         val lockedOut = isLockedOut()
 
-        val storedHash = prefs.getString(KEY_PIN_HASH, null)
-        val salt = prefs.getString(KEY_PIN_SALT, null)
+        // A record that will not decrypt cannot verify anything, and must not spend the
+        // attempt budget on a fault that is not a wrong PIN: burning attempts here would
+        // drive the lockout for a record no PIN can ever satisfy. The constant-time dance
+        // below is kept for the readable path, where a timing difference would separate
+        // "no PIN set" from "wrong PIN"; this state is already named on screen, so there
+        // is nothing for it to leak.
+        val hashRead = prefs.readString(KEY_PIN_HASH)
+        val saltRead = prefs.readString(KEY_PIN_SALT)
+        if (hashRead == PrefRead.Unreadable || saltRead == PrefRead.Unreadable) return false
+
+        val storedHash = (hashRead as? PrefRead.Found)?.value
+        val salt = (saltRead as? PrefRead.Found)?.value
 
         val pinNotSet = storedHash == null || salt == null
         val effectiveSalt = salt ?: DUMMY_SALT
@@ -200,10 +302,18 @@ class PinStore(private val context: Context) {
     }
 
     @Synchronized
-    fun isSessionValid(): Boolean {
-        if (!isPinEnabled()) return true
-        val sessionStartedAtRealtime = prefs.getLong(KEY_SESSION_STARTED_AT_REALTIME, 0)
-        val sessionStartedAtWall = prefs.getLong(KEY_SESSION_STARTED_AT_WALL, 0)
+    fun isSessionValid(): Boolean = !isPinEnabled() || sessionOpen()
+
+    /**
+     * Whether a session opened by a verified unlock is still open, without first asking
+     * whether a PIN is set. Split out so [requiresAuthentication] classifies the record
+     * once rather than twice.
+     */
+    private fun sessionOpen(): Boolean {
+        // An unreadable timestamp answers 0, which is the no-session value, so an
+        // unreadable session is not a valid one.
+        val sessionStartedAtRealtime = prefs.readLong(KEY_SESSION_STARTED_AT_REALTIME).resolve(ifAbsent = 0, ifUnreadable = 0)
+        val sessionStartedAtWall = prefs.readLong(KEY_SESSION_STARTED_AT_WALL).resolve(ifAbsent = 0, ifUnreadable = 0)
         if (sessionStartedAtRealtime == 0L || sessionStartedAtWall == 0L) return false
         val timeout = getSessionTimeout()
         if (timeout == 0L) return false
@@ -223,8 +333,17 @@ class PinStore(private val context: Context) {
         return elapsedRealtime in 0..timeout && elapsedWall in 0..timeout
     }
 
+    // The default, not 0. Nothing in the app calls setSessionTimeout, and neither setPin
+    // nor disablePin writes this key, so an unreadable value here could never be
+    // rewritten: 0 would make every session invalid for good and refuse all background
+    // signing while a PIN is set, with no way back. The default is what every install
+    // runs with, so it lifts nothing below that. A whole-file fault does not rely on
+    // this: the session timestamps then read as 0, which already invalidates the session.
     @Synchronized
-    fun getSessionTimeout(): Long = prefs.getLong(KEY_SESSION_TIMEOUT, DEFAULT_SESSION_TIMEOUT_MS)
+    fun getSessionTimeout(): Long = prefs.readLong(KEY_SESSION_TIMEOUT).resolve(
+        ifAbsent = DEFAULT_SESSION_TIMEOUT_MS,
+        ifUnreadable = DEFAULT_SESSION_TIMEOUT_MS
+    )
 
     @Synchronized
     fun setSessionTimeout(timeoutMs: Long): Boolean {
@@ -253,18 +372,42 @@ class PinStore(private val context: Context) {
 
     @Synchronized
     fun getLockoutRemainingMs(): Long {
-        val lockoutDuration = prefs.getLong(KEY_LOCKOUT_DURATION, 0)
+        // Checked for the whole record before any arithmetic, because these values live
+        // in one file under one key, so a fault takes them together and the sums below
+        // would be computed from guesses. Reports the longest configured lockout rather
+        // than none: the throttle is what makes a short PIN worth having, and this is
+        // the one case where someone able to write this file could otherwise clear it.
+        // Waiting is not the way out; an unreadable record puts the unlock screen in
+        // its own state, which offers the reset.
+        if (pinRecord() == PinRecord.UNREADABLE) return LOCKOUT_DURATIONS_MS.last()
+
+        val lockoutDuration = prefs.readLong(KEY_LOCKOUT_DURATION).resolve(
+            ifAbsent = 0,
+            ifUnreadable = LOCKOUT_DURATIONS_MS.last()
+        )
         if (lockoutDuration == 0L) {
             maybeDecayLockoutLevel()
             return 0
         }
 
-        val savedSetElapsed = prefs.getLong(KEY_LOCKOUT_SET_AT_ELAPSED, 0)
+        // An anchor that will not decrypt is its own case rather than a number. Either
+        // number is wrong: 0 makes the subtraction below expire the lockout at once, and
+        // "now" substituted on each read re-anchors it to the moment of every call, which
+        // holds it at full length forever. With the PIN flag reading fine the screen
+        // shows the lockout and not the removal, so counting down is the only way out.
+        // Writing a fresh anchor makes the lockout run its full length once and then
+        // end, and the write heals the damaged value, since it does not read first.
+        val setAtRead = prefs.readLong(KEY_LOCKOUT_SET_AT_ELAPSED)
+        val wallRead = prefs.readLong(KEY_LOCKOUT_WALL_CLOCK)
+        if (setAtRead == PrefRead.Unreadable || wallRead == PrefRead.Unreadable) {
+            return reanchorLockout(lockoutDuration)
+        }
+        val savedSetElapsed = (setAtRead as? PrefRead.Found)?.value ?: 0L
         val currentElapsed = SystemClock.elapsedRealtime()
 
         val rebootDetected = currentElapsed < savedSetElapsed
         if (rebootDetected) {
-            val lockoutWallClock = prefs.getLong(KEY_LOCKOUT_WALL_CLOCK, 0)
+            val lockoutWallClock = (wallRead as? PrefRead.Found)?.value ?: 0L
             if (lockoutWallClock == 0L) {
                 clearLockoutTimestampsInternal()
                 return 0
@@ -292,8 +435,26 @@ class PinStore(private val context: Context) {
         return remainingByElapsed
     }
 
+    /**
+     * Starts [duration] over from now, for a lockout whose anchor could not be read.
+     *
+     * If the write fails the next read finds the anchor still unreadable and comes back
+     * here, so the lockout holds rather than lifting. That is the strict direction, at
+     * the cost of a lockout that cannot end while storage refuses writes.
+     */
+    private fun reanchorLockout(duration: Long): Long {
+        prefs.edit()
+            .putLong(KEY_LOCKOUT_SET_AT_ELAPSED, SystemClock.elapsedRealtime())
+            .putLong(KEY_LOCKOUT_WALL_CLOCK, System.currentTimeMillis())
+            .putLong(KEY_LOCKOUT_DURATION, duration)
+            .commit()
+        return duration
+    }
+
+    // A reset that is owed and cannot be read is still owed.
     @Synchronized
-    fun requiresBiometricReset(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
+    fun requiresBiometricReset(): Boolean =
+        prefs.readBoolean(KEY_BIOMETRIC_RESET_REQUIRED).resolve(ifAbsent = false, ifUnreadable = true)
 
     @Synchronized
     fun clearBiometricResetRequirement(): Boolean {
@@ -313,10 +474,13 @@ class PinStore(private val context: Context) {
     }
 
     private fun maybeDecayLockoutLevel() {
-        val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+        // Decay only ever lowers the escalation level, so an unreadable level or
+        // timestamp must not drive it: both answer "nothing to decay" and leave the
+        // escalation where it is.
+        val currentLevel = prefs.readInt(KEY_LOCKOUT_LEVEL).resolve(ifAbsent = 0, ifUnreadable = 0)
         if (currentLevel == 0) return
 
-        val lastCleared = prefs.getLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+        val lastCleared = prefs.readLong(KEY_LAST_LOCKOUT_CLEARED).resolve(ifAbsent = 0, ifUnreadable = 0)
         if (lastCleared == 0L) return
 
         val now = System.currentTimeMillis()
@@ -346,14 +510,19 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
-        if (!prefs.getBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)) {
+        // Through the fail-closed read: an unreadable requirement is still owed, so the
+        // attempt counter is kept rather than cleared.
+        if (!requiresBiometricReset()) {
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
         }
         editor.commit()
     }
 
     @Synchronized
-    fun getFailedAttempts(): Int = prefs.getInt(KEY_FAILED_ATTEMPTS, 0)
+    // An unreadable counter reports the budget spent, so getRemainingAttempts answers 0
+    // rather than a full allowance.
+    fun getFailedAttempts(): Int =
+        prefs.readInt(KEY_FAILED_ATTEMPTS).resolve(ifAbsent = 0, ifUnreadable = MAX_FAILED_ATTEMPTS)
 
     @Synchronized
     fun getRemainingAttempts(): Int = MAX_FAILED_ATTEMPTS - getFailedAttempts()
@@ -363,7 +532,12 @@ class PinStore(private val context: Context) {
         val editor = prefs.edit().putInt(KEY_FAILED_ATTEMPTS, attempts)
 
         if (attempts >= MAX_FAILED_ATTEMPTS) {
-            val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+            // An unreadable level takes the top of the ladder, not the bottom: reading
+            // it as 0 would hand out the shortest lockout and restart the escalation.
+            val currentLevel = prefs.readInt(KEY_LOCKOUT_LEVEL).resolve(
+                ifAbsent = 0,
+                ifUnreadable = LOCKOUT_DURATIONS_MS.size - 1
+            )
             val duration = LOCKOUT_DURATIONS_MS[currentLevel.coerceIn(0, LOCKOUT_DURATIONS_MS.size - 1)]
             val newLevel = (currentLevel + 1).coerceAtMost(LOCKOUT_DURATIONS_MS.size - 1)
             editor.putLong(KEY_LOCKOUT_SET_AT_ELAPSED, SystemClock.elapsedRealtime())
@@ -372,7 +546,12 @@ class PinStore(private val context: Context) {
             editor.putInt(KEY_FAILED_ATTEMPTS, 0)
             editor.putInt(KEY_LOCKOUT_LEVEL, newLevel)
 
-            val epoch = prefs.getInt(KEY_LOCKOUT_EPOCH, 0) + 1
+            // An unreadable epoch counts as having reached the threshold, so the
+            // biometric reset below is required rather than postponed.
+            val epoch = prefs.readInt(KEY_LOCKOUT_EPOCH).resolve(
+                ifAbsent = 0,
+                ifUnreadable = LOCKOUT_EPOCHS_BEFORE_BIOMETRIC
+            ) + 1
             editor.putInt(KEY_LOCKOUT_EPOCH, epoch)
             if (epoch >= LOCKOUT_EPOCHS_BEFORE_BIOMETRIC) {
                 editor.putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, true)
@@ -385,7 +564,10 @@ class PinStore(private val context: Context) {
     }
 
     private fun clearFailedAttemptsAndResetEpoch() {
-        val currentLevel = prefs.getInt(KEY_LOCKOUT_LEVEL, 0)
+        // 0 is the strict answer here, unlike the other level reads: it only decides
+        // whether to stamp the decay clock, and not stamping leaves the escalation
+        // where it is. Don't align this with the others.
+        val currentLevel = prefs.readInt(KEY_LOCKOUT_LEVEL).resolve(ifAbsent = 0, ifUnreadable = 0)
         val editor = prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putInt(KEY_LOCKOUT_EPOCH, 0)

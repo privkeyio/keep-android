@@ -22,6 +22,11 @@
     <string name="pin_unlock_biometric_required_body">Too many failed PIN attempts. Verify your identity with biometrics to continue.</string>
     <string name="pin_unlock_locked_out_title">Locked out</string>
     <string name="pin_unlock_locked_out_body">Try again in <xliff:g id="seconds" example="30">%1$d</xliff:g> seconds</string>
+    <string name="pin_unlock_unreadable_title">PIN cannot be read</string>
+    <string name="pin_unlock_unreadable_body">The app\'s PIN record is damaged or its encryption key is gone, so a PIN may be set that can no longer be checked, and signing stays blocked. Removing the record clears the PIN and the lockout; your keys and accounts are untouched. You can set a new PIN afterwards.</string>
+    <string name="pin_unlock_unreadable_auth_subtitle">Confirm it\'s you to remove the stored PIN</string>
+    <string name="pin_unlock_unreadable_remove">Remove PIN</string>
+    <string name="pin_unlock_unreadable_remove_failed">The PIN could not be removed. It is still stored on this device.</string>
     <string name="pin_unlock_error_too_many">Too many attempts. Try again later.</string>
     <string name="pin_unlock_error_incorrect">Incorrect PIN. <xliff:g id="remaining" example="3">%1$d</xliff:g> attempts remaining.</string>
 

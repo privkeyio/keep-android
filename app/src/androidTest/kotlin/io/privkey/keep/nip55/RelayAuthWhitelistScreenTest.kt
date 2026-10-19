@@ -2,11 +2,14 @@ package io.privkey.keep.nip55
 
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.R
@@ -14,6 +17,7 @@ import io.privkey.keep.storage.PrefRead
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.corruptStoredValue
 import io.privkey.keep.storage.forgetWriteProbe
+import io.privkey.keep.storage.rawPrefs
 import io.privkey.keep.storage.writeAndFindStoredName
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.launch
@@ -41,9 +45,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class RelayAuthWhitelistScreenTest {
 
-    // createComposeRule() is deprecated in favor of the v2 API; the classic rule
-    // is intentional here, and the project builds with -Werror.
-    @Suppress("DEPRECATION")
+    // The v2 rule, not the classic one. The screen loads its list in a LaunchedEffect
+    // with an IO hop, and the classic rule resumes such a continuation on the IO thread,
+    // writing the screen's state off the main thread. Under it the update now and then
+    // never showed: the read finished with the right answer and the screen stayed on its
+    // initial empty state. The v2 rule resumes on the main thread, as the app does, and
+    // the failure has not recurred under it.
     @get:Rule
     val compose = createComposeRule()
 
@@ -70,11 +77,16 @@ class RelayAuthWhitelistScreenTest {
         context.deleteSharedPreferences(RelayAuthWhitelistStore.PREFS_NAME)
     }
 
-    private fun stageUnreadableList() {
+    /** What was staged, kept so a timeout can say whether it is still on disk. */
+    private class Staged(val storedName: String, val corruptedValue: String)
+
+    private fun stageUnreadableList(): Staged {
         val storedName = writeAndFindStoredName(context, RelayAuthWhitelistStore.PREFS_NAME) {
-            RelayAuthWhitelistStore(context).add("wss://relay.example.com")
+            RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
         }
         corruptStoredValue(context, RelayAuthWhitelistStore.PREFS_NAME, storedName)
+        val corrupted = rawPrefs(context, RelayAuthWhitelistStore.PREFS_NAME).getString(storedName, null)
+        return Staged(storedName, checkNotNull(corrupted) { "the staged entry vanished as it was written" })
     }
 
     /**
@@ -87,10 +99,10 @@ class RelayAuthWhitelistScreenTest {
      */
     @Test
     fun theResetDoesNotHappenWithoutTheAuthGate() {
-        stageUnreadableList()
+        val staged = stageUnreadableList()
         showScreen(gateReset = { /* never runs the action */ })
 
-        awaitText(unreadableText)
+        awaitUnreadable(staged)
         compose.onNodeWithText(resetText).performClick()
         val confirm = context.getString(R.string.connections_nip55_relay_auth_whitelist_reset_confirm)
         awaitText(confirm)
@@ -102,6 +114,9 @@ class RelayAuthWhitelistScreenTest {
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
 
+    /** The store the screen under test holds, so a timeout can ask it directly. */
+    private var screenStore: RelayAuthWhitelistStore? = null
+
     /**
      * [gateReset] defaults to running the action, standing in for an auth factor that
      * was satisfied, so the cases below assert what the screen does after the gate
@@ -112,7 +127,7 @@ class RelayAuthWhitelistScreenTest {
             // Remembered, not rebuilt per recomposition: production hands this screen
             // the application's single store, and a fresh one each pass would give the
             // launched read and the button handlers different per-instance caches.
-            val store = remember { RelayAuthWhitelistStore(context) }
+            val store = remember { RelayAuthWhitelistStore(context).also { screenStore = it } }
             val scope = rememberCoroutineScope()
             val satisfiedGate: (suspend () -> Unit) -> Unit = { action -> scope.launch { action() } }
             KeepAndroidTheme {
@@ -125,16 +140,69 @@ class RelayAuthWhitelistScreenTest {
         }
     }
 
-    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = 5_000) {
+    // A generous bound, since the CI emulator runs these at about half local speed and
+    // waitUntil returns as soon as the text appears, so it costs nothing on a pass.
+    private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+    }
+
+    /**
+     * Waits for the unreadable state, and on a timeout fails with what was actually there.
+     *
+     * The report says whether the damaged entry is still damaged in the process's copy
+     * of the file, what the screen's own store and a fresh store each answer now, and
+     * which state the screen is showing, so a failure points at the file, the store or
+     * the screen.
+     */
+    private fun awaitUnreadable(staged: Staged) {
+        try {
+            awaitText(unreadableText)
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError(describe(staged), e)
+        }
+    }
+
+    /** One store's answer for the list, in words. */
+    private fun describeRead(store: RelayAuthWhitelistStore): String =
+        runCatching { store.readHosts() }.fold(
+            onSuccess = { read ->
+                when (read) {
+                    is PrefRead.Found -> "Found with ${read.value.size} host(s)"
+                    PrefRead.Absent -> "Absent"
+                    PrefRead.Unreadable -> "Unreadable"
+                }
+            },
+            onFailure = { "a raised ${it::class.simpleName}" }
+        )
+
+    private fun describe(staged: Staged): String {
+        val raw = rawPrefs(context, RelayAuthWhitelistStore.PREFS_NAME)
+        val onDisk = raw.getString(staged.storedName, null)
+        val diskState = when (onDisk) {
+            null -> "The damaged entry is gone from the process's copy of the file"
+            staged.corruptedValue -> "The damaged entry is still in the process's copy of the file, unchanged"
+            else -> "The damaged entry was rewritten in the process's copy of the file"
+        }
+        val screenRead = screenStore?.let(::describeRead) ?: "nothing, it was never created"
+        val freshRead = describeRead(RelayAuthWhitelistStore(context))
+        val shown = listOf("unreadable" to unreadableText, "empty" to emptyText, "a host row" to STAGED_HOST)
+            .filter { (_, text) -> compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+            .map { it.first }
+            .ifEmpty { listOf("none of the known states") }
+        val tree = runCatching { compose.onRoot().printToString() }
+            .getOrElse { "unavailable: ${it::class.simpleName}" }
+        return "The unreadable state never appeared. $diskState, with ${raw.all.size} raw " +
+            "entries in that copy; the screen's own store answers $screenRead; a fresh store answers " +
+            "$freshRead; the screen shows " +
+            "${shown.joinToString()}.\n$tree"
     }
 
     @Test
     fun anUnreadableListIsReportedRatherThanShownAsEmpty() {
-        stageUnreadableList()
+        val staged = stageUnreadableList()
         showScreen()
 
-        awaitText(unreadableText)
+        awaitUnreadable(staged)
         compose.onNodeWithText(unreadableText).assertIsDisplayed()
         compose.onNodeWithText(emptyText).assertDoesNotExist()
         // The input is gone too: every add in this state fails, and it fails with the
@@ -146,8 +214,9 @@ class RelayAuthWhitelistScreenTest {
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
 
-    // The readable case, so the assertions above cannot pass on a screen that reports a
-    // fault whatever it reads.
+    // An empty list is reported as empty, not as a fault. This also matches the screen
+    // before its read lands, since it opens on an empty list, so the listed-host case
+    // below is the control that proves the read.
     @Test
     fun anEmptyListIsStillReportedAsEmpty() {
         showScreen()
@@ -158,14 +227,29 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(resetText).assertDoesNotExist()
     }
 
+    // The readable control. A listed host appears only once the read has landed, so the
+    // unreadable assertions above cannot pass on a screen that reports a fault whatever
+    // it reads.
+    @Test
+    fun aReadableListShowsItsHostsRatherThanAFault() {
+        RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
+        showScreen()
+
+        awaitText(STAGED_HOST)
+        compose.onNodeWithText(STAGED_HOST).assertIsDisplayed()
+        compose.onNodeWithText(unreadableText).assertDoesNotExist()
+        compose.onNodeWithText(emptyText).assertDoesNotExist()
+        compose.onNodeWithText(resetText).assertDoesNotExist()
+    }
+
     // Declining has to leave the list where it is. Without this, a confirmation that
     // deleted on either answer would pass every other case here.
     @Test
     fun decliningTheResetLeavesTheListAlone() {
-        stageUnreadableList()
+        val staged = stageUnreadableList()
         showScreen()
 
-        awaitText(unreadableText)
+        awaitUnreadable(staged)
         compose.onNodeWithText(resetText).performClick()
         val cancel = context.getString(R.string.common_cancel)
         awaitText(cancel)
@@ -182,10 +266,10 @@ class RelayAuthWhitelistScreenTest {
 
     @Test
     fun resettingAnUnreadableListClearsItAndTheScreenRecovers() {
-        stageUnreadableList()
+        val staged = stageUnreadableList()
         showScreen()
 
-        awaitText(unreadableText)
+        awaitUnreadable(staged)
         compose.onNodeWithText(resetText).performClick()
 
         // Confirmed rather than done on the first tap: an unreadable list can be a
@@ -204,5 +288,11 @@ class RelayAuthWhitelistScreenTest {
         ).assertDoesNotExist()
 
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    private companion object {
+        const val AWAIT_MS = 15_000L
+        // Normalized form, which is what the store keeps and the screen renders.
+        const val STAGED_HOST = "relay.example.com"
     }
 }
