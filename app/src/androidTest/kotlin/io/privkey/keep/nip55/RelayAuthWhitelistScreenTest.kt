@@ -2,10 +2,9 @@ package io.privkey.keep.nip55
 
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -46,9 +45,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class RelayAuthWhitelistScreenTest {
 
-    // createComposeRule() is deprecated in favor of the v2 API; the classic rule
-    // is intentional here, and the project builds with -Werror.
-    @Suppress("DEPRECATION")
+    // The v2 rule, not the classic one. The screen loads its list in a LaunchedEffect
+    // with an IO hop, and the classic rule resumes such a continuation on the IO thread,
+    // so the screen's state was written off the main thread while the main thread could
+    // still be composing it. Now and then the update never showed: the read finished with
+    // the right answer and the screen stayed on its initial empty state. The v2 rule
+    // resumes on the main thread, as the app does.
     @get:Rule
     val compose = createComposeRule()
 
@@ -141,10 +143,7 @@ class RelayAuthWhitelistScreenTest {
     }
 
     // A generous bound, since the CI emulator runs these at about twice local speed and
-    // waitUntil returns as soon as the text appears, so it costs nothing on a pass. It is
-    // not what decides a failure: the CI timeouts these tests have hit ran out the full
-    // 15s, so the state was not arriving late, it was not arriving. awaitUnreadable says
-    // what was there instead.
+    // waitUntil returns as soon as the text appears, so it costs nothing on a pass.
     private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
     }
@@ -152,8 +151,7 @@ class RelayAuthWhitelistScreenTest {
     /**
      * Waits for the unreadable state, and on a timeout fails with what was actually there.
      *
-     * These tests have timed out on CI while passing every local run, including full
-     * suites, so a bare timeout gives nothing to act on. The report separates the layers
+     * A bare timeout gives nothing to act on. The report separates the layers
      * that can fail: whether the damaged entry is still damaged in the process's copy of
      * the file, what the screen's own store and a fresh store each answer now, and which
      * state the screen is showing. The two stores disagreeing about one file is a fault
@@ -165,23 +163,8 @@ class RelayAuthWhitelistScreenTest {
         try {
             awaitText(unreadableText)
         } catch (e: ComposeTimeoutException) {
-            val report = describe(staged)
-            throw AssertionError("$report\n${afterForcedApply()}", e)
+            throw AssertionError(describe(staged), e)
         }
-    }
-
-    /**
-     * Whether the state arrives once pending snapshot writes are announced and the clock
-     * moves. If it does, the read's write happened and recomposition was never told; if
-     * not, the write itself never ran.
-     */
-    private fun afterForcedApply(): String {
-        Snapshot.sendApplyNotifications()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.waitForIdle()
-        val appeared = compose.onAllNodesWithText(unreadableText).fetchSemanticsNodes().isNotEmpty()
-        return "After announcing pending snapshot writes and advancing the clock, the unreadable " +
-            "state ${if (appeared) "appeared" else "still did not appear"}."
     }
 
     /**
@@ -220,30 +203,7 @@ class RelayAuthWhitelistScreenTest {
         return "The unreadable state never appeared. $diskState, with ${raw.all.size} raw " +
             "entries in that copy; the screen's own store answers $screenRead; a fresh store answers " +
             "$freshRead; the screen shows " +
-            "${shown.joinToString()}.\n${describeThreads()}\n$tree"
-    }
-
-    /**
-     * Every other thread inside app or Keystore code, with its stack.
-     *
-     * The screen shows its initial empty state, which is also what it shows while its one
-     * read is still in flight, so the question is whether that read is stuck and where.
-     * The store answering this thread afterwards does not settle it: a read that fails for
-     * any reason, including a busy Keystore, also answers Unreadable.
-     */
-    private fun describeThreads(): String {
-        val current = Thread.currentThread()
-        val busy = Thread.getAllStackTraces().filter { (thread, stack) ->
-            thread !== current && stack.any {
-                it.className.startsWith("io.privkey.keep") || it.className.startsWith("android.security")
-            }
-        }
-        val workers = Thread.getAllStackTraces().keys.filter { it.name.startsWith("DefaultDispatcher-worker") }
-        val header = "Dispatcher workers: ${workers.size}, " +
-            workers.groupingBy { it.state }.eachCount() + ". Threads in app or Keystore code: ${busy.size}."
-        return busy.entries.joinToString("\n", prefix = "$header\n") { (thread, stack) ->
-            "--- ${thread.name} (${thread.state})\n" + stack.take(40).joinToString("\n") { "    at $it" }
-        }
+            "${shown.joinToString()}.\n$tree"
     }
 
     @Test
