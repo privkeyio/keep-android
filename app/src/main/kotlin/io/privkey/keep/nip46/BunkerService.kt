@@ -72,7 +72,11 @@ class BunkerService : Service() {
         private const val APPROVAL_CHANNEL_ID = "keep_bunker_approvals"
         private const val APPROVAL_NOTIFICATION_ID_BASE = 0x4E46
 
-        private const val APPROVAL_TIMEOUT_MS = 60_000L
+        // Kept clearly inside the core's own 60 second backstop on this same wait. With
+        // equal deadlines an approval landing at the boundary could be denied by the
+        // core after this side had already authorized the client, so this side has to
+        // be the one that decides.
+        internal const val APPROVAL_TIMEOUT_MS = 55_000L
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
 
@@ -430,7 +434,14 @@ class BunkerService : Service() {
                     // connect is not persisted as an authorized client. Authorization is driven
                     // by an explicit assertion rather than the callback merely having fired.
                     if (shouldPersistConnectAuthorization(authorization)) {
-                        authorizeClient(pubkey, safeName, safeRelays)
+                        // A connect the user approved at a prompt lifts an earlier revocation;
+                        // a matched secret alone does not.
+                        authorizeClient(
+                            pubkey,
+                            safeName,
+                            safeRelays,
+                            clearDenylist = authorization == ConnectAuthorization.USER_APPROVED
+                        )
                     } else {
                         if (BuildConfig.DEBUG) Log.w(TAG, "Bunker: not persisting auto-approved connect ${pubkey.take(8)}")
                         logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, safeName.ifBlank { pubkey.take(8) }, "connect not persisted (auto-approved)")
@@ -634,7 +645,6 @@ class BunkerService : Service() {
             return REJECTED
         }
 
-        val mobile = keepMobileRef
         val pk = clientPubkey.lowercase()
         val denylisted = runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)
         val isAuthorized = isClientAuthorized(
@@ -688,13 +698,10 @@ class BunkerService : Service() {
             return REJECTED
         }
 
-        val result = resultRef.get() ?: REJECTED
-        if (result.approved && isConnectRequest && mobile != null) {
-            authorizeClient(clientPubkey, clearDenylist = true)
-            if (BuildConfig.DEBUG) Log.d(TAG, "Authorized new client: ${truncatePubkey(clientPubkey)}")
-        }
-
-        return result
+        // A connect approval is not persisted here: the core can still refuse the connect
+        // after this returns, at its own deadline or on its own checks. onConnect reports
+        // the connects it accepted, and persists them.
+        return resultRef.get() ?: REJECTED
     }
 
     private fun startApprovalActivity(requestId: String, request: BunkerApprovalRequest, isConnectRequest: Boolean) {
