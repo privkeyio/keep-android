@@ -654,9 +654,12 @@ class KeepMobileApp : Application() {
     fun onLiveNodeDropped() {
         liveNode.dropped()
         mainHandler.post {
-            liveState = null
-            // The drop discards the node's pending requests without a state callback.
-            io.privkey.keep.service.CosignNotifier.update(applicationContext, emptyList())
+            // Not over a node an initialize has built since this drop.
+            if (!liveNode.isLive()) {
+                liveState = null
+                // The drop discards the node's pending requests without a state callback.
+                io.privkey.keep.service.CosignNotifier.update(applicationContext, emptyList())
+            }
         }
     }
 

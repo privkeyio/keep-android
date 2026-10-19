@@ -127,17 +127,23 @@ internal class AccountActions(
      * and a running bunker would keep serving the previous one. Compared rather than
      * assumed, so a call that switched and then failed is still cleaned up, while a
      * failed attempt that changed nothing, or a first account, wipes nothing. A pointer or
-     * share list that cannot be read counts as a change.
+     * share list that cannot be read counts as a change. A store that succeeded also
+     * reports the core's node drop.
      */
     private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
         val before = withContext(Dispatchers.IO) {
             val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
             hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
         }
+        var stored = false
         try {
-            return withContext(Dispatchers.IO) { store() }
+            return withContext(Dispatchers.IO) { store().also { stored = true } }
         } finally {
             withContext(NonCancellable) {
+                // Here rather than at the caller: a cancellation that lands once the store
+                // has returned would skip the caller's code, and the core has already
+                // dropped the node.
+                if (stored) onLiveNodeDropped()
                 val (hadShare, activeBefore) = before
                 val activeAfter = withContext(Dispatchers.IO) {
                     runCatching { storage.getActiveShareKey() }.getOrNull()
@@ -591,7 +597,6 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
-                    onLiveNodeDropped()
                     finished.set(true)
                     postState(CreateGroupState.Success(result.name, result.groupPubkey))
                     try {
@@ -754,7 +759,6 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
-                    onLiveNodeDropped()
                     runCatching { refreshAccountState() }
                     onResult(info)
                 } catch (e: Exception) {
@@ -948,7 +952,6 @@ internal class AccountActions(
                                 storage.clearRequestIdContext()
                             }
                         }
-                        onLiveNodeDropped()
                         onImportStateChanged(ImportState.Success(result.name, result.groupPubkey))
                         try {
                             refreshAccountState()
