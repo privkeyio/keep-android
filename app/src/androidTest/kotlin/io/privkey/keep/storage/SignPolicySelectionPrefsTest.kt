@@ -5,9 +5,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.SignPolicyStore
+import io.privkey.keep.uniffi.StorageRead
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -69,9 +69,9 @@ class SignPolicySelectionPrefsTest {
 
     @Test
     fun migrationNeverResurrectsTheLegacySelectionAfterTheStoreIsLost() {
-        // The legacy value is kept on disk, and the encrypted-prefs layer reports an
-        // undecryptable value as absent, so gating the migration on "new value is
-        // absent" would re-run it and restore the old, possibly looser, selection.
+        // The legacy value is kept on disk, and a lost store reads as absent, so gating
+        // the migration on "new value is absent" alone would re-run it and restore the
+        // old, possibly looser, selection.
         // The one-shot marker must prevent that: losing the store falls back to
         // MANUAL (strictest), never back to the legacy AUTO.
         writeLegacyOrdinal(SignPolicy.AUTO.ordinal)
@@ -84,6 +84,26 @@ class SignPolicySelectionPrefsTest {
         context.deleteSharedPreferences(SELECTION_PREFS)
 
         assertEquals(SignPolicySelection.MANUAL, newStore().globalPolicy())
+    }
+
+    /**
+     * The migration copies only over a value that is not there. One that is stored but
+     * will not decrypt resolves to MANUAL, and reading it as absent would put the legacy
+     * selection, here a looser one, in its place.
+     */
+    @Test
+    fun migrationNeverCopiesOverAValueThatCannotBeRead() {
+        val storedName = writeAndFindStoredName(context, SELECTION_PREFS) {
+            SignPolicySelectionPrefs(context).save(GLOBAL_KEY, SignPolicySelection.BASIC.ordinal.toString())
+        }
+        corruptStoredValue(context, SELECTION_PREFS, storedName)
+        // As on an install that has not run the migration yet.
+        context.getSharedPreferences(SignPolicySelectionPrefs.MARKER_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().remove(SignPolicySelectionPrefs.MIGRATION_MARKER).commit()
+        writeLegacyOrdinal(SignPolicy.AUTO.ordinal)
+
+        assertEquals(SignPolicySelection.MANUAL, newStore().globalPolicy())
+        forgetWriteProbe(context, SELECTION_PREFS)
     }
 
     @Test
@@ -102,7 +122,7 @@ class SignPolicySelectionPrefsTest {
     fun noLegacyValueLeavesTheStoreUnsetAndDefaultsToManual() {
         val prefs = SignPolicySelectionPrefs(context)
 
-        assertNull(prefs.load(GLOBAL_KEY))
+        assertEquals(StorageRead.Absent, prefs.load(GLOBAL_KEY))
         assertEquals(SignPolicySelection.MANUAL, SignPolicyStore(prefs).globalPolicy())
     }
 
@@ -116,7 +136,7 @@ class SignPolicySelectionPrefsTest {
     @Test
     fun unreadableStoredValueFallsBackToManual() {
         // A value of the wrong type is what the pre-migration prefs file held; reading
-        // it must yield "unset" rather than throwing into the signing path.
+        // it must report a fault rather than throwing into the signing path.
         KeystoreEncryptedPrefs.create(context, SELECTION_PREFS)
             .edit()
             .putInt(GLOBAL_KEY, SignPolicy.AUTO.ordinal)
@@ -124,7 +144,7 @@ class SignPolicySelectionPrefsTest {
 
         val prefs = SignPolicySelectionPrefs(context)
 
-        assertNull(prefs.load(GLOBAL_KEY))
+        assertEquals(StorageRead.Unavailable, prefs.load(GLOBAL_KEY))
         assertEquals(SignPolicySelection.MANUAL, SignPolicyStore(prefs).globalPolicy())
     }
 
@@ -152,11 +172,53 @@ class SignPolicySelectionPrefsTest {
 
         prefs.remove(GLOBAL_KEY)
 
-        assertNull(prefs.load(GLOBAL_KEY))
+        assertEquals(StorageRead.Absent, prefs.load(GLOBAL_KEY))
         assertEquals(SignPolicySelection.MANUAL, SignPolicyStore(prefs).globalPolicy())
     }
 
+    /**
+     * An override that is stored but will not decrypt must not fall back to the global
+     * selection, which can be looser than the override the owner set. Reported as
+     * absent, it would: the core reads absent as "no override". Reported as
+     * unavailable, the core resolves it to MANUAL.
+     *
+     * Staged on disk, so this is the production backend's answer for a real
+     * undecryptable entry rather than a fake's.
+     */
+    @Test
+    fun anUndecryptableOverrideResolvesToManualRatherThanTheGlobal() {
+        newStore().setGlobalPolicy(SignPolicySelection.AUTO)
+        val storedName = writeAndFindStoredName(context, SELECTION_PREFS) {
+            newStore().setAppOverride(PKG, SignPolicySelection.BASIC)
+        }
+        corruptStoredValue(context, SELECTION_PREFS, storedName)
+
+        val store = newStore()
+        assertEquals(SignPolicySelection.MANUAL, store.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, store.effectivePolicy(PKG))
+        forgetWriteProbe(context, SELECTION_PREFS)
+    }
+
+    // The controls: a readable override wins over the global, and a package with no
+    // override gets the global, so the case above cannot pass on a store that answers
+    // MANUAL for everything.
+    @Test
+    fun aReadableOverrideWinsOverTheGlobal() {
+        newStore().setGlobalPolicy(SignPolicySelection.AUTO)
+        newStore().setAppOverride(PKG, SignPolicySelection.BASIC)
+
+        assertEquals(SignPolicySelection.BASIC, newStore().effectivePolicy(PKG))
+    }
+
+    @Test
+    fun aPackageWithNoOverrideGetsTheGlobal() {
+        newStore().setGlobalPolicy(SignPolicySelection.AUTO)
+
+        assertEquals(SignPolicySelection.AUTO, newStore().effectivePolicy(PKG))
+    }
+
     private companion object {
+        const val PKG = "com.test.app"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
         const val LEGACY_PREFS = "keep_sign_policy"
         const val GLOBAL_KEY = SignPolicySelectionPrefs.GLOBAL_POLICY_KEY

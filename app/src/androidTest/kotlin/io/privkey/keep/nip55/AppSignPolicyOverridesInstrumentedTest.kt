@@ -11,6 +11,7 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.SignPolicySelectionStorage
 import io.privkey.keep.uniffi.SignPolicyStore
+import io.privkey.keep.uniffi.StorageRead
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -814,12 +815,11 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     /**
-     * Why the marker rather than the absence check carries this. A core that reads as
-     * empty is indistinguishable from one whose value would not decrypt, and by the time
-     * a second run happens the core may durably hold the stricter Manual an unconfirmed
-     * write pinned while the row still holds the looser tier the user asked for. Copying
-     * the row again would then widen the app, so an attempted package is never copied
-     * twice whatever the core answers.
+     * Why the marker rather than the absence check carries this. By the time a second run
+     * happens the core may durably hold the stricter Manual an unconfirmed write pinned
+     * while the row still holds the looser tier the user asked for. Copying the row again
+     * would then widen the app, so an attempted package is never copied twice, even when
+     * the core answers that nothing is stored.
      */
     @Test
     fun anAttemptedPackageIsNotCopiedWhenTheCoreReadsAsEmpty() = runBlocking {
@@ -952,7 +952,8 @@ private class UncommittableStorage : SignPolicySelectionStorage {
 
     private val values = HashMap<String, String>()
 
-    override fun load(key: String): String? = values[key]
+    override fun load(key: String): StorageRead =
+        values[key]?.let { StorageRead.Found(it) } ?: StorageRead.Absent
 
     override fun save(key: String, value: String): Boolean {
         values[key] = value
@@ -976,7 +977,8 @@ private class UnremovableStorage(private val unremovablePackage: String) : SignP
 
     private val values = HashMap<String, String>()
 
-    override fun load(key: String): String? = values[key]
+    override fun load(key: String): StorageRead =
+        values[key]?.let { StorageRead.Found(it) } ?: StorageRead.Absent
 
     override fun save(key: String, value: String): Boolean {
         values[key] = value
@@ -991,16 +993,16 @@ private class UnremovableStorage(private val unremovablePackage: String) : SignP
 }
 
 /**
- * A backend whose reads all come back empty while its writes persist: the decrypt fault
- * the encrypted-prefs layer reports as an absent value, since it returns the default
- * when a value cannot be decrypted. Records what it was asked to store so a test can
- * tell a copy that was skipped from one that landed.
+ * A backend whose reads all come back absent while its writes persist, so a test can
+ * see what the migration does when the core answers that nothing is stored whatever it
+ * holds. Records what it was asked to store so a test can tell a copy that was skipped
+ * from one that landed.
  */
 private class UnreadableStorage : SignPolicySelectionStorage {
 
     val saved = mutableListOf<Pair<String, String>>()
 
-    override fun load(key: String): String? = null
+    override fun load(key: String): StorageRead = StorageRead.Absent
 
     override fun save(key: String, value: String): Boolean {
         saved += key to value

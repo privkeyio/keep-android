@@ -6,6 +6,7 @@ import android.util.Base64
 import android.util.Log
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.SignPolicySelectionStorage
+import io.privkey.keep.uniffi.StorageRead
 import java.security.MessageDigest
 
 private const val TAG = "SignPolicySelectionPrefs"
@@ -15,9 +16,11 @@ private const val TAG = "SignPolicySelectionPrefs"
  * The core owns the selection state and its precedence; Android only persists the
  * opaque key/value pairs.
  *
- * Every operation fails safe: a read error surfaces as "unset", which the core
- * resolves to `Manual`, the strictest tier. A storage fault must never propagate
- * into the signing path.
+ * Every operation fails safe. A value that is there but cannot be read reports
+ * [StorageRead.Unavailable], never [StorageRead.Absent]: an absent per-app override
+ * falls back to the global selection, which can be looser than the override the
+ * owner set, while an unavailable one resolves to `Manual`, the strictest tier. A
+ * storage fault must never propagate into the signing path.
  *
  * Uses its own prefs file. The legacy Kotlin store wrote `global_sign_policy` as an
  * Int into "keep_sign_policy", and the core reads that key as a String, so sharing
@@ -32,10 +35,17 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         migrateLegacyGlobalPolicy(context)
     }
 
-    override fun load(key: String): String? =
-        runCatching { prefs.getString(key, null) }
-            .onFailure { warn("load failed for $key", it) }
-            .getOrNull()
+    override fun load(key: String): StorageRead =
+        runCatching {
+            when (val read = prefs.readString(key)) {
+                is PrefRead.Found -> StorageRead.Found(read.value)
+                PrefRead.Absent -> StorageRead.Absent
+                PrefRead.Unreadable -> StorageRead.Unavailable
+            }
+        }.getOrElse {
+            warn("load failed for $key", it)
+            StorageRead.Unavailable
+        }
 
     // Both writes return the platform's own durable-write result. Reporting
     // whether the call threw would say nothing, since a commit can return false
@@ -59,11 +69,10 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
      * One-time copy of the global selection the deleted Kotlin store wrote as an Int.
      * The legacy key is left in place, so this stays non-destructive.
      *
-     * Gated on a persisted marker rather than on "is the new value absent". The
-     * encrypted-prefs layer returns the default when a value cannot be decrypted, so
-     * an unreadable store is indistinguishable from an unset one; gating on absence
-     * would re-run this after any such failure and resurrect the legacy selection,
-     * which may be LOOSER than what the user has chosen since. The marker is set
+     * Gated on a persisted marker rather than only on "is the new value absent". A store
+     * that was lost reads as absent, so gating on absence alone would re-run this after
+     * such a loss and resurrect the legacy selection, which may be LOOSER than what the
+     * user has chosen since. The marker is set
      * whether or not the copy succeeds, so this runs at most once: a failed copy
      * leaves the store unset, which the core resolves to `Manual`, the strictest
      * tier. Losing a selection that way costs the user a re-pick; resurrecting a
@@ -74,7 +83,9 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         if (markerPrefs.getBoolean(MIGRATION_MARKER, false)) return
 
         runCatching {
-            if (prefs.getString(GLOBAL_POLICY_KEY, null) == null) {
+            // Only over a value that is not there. One that is there but unreadable resolves
+            // to Manual, and copying the legacy selection over it could widen it.
+            if (prefs.readString(GLOBAL_POLICY_KEY) == PrefRead.Absent) {
                 val legacyPrefs = LegacyPrefsMigration.migrateIfNeeded(
                     context,
                     LEGACY_PREFS_NAME,
