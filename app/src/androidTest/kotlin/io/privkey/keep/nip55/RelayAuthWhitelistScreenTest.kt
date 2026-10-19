@@ -235,6 +235,21 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(resetText).assertDoesNotExist()
     }
 
+    // The empty case above also matches the screen before its read lands, since it opens
+    // on an empty list. A listed host appears only once the read has landed, so this is
+    // the readable control that cannot pass on the initial state.
+    @Test
+    fun aReadableListShowsItsHostsRatherThanAFault() {
+        RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
+        showScreen()
+
+        awaitText(STAGED_HOST)
+        compose.onNodeWithText(STAGED_HOST).assertIsDisplayed()
+        compose.onNodeWithText(unreadableText).assertDoesNotExist()
+        compose.onNodeWithText(emptyText).assertDoesNotExist()
+        compose.onNodeWithText(resetText).assertDoesNotExist()
+    }
+
     // Declining has to leave the list where it is. Without this, a confirmation that
     // deleted on either answer would pass every other case here.
     @Test
