@@ -87,7 +87,7 @@ class PinUnlockScreenUnreadableTest {
         }
     }
 
-    // A generous bound, since the CI emulator runs these at about twice local speed, and
+    // A generous bound, since the CI emulator runs these at about half local speed, and
     // waitUntil returns as soon as the condition holds, so it costs nothing on a pass.
     private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()

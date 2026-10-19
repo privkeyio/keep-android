@@ -47,10 +47,10 @@ class RelayAuthWhitelistScreenTest {
 
     // The v2 rule, not the classic one. The screen loads its list in a LaunchedEffect
     // with an IO hop, and the classic rule resumes such a continuation on the IO thread,
-    // so the screen's state was written off the main thread while the main thread could
-    // still be composing it. Now and then the update never showed: the read finished with
-    // the right answer and the screen stayed on its initial empty state. The v2 rule
-    // resumes on the main thread, as the app does.
+    // writing the screen's state off the main thread. Under it the update now and then
+    // never showed: the read finished with the right answer and the screen stayed on its
+    // initial empty state. The v2 rule resumes on the main thread, as the app does, and
+    // the failure has not recurred under it.
     @get:Rule
     val compose = createComposeRule()
 
@@ -114,21 +114,19 @@ class RelayAuthWhitelistScreenTest {
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
 
+    /** The store the screen under test holds, so a timeout can ask it directly. */
+    private var screenStore: RelayAuthWhitelistStore? = null
+
     /**
      * [gateReset] defaults to running the action, standing in for an auth factor that
      * was satisfied, so the cases below assert what the screen does after the gate
      * rather than what the gate does. Production supplies `requireAuthThen`.
      */
-    /** The store the screen under test holds, so a timeout can ask it directly. */
-    private var screenStore: RelayAuthWhitelistStore? = null
-
     private fun showScreen(gateReset: ((suspend () -> Unit) -> Unit)? = null) {
         compose.setContent {
             // Remembered, not rebuilt per recomposition: production hands this screen
             // the application's single store, and a fresh one each pass would give the
             // launched read and the button handlers different per-instance caches.
-            // Kept for the timeout report only. Created where it always was, inside the
-            // composition, so holding a reference does not change when it is built.
             val store = remember { RelayAuthWhitelistStore(context).also { screenStore = it } }
             val scope = rememberCoroutineScope()
             val satisfiedGate: (suspend () -> Unit) -> Unit = { action -> scope.launch { action() } }
@@ -142,7 +140,7 @@ class RelayAuthWhitelistScreenTest {
         }
     }
 
-    // A generous bound, since the CI emulator runs these at about twice local speed and
+    // A generous bound, since the CI emulator runs these at about half local speed and
     // waitUntil returns as soon as the text appears, so it costs nothing on a pass.
     private fun awaitText(text: String) = compose.waitUntil(timeoutMillis = AWAIT_MS) {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
@@ -151,13 +149,10 @@ class RelayAuthWhitelistScreenTest {
     /**
      * Waits for the unreadable state, and on a timeout fails with what was actually there.
      *
-     * A bare timeout gives nothing to act on. The report separates the layers
-     * that can fail: whether the damaged entry is still damaged in the process's copy of
-     * the file, what the screen's own store and a fresh store each answer now, and which
-     * state the screen is showing. The two stores disagreeing about one file is a fault
-     * in how a store instance comes to see it; both reporting the fault behind a screen
-     * showing something else is the screen; a rewritten entry is something else writing
-     * the file. It reads the copy the process holds in memory, not the physical file.
+     * The report says whether the damaged entry is still damaged in the process's copy
+     * of the file, what the screen's own store and a fresh store each answer now, and
+     * which state the screen is showing, so a failure points at the file, the store or
+     * the screen.
      */
     private fun awaitUnreadable(staged: Staged) {
         try {
@@ -167,11 +162,7 @@ class RelayAuthWhitelistScreenTest {
         }
     }
 
-    /**
-     * One store's answer for the list, in words. The screen's own store and a fresh one
-     * are both asked: if they disagree about the same file, the fault is in how a store
-     * instance comes to see the file, not in the file or the screen.
-     */
+    /** One store's answer for the list, in words. */
     private fun describeRead(store: RelayAuthWhitelistStore): String =
         runCatching { store.readHosts() }.fold(
             onSuccess = { read ->
@@ -223,8 +214,9 @@ class RelayAuthWhitelistScreenTest {
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
 
-    // The readable case, so the assertions above cannot pass on a screen that reports a
-    // fault whatever it reads.
+    // An empty list is reported as empty, not as a fault. This also matches the screen
+    // before its read lands, since it opens on an empty list, so the listed-host case
+    // below is the control that proves the read.
     @Test
     fun anEmptyListIsStillReportedAsEmpty() {
         showScreen()
@@ -235,9 +227,9 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(resetText).assertDoesNotExist()
     }
 
-    // The empty case above also matches the screen before its read lands, since it opens
-    // on an empty list. A listed host appears only once the read has landed, so this is
-    // the readable control that cannot pass on the initial state.
+    // The readable control. A listed host appears only once the read has landed, so the
+    // unreadable assertions above cannot pass on a screen that reports a fault whatever
+    // it reads.
     @Test
     fun aReadableListShowsItsHostsRatherThanAFault() {
         RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
