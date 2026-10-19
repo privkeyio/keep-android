@@ -5,6 +5,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.KeepMobile
 import org.junit.Assert.assertEquals
 import org.junit.AssumptionViolatedException
+import javax.crypto.Cipher
 
 object FrostSignTestSupport {
 
@@ -27,14 +28,8 @@ object FrostSignTestSupport {
                     "delete it. Manually clear the device before running this test."
             )
         }
-        val cipher = storage.getCipherForEncryption()
-        storage.setRequestIdContext(requestId)
-        storage.setPendingCipher(requestId, cipher)
-        try {
+        withCipher(storage, requestId, storage.getCipherForEncryption()) {
             mobile.importShare(exportData, FrostSignFixture.PASSPHRASE, "test")
-        } finally {
-            storage.clearRequestIdContext()
-            storage.clearPendingCipher(requestId)
         }
     }
 
@@ -43,11 +38,17 @@ object FrostSignTestSupport {
         storage: AndroidKeystoreStorage,
         requestId: String,
     ) {
-        val cipher = requireNotNull(storage.getCipherForDecryption()) { "decryption cipher must not be null" }
+        withCipher(storage, requestId, requireNotNull(storage.getCipherForDecryption()) { "decryption cipher must not be null" }) {
+            mobile.initialize(listOf(FrostSignFixture.RELAY))
+        }
+    }
+
+    /** Runs [block] with [cipher] staged as the keystore context the core reads for [requestId]. */
+    fun <T> withCipher(storage: AndroidKeystoreStorage, requestId: String, cipher: Cipher, block: () -> T): T {
         storage.setPendingCipher(requestId, cipher)
         storage.setRequestIdContext(requestId)
         try {
-            mobile.initialize(listOf(FrostSignFixture.RELAY))
+            return block()
         } finally {
             storage.clearRequestIdContext()
             storage.clearPendingCipher(requestId)
