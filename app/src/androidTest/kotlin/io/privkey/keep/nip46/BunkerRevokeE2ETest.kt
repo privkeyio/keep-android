@@ -8,6 +8,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -45,6 +48,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -76,6 +80,7 @@ class BunkerRevokeE2ETest {
     private val dir by lazy { File(context.filesDir, "bunker-e2e") }
     private val savedFile by lazy { File(context.filesDir, "bunker-e2e-saved.json") }
     private val clientsFile by lazy { File(context.filesDir, "bunker-e2e-clients.txt") }
+    private val testClients = mutableSetOf<String>()
     private val approvedClients = mutableSetOf<String>()
     private var requests = 0
     private var screen by mutableStateOf<Screen>(Screen.None)
@@ -162,6 +167,7 @@ class BunkerRevokeE2ETest {
             val c6 = newClient()
             assertOk(settled("connect", c6.secret, url3))
             awaitAuthorized(mobile, c6)
+            awaitStored(c6)
             screen = Screen.Disconnect(c6.pubkey)
             compose.waitUntil(30_000) { compose.onAllNodesWithText("Disconnect Client").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Disconnect Client").performScrollTo().performClick()
@@ -170,7 +176,29 @@ class BunkerRevokeE2ETest {
             assertRotated(url3, url4)
             assertTrue(Nip46ClientStore.isDenylisted(context, c6.pubkey))
             assertFalse(c6.pubkey in mobile.getBunkerConfig().authorizedClients)
+            assertNull("the client's stored entry must go", Nip46ClientStore.getClient(context, c6.pubkey))
             assertDead(url3, url4)
+
+            // Revoke All from the Bunker screen while the bunker is running.
+            val c7 = newClient()
+            val c8 = newClient()
+            for (c in listOf(c7, c8)) {
+                assertOk(settled("connect", c.secret, url4))
+                awaitAuthorized(mobile, c)
+                awaitStored(c)
+            }
+            screen = Screen.Bunker(3)
+            compose.waitUntil(30_000) { compose.onAllNodesWithText(truncateStr(c8.pubkey, 8u, 6u)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Revoke All").performScrollTo().performClick()
+            compose.onNode(hasText("Revoke All") and hasAnyAncestor(isDialog())).performClick()
+            val url5 = awaitRunning(previous = url4)
+            assertRotated(url4, url5)
+            for (c in listOf(c7, c8)) {
+                assertTrue(Nip46ClientStore.isDenylisted(context, c.pubkey))
+                assertFalse(c.pubkey in mobile.getBunkerConfig().authorizedClients)
+                assertNull("the client's stored entry must go", Nip46ClientStore.getClient(context, c.pubkey))
+            }
+            assertDead(url4, url5)
             passed = true
         } finally {
             screen = Screen.None
@@ -210,7 +238,7 @@ class BunkerRevokeE2ETest {
         }
         step("stop the bunker") { stopService() }
         step("rotate the bunker URL") { runBlocking { BunkerService.rotateBunkerCredentials(mobile) } }
-        failures += saved.restore(context, mobile, storage, extraDenylist = approvedClients)
+        failures += saved.restore(context, mobile, storage, testClients, approvedClients)
         step("delete the request files") { check(!dir.exists() || dir.deleteRecursively()) }
         if (failures.isEmpty()) step("delete the saved state") { check(savedFile.delete() && (!clientsFile.exists() || clientsFile.delete())) }
         return failures
@@ -228,8 +256,12 @@ class BunkerRevokeE2ETest {
             // The killed run left the bunker enabled, so the app may have started it again.
             step("stop the bunker") { stopService() }
             step("rotate the bunker URL") { runBlocking { BunkerService.rotateBunkerCredentials(mobile) } }
-            val clients = if (clientsFile.exists()) clientsFile.readLines().filter { it.isNotBlank() }.toSet() else emptySet()
-            failures += SavedState.readFrom(savedFile).restore(context, mobile, storage, extraDenylist = clients)
+            val recorded = if (clientsFile.exists()) clientsFile.readLines().mapNotNull { line -> line.split(" ").takeIf { it.size == 2 } } else emptyList()
+            failures += SavedState.readFrom(savedFile).restore(
+                context, mobile, storage,
+                testClients = recorded.map { it[1] }.toSet(),
+                approvedClients = recorded.filter { it[0] == APPROVED }.map { it[1] }.toSet(),
+            )
             check(failures.isEmpty()) {
                 "could not restore the state an interrupted run saved (see README): ${failures.joinToString()}"
             }
@@ -283,6 +315,9 @@ class BunkerRevokeE2ETest {
         return url!!
     }
 
+    private fun awaitStored(client: Client) =
+        awaitTrue("the client ${client.pubkey.take(8)} is stored") { Nip46ClientStore.getClient(context, client.pubkey) != null }
+
     private fun awaitAuthorized(mobile: KeepMobile, client: Client) =
         awaitTrue("the connect from ${client.pubkey.take(8)} is authorized") { client.pubkey in mobile.getBunkerConfig().authorizedClients }
 
@@ -327,7 +362,7 @@ class BunkerRevokeE2ETest {
         // Only an approved client can hold a persisted grant; every other client only ever
         // saw URLs that are rotated away. Recorded first, so a killed run's recovery can
         // denylist it too.
-        clientsFile.appendText(pubkey + "\n")
+        clientsFile.appendText("$APPROVED $pubkey\n")
         approvedClients += pubkey
         BunkerService.respondToApproval(requestId, approved = true, clientPubkey = pubkey, remember = BunkerRememberDuration.FOREVER)
         val prompt = resumedApproval(pubkey) ?: return
@@ -340,6 +375,9 @@ class BunkerRevokeE2ETest {
         val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         val pubkey = probe("pubkey", secret)
         check(pubkey.matches(Regex("[0-9a-f]{64}"))) { "probe returned no pubkey: $pubkey" }
+        // Recorded before use, so a killed run's recovery knows it.
+        clientsFile.appendText("$CLIENT $pubkey\n")
+        testClients += pubkey
         return Client(secret, pubkey)
     }
 
@@ -401,7 +439,18 @@ class BunkerRevokeE2ETest {
         val marker: Boolean,
     ) {
         /** Restores each part on its own, so one failure does not skip the rest. Returns the failures. */
-        fun restore(context: Context, mobile: KeepMobile, storage: AndroidKeystoreStorage, extraDenylist: Set<String>): List<String> {
+        /**
+         * The denylist ends as the saved one plus every test client that was approved (and
+         * so may hold a grant). The other test clients, which only ever saw URLs that were
+         * rotated away, come off it again; no entry of the user's own is removed.
+         */
+        fun restore(
+            context: Context,
+            mobile: KeepMobile,
+            storage: AndroidKeystoreStorage,
+            testClients: Set<String>,
+            approvedClients: Set<String>,
+        ): List<String> {
             val failures = mutableListOf<String>()
             fun step(name: String, block: () -> Unit) = runCatching(block).onFailure {
                 Log.e(TAG, "restore step '$name' failed", it)
@@ -409,8 +458,10 @@ class BunkerRevokeE2ETest {
             }
             step("relay config") { mobile.saveRelayConfig(null, relays) }
             step("bunker config") { mobile.saveBunkerConfig(bunker) }
-            // Only adds: the run never removes an entry, and the user may have revoked more since.
-            step("denylist") { Nip46ClientStore.addAllToDenylist(context, denylist + extraDenylist) }
+            step("denylist") {
+                (testClients - approvedClients - denylist).forEach { Nip46ClientStore.removeFromDenylist(context, it) }
+                Nip46ClientStore.addAllToDenylist(context, denylist + approvedClients)
+            }
             step("rotation marker") {
                 check(context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
                     .edit().putBoolean(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES, marker).commit())
@@ -464,6 +515,8 @@ class BunkerRevokeE2ETest {
         const val MANUAL_ARG = "bunkerRevokeE2e"
         const val RELAY_ARG = "bunkerRelay"
         // The NIP-19 test vector key: public, used only for this temporary account.
+        const val CLIENT = "client"
+        const val APPROVED = "approved"
         const val THROWAWAY_NSEC = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5"
         const val THROWAWAY_GROUP = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e"
 

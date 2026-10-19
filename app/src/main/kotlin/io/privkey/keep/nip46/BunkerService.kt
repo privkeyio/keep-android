@@ -57,6 +57,18 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
+/**
+ * The clients a revoke covers: [pubkeys], or for Revoke All (null) every client the config,
+ * the authorized cache or a connect still being saved knows about. Lowercased, since pubkeys
+ * are compared lowercased everywhere else.
+ */
+internal fun revokedClientSet(
+    pubkeys: Collection<String>?,
+    configured: Collection<String>,
+    cached: Collection<String>,
+    pending: Collection<String>,
+): Set<String> = (pubkeys ?: (configured + cached + pending)).map { it.lowercase() }.toSet()
+
 class BunkerService : Service() {
 
     companion object {
@@ -151,21 +163,59 @@ class BunkerService : Service() {
         }
 
         /**
-         * Rotate the bunker credentials whether or not the service is running. Revoking
-         * a client needs this: the connect secret in the bunker URL is reusable, so a
-         * revoked client that kept the URL could connect again under a new key.
+         * The one revoke path for NIP-46 clients: [pubkeys], or every client when null.
+         * Denylists them, drops them from the app's lists and the engine, then rotates the
+         * bunker URL, since the connect secret in it is reusable and a revoked client that
+         * kept it could connect again under a new key. Returns the saved bunker config.
+         *
+         * Stopgap until the core owns revocation: a single core revoke that records the
+         * revocation, drops live and persisted grants and invalidates the connect secret
+         * replaces this sequence, and the Kotlin denylist with it.
+         */
+        internal suspend fun revokeClients(
+            context: Context,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+            pubkeys: Collection<String>?,
+        ): io.privkey.keep.uniffi.BunkerConfigInfo {
+            var revoked = emptySet<String>()
+            val saved = BunkerConfigStore.update(keepMobile) { config ->
+                val service = current()
+                revoked = revokedClientSet(
+                    pubkeys,
+                    config.authorizedClients,
+                    service?.authorizedClientsCache?.let { synchronized(it) { it.toList() } }.orEmpty(),
+                    service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty(),
+                )
+                // Out of pendingAuthSaves and denylisted before the config drops them, so neither the
+                // gate nor a connect still being saved sees them unblocked.
+                revoked.forEach { forgetPendingAuth(it) }
+                Nip46ClientStore.addAllToDenylist(context, revoked)
+                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() !in revoked })
+            }
+            revoked.forEach { pubkey ->
+                runCatching { Nip46ClientStore.removeClient(context, pubkey) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
+            }
+            if (pubkeys == null) revokeAllClientsInEngine() else revoked.forEach { revokeClientInEngine(it) }
+            rotateBunkerCredentials(keepMobile)
+            return saved
+        }
+
+        /**
+         * Rotate the bunker credentials whether or not the service is running.
          */
         internal suspend fun rotateBunkerCredentials(keepMobile: io.privkey.keep.uniffi.KeepMobile) {
             current()?.takeIf { it.serving }?.let { return it.rotateBunkerUrl() }
             BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
             // A service that began starting during the rotation may have loaded the old keys.
+            // Remove once the pinned core's rotation stops a bunker started from any handler.
             current()?.takeIf { it.serving }?.rotateBunkerUrl()
         }
 
         /**
          * Versions before revoke rotated the URL left every revoked client holding a
          * working connect secret, so rotate once if anything was ever revoked.
-         * Returns whether it rotated.
+         * Returns whether it rotated. Lives here only while the denylist does.
          */
         internal fun rotateOnceForEarlierRevokes(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile): Boolean {
             val markers = context.getSharedPreferences(BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
@@ -643,31 +693,37 @@ class BunkerService : Service() {
         pendingAuthSaves.add(pk)
         serviceScope.launch(Dispatchers.IO) {
             try {
-                if (clearDenylist) {
-                    runCatching { Nip46ClientStore.removeFromDenylist(this@BunkerService, pk) }
-                } else if (runCatching { Nip46ClientStore.isDenylisted(this@BunkerService, pk) }.getOrDefault(true)) {
+                val mobile = keepMobileRef ?: return@launch
+                val evicted = mutableListOf<String>()
+                var accepted = false
+                runCatching {
+                    BunkerConfigStore.update(mobile) { config ->
+                        // Decided under the same lock as revokeClients, which drops a client from
+                        // pendingAuthSaves when it revokes it, so a revoke that lands while this
+                        // connect is being saved is never undone by it.
+                        when {
+                            pk !in pendingAuthSaves -> return@update config
+                            clearDenylist -> Nip46ClientStore.removeFromDenylist(this@BunkerService, pk)
+                            runCatching { Nip46ClientStore.isDenylisted(this@BunkerService, pk) }.getOrDefault(true) -> return@update config
+                        }
+                        accepted = true
+                        if (config.authorizedClients.none { it.lowercase() == pk }) {
+                            val combined = config.authorizedClients + pk
+                            val capped = combined.takeLast(MAX_AUTHORIZED_CLIENTS)
+                            evicted.addAll(combined.dropLast(capped.size))
+                            io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
+                        } else {
+                            config
+                        }
+                    }
+                }.onSuccess {
+                    if (accepted) authorizedClientsCache.add(pk)
+                }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
+                }
+                if (!accepted) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring connect from revoked client")
                     return@launch
-                }
-                val mobile = keepMobileRef
-                val evicted = mutableListOf<String>()
-                if (mobile != null) {
-                    runCatching {
-                        BunkerConfigStore.update(mobile) { config ->
-                            if (config.authorizedClients.none { it.lowercase() == pk }) {
-                                val combined = config.authorizedClients + pk
-                                val capped = combined.takeLast(MAX_AUTHORIZED_CLIENTS)
-                                evicted.addAll(combined.dropLast(capped.size))
-                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
-                            } else {
-                                config
-                            }
-                        }
-                    }.onSuccess {
-                        authorizedClientsCache.add(pk)
-                    }.onFailure {
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
-                    }
                 }
                 evicted.forEach {
                     authorizedClientsCache.remove(it.lowercase())
@@ -757,7 +813,8 @@ class BunkerService : Service() {
         // after this returns, at its own deadline or on its own checks. onConnect reports
         // the connects it accepted, and persists them.
         val result = resultRef.get() ?: return REJECTED
-        // The client may have been revoked while its prompt was open.
+        // The client may have been revoked while its prompt was open. Stopgap until the core
+        // re-checks the client's permission after the prompt, before it signs.
         if (result.approved && !isConnectRequest && runCatching { Nip46ClientStore.isDenylisted(this, pk) }.getOrDefault(true)) {
             return REJECTED
         }

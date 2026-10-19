@@ -26,13 +26,11 @@ import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import io.privkey.keep.KeepMobileApp
-import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip46.Nip46ClientStore
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
-import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -410,16 +408,7 @@ private fun AppPermissionsListContent(
 
 private suspend fun revokeNip46Client(context: android.content.Context, pubkey: String) {
     val mobile = checkNotNull((context.applicationContext as? KeepMobileApp)?.getKeepMobile()) { "Keep not initialized" }
-    Nip46ClientStore.addToDenylist(context, pubkey)
-    runCatching { Nip46ClientStore.removeClient(context, pubkey) }
-        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
-    BunkerConfigStore.update(mobile) { config ->
-        BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
-    }
-    BunkerService.forgetPendingAuth(pubkey)
-    // The engine keeps the client's remembered kinds, which sign without reaching the denylist.
-    BunkerService.revokeClientInEngine(pubkey)
-    BunkerService.rotateBunkerCredentials(mobile)
+    BunkerService.revokeClients(context, mobile, listOf(pubkey))
 }
 
 @Composable

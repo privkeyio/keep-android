@@ -287,20 +287,16 @@ fun BunkerScreen(
                 scope.launch {
                     runCatching {
                         withContext(NonCancellable + Dispatchers.IO) {
-                            Nip46ClientStore.addToDenylist(context, pubkey)
-                            val saved = BunkerConfigStore.update(keepMobile) { config ->
-                                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
-                            }
-                            BunkerService.forgetPendingAuth(pubkey)
-                            BunkerService.revokeClientInEngine(pubkey)
-                            BunkerService.rotateBunkerCredentials(keepMobile)
-                            saved
+                            BunkerService.revokeClients(context, keepMobile, listOf(pubkey))
                         }
                     }.onSuccess { saved ->
                         authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastClientRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         if (it is CancellationException) throw it
+                        // A revoke can fail after it has changed the config, so show what is saved now.
+                        runCatching { withContext(Dispatchers.IO) { keepMobile.getBunkerConfig() } }
+                            .onSuccess { saved -> authorizedClients = saved.authorizedClients.toSet() }
                         Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -313,22 +309,18 @@ fun BunkerScreen(
         RevokeAllClientsDialog(
             onConfirm = {
                 scope.launch {
-                    val revoked = authorizedClients
                     runCatching {
                         withContext(NonCancellable + Dispatchers.IO) {
-                            Nip46ClientStore.addAllToDenylist(context, revoked)
-                            BunkerConfigStore.update(keepMobile) { config ->
-                                BunkerConfigInfo(config.enabled, emptyList())
-                            }
-                            revoked.forEach { BunkerService.forgetPendingAuth(it) }
-                            BunkerService.revokeAllClientsInEngine()
-                            BunkerService.rotateBunkerCredentials(keepMobile)
+                            BunkerService.revokeClients(context, keepMobile, null)
                         }
-                    }.onSuccess {
-                        authorizedClients = emptySet()
+                    }.onSuccess { saved ->
+                        authorizedClients = saved.authorizedClients.toSet()
                         Toast.makeText(context, toastAllClientsRevoked, Toast.LENGTH_SHORT).show()
                     }.onFailure {
                         if (it is CancellationException) throw it
+                        // A revoke can fail after it has changed the config, so show what is saved now.
+                        runCatching { withContext(Dispatchers.IO) { keepMobile.getBunkerConfig() } }
+                            .onSuccess { saved -> authorizedClients = saved.authorizedClients.toSet() }
                         Toast.makeText(context, toastRevokeAllFailed, Toast.LENGTH_SHORT).show()
                     }
                 }
