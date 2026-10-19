@@ -784,7 +784,7 @@ class Nip55Activity : FragmentActivity() {
         val mobile = app.getKeepMobile() ?: return "No key is stored in Keep"
         if (!mobile.hasShare()) return "No key is stored in Keep"
 
-        if (app.liveState != null) return null
+        if (app.isNodeLive()) return null
 
         BiometricHelper.requireBiometricReady(this, biometricHelper.checkBiometricStatus())
 

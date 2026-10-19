@@ -5,9 +5,10 @@ import io.privkey.keep.uniffi.nip55NormalizeRelayHost
 
 /**
  * Global allowlist of relay hosts for NIP-42 (kind 22242) authentication. When the
- * list is non-empty it acts as a hard gate: a 22242 request whose relay is listed is
- * auto-accepted, one whose relay is not listed is auto-rejected, and an empty list
- * defers to normal per-app grant resolution. Entries are stored normalized (via the
+ * list is non-empty it acts as a hard gate: a 22242 request whose relay is not listed
+ * is auto-rejected, one whose relay is listed goes on to normal per-app grant
+ * resolution, and so does every request when the list is empty. Listing a relay never
+ * authorizes signing on its own. Entries are stored normalized (via the
  * Rust `nip55_normalize_relay_host`) so they compare consistently with request relays.
  */
 class RelayAuthWhitelistStore(context: Context) {

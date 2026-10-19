@@ -166,7 +166,7 @@ class UnreadableReadGuardTest {
         assertEquals("relay.example.com", repaired.add("wss://relay.example.com"))
         assertEquals(
             "and the gate works again afterwards",
-            Nip55RelayAuthGate.AUTO_ACCEPT,
+            Nip55RelayAuthGate.WHITELISTED,
             evaluateRelayAuthGate(repaired, EVENT_22242).first
         )
         forgetWriteProbe(context, WHITELIST_PREFS)

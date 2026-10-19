@@ -18,6 +18,7 @@ import io.privkey.keep.uniffi.ShareInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -47,6 +48,15 @@ sealed class CreateGroupState {
     data class Error(val message: String) : CreateGroupState()
 }
 
+/**
+ * Whether storing a share replaced the account that was active before it. There is no
+ * previous account to clean up after when nothing was stored before; otherwise any change
+ * of the active pointer is one, and a pointer that cannot be read afterwards counts as a
+ * change rather than as proof that nothing moved.
+ */
+internal fun storeSwitchedAccount(hadShare: Boolean, activeBefore: String?, activeAfter: String?): Boolean =
+    hadShare && (activeAfter == null || activeAfter != activeBefore)
+
 internal class AccountActions(
     private val keepMobile: KeepMobile,
     private val storage: AndroidKeystoreStorage,
@@ -55,6 +65,7 @@ internal class AccountActions(
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     private val onAccountSwitched: suspend () -> Unit,
     private val onAccountDeleted: suspend () -> Unit,
+    private val onLiveNodeDropped: () -> Unit,
     private val onStateChanged: (AccountState) -> Unit
 ) {
     data class AccountState(
@@ -102,9 +113,43 @@ internal class AccountActions(
                 } finally {
                     storage.clearRequestIdContext()
                 }
+                onLiveNodeDropped()
             }
         } finally {
             storage.clearPendingCipher(switchId)
+        }
+    }
+
+    /**
+     * Runs [store], a core call that stores a share and makes it the active one, on the IO
+     * dispatcher, and treats it as an account switch when it replaced another account.
+     * Without the switch cleanup the previous account's grants would apply to the new key
+     * and a running bunker would keep serving the previous one. Compared rather than
+     * assumed, so a call that switched and then failed is still cleaned up, while a
+     * failed attempt that changed nothing, or a first account, wipes nothing. A pointer or
+     * share list that cannot be read counts as a change. A store that succeeded also
+     * reports the core's node drop.
+     */
+    private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
+        val before = withContext(Dispatchers.IO) {
+            val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
+            hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
+        }
+        var stored = false
+        try {
+            return withContext(Dispatchers.IO) { store().also { stored = true } }
+        } finally {
+            withContext(NonCancellable) {
+                // Here rather than at the caller: a cancellation that lands once the store
+                // has returned would skip the caller's code, and the core has already
+                // dropped the node.
+                if (stored) onLiveNodeDropped()
+                val (hadShare, activeBefore) = before
+                val activeAfter = withContext(Dispatchers.IO) {
+                    runCatching { storage.getActiveShareKey() }.getOrNull()
+                }
+                if (storeSwitchedAccount(hadShare, activeBefore, activeAfter)) onAccountSwitched()
+            }
         }
     }
 
@@ -202,10 +247,24 @@ internal class AccountActions(
         ) {
             accountMutex.withLock {
                 val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-                val wasActive = account.groupPubkeyHex == activeAccountKey
+                // No pointer is treated as this account: the core builds its node from a
+                // share it resolves when none is set, so it may be this one.
+                val wasActive = activeAccountKey == null || account.groupPubkeyHex == activeAccountKey
+                if (wasActive) {
+                    // Before the delete, not after the follow-up switch prompt. The core's
+                    // teardown leaves a running bunker serving with the deleted share, and
+                    // this account's grants would otherwise stand until that prompt is
+                    // answered, which it may never be if the activity goes away first.
+                    onAccountSwitched()
+                }
                 try {
                     withContext(Dispatchers.IO) {
-                        keepMobile.deleteShareByKey(account.groupPubkeyHex)
+                        // The core drops its node whatever the delete returns.
+                        try {
+                            keepMobile.deleteShareByKey(account.groupPubkeyHex)
+                        } finally {
+                            onLiveNodeDropped()
+                        }
                         runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
                             .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
                         // Audit the deletion in the current chain. Deleting the active
@@ -215,6 +274,11 @@ internal class AccountActions(
                     }
                 } catch (e: Exception) {
                     logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)
+                    // A failed delete may still have removed the share's data, and for the
+                    // active account it cleared the active pointer first, so the screen has
+                    // to be re-read rather than left showing the account as it was.
+                    runCatching { refreshAccountState() }
+                        .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Refresh after failed delete failed: ${it::class.simpleName}") }
                     onDismiss()
                     return@withLock
                 }
@@ -525,7 +589,7 @@ internal class AccountActions(
                 try {
                     storage.setPendingCipher(requestId, cipher, timeoutMs = DKG_CIPHER_TIMEOUT_MS)
                     pendingSet = true
-                    val result = withContext(Dispatchers.IO) {
+                    val result = storingNewActiveShare {
                         storage.setRequestIdContext(requestId)
                         try {
                             keepMobile.frostRunDkg(config, name, passphrase, DKG_ROUND_TIMEOUT_SECS.toULong(), callback)
@@ -686,7 +750,7 @@ internal class AccountActions(
                     storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
                     pendingSet = true
                     storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
-                    val info = withContext(Dispatchers.IO) {
+                    val info = storingNewActiveShare {
                         storage.setRequestIdContext(requestId)
                         try {
                             // Vault-protected: the passphrase is stashed in the secret.
@@ -880,7 +944,7 @@ internal class AccountActions(
                     try {
                         storage.setPendingCipher(importId, cipher)
                         pendingSet = true
-                        val result = withContext(Dispatchers.IO) {
+                        val result = storingNewActiveShare {
                             storage.setRequestIdContext(importId)
                             try {
                                 apiCall()

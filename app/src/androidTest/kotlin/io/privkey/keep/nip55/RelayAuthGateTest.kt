@@ -135,13 +135,13 @@ class RelayAuthGateTest {
         assertEquals(emptyList<String>(), hosts)
     }
 
-    // The same relay, listed and readable, is accepted. Without this the test
+    // The same relay, listed and readable, is not rejected. Without this the test
     // above could pass on a gate that rejected everything.
     @Test
-    fun whitelistedRelayAutoAccepts() {
+    fun whitelistedRelayResolvesToWhitelisted() {
         store.add("relay.example.com")
         val (gate, host) = evaluateRelayAuthGate(store, event22242)
-        assertEquals(Nip55RelayAuthGate.AUTO_ACCEPT, gate)
+        assertEquals(Nip55RelayAuthGate.WHITELISTED, gate)
         assertEquals("relay.example.com", host)
     }
 

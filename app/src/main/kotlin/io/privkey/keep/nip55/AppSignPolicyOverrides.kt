@@ -84,9 +84,7 @@ object AppSignPolicyOverrides {
         // Neither side knows of one: the app is not pinned, so the global applies.
         if (fromRow == null && fromCore == null) return@runCatching null
         // Exactly one side knows of one, so a tier exists but which one is unknown: the
-        // row has not been migrated, or a write reached one store and not the other, or a
-        // read faulted (the prefs layer returns the default when a value cannot be
-        // decrypted, so unreadable is indistinguishable from absent). Resolve the
+        // row has not been migrated, or a write reached one store and not the other. Resolve the
         // strictest tier rather than the global, which may be looser than what the user
         // chose, and rather than the one side that did answer, which may be the stale one.
         if (fromRow == null || fromCore == null) return@runCatching SignPolicySelection.MANUAL
@@ -196,14 +194,13 @@ object AppSignPolicyOverrides {
      * Copies the row values into the core at startup, which is what moves a pinned app
      * from resolving Manual to resolving its chosen tier.
      *
-     * Gated on persisted markers in [markers] rather than on the core looking empty for a
-     * package. The encrypted-prefs layer returns the default when a value cannot be
-     * decrypted, so an unreadable tier is indistinguishable from an absent one, and a
-     * second run that read it as absent would copy the row's tier over a stricter one the
-     * core durably holds: `setOverride` pins Manual in the core when its write is
-     * unconfirmed while the row keeps the tier the user asked for, so core-stricter-than-
-     * row is a state this code produces deliberately. The absence check stays as the
-     * second line, but it is not what bounds this.
+     * Gated on persisted markers in [markers] rather than only on the core looking empty
+     * for a package. The core reports an unreadable tier as Manual rather than absent, so
+     * the absence check holds against that fault. The markers are still what bounds this,
+     * because a copy whose outcome is unknown must not be retried: `setOverride` pins
+     * Manual in the core when its write is unconfirmed while the row keeps the tier the
+     * user asked for, so core-stricter-than-row is a state this code produces
+     * deliberately, and a second copy would undo it.
      *
      * Each package's marker is written before its copy is attempted, and a package whose
      * marker cannot be persisted is skipped rather than copied unrecorded: an attempt that
@@ -220,12 +217,6 @@ object AppSignPolicyOverrides {
      * killed between the marker commit and the write, with no fault involved at all. A
      * two-phase in-progress marker would not buy anything, because in-progress is precisely
      * the unknown outcome that must not be retried.
-     *
-     * One widening window is left, and the markers do not close it: for a package no run
-     * has attempted yet, a core that reads as absent because its value would not decrypt
-     * gets the row's tier copied over whatever it durably holds, which an unconfirmed
-     * `setOverride` write may have left stricter. Closing that needs a store that can tell
-     * an absent value from an unreadable one.
      */
     suspend fun migrateLegacyOverrides(
         core: SignPolicyStore,
