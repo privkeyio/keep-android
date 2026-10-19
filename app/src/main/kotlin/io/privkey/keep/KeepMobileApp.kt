@@ -101,6 +101,7 @@ class KeepMobileApp : Application() {
 
     var liveState: KeepLiveState? by mutableStateOf(null)
         private set
+    private val liveNode = LiveNodeTracker()
 
     @Volatile
     private var pinMismatch: PinMismatchInfo? = null
@@ -412,7 +413,7 @@ class KeepMobileApp : Application() {
         val mobile = keepMobile
             ?: throw IllegalStateException("KeepMobile not initialized")
         initMutex.withLock {
-            if (liveState != null && mobile.getShareInfo() != null) return
+            if (isNodeLive() && mobile.getShareInfo() != null) return
 
             val relays = getActiveRelays().ifEmpty {
                 listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
@@ -475,6 +476,7 @@ class KeepMobileApp : Application() {
     }
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
+        val startedAt = liveNode.beginInit()
         val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
@@ -484,6 +486,7 @@ class KeepMobileApp : Application() {
         } else {
             mobile.initialize(relays)
         }
+        liveNode.built(startedAt)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
@@ -639,21 +642,51 @@ class KeepMobileApp : Application() {
         manager.register()
     }
 
+    /** Whether signing can use the node as it stands, rather than having to build one. */
+    fun isNodeLive(): Boolean = liveState != null && liveNode.isLive()
+
+    /**
+     * For the operations after which the core has dropped its live node; see
+     * [LiveNodeTracker]. No reconnect is attempted from here: building a node loads the
+     * share, which needs an authenticated cipher this has no way to get, so the next
+     * request that needs the node prompts for one and builds it.
+     */
+    fun onLiveNodeDropped() {
+        liveNode.dropped()
+        mainHandler.post {
+            liveState = null
+            // The drop discards the node's pending requests without a state callback.
+            io.privkey.keep.service.CosignNotifier.update(applicationContext, emptyList())
+        }
+    }
+
+    // The bunker keeps the pin set it started with, so a pin edit reaches it only through
+    // a restart. Starting the running service restarts its bunker under its own lock.
+    private fun onCertificatePinsChanged() {
+        onLiveNodeDropped()
+        val enabled = runCatching { keepMobile?.getBunkerConfig()?.enabled }.getOrNull() == true
+        if (enabled) BunkerService.start(this)
+    }
+
     fun clearCertificatePin(hostname: String) {
         runCatching { keepMobile?.clearCertificatePin(hostname) }
+            .onSuccess { if (it != null) onCertificatePinsChanged() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
+            .onSuccess { if (it != null) onCertificatePinsChanged() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
     fun stageCertificatePin(hostname: String, spkiHash: String): Boolean =
-        keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false
+        (keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false)
+            .also { if (it) onCertificatePinsChanged() }
 
     fun removeCertificatePin(hostname: String, spkiHash: String): CertPinRemoval? =
         keepMobile?.removeCertificatePinCompat(hostname, spkiHash)
+            ?.also { onCertificatePinsChanged() }
 
     fun dismissPinMismatch() {
         pinMismatch = null

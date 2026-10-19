@@ -547,6 +547,7 @@ fun MainScreen(
                     // best-effort audit; a failed append must not block deletion
                 }
             },
+            onLiveNodeDropped = { (appContext.applicationContext as? KeepMobileApp)?.onLiveNodeDropped() },
             onStateChanged = { state ->
                 hasShare = state.hasShare
                 shareInfo = state.shareInfo

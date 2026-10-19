@@ -55,6 +55,7 @@ internal class AccountActions(
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     private val onAccountSwitched: suspend () -> Unit,
     private val onAccountDeleted: suspend () -> Unit,
+    private val onLiveNodeDropped: () -> Unit,
     private val onStateChanged: (AccountState) -> Unit
 ) {
     data class AccountState(
@@ -102,6 +103,7 @@ internal class AccountActions(
                 } finally {
                     storage.clearRequestIdContext()
                 }
+                onLiveNodeDropped()
             }
         } finally {
             storage.clearPendingCipher(switchId)
@@ -202,10 +204,24 @@ internal class AccountActions(
         ) {
             accountMutex.withLock {
                 val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-                val wasActive = account.groupPubkeyHex == activeAccountKey
+                // No pointer is treated as this account: the core builds its node from a
+                // share it resolves when none is set, so it may be this one.
+                val wasActive = activeAccountKey == null || account.groupPubkeyHex == activeAccountKey
+                if (wasActive) {
+                    // Before the delete, not after the follow-up switch prompt. The core's
+                    // teardown leaves a running bunker serving with the deleted share, and
+                    // this account's grants would otherwise stand until that prompt is
+                    // answered, which it may never be if the activity goes away first.
+                    onAccountSwitched()
+                }
                 try {
                     withContext(Dispatchers.IO) {
-                        keepMobile.deleteShareByKey(account.groupPubkeyHex)
+                        // The core drops its node whatever the delete returns.
+                        try {
+                            keepMobile.deleteShareByKey(account.groupPubkeyHex)
+                        } finally {
+                            onLiveNodeDropped()
+                        }
                         runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
                             .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
                         // Audit the deletion in the current chain. Deleting the active
@@ -215,6 +231,11 @@ internal class AccountActions(
                     }
                 } catch (e: Exception) {
                     logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)
+                    // A failed delete may still have removed the share's data, and for the
+                    // active account it cleared the active pointer first, so the screen has
+                    // to be re-read rather than left showing the account as it was.
+                    runCatching { refreshAccountState() }
+                        .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Refresh after failed delete failed: ${it::class.simpleName}") }
                     onDismiss()
                     return@withLock
                 }
@@ -533,6 +554,7 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
+                    onLiveNodeDropped()
                     finished.set(true)
                     postState(CreateGroupState.Success(result.name, result.groupPubkey))
                     try {
@@ -695,6 +717,7 @@ internal class AccountActions(
                             storage.clearRequestIdContext()
                         }
                     }
+                    onLiveNodeDropped()
                     runCatching { refreshAccountState() }
                     onResult(info)
                 } catch (e: Exception) {
@@ -888,6 +911,7 @@ internal class AccountActions(
                                 storage.clearRequestIdContext()
                             }
                         }
+                        onLiveNodeDropped()
                         onImportStateChanged(ImportState.Success(result.name, result.groupPubkey))
                         try {
                             refreshAccountState()
