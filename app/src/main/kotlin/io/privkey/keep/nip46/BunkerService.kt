@@ -196,8 +196,13 @@ class BunkerService : Service() {
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
             }
-            if (pubkeys == null) revokeAllClientsInEngine() else revoked.forEach { revokeClientInEngine(it) }
-            rotateBunkerCredentials(keepMobile)
+            try {
+                if (pubkeys == null) revokeAllClientsInEngine() else revoked.forEach { revokeClientInEngine(it) }
+            } finally {
+                // The secret must change even if the engine revoke failed; the next start's
+                // sweep revokes any grant the engine still holds.
+                rotateBunkerCredentials(keepMobile)
+            }
             return saved
         }
 
