@@ -495,9 +495,9 @@ class KeepMobileApp : Application() {
         { context, mobile -> BunkerService.resetForAccountSwitch(context, mobile) }
 
     /**
-     * Clears the previous account's state. Returns false when the bunker could not be reset.
-     * With [stopIfBunkerResetFails] it then stops before wiping anything, and the caller must
-     * not change the account: the bunker's clients would act as the new one.
+     * Clears the previous account's state. Returns false when the bunker's revoke-all mark
+     * could not be saved. With [stopIfBunkerResetFails] it then stops before wiping anything,
+     * and the caller must not change the account: the bunker's clients would act as the new one.
      */
     suspend fun onAccountSwitched(stopIfBunkerResetFails: Boolean = false): Boolean {
         BunkerService.stop(this)
@@ -519,7 +519,7 @@ class KeepMobileApp : Application() {
                 runAccountSwitchCleanup("record bunker reset failure") {
                     eventLogStore?.log(
                         EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
-                        "The bunker was stopped and could not be reset, so the account was not changed; try again"
+                        "The bunker was stopped and could not be reset, so the account was not changed; its clients may need pairing again. Try again"
                     )
                 }
             }
@@ -542,11 +542,18 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
             // After the wipe, so it survives: the person has to know before turning the bunker on.
-            if (bunkerResetFailed || !bunkerResetComplete) {
+            if (bunkerResetFailed) {
                 runAccountSwitchCleanup("record bunker reset failure") {
                     eventLogStore?.log(
                         EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
-                        "The bunker could not be fully reset for this account; rotate the bunker URL before turning it on"
+                        "The bunker could not be reset for this account and may still allow what was approved under the previous one; leave it off and switch accounts again to retry"
+                    )
+                }
+            } else if (!bunkerResetComplete) {
+                runAccountSwitchCleanup("record partial bunker reset") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker",
+                        "The bunker was not fully reset for this account; the reset finishes when the bunker is next turned on"
                     )
                 }
             }
