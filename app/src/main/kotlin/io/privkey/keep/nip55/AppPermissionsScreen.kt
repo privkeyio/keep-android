@@ -26,16 +26,16 @@ import androidx.core.graphics.drawable.toBitmap
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.R
 import io.privkey.keep.KeepMobileApp
-import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.nip46.Nip46ClientStore
 import io.privkey.keep.storage.SignPolicy
 import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
-import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -185,7 +185,7 @@ private fun RevokeAllPermissionsDialog(
                 onClick = {
                     coroutineScope.launch {
                         try {
-                            withContext(Dispatchers.IO) {
+                            withContext(NonCancellable + Dispatchers.IO) {
                                 permissionStore.revokePermission(packageName)
                                 if (isNip46) {
                                     val pubkey = packageName.removePrefix("nip46:")
@@ -195,6 +195,7 @@ private fun RevokeAllPermissionsDialog(
                             onDismissDialog()
                             onDismissScreen()
                         } catch (e: Exception) {
+                            if (e is CancellationException) throw e
                             if (BuildConfig.DEBUG) Log.e("AppPermissions", "Revoke failed: ${e::class.simpleName}")
                             onDismissDialog()
                             Toast.makeText(context, toastRevokeFailed, Toast.LENGTH_SHORT).show()
@@ -406,19 +407,8 @@ private fun AppPermissionsListContent(
 }
 
 private suspend fun revokeNip46Client(context: android.content.Context, pubkey: String) {
-    runCatching { Nip46ClientStore.addToDenylist(context, pubkey) }
-        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to denylist NIP-46 client: ${it::class.simpleName}") }
-    runCatching { Nip46ClientStore.removeClient(context, pubkey) }
-        .onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to remove NIP-46 client: ${it::class.simpleName}") }
-    runCatching {
-        val mobile = (context.applicationContext as? KeepMobileApp)?.getKeepMobile()
-        if (mobile != null) {
-            BunkerConfigStore.update(mobile) { config ->
-                BunkerConfigInfo(config.enabled, config.authorizedClients.filter { it.lowercase() != pubkey.lowercase() })
-            }
-        }
-    }.onFailure { if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to revoke bunker client: ${it::class.simpleName}") }
-    BunkerService.forgetPendingAuth(pubkey)
+    val mobile = checkNotNull((context.applicationContext as? KeepMobileApp)?.getKeepMobile()) { "Keep not initialized" }
+    BunkerService.revokeClients(context, mobile, listOf(pubkey))
 }
 
 @Composable
