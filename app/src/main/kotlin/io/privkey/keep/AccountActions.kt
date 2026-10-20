@@ -68,7 +68,7 @@ internal class AccountActions(
     private val onAccountDeleted: suspend () -> Unit,
     private val onLiveNodeDropped: () -> Unit,
     private val onStateChanged: (AccountState) -> Unit,
-    private val markBunkerRevokeAhead: () -> (() -> Unit)? = { BunkerService.markRevokeAllAhead(appContext) }
+    private val markBunkerRevokeAhead: () -> (switched: Boolean) -> Unit = { BunkerService.markRevokeAllAhead(appContext) }
 ) {
     data class AccountState(
         val hasShare: Boolean,
@@ -134,14 +134,15 @@ internal class AccountActions(
      *
      * The bunker's revoke-all mark is saved before [store] runs, since nothing can stop the
      * switch once the core has made it; when the mark cannot be saved, [store] does not run.
-     * It is withdrawn when nothing switched.
+     * It becomes the switch's mark when the store switched and is withdrawn otherwise.
      */
     private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
         val before = withContext(Dispatchers.IO) {
             val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
             hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
         }
-        val withdrawMark = if (before.first) withContext(Dispatchers.IO) { markBunkerRevokeAhead() } else null
+        // Not cancellable: a cancel landing after the save would lose what finishes it.
+        val finishMark = if (before.first) withContext(NonCancellable + Dispatchers.IO) { markBunkerRevokeAhead() } else null
         var stored = false
         try {
             return withContext(Dispatchers.IO) { store().also { stored = true } }
@@ -155,12 +156,12 @@ internal class AccountActions(
                 val activeAfter = withContext(Dispatchers.IO) {
                     runCatching { storage.getActiveShareKey() }.getOrNull()
                 }
-                if (storeSwitchedAccount(hadShare, activeBefore, activeAfter)) {
-                    onAccountSwitched(false)
-                } else if (withdrawMark != null) {
-                    withContext(Dispatchers.IO) { runCatching(withdrawMark) }
+                val switched = storeSwitchedAccount(hadShare, activeBefore, activeAfter)
+                if (finishMark != null) {
+                    withContext(Dispatchers.IO) { runCatching { finishMark(switched) } }
                         .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Revoke mark withdraw failed: ${it::class.simpleName}") }
                 }
+                if (switched) onAccountSwitched(false)
             }
         }
     }

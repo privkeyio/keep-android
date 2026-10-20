@@ -6,7 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -78,27 +77,80 @@ class RevokeAllMarkTest {
     }
 
     @Test
-    fun aMarkSetAheadOfAChangeThatDidNotHappenIsWithdrawn() {
+    fun aStartDuringAnOpenChangeStillRevokes() {
         val mark = RevokeAllMark(prefs)
-        checkNotNull(mark.setAhead()).invoke()
+        mark.setAhead()
+        assertTrue(mark.isSet())
+    }
+
+    @Test
+    fun aChangeThatSwitchedKeepsTheMark() {
+        val mark = RevokeAllMark(prefs)
+        val seen = mark.requestsSoFar()
+        mark.setAhead()(true)
+        assertTrue(mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
+        assertFalse("a start that looked before the switch must not clear it", mark.clearIfUnchanged(seen) { true })
+    }
+
+    @Test
+    fun aChangeThatDidNotSwitchWithdrawsTheMark() {
+        val mark = RevokeAllMark(prefs)
+        mark.setAhead()(false)
         assertFalse(mark.isSet())
         assertFalse(RevokeAllMark(prefs).isSet())
     }
 
     @Test
-    fun aWithdrawLeavesAMarkThatWasAlreadyPending() {
+    fun aStartKeepsTheSavedMarkWhileAChangeIsOpen() {
         val mark = RevokeAllMark(prefs)
         mark.set()
-        assertNull(mark.setAhead())
+        val finish = mark.setAhead()
+        assertTrue(mark.clearIfUnchanged(mark.requestsSoFar()) { true })
+        assertTrue("the open change still needs the saved mark", RevokeAllMark(prefs).isSet())
+        finish(true)
         assertTrue(mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
     }
 
     @Test
-    fun aWithdrawLeavesAMarkSetAgainAfterIt() {
+    fun aChangeThatDidNotSwitchWithdrawsAMarkAStartAlreadyRevokedFor() {
         val mark = RevokeAllMark(prefs)
-        val withdraw = checkNotNull(mark.setAhead())
         mark.set()
-        withdraw()
+        val finish = mark.setAhead()
+        assertTrue(mark.clearIfUnchanged(mark.requestsSoFar()) { true })
+        finish(false)
+        assertFalse(mark.isSet())
+        assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun anOpenChangeKeepsTheMarkAnotherOneFinishedWithout() {
+        val mark = RevokeAllMark(prefs)
+        val first = mark.setAhead()
+        mark.setAhead()(false)
+        assertTrue(RevokeAllMark(prefs).isSet())
+        first(false)
+        assertFalse(mark.isSet())
+        assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aChangeThatDidNotSwitchLeavesAMarkThatWasAlreadyPending() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        mark.setAhead()(false)
+        assertTrue(mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aChangeThatDidNotSwitchLeavesAMarkSavedByAnEarlierProcess() {
+        RevokeAllMark(prefs).set()
+        val mark = RevokeAllMark(prefs)
+        val finish = mark.setAhead()
+        assertTrue(mark.isSet())
+        finish(false)
         assertTrue(mark.isSet())
         assertTrue(RevokeAllMark(prefs).isSet())
     }

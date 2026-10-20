@@ -282,7 +282,7 @@ class BunkerService : Service() {
             revokeAllMarkInstance ?: RevokeAllMark(markers(context.applicationContext)).also { revokeAllMarkInstance = it }
 
         /** Saves the revoke-all mark before a store that may replace the active account. */
-        internal fun markRevokeAllAhead(context: Context): (() -> Unit)? = revokeAllMark(context).setAhead()
+        internal fun markRevokeAllAhead(context: Context): (switched: Boolean) -> Unit = revokeAllMark(context).setAhead()
 
         /**
          * Rotate the bunker credentials whether or not the service is running.
@@ -652,27 +652,28 @@ class BunkerService : Service() {
                 return false
             }
 
-            // A revoke made while the engine was stopped could not drop the client's
-            // persisted grants, and this start has just restored them. Ceiling: one
-            // storage write per denylisted client on every start, and grants live until
-            // the sweep reaches them. Remove once the pinned core clears persisted grants
-            // on a revoke without a running bunker and drops them on rotation.
             try {
-                Nip46ClientStore.getDenylist(this)
-                    .filter { HEX_PUBKEY_REGEX.matches(it) }
-                    .forEach { handler.revokeClient(it) }
                 // An account switch dropped the previous account's clients; their remembered
-                // grants were restored by this start and go here. The revoke is a silent no-op
-                // once onDestroy has stopped the handler, and onDestroy clears serving first, so
-                // the mark is kept for the next start unless this one is still serving. Ceiling:
-                // the pinned core also reports success when it fails to save the emptied grants;
-                // a core whose revoke returns a result closes that.
+                // grants were restored by this start and go here, first, since they are live
+                // until then. The revoke is a silent no-op once onDestroy has stopped the
+                // handler, and onDestroy clears serving first, so the mark is kept for the next
+                // start unless this one is still serving. Ceiling: the pinned core also reports
+                // success when it fails to save the emptied grants; a core whose revoke returns
+                // a result closes that.
                 val mark = revokeAllMark(this)
                 val requestsSeen = mark.requestsSoFar()
                 if (mark.isSet()) {
                     handler.revokeAllClients()
                     mark.clearIfUnchanged(requestsSeen) { serving }
                 }
+                // A revoke made while the engine was stopped could not drop the client's
+                // persisted grants, and this start has just restored them. Ceiling: one
+                // storage write per denylisted client on every start, and grants live until
+                // the sweep reaches them. Remove once the pinned core clears persisted grants
+                // on a revoke without a running bunker and drops them on rotation.
+                Nip46ClientStore.getDenylist(this)
+                    .filter { HEX_PUBKEY_REGEX.matches(it) }
+                    .forEach { handler.revokeClient(it) }
             } catch (e: Exception) {
                 runCatching { handler.stopBunker() }
                 throw e

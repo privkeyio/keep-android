@@ -289,7 +289,11 @@ class BunkerRevokeE2ETest {
                 )
                 assertEquals(active, storage.getActiveShareKey())
                 // An import that stores nothing withdraws its mark, and the grants stay.
-                importThroughActions(mobile, storage, "nsec1bunkere2einvalid", realReset)
+                var savedAhead = false
+                importThroughActions(mobile, storage, "nsec1bunkere2einvalid", realReset) {
+                    BunkerService.markRevokeAllAhead(context).also { savedAhead = markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false) }
+                }
+                assertTrue("the import must save the mark before it runs", savedAhead)
                 assertFalse("an import that changed nothing must withdraw its mark", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
                 stopService()
                 BunkerService.start(context)
@@ -434,7 +438,7 @@ class BunkerRevokeE2ETest {
         mobile: KeepMobile,
         storage: AndroidKeystoreStorage,
         onAccountSwitched: suspend (Boolean) -> Boolean,
-        markBunkerRevokeAhead: () -> (() -> Unit)? = { BunkerService.markRevokeAllAhead(context) },
+        markBunkerRevokeAhead: () -> (Boolean) -> Unit = { BunkerService.markRevokeAllAhead(context) },
         action: (AccountActions, () -> Unit) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -466,7 +470,7 @@ class BunkerRevokeE2ETest {
         storage: AndroidKeystoreStorage,
         nsec: String,
         onAccountSwitched: suspend (Boolean) -> Boolean,
-        markBunkerRevokeAhead: () -> (() -> Unit)? = { BunkerService.markRevokeAllAhead(context) },
+        markBunkerRevokeAhead: () -> (Boolean) -> Unit = { BunkerService.markRevokeAllAhead(context) },
     ) = withAccountActions(mobile, storage, onAccountSwitched, markBunkerRevokeAhead) { actions, done ->
         actions.importNsec(nsec.toByteArray(), "bunker-e2e-import", storage.getCipherForEncryption()) { state ->
             if (state is ImportState.Success || state is ImportState.Error) done()
