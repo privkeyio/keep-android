@@ -219,7 +219,11 @@ class BunkerRevokeE2ETest {
                 val remembered = probeAsync("sign", c9.secret, url5, "1", "90")
                 approve(c9.pubkey)
                 assertOk(awaitProbe(remembered))
-                stopService()
+                // The app's own stop: a reset that fails wipes nothing. It also stops the
+                // bunker, which then serves again so the switch below has one to halt.
+                assertStoppedSwitchWipesNothing()
+                BunkerService.start(context)
+                assertEquals(url5, awaitRunning(previous = null))
                 val throwaway = THROWAWAY_GROUP
                 // The delete below must only ever be tried on the test's own account.
                 check(storage.getActiveShareKey() == throwaway) { "the throwaway account is not the active one" }
@@ -358,6 +362,26 @@ class BunkerRevokeE2ETest {
         compose.onNodeWithText("Revoke").performClick()
         // The row goes only after the revoke and its rotation both complete.
         compose.waitUntil(60_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty() }
+    }
+
+    private fun assertStoppedSwitchWipesNothing() {
+        val log = EventLogStore.getInstance(Nip55Database.getInstance(context))
+        val sentinel = "bunker-e2e sentinel ${System.nanoTime()}"
+        runBlocking { log.log(EventLogCategory.BUNKER, EventLogLevel.INFO, "bunker-e2e", sentinel) }
+        val realReset = app.resetBunkerForSwitch
+        app.resetBunkerForSwitch = { _, _ -> throw IllegalStateException("bunker-e2e: the reset fails") }
+        val result = try {
+            runBlocking { app.onAccountSwitched(true) }
+        } finally {
+            app.resetBunkerForSwitch = realReset
+        }
+        assertFalse("a reset that fails must be reported", result)
+        val entries = runBlocking { log.getRecent(200) }
+        assertTrue("a stopped switch must wipe nothing", entries.any { it.message == sentinel })
+        assertTrue(
+            "a stopped switch must say so",
+            entries.any { it.level == EventLogLevel.ERROR.name && it.message.startsWith("The bunker was turned off and could not be reset") },
+        )
     }
 
     private fun account(storage: AndroidKeystoreStorage, key: String) =

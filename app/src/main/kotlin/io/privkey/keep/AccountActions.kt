@@ -337,10 +337,11 @@ internal class AccountActions(
                             // activating the next account's key, so a signing request
                             // racing this switch cannot resolve an old grant against
                             // the new key (revoke-before-activate; see switchAccount).
-                            // Skipped like a failed activation when the bunker reset failed
-                            // (see switchAccount). The reset before the delete succeeded, so
-                            // with one account left, which is then in use anyway, this is safe.
-                            val bunkerReset = onAccountSwitched(true)
+                            // Not a stop: the account is already deleted, so the cleanup
+                            // runs whatever the bunker reset does. Activation still waits on
+                            // the reset (see switchAccount); with one account left, which is
+                            // then in use anyway, the reset before the delete already held.
+                            val bunkerReset = onAccountSwitched(false)
                             if (switchAuthed != null && bunkerReset) {
                                 try {
                                     activateShare(switchAuthed, nextAccount.groupPubkeyHex)

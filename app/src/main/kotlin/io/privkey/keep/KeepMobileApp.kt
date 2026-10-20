@@ -490,6 +490,10 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
+    @androidx.annotation.VisibleForTesting
+    internal var resetBunkerForSwitch: suspend (Context, KeepMobile) -> Unit =
+        { context, mobile -> BunkerService.resetForAccountSwitch(context, mobile) }
+
     /**
      * Clears the previous account's state. Returns false when the bunker could not be reset.
      * With [stopIfBunkerResetFails] it then stops before wiping anything, and the caller must
@@ -502,7 +506,7 @@ class KeepMobileApp : Application() {
             // First: the bunker's clients belong to the previous account; also turns it off.
             runAccountSwitchCleanup("reset bunker clients") {
                 try {
-                    keepMobile?.let { BunkerService.resetForAccountSwitch(this@KeepMobileApp, it) }
+                    keepMobile?.let { resetBunkerForSwitch(this@KeepMobileApp, it) }
                 } catch (e: Exception) {
                     if (e !is CancellationException) bunkerResetFailed = true
                     throw e
@@ -514,7 +518,7 @@ class KeepMobileApp : Application() {
                 runAccountSwitchCleanup("record bunker reset failure") {
                     eventLogStore?.log(
                         EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
-                        "The bunker could not be reset, so the account was not changed; try again"
+                        "The bunker was turned off and could not be reset, so the account was not changed; try again"
                     )
                 }
             }

@@ -10,8 +10,9 @@ import android.content.SharedPreferences
  *
  * Ceiling: a save that failed, or one a power cut rolled back, is lost when the process
  * ends, and the next start then restores the previous account's remembered grants. The
- * switch's rotation still keeps those clients out unless it failed too; an explicit switch
- * or delete stops on that failure, an import cannot. Goes with the start-time revoke.
+ * switch's rotation still keeps those clients out unless it failed or was rolled back too.
+ * A switch or delete of the active account stops when the save and the rotation both
+ * failed; an import cannot. Goes with the start-time revoke.
  */
 internal class RevokeAllMark(private val prefs: SharedPreferences) {
     private var pending = false
