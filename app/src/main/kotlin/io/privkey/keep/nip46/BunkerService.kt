@@ -281,6 +281,9 @@ class BunkerService : Service() {
         private fun revokeAllMark(context: Context): RevokeAllMark =
             revokeAllMarkInstance ?: RevokeAllMark(markers(context.applicationContext)).also { revokeAllMarkInstance = it }
 
+        /** Saves the revoke-all mark before a store that may replace the active account. */
+        internal fun markRevokeAllAhead(context: Context): (() -> Unit)? = revokeAllMark(context).setAhead()
+
         /**
          * Rotate the bunker credentials whether or not the service is running.
          */

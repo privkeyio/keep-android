@@ -24,6 +24,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import io.privkey.keep.AccountActions
+import io.privkey.keep.ImportState
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.toAccountInfo
 import io.privkey.keep.nip55.AppPermissionsScreen
@@ -269,6 +270,46 @@ class BunkerRevokeE2ETest {
                     settled("sign", c9.secret, url6, "1", "15"), c9.pubkey, restarted, reason = "Permission denied",
                 )
                 assertDead(url5, url6)
+
+                // Import over the active account: the core switches as it stores, so the mark
+                // that revokes the previous account's grants is saved before the store runs.
+                val c10 = newClient()
+                assertOk(settled("connect", c10.secret, url6))
+                awaitAuthorized(mobile, c10)
+                val rememberedHere = probeAsync("sign", c10.secret, url6, "1", "90")
+                approve(c10.pubkey)
+                assertOk(awaitProbe(rememberedHere))
+                val active = storage.getActiveShareKey()
+                val (thirdNsec, thirdAccount) = newTestAccount()
+                val realReset: suspend (Boolean) -> Boolean = { stop -> app.onAccountSwitched(stop) }
+                importThroughActions(mobile, storage, thirdNsec, realReset) { throw IllegalStateException("bunker-e2e: the mark fails") }
+                assertFalse(
+                    "an import must not run when the mark cannot be saved",
+                    storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == thirdAccount },
+                )
+                assertEquals(active, storage.getActiveShareKey())
+                // An import that stores nothing withdraws its mark, and the grants stay.
+                importThroughActions(mobile, storage, "nsec1bunkere2einvalid", realReset)
+                assertFalse("an import that changed nothing must withdraw its mark", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+                stopService()
+                BunkerService.start(context)
+                assertEquals("an import that changed nothing must not rotate the bunker", url6, awaitRunning(previous = null))
+                assertOk(settled("sign", c10.secret, url6, "1", "15"))
+                // A switching import whose reset then fails still revokes at the next start.
+                importThroughActions(mobile, storage, thirdNsec, onAccountSwitched = { false })
+                assertEquals("the import must activate the new account", thirdAccount, storage.getActiveShareKey())
+                assertTrue("the mark must be saved before the import switches", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-import-init")
+                stopService()
+                BunkerService.start(context)
+                val url7 = awaitRunning(previous = null)
+                assertRotated(url6, url7)
+                val imported = System.currentTimeMillis()
+                assertRefused(
+                    "a grant remembered under the account an import replaced must not sign as the new one",
+                    settled("sign", c10.secret, url7, "1", "15"), c10.pubkey, imported, reason = "Permission denied",
+                )
+                assertFalse("the mark is cleared once the grants are revoked", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
             }
             passed = true
         } finally {
@@ -393,6 +434,7 @@ class BunkerRevokeE2ETest {
         mobile: KeepMobile,
         storage: AndroidKeystoreStorage,
         onAccountSwitched: suspend (Boolean) -> Boolean,
+        markBunkerRevokeAhead: () -> (() -> Unit)? = { BunkerService.markRevokeAllAhead(context) },
         action: (AccountActions, () -> Unit) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -408,6 +450,7 @@ class BunkerRevokeE2ETest {
                 onAccountDeleted = {},
                 onLiveNodeDropped = {},
                 onStateChanged = {},
+                markBunkerRevokeAhead = markBunkerRevokeAhead,
             )
             storage.getActiveShareKey()?.let { actions.setCurrentRelays(mobile.getRelayConfig(it).frostRelays) }
             action(actions) { dismissed.complete(Unit) }
@@ -417,9 +460,22 @@ class BunkerRevokeE2ETest {
         }
     }
 
-    // A second account the test owns, for the account switch. Random, so it is never one of
-    // the device's own; recorded before use so cleanup and recovery delete it.
-    private fun importSecondAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage): String {
+    // Runs the app's own import, waiting for it to finish either way.
+    private fun importThroughActions(
+        mobile: KeepMobile,
+        storage: AndroidKeystoreStorage,
+        nsec: String,
+        onAccountSwitched: suspend (Boolean) -> Boolean,
+        markBunkerRevokeAhead: () -> (() -> Unit)? = { BunkerService.markRevokeAllAhead(context) },
+    ) = withAccountActions(mobile, storage, onAccountSwitched, markBunkerRevokeAhead) { actions, done ->
+        actions.importNsec(nsec.toByteArray(), "bunker-e2e-import", storage.getCipherForEncryption()) { state ->
+            if (state is ImportState.Success || state is ImportState.Error) done()
+        }
+    }
+
+    // An account the test owns, as its nsec and group key. Random, so it is never one of the
+    // device's own; recorded before use so cleanup and recovery delete it.
+    private fun newTestAccount(): Pair<String, String> {
         val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         val nsec = probe("nsec", secret)
         check(nsec.startsWith("nsec1")) { "probe returned no nsec: $nsec" }
@@ -427,6 +483,12 @@ class BunkerRevokeE2ETest {
         val expected = probe("pubkey", secret)
         clientsFile.appendText("$ACCOUNT $expected\n")
         testAccounts += expected
+        return nsec to expected
+    }
+
+    // A second account, for the account switch.
+    private fun importSecondAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage): String {
+        val (nsec, expected) = newTestAccount()
         val group = withCipher(storage, "bunker-e2e-import-second", storage.getCipherForEncryption()) {
             mobile.importNsec(nsec.toByteArray(), "bunker-e2e-second")
         }.groupPubkey

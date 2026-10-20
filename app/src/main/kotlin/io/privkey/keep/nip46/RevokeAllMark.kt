@@ -8,11 +8,11 @@ import android.content.SharedPreferences
  * every start in this process. A start clears it only if no switch set it again after the
  * start read it, since that switch's grants may postdate the revoke.
  *
- * A save that fails stops a switch or delete of the active account. Ceiling: an import
- * cannot be stopped, so there a failed save holds only until the process ends, and a power
- * cut can roll back a save that reported success. The next start then restores the previous
- * account's remembered grants, and the switch's rotation does not keep a client holding one
- * out, since the bunker key is public. Goes with the start-time revoke.
+ * A save that fails stops the change: a switch or delete of the active account, or a store
+ * that may replace it, which saves the mark before it runs. Ceiling: a power cut can roll
+ * back a save that reported success. The next start then restores the previous account's
+ * remembered grants, and the switch's rotation does not keep a client holding one out, since
+ * the bunker key is public. Goes with the start-time revoke.
  */
 internal class RevokeAllMark(private val prefs: SharedPreferences) {
     private var pending = false
@@ -25,6 +25,26 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
         check(prefs.edit().putBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, true).commit()) {
             "could not mark the grants for revocation"
         }
+    }
+
+    /**
+     * Sets the mark ahead of a change that may switch accounts. Returns a withdraw for when it
+     * did not, or null when a mark was already pending, since only a start may clear that one.
+     */
+    @Synchronized
+    fun setAhead(): (() -> Unit)? {
+        val wasSet = isSet()
+        set()
+        if (wasSet) return null
+        val token = requests
+        return { withdraw(token) }
+    }
+
+    @Synchronized
+    private fun withdraw(token: Int) {
+        if (requests != token) return
+        check(prefs.edit().remove(BunkerService.KEY_REVOKE_ALL_ON_START).commit()) { "could not withdraw the revoke-all mark" }
+        pending = false
     }
 
     @Synchronized

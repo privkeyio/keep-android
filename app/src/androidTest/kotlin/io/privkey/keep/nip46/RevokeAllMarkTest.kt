@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -68,5 +69,37 @@ class RevokeAllMarkTest {
         assertTrue(mark.clearIfUnchanged(mark.requestsSoFar()) { true })
         assertFalse(mark.isSet())
         assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aMarkSetAheadIsSavedBeforeTheChange() {
+        RevokeAllMark(prefs).setAhead()
+        assertTrue(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aMarkSetAheadOfAChangeThatDidNotHappenIsWithdrawn() {
+        val mark = RevokeAllMark(prefs)
+        checkNotNull(mark.setAhead()).invoke()
+        assertFalse(mark.isSet())
+        assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aWithdrawLeavesAMarkThatWasAlreadyPending() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        assertNull(mark.setAhead())
+        assertTrue(mark.isSet())
+    }
+
+    @Test
+    fun aWithdrawLeavesAMarkSetAgainAfterIt() {
+        val mark = RevokeAllMark(prefs)
+        val withdraw = checkNotNull(mark.setAhead())
+        mark.set()
+        withdraw()
+        assertTrue(mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
     }
 }
