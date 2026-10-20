@@ -141,8 +141,9 @@ internal class AccountActions(
             val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
             hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
         }
-        // Not cancellable: a cancel landing after the save would lose what finishes it.
-        val finishMark = if (before.first) withContext(NonCancellable + Dispatchers.IO) { markBunkerRevokeAhead() } else null
+        // Not cancellable: a cancel landing after the save would lose what finishes it. Nested,
+        // since a withContext that also changes dispatcher returns cancellably.
+        val finishMark = if (before.first) withContext(NonCancellable) { withContext(Dispatchers.IO) { markBunkerRevokeAhead() } } else null
         var stored = false
         try {
             return withContext(Dispatchers.IO) { store().also { stored = true } }

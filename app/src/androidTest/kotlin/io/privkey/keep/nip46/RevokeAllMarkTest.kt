@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -77,10 +78,25 @@ class RevokeAllMarkTest {
     }
 
     @Test
-    fun aStartDuringAnOpenChangeStillRevokes() {
+    fun aStartDuringAnOpenChangeRevokesAndKeepsTheMark() {
         val mark = RevokeAllMark(prefs)
         mark.setAhead()
+        val seen = mark.requestsSoFar()
         assertTrue(mark.isSet())
+        assertTrue(mark.clearIfUnchanged(seen) { true })
+        assertTrue("a later start revokes again while the change is open", mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aMarkThatCouldNotBeSavedAheadLeavesNothingBehind() {
+        var failing = true
+        val mark = RevokeAllMark(failingCommits(prefs) { failing })
+        assertThrows(IllegalStateException::class.java) { mark.setAhead() }
+        assertFalse(mark.isSet())
+        failing = false
+        mark.setAhead()(false)
+        assertFalse("a failed save must not leave a change open", mark.isSet())
     }
 
     @Test
@@ -153,5 +169,17 @@ class RevokeAllMarkTest {
         finish(false)
         assertTrue(mark.isSet())
         assertTrue(RevokeAllMark(prefs).isSet())
+    }
+
+    // A commit that fails as a disk write does: applied in memory, reported as not saved.
+    private fun failingCommits(prefs: SharedPreferences, failing: () -> Boolean) = object : SharedPreferences by prefs {
+        override fun edit(): SharedPreferences.Editor {
+            val editor = prefs.edit()
+            return object : SharedPreferences.Editor by editor {
+                override fun putBoolean(key: String?, value: Boolean): SharedPreferences.Editor = apply { editor.putBoolean(key, value) }
+                override fun remove(key: String?): SharedPreferences.Editor = apply { editor.remove(key) }
+                override fun commit(): Boolean = if (failing()) false.also { editor.apply() } else editor.commit()
+            }
+        }
     }
 }
