@@ -132,9 +132,10 @@ internal class AccountActions(
      * share list that cannot be read counts as a change. A store that succeeded also
      * reports the core's node drop.
      *
-     * The bunker's revoke-all mark is saved before [store] runs, since nothing can stop the
-     * switch once the core has made it; when the mark cannot be saved, [store] does not run.
-     * It becomes the switch's mark when the store switched and is withdrawn otherwise.
+     * When a share already exists, or that cannot be read, the bunker's revoke-all mark is
+     * saved before [store] runs, since nothing can stop the switch once the core has made it;
+     * when the mark cannot be saved, [store] does not run. It becomes the switch's mark when
+     * the store switched; otherwise it is withdrawn unless another change or switch needs it.
      */
     private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
         val before = withContext(Dispatchers.IO) {

@@ -171,6 +171,18 @@ class RevokeAllMarkTest {
         assertTrue(RevokeAllMark(prefs).isSet())
     }
 
+    @Test
+    fun aChangeFinishesOnlyOnce() {
+        val mark = RevokeAllMark(prefs)
+        val first = mark.setAhead()
+        val second = mark.setAhead()
+        first(false)
+        first(false)
+        assertTrue("a repeated finish must not close another open change", RevokeAllMark(prefs).isSet())
+        second(false)
+        assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
     // A commit that fails as a disk write does: applied in memory, reported as not saved.
     private fun failingCommits(prefs: SharedPreferences, failing: () -> Boolean) = object : SharedPreferences by prefs {
         override fun edit(): SharedPreferences.Editor {

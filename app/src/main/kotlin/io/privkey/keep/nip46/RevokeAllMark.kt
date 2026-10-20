@@ -1,6 +1,7 @@
 package io.privkey.keep.nip46
 
 import android.content.SharedPreferences
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The account-switch mark that makes the next bunker start revoke every remembered grant.
@@ -36,7 +37,8 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
 
     /**
      * Saves the mark ahead of a change that may switch accounts. Returns what the change calls
-     * once done, with whether it switched. Throws, leaving nothing open, when it is not saved.
+     * once done, with whether it switched; calls after the first do nothing. Throws, leaving
+     * nothing open, when it is not saved.
      */
     @Synchronized
     fun setAhead(): (switched: Boolean) -> Unit {
@@ -47,7 +49,8 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
             throw IllegalStateException("could not mark the grants for revocation")
         }
         open++
-        return { switched -> finishAhead(switched) }
+        val finished = AtomicBoolean(false)
+        return { switched -> if (finished.compareAndSet(false, true)) finishAhead(switched) }
     }
 
     @Synchronized
