@@ -491,7 +491,7 @@ class KeepMobileApp : Application() {
     }
 
     @androidx.annotation.VisibleForTesting
-    internal var resetBunkerForSwitch: suspend (Context, KeepMobile) -> Unit =
+    internal var resetBunkerForSwitch: suspend (Context, KeepMobile) -> Boolean =
         { context, mobile -> BunkerService.resetForAccountSwitch(context, mobile) }
 
     /**
@@ -502,11 +502,12 @@ class KeepMobileApp : Application() {
     suspend fun onAccountSwitched(stopIfBunkerResetFails: Boolean = false): Boolean {
         BunkerService.stop(this)
         var bunkerResetFailed = false
+        var bunkerResetComplete = true
         withContext(Dispatchers.IO) {
             // First: the bunker's clients belong to the previous account; also turns it off.
             runAccountSwitchCleanup("reset bunker clients") {
                 try {
-                    keepMobile?.let { resetBunkerForSwitch(this@KeepMobileApp, it) }
+                    keepMobile?.let { bunkerResetComplete = resetBunkerForSwitch(this@KeepMobileApp, it) }
                 } catch (e: Exception) {
                     if (e !is CancellationException) bunkerResetFailed = true
                     throw e
@@ -518,7 +519,7 @@ class KeepMobileApp : Application() {
                 runAccountSwitchCleanup("record bunker reset failure") {
                     eventLogStore?.log(
                         EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
-                        "The bunker was turned off and could not be reset, so the account was not changed; try again"
+                        "The bunker was stopped and could not be reset, so the account was not changed; try again"
                     )
                 }
             }
@@ -541,7 +542,7 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
             // After the wipe, so it survives: the person has to know before turning the bunker on.
-            if (bunkerResetFailed) {
+            if (bunkerResetFailed || !bunkerResetComplete) {
                 runAccountSwitchCleanup("record bunker reset failure") {
                     eventLogStore?.log(
                         EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",

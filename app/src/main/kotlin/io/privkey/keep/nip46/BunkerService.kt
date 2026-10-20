@@ -218,18 +218,18 @@ class BunkerService : Service() {
          * serves the old URL while the old grants are still loaded. Nothing is denylisted,
          * so a client can still be paired to the new account deliberately.
          *
-         * Throws only when neither the saved mark nor the rotation took effect: either one
-         * keeps the clients out, since a saved mark makes every start rotate first and revoke
-         * every grant, and a rotated URL is one they do not hold. A reset that cannot finish,
-         * such as one over an unreadable bunker config, then does not block every switch and
-         * delete for good.
+         * Throws when the mark could not be saved, since only it keeps the clients out for good:
+         * a start that finds it rotates first and then revokes every remembered grant. A rotated
+         * URL alone does not, because the bunker key is public and a restored grant needs no
+         * connect. Returns false when another step failed, which the mark still covers, so a
+         * reset over an unreadable bunker config does not block every switch and delete.
          *
          * Stopgap. The mark and its start-time revoke go once the pinned core revokes all
          * clients with no running bunker (keep a one-shot revoke for a mark left set by this
          * version). The turn-off, list clear and rotation go once the core keys the bunker
          * config by account. The Nip46ClientStore clear stays until that store is per account.
          */
-        internal suspend fun resetForAccountSwitch(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
+        internal suspend fun resetForAccountSwitch(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile): Boolean {
             // The stop the switch asked for is asynchronous: halt a running instance now, so a
             // start in flight either finishes before the mark exists or serves nothing.
             current()?.haltForAccountSwitch()
@@ -264,12 +264,13 @@ class BunkerService : Service() {
             // under the new one.
             pendingNostrConnectRequests.clear()
             // Standalone: the service is being stopped for the switch and must not restart.
-            val rotated = step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
+            step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
             // Again, now the config is off: a start asked for since the first halt read it on.
             stop(context)
             current()?.haltForAccountSwitch()
-            if (!marked && !rotated) throw failures.first().also { first -> failures.drop(1).forEach(first::addSuppressed) }
+            if (!marked) throw failures.first().also { first -> failures.drop(1).forEach(first::addSuppressed) }
             if (BuildConfig.DEBUG) failures.forEach { Log.w(TAG, "Account switch reset step failed: ${it::class.simpleName}") }
+            return failures.isEmpty()
         }
 
         private fun markers(context: Context) = context.getSharedPreferences(BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)

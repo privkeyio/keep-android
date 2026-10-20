@@ -380,7 +380,7 @@ class BunkerRevokeE2ETest {
         assertTrue("a stopped switch must wipe nothing", entries.any { it.message == sentinel })
         assertTrue(
             "a stopped switch must say so",
-            entries.any { it.level == EventLogLevel.ERROR.name && it.message.startsWith("The bunker was turned off and could not be reset") },
+            entries.any { it.level == EventLogLevel.ERROR.name && it.message.startsWith("The bunker was stopped and could not be reset") },
         )
     }
 
