@@ -228,7 +228,7 @@ class BunkerRevokeE2ETest {
                 // The delete below must only ever be tried on the test's own account.
                 check(storage.getActiveShareKey() == throwaway) { "the throwaway account is not the active one" }
                 var resetAsked = false
-                val failingReset: suspend (Boolean) -> Boolean = { stop -> resetAsked = stop; false }
+                val failingReset: suspend (Boolean) -> Boolean = { stop -> resetAsked = resetAsked || stop; false }
                 // A delete or a switch must stop when the bunker cannot be reset, wiping nothing.
                 withAccountActions(mobile, storage, failingReset) { actions, done -> actions.deleteAccount(account(storage, throwaway), done) }
                 assertTrue("the delete must ask to stop on a failed bunker reset", resetAsked)
