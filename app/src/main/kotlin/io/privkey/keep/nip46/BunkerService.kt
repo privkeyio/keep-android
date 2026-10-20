@@ -236,7 +236,18 @@ class BunkerService : Service() {
                     failures += e
                 }
             }
-            step { check(markers(context).edit().putBoolean(KEY_REVOKE_ALL_ON_START, true).commit()) { "could not mark the grants for revocation" } }
+            // Held in memory too, so a mark that could not be saved still applies to every
+            // start in this process. Ceiling: that write failing as well as the rotation, and
+            // the process ending before a start, leaves the old URL and grants in place. An
+            // explicit switch stops before activating when this throws (see onAccountSwitched);
+            // an import, or a delete that leaves one account, cannot.
+            step {
+                synchronized(revokeAllLock) {
+                    revokeAllRequests++
+                    revokeAllPending = true
+                    check(markers(context).edit().putBoolean(KEY_REVOKE_ALL_ON_START, true).commit()) { "could not mark the grants for revocation" }
+                }
+            }
             step {
                 BunkerConfigStore.update(keepMobile) {
                     // Inside the lock, so a connect save still queued behind it finds its
@@ -258,6 +269,15 @@ class BunkerService : Service() {
         }
 
         private fun markers(context: Context) = context.getSharedPreferences(BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
+
+        private val revokeAllLock = Any()
+        @Volatile private var revokeAllPending = false
+        // Guarded by revokeAllLock. A start clears the mark only if no switch marked it again
+        // after the start read it, since that switch's grants may postdate the revoke.
+        @Volatile private var revokeAllRequests = 0
+
+        private fun revokeAllMarked(context: Context) =
+            revokeAllPending || markers(context).getBoolean(KEY_REVOKE_ALL_ON_START, false)
 
         /**
          * Rotate the bunker credentials whether or not the service is running.
@@ -550,7 +570,7 @@ class BunkerService : Service() {
             bunkerHandler?.let { runCatching { it.stopBunker() } }
             // After an account switch, before anything serves: retries a rotation the switch
             // could not do, and keeps the old URL dead while the old grants are loaded.
-            if (markers(this).getBoolean(KEY_REVOKE_ALL_ON_START, false)) {
+            if (revokeAllMarked(this)) {
                 BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
             }
             if (rotateOnceForEarlierRevokes(this, keepMobile)) {
@@ -635,11 +655,14 @@ class BunkerService : Service() {
                 // the mark is kept for the next start unless this one is still serving. Ceiling:
                 // the pinned core also reports success when it fails to save the emptied grants;
                 // a core whose revoke returns a result closes that.
-                val markers = markers(this)
-                if (markers.getBoolean(KEY_REVOKE_ALL_ON_START, false)) {
+                val requestsSeen = revokeAllRequests
+                if (revokeAllMarked(this)) {
                     handler.revokeAllClients()
-                    if (serving) {
-                        check(markers.edit().remove(KEY_REVOKE_ALL_ON_START).commit()) { "could not clear the revoke-all mark" }
+                    synchronized(revokeAllLock) {
+                        if (serving && revokeAllRequests == requestsSeen) {
+                            check(markers(this).edit().remove(KEY_REVOKE_ALL_ON_START).commit()) { "could not clear the revoke-all mark" }
+                            revokeAllPending = false
+                        }
                     }
                 }
             } catch (e: Exception) {

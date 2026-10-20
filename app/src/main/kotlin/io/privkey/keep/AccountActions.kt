@@ -63,7 +63,7 @@ internal class AccountActions(
     private val coroutineScope: CoroutineScope,
     private val appContext: Context,
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
-    private val onAccountSwitched: suspend () -> Unit,
+    private val onAccountSwitched: suspend () -> Boolean,
     private val onAccountDeleted: suspend () -> Unit,
     private val onLiveNodeDropped: () -> Unit,
     private val onStateChanged: (AccountState) -> Unit
@@ -226,7 +226,9 @@ internal class AccountActions(
                     // the transition window fail-safe (no grants + old key -> the
                     // request re-prompts). onAccountSwitched clears state account-
                     // agnostically and does not depend on the new active share.
-                    onAccountSwitched()
+                    // A bunker that could not be reset would serve the previous account's
+                    // clients as this one, so the switch stops here, before activation.
+                    check(onAccountSwitched()) { "bunker reset failed" }
                     activateShare(authedCipher, account.groupPubkeyHex)
                     refreshAccountState()
                 } catch (e: Exception) {
@@ -329,8 +331,10 @@ internal class AccountActions(
                             // activating the next account's key, so a signing request
                             // racing this switch cannot resolve an old grant against
                             // the new key (revoke-before-activate; see switchAccount).
-                            onAccountSwitched()
-                            if (switchAuthed != null) {
+                            // Skipped like a failed activation when the bunker reset failed
+                            // (see switchAccount); the person then picks an account again.
+                            val bunkerReset = onAccountSwitched()
+                            if (switchAuthed != null && bunkerReset) {
                                 try {
                                     activateShare(switchAuthed, nextAccount.groupPubkeyHex)
                                 } catch (e: Exception) {

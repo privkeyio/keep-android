@@ -369,7 +369,7 @@ fun MainScreen(
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
     onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
-    onAccountSwitched: suspend () -> Unit = {}
+    onAccountSwitched: suspend () -> Boolean = { true }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE

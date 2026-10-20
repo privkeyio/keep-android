@@ -490,15 +490,16 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    suspend fun onAccountSwitched() {
+    /** Returns false when the bunker reset failed: the caller must not activate another account. */
+    suspend fun onAccountSwitched(): Boolean {
         connectionJob?.cancel()
         reconnectJob?.cancel()
         pinMismatch = null
         BunkerService.stop(this)
         DescriptorSessionManager.clearAll()
+        var bunkerResetFailed = false
         withContext(Dispatchers.IO) {
             // The bunker's clients belong to the previous account; also turns the bunker off.
-            var bunkerResetFailed = false
             runAccountSwitchCleanup("reset bunker clients") {
                 try {
                     keepMobile?.let { BunkerService.resetForAccountSwitch(this@KeepMobileApp, it) }
@@ -549,6 +550,7 @@ class KeepMobileApp : Application() {
                 )
             }
         }
+        return !bunkerResetFailed
     }
 
     /**
