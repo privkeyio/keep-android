@@ -220,10 +220,26 @@ class BunkerRevokeE2ETest {
                 approve(c9.pubkey)
                 assertOk(awaitProbe(remembered))
                 stopService()
-                assertSwitchStopsWhenResetFails(mobile, storage, secondAccount)
-                switchAccount(mobile, storage, secondAccount)
+                val throwaway = THROWAWAY_GROUP
+                // The delete below must only ever be tried on the test's own account.
+                check(storage.getActiveShareKey() == throwaway) { "the throwaway account is not the active one" }
+                var resetAsked = false
+                val failingReset: suspend (Boolean) -> Boolean = { stop -> resetAsked = stop; false }
+                // A delete or a switch must stop when the bunker cannot be reset, wiping nothing.
+                withAccountActions(mobile, storage, failingReset) { actions, done -> actions.deleteAccount(account(storage, throwaway), done) }
+                assertTrue("the delete must ask to stop on a failed bunker reset", resetAsked)
+                assertTrue("a failed bunker reset must stop the delete", storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == throwaway })
+                assertEquals(throwaway, storage.getActiveShareKey())
+                resetAsked = false
+                withAccountActions(mobile, storage, failingReset) { actions, done -> actions.switchAccount(account(storage, secondAccount), done) }
+                assertTrue("the switch must ask to stop on a failed bunker reset", resetAsked)
+                assertEquals("a failed bunker reset must stop the switch", throwaway, storage.getActiveShareKey())
+                // The app's own switch, in its own order: reset, wipe, then activate.
+                withAccountActions(mobile, storage, { stop -> app.onAccountSwitched(stop) }) { actions, done ->
+                    actions.switchAccount(account(storage, secondAccount), done)
+                }
+                assertEquals("the switch must activate the new account", secondAccount, storage.getActiveShareKey())
                 FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-switch-init")
-                assertTrue("the bunker reset must succeed", runBlocking { app.onAccountSwitched() })
                 val afterSwitch = mobile.getBunkerConfig()
                 assertFalse("the switch turns the bunker off", afterSwitch.enabled)
                 assertTrue("the switch drops the previous account's clients", afterSwitch.authorizedClients.isEmpty())
@@ -344,16 +360,19 @@ class BunkerRevokeE2ETest {
         compose.waitUntil(60_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty() }
     }
 
-    // A second account the test owns, for the account switch. Random, so it is never one of
-    // the device's own; recorded before use so cleanup and recovery delete it.
-    // Drives the app's own switch with a bunker reset that reports failure: the account in use
-    // must not change, or the previous account's bunker clients would act as the new one.
-    private fun assertSwitchStopsWhenResetFails(mobile: KeepMobile, storage: AndroidKeystoreStorage, target: String) {
-        val activeBefore = requireNotNull(storage.getActiveShareKey()) { "no active account" }
-        val account = storage.listAllShares().map { it.toAccountInfo() }.single { it.groupPubkeyHex == target }
+    private fun account(storage: AndroidKeystoreStorage, key: String) =
+        storage.listAllShares().map { it.toAccountInfo() }.single { it.groupPubkeyHex == key }
+
+    // Runs one of the app's account actions, the biometric prompt answered with the cipher it
+    // was given, and waits for the action to dismiss.
+    private fun withAccountActions(
+        mobile: KeepMobile,
+        storage: AndroidKeystoreStorage,
+        onAccountSwitched: suspend (Boolean) -> Boolean,
+        action: (AccountActions, () -> Unit) -> Unit,
+    ) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val dismissed = CompletableDeferred<Unit>()
-        var resetAsked = false
         try {
             val actions = AccountActions(
                 keepMobile = mobile,
@@ -361,21 +380,21 @@ class BunkerRevokeE2ETest {
                 coroutineScope = scope,
                 appContext = context,
                 onBiometricRequest = { _, _, cipher, onResult -> onResult(cipher) },
-                onAccountSwitched = { resetAsked = true; false },
+                onAccountSwitched = onAccountSwitched,
                 onAccountDeleted = {},
                 onLiveNodeDropped = {},
                 onStateChanged = {},
             )
-            actions.setCurrentRelays(mobile.getRelayConfig(activeBefore).frostRelays)
-            actions.switchAccount(account) { dismissed.complete(Unit) }
-            runBlocking { withTimeout(30_000) { dismissed.await() } }
+            storage.getActiveShareKey()?.let { actions.setCurrentRelays(mobile.getRelayConfig(it).frostRelays) }
+            action(actions) { dismissed.complete(Unit) }
+            runBlocking { withTimeout(60_000) { dismissed.await() } }
         } finally {
             scope.cancel()
         }
-        assertTrue("the switch must ask for the bunker reset", resetAsked)
-        assertEquals("a failed bunker reset must stop the switch", activeBefore, storage.getActiveShareKey())
     }
 
+    // A second account the test owns, for the account switch. Random, so it is never one of
+    // the device's own; recorded before use so cleanup and recovery delete it.
     private fun importSecondAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage): String {
         val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         val nsec = probe("nsec", secret)

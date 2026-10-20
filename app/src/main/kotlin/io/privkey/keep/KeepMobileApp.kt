@@ -490,16 +490,16 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    /** Returns false when the bunker reset failed: the caller must not activate another account. */
-    suspend fun onAccountSwitched(): Boolean {
-        connectionJob?.cancel()
-        reconnectJob?.cancel()
-        pinMismatch = null
+    /**
+     * Clears the previous account's state. Returns false when the bunker could not be reset.
+     * With [stopIfBunkerResetFails] it then stops before wiping anything, and the caller must
+     * not change the account: the bunker's clients would act as the new one.
+     */
+    suspend fun onAccountSwitched(stopIfBunkerResetFails: Boolean = false): Boolean {
         BunkerService.stop(this)
-        DescriptorSessionManager.clearAll()
         var bunkerResetFailed = false
         withContext(Dispatchers.IO) {
-            // The bunker's clients belong to the previous account; also turns the bunker off.
+            // First: the bunker's clients belong to the previous account; also turns it off.
             runAccountSwitchCleanup("reset bunker clients") {
                 try {
                     keepMobile?.let { BunkerService.resetForAccountSwitch(this@KeepMobileApp, it) }
@@ -508,6 +508,23 @@ class KeepMobileApp : Application() {
                     throw e
                 }
             }
+        }
+        if (bunkerResetFailed && stopIfBunkerResetFails) {
+            withContext(Dispatchers.IO) {
+                runAccountSwitchCleanup("record bunker reset failure") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
+                        "The bunker could not be reset, so the account was not changed; try again"
+                    )
+                }
+            }
+            return false
+        }
+        connectionJob?.cancel()
+        reconnectJob?.cancel()
+        pinMismatch = null
+        DescriptorSessionManager.clearAll()
+        withContext(Dispatchers.IO) {
             // Before the revoke: clearAllAppSettings enumerates permission callers to
             // find overrides whose mirror row is already gone, and revokeAllPermissions
             // empties that index.

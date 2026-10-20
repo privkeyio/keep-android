@@ -218,12 +218,18 @@ class BunkerService : Service() {
          * serves the old URL while the old grants are still loaded. Nothing is denylisted,
          * so a client can still be paired to the new account deliberately.
          *
+         * Throws when any step that keeps the clients out failed; the client display list is
+         * not one of them, since the bunker authorizes from its config.
+         *
          * Stopgap. The mark and its start-time revoke go once the pinned core revokes all
          * clients with no running bunker (keep a one-shot revoke for a mark left set by this
          * version). The turn-off, list clear and rotation go once the core keys the bunker
          * config by account. The Nip46ClientStore clear stays until that store is per account.
          */
         internal suspend fun resetForAccountSwitch(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
+            // The stop the switch asked for is asynchronous: halt a running instance now, so a
+            // start in flight either finishes before the mark exists or serves nothing.
+            current()?.haltForAccountSwitch()
             // Every step runs even if an earlier one failed, since each closes part of it. The
             // mark goes first: a reset cut short after it is finished by the next start.
             val failures = mutableListOf<Throwable>()
@@ -236,18 +242,7 @@ class BunkerService : Service() {
                     failures += e
                 }
             }
-            // Held in memory too, so a mark that could not be saved still applies to every
-            // start in this process. Ceiling: that write failing as well as the rotation, and
-            // the process ending before a start, leaves the old URL and grants in place. An
-            // explicit switch stops before activating when this throws (see onAccountSwitched);
-            // an import, or a delete that leaves one account, cannot.
-            step {
-                synchronized(revokeAllLock) {
-                    revokeAllRequests++
-                    revokeAllPending = true
-                    check(markers(context).edit().putBoolean(KEY_REVOKE_ALL_ON_START, true).commit()) { "could not mark the grants for revocation" }
-                }
-            }
+            step { revokeAllMark(context).set() }
             step {
                 BunkerConfigStore.update(keepMobile) {
                     // Inside the lock, so a connect save still queued behind it finds its
@@ -259,7 +254,8 @@ class BunkerService : Service() {
                     io.privkey.keep.uniffi.BunkerConfigInfo(false, emptyList())
                 }
             }
-            step { Nip46ClientStore.getClients(context).keys.forEach { Nip46ClientStore.removeClient(context, it) } }
+            runCatching { Nip46ClientStore.getClients(context).keys.forEach { Nip46ClientStore.removeClient(context, it) } }
+                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not clear the NIP-46 client list: ${it::class.simpleName}") }
             // A nostrconnect request approved under the previous account must not be answered
             // under the new one.
             pendingNostrConnectRequests.clear()
@@ -270,14 +266,11 @@ class BunkerService : Service() {
 
         private fun markers(context: Context) = context.getSharedPreferences(BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
 
-        private val revokeAllLock = Any()
-        @Volatile private var revokeAllPending = false
-        // Guarded by revokeAllLock. A start clears the mark only if no switch marked it again
-        // after the start read it, since that switch's grants may postdate the revoke.
-        @Volatile private var revokeAllRequests = 0
+        private var revokeAllMarkInstance: RevokeAllMark? = null
 
-        private fun revokeAllMarked(context: Context) =
-            revokeAllPending || markers(context).getBoolean(KEY_REVOKE_ALL_ON_START, false)
+        @Synchronized
+        private fun revokeAllMark(context: Context): RevokeAllMark =
+            revokeAllMarkInstance ?: RevokeAllMark(markers(context.applicationContext)).also { revokeAllMarkInstance = it }
 
         /**
          * Rotate the bunker credentials whether or not the service is running.
@@ -517,6 +510,11 @@ class BunkerService : Service() {
         }
     }
 
+    private suspend fun haltForAccountSwitch() = startStopMutex.withLock {
+        serving = false
+        bunkerHandler?.let { runCatching { it.stopBunker() } }
+    }
+
     /**
      * Rotate the bunker credentials so a previously distributed (possibly leaked)
      * bunker:// URL can no longer pair or sign, then restart the bunker to publish
@@ -570,7 +568,7 @@ class BunkerService : Service() {
             bunkerHandler?.let { runCatching { it.stopBunker() } }
             // After an account switch, before anything serves: retries a rotation the switch
             // could not do, and keeps the old URL dead while the old grants are loaded.
-            if (revokeAllMarked(this)) {
+            if (revokeAllMark(this).isSet()) {
                 BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
             }
             if (rotateOnceForEarlierRevokes(this, keepMobile)) {
@@ -655,15 +653,11 @@ class BunkerService : Service() {
                 // the mark is kept for the next start unless this one is still serving. Ceiling:
                 // the pinned core also reports success when it fails to save the emptied grants;
                 // a core whose revoke returns a result closes that.
-                val requestsSeen = revokeAllRequests
-                if (revokeAllMarked(this)) {
+                val mark = revokeAllMark(this)
+                val requestsSeen = mark.requestsSoFar()
+                if (mark.isSet()) {
                     handler.revokeAllClients()
-                    synchronized(revokeAllLock) {
-                        if (serving && revokeAllRequests == requestsSeen) {
-                            check(markers(this).edit().remove(KEY_REVOKE_ALL_ON_START).commit()) { "could not clear the revoke-all mark" }
-                            revokeAllPending = false
-                        }
-                    }
+                    mark.clearIfUnchanged(requestsSeen) { serving }
                 }
             } catch (e: Exception) {
                 runCatching { handler.stopBunker() }
