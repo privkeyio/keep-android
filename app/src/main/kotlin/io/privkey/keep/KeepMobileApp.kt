@@ -495,15 +495,18 @@ class KeepMobileApp : Application() {
         reconnectJob?.cancel()
         pinMismatch = null
         BunkerService.stop(this)
-        keepMobile?.let { mobile ->
-            runCatching {
-                BunkerConfigStore.update(mobile) { current ->
-                    BunkerConfigInfo(false, current.authorizedClients)
-                }
-            }
-        }
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
+            // The bunker's clients belong to the previous account; also turns the bunker off.
+            var bunkerResetFailed = false
+            runAccountSwitchCleanup("reset bunker clients") {
+                try {
+                    keepMobile?.let { BunkerService.resetForAccountSwitch(this@KeepMobileApp, it) }
+                } catch (e: Exception) {
+                    if (e !is CancellationException) bunkerResetFailed = true
+                    throw e
+                }
+            }
             // Before the revoke: clearAllAppSettings enumerates permission callers to
             // find overrides whose mirror row is already gone, and revokeAllPermissions
             // empties that index.
@@ -515,6 +518,15 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear auto-sign rate limits") { signingRateLimiter?.clearAll() }
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
+            // After the wipe, so it survives: the person has to know before turning the bunker on.
+            if (bunkerResetFailed) {
+                runAccountSwitchCleanup("record bunker reset failure") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
+                        "The bunker could not be fully reset for this account; rotate the bunker URL before turning it on"
+                    )
+                }
+            }
             // Genesis entry for the new account's fresh audit chain: the per-account wipe
             // above clears the prior trail, so record the activation itself here to keep
             // every account switch auditable (a switch is otherwise evidence-free).

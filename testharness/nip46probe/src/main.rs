@@ -2,6 +2,7 @@
 //! so client secrets and bunker URLs never appear on a command line:
 //!
 //!   pubkey  <client_secret_hex>
+//!   nsec    <secret_hex>        (bech32 form, for importing a test account)
 //!   connect <client_secret_hex> <bunker_url> [timeout_secs]
 //!   sign    <client_secret_hex> <bunker_url> <kind> [timeout_secs]
 //!
@@ -24,6 +25,7 @@ async fn main() {
     let timeout = |i: usize| args.get(i).map(|s| s.parse().expect("timeout")).unwrap_or(25);
     match args[0].as_str() {
         "pubkey" => println!("{}", keys.public_key().to_hex()),
+        "nsec" => println!("{}", keys.secret_key().to_bech32().expect("bech32")),
         "connect" => {
             let (signer, relays, secret) = bunker(&args[2]);
             let mut params = vec![signer.to_hex()];

@@ -93,6 +93,7 @@ class BunkerService : Service() {
         internal const val MAX_AUTHORIZED_CLIENTS = 100
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
+        internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
@@ -205,6 +206,58 @@ class BunkerService : Service() {
             }
             return saved
         }
+
+        /**
+         * Called on an account switch. The bunker's URL, its authorized clients and their
+         * remembered grants are all device-wide, so without this the clients paired under
+         * the previous account would act as the new one: requests reach the user under the
+         * new identity and remembered kinds sign with no prompt. Drops the clients, turns
+         * the bunker off, rotates the URL, and marks every remembered grant to be revoked
+         * on the next start, since revoking needs a running engine. A start that finds the
+         * mark rotates again first, so a rotation that failed here is retried and nothing
+         * serves the old URL while the old grants are still loaded. Nothing is denylisted,
+         * so a client can still be paired to the new account deliberately.
+         *
+         * Stopgap. The mark and its start-time revoke go once the pinned core revokes all
+         * clients with no running bunker (keep a one-shot revoke for a mark left set by this
+         * version). The turn-off, list clear and rotation go once the core keys the bunker
+         * config by account. The Nip46ClientStore clear stays until that store is per account.
+         */
+        internal suspend fun resetForAccountSwitch(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
+            // Every step runs even if an earlier one failed, since each closes part of it. The
+            // mark goes first: a reset cut short after it is finished by the next start.
+            val failures = mutableListOf<Throwable>()
+            suspend fun step(block: suspend () -> Unit) {
+                try {
+                    block()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failures += e
+                }
+            }
+            step { check(markers(context).edit().putBoolean(KEY_REVOKE_ALL_ON_START, true).commit()) { "could not mark the grants for revocation" } }
+            step {
+                BunkerConfigStore.update(keepMobile) {
+                    // Inside the lock, so a connect save still queued behind it finds its
+                    // client no longer pending and does not write it back (see authorizeClient).
+                    current()?.let { service ->
+                        service.authorizedClientsCache.clear()
+                        service.pendingAuthSaves.clear()
+                    }
+                    io.privkey.keep.uniffi.BunkerConfigInfo(false, emptyList())
+                }
+            }
+            step { Nip46ClientStore.getClients(context).keys.forEach { Nip46ClientStore.removeClient(context, it) } }
+            // A nostrconnect request approved under the previous account must not be answered
+            // under the new one.
+            pendingNostrConnectRequests.clear()
+            // Standalone: the service is being stopped for the switch and must not restart.
+            step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
+            failures.firstOrNull()?.let { first -> throw first.also { failures.drop(1).forEach(it::addSuppressed) } }
+        }
+
+        private fun markers(context: Context) = context.getSharedPreferences(BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
 
         /**
          * Rotate the bunker credentials whether or not the service is running.
@@ -495,6 +548,11 @@ class BunkerService : Service() {
             _status.value = BunkerStatus.STARTING
 
             bunkerHandler?.let { runCatching { it.stopBunker() } }
+            // After an account switch, before anything serves: retries a rotation the switch
+            // could not do, and keeps the old URL dead while the old grants are loaded.
+            if (markers(this).getBoolean(KEY_REVOKE_ALL_ON_START, false)) {
+                BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
+            }
             if (rotateOnceForEarlierRevokes(this, keepMobile)) {
                 logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker", "URL rotated because a client was revoked before this version; pair clients again")
             }
@@ -571,6 +629,19 @@ class BunkerService : Service() {
                 Nip46ClientStore.getDenylist(this)
                     .filter { HEX_PUBKEY_REGEX.matches(it) }
                     .forEach { handler.revokeClient(it) }
+                // An account switch dropped the previous account's clients; their remembered
+                // grants were restored by this start and go here. The revoke is a silent no-op
+                // once onDestroy has stopped the handler, and onDestroy clears serving first, so
+                // the mark is kept for the next start unless this one is still serving. Ceiling:
+                // the pinned core also reports success when it fails to save the emptied grants;
+                // a core whose revoke returns a result closes that.
+                val markers = markers(this)
+                if (markers.getBoolean(KEY_REVOKE_ALL_ON_START, false)) {
+                    handler.revokeAllClients()
+                    if (serving) {
+                        check(markers.edit().remove(KEY_REVOKE_ALL_ON_START).commit()) { "could not clear the revoke-all mark" }
+                    }
+                }
             } catch (e: Exception) {
                 runCatching { handler.stopBunker() }
                 throw e

@@ -28,9 +28,12 @@ while kill -0 "$instrumentation" 2>/dev/null; do
     # A probe that fails still answers, so the test reports it instead of waiting out its timeout.
     out="$(printf '%s\n' "$req" | NIP46PROBE_DEBUG=1 "$probe" 2>>"$probe_log" | tail -n 1)" || true
     [ -n "$out" ] || out="ERR probe failed, see $probe_log"
-    encoded="$(printf '%s' "$out" | base64 -w0)"
-    if on_device "echo $encoded | base64 -d > files/bunker-e2e/res-$n.tmp && mv files/bunker-e2e/res-$n.tmp files/bunker-e2e/res-$n"; then
-      echo "request $n: ${req%% *} -> ${out:0:120}"
+    # The reply goes to the device on stdin too, since some replies (an nsec) are secrets.
+    if printf '%s' "$out" | adb shell -T "run-as $pkg sh -c 'cat > files/bunker-e2e/res-$n.tmp && mv files/bunker-e2e/res-$n.tmp files/bunker-e2e/res-$n'"; then
+      case "$req" in
+        nsec\ *) echo "request $n: nsec -> (secret, not shown)" ;;
+        *) echo "request $n: ${req%% *} -> ${out:0:120}" ;;
+      esac
       n=$((n + 1))
     fi
   else
