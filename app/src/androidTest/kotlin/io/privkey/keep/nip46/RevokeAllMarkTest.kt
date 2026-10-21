@@ -183,6 +183,50 @@ class RevokeAllMarkTest {
         assertFalse(RevokeAllMark(prefs).isSet())
     }
 
+    @Test
+    fun aStartThatRevokedCleanlyClearsTheMark() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        var revoked = false
+        mark.revokeIfSet(revoke = { revoked = true }, serving = { true }, faultsSoFar = { 0L })
+        assertTrue(revoked)
+        assertFalse(mark.isSet())
+        assertFalse(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aStorageFaultDuringTheRevokeKeepsTheMark() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        var faults = 0L
+        mark.revokeIfSet(revoke = { faults++ }, serving = { true }, faultsSoFar = { faults })
+        assertTrue(mark.isSet())
+        assertTrue(RevokeAllMark(prefs).isSet())
+    }
+
+    @Test
+    fun aStartThatCannotCountFaultsKeepsTheMark() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        mark.revokeIfSet(revoke = {}, serving = { true }, faultsSoFar = { null })
+        assertTrue(mark.isSet())
+    }
+
+    @Test
+    fun aStartThatStoppedServingKeepsTheMarkAfterItsRevoke() {
+        val mark = RevokeAllMark(prefs)
+        mark.set()
+        mark.revokeIfSet(revoke = {}, serving = { false }, faultsSoFar = { 0L })
+        assertTrue(mark.isSet())
+    }
+
+    @Test
+    fun aStartWithNoMarkRevokesNothing() {
+        var revoked = false
+        RevokeAllMark(prefs).revokeIfSet(revoke = { revoked = true }, serving = { true }, faultsSoFar = { 0L })
+        assertFalse(revoked)
+    }
+
     // A commit that fails as a disk write does: applied in memory, reported as not saved.
     private fun failingCommits(prefs: SharedPreferences, failing: () -> Boolean) = object : SharedPreferences by prefs {
         override fun edit(): SharedPreferences.Editor {

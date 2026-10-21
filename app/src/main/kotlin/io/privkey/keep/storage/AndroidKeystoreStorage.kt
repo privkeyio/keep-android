@@ -255,8 +255,8 @@ class AndroidKeystoreStorage(
 
     /**
      * How many fallible storage calls have failed so far, an absence aside. Two reads that
-     * match show that none failed in between, which is how a caller tells that a core write
-     * whose own result it cannot see did not fail.
+     * match show that no storage call failed in between, which is how a caller tells that a
+     * core write whose own result it cannot see did not fail here.
      */
     fun faultsSoFar(): Long = faults.get()
 

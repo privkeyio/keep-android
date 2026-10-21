@@ -71,12 +71,25 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
     fun requestsSoFar(): Int = requests
 
     /**
-     * Clears the mark unless it was set again after [seen] was read, or [revokeHeld] says the
+     * A start's revoke: runs [revoke] when the mark is set, then clears it if the start is still
+     * [serving] and no storage call failed meanwhile, which [faultsSoFar] counts; null when it
+     * cannot be read. Not under the lock, since [revoke] blocks on the core.
+     */
+    fun revokeIfSet(revoke: () -> Unit, serving: () -> Boolean, faultsSoFar: () -> Long?) {
+        val seen = requestsSoFar()
+        if (!isSet()) return
+        val faultsBefore = faultsSoFar()
+        revoke()
+        clearIfUnchanged(seen) { serving() && faultsBefore != null && faultsSoFar() == faultsBefore }
+    }
+
+    /**
+     * Clears the mark unless it was set again after [seen] was read, or [revokeTook] says the
      * revoke may not have taken. The saved mark stays while a change is open.
      */
     @Synchronized
-    fun clearIfUnchanged(seen: Int, revokeHeld: () -> Boolean): Boolean {
-        if (requests != seen || !revokeHeld()) return false
+    fun clearIfUnchanged(seen: Int, revokeTook: () -> Boolean): Boolean {
+        if (requests != seen || !revokeTook()) return false
         if (open == 0) check(prefs.edit().remove(BunkerService.KEY_REVOKE_ALL_ON_START).commit()) { "could not clear the revoke-all mark" }
         pending = false
         return true

@@ -7,7 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class StorageFaultCountTest {
@@ -21,11 +20,18 @@ class StorageFaultCountTest {
     }
 
     @Test
+    fun aStorageErrorIsCounted() {
+        val before = storage.faultsSoFar()
+        // A share key outside a request has no cipher to use.
+        assertThrows(KeepMobileException.StorageException::class.java) { storage.loadShareByKey("fault_count_test") }
+        assertEquals(before + 1, storage.faultsSoFar())
+    }
+
+    @Test
     fun anAbsentRecordIsNotAFault() {
         val before = storage.faultsSoFar()
-        assertThrows(KeepMobileException.StorageNotFound::class.java) {
-            storage.loadShareByKey("__keep_fault_count_test_${UUID.randomUUID()}")
-        }
+        // Fixed, since each metadata record name gets its own Keystore key.
+        assertThrows(KeepMobileException.StorageNotFound::class.java) { storage.loadShareByKey("__keep_fault_count_test") }
         assertEquals(before, storage.faultsSoFar())
     }
 }
