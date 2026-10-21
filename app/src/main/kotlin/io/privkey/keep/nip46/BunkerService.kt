@@ -657,14 +657,16 @@ class BunkerService : Service() {
                 // grants were restored by this start and go here, first, since they are live
                 // until then. The revoke is a silent no-op once onDestroy has stopped the
                 // handler, and onDestroy clears serving first, so the mark is kept for the next
-                // start unless this one is still serving. Ceiling: the pinned core also reports
-                // success when it fails to save the emptied grants; a core whose revoke returns
-                // a result closes that.
+                // start unless this one is still serving. The pinned core also reports success
+                // when it could not save the emptied grants, so the mark stays unless no storage
+                // call failed meanwhile; remove that once the core's revoke returns a result.
                 val mark = revokeAllMark(this)
                 val requestsSeen = mark.requestsSoFar()
                 if (mark.isSet()) {
+                    val storage = (applicationContext as? KeepMobileApp)?.getStorage()
+                    val faultsBefore = storage?.faultsSoFar()
                     handler.revokeAllClients()
-                    mark.clearIfUnchanged(requestsSeen) { serving }
+                    mark.clearIfUnchanged(requestsSeen) { serving && storage != null && storage.faultsSoFar() == faultsBefore }
                 }
                 // A revoke made while the engine was stopped could not drop the client's
                 // persisted grants, and this start has just restored them. Ceiling: one

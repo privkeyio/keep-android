@@ -26,6 +26,7 @@ import java.security.ProviderException
 import java.security.spec.MGF1ParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -242,11 +243,22 @@ class AndroidKeystoreStorage(
         try {
             block()
         } catch (e: KeepMobileException) {
+            if (e !is KeepMobileException.StorageNotFound) faults.incrementAndGet()
             throw e
         } catch (e: Exception) {
+            faults.incrementAndGet()
             Log.e(TAG, "$what could not be completed: ${e::class.simpleName}")
             throw KeepMobileException.StorageException("$what failed: ${e::class.simpleName}")
         }
+
+    private val faults = AtomicLong()
+
+    /**
+     * How many fallible storage calls have failed so far, an absence aside. Two reads that
+     * match show that none failed in between, which is how a caller tells that a core write
+     * whose own result it cannot see did not fail.
+     */
+    fun faultsSoFar(): Long = faults.get()
 
     private fun isDkgSecretKey(key: String): Boolean = key == DKG_SECRET_STORAGE_KEY
 
