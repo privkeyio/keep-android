@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import android.util.Log
 import android.widget.Toast
+import io.privkey.keep.nip46.BunkerService
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgProgressCallback
@@ -63,10 +64,11 @@ internal class AccountActions(
     private val coroutineScope: CoroutineScope,
     private val appContext: Context,
     private val onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
-    private val onAccountSwitched: suspend () -> Unit,
+    private val onAccountSwitched: suspend (stopIfBunkerResetFails: Boolean) -> Boolean,
     private val onAccountDeleted: suspend () -> Unit,
     private val onLiveNodeDropped: () -> Unit,
-    private val onStateChanged: (AccountState) -> Unit
+    private val onStateChanged: (AccountState) -> Unit,
+    private val markBunkerRevokeAhead: () -> (switched: Boolean) -> Unit = { BunkerService.markRevokeAllAhead(appContext) }
 ) {
     data class AccountState(
         val hasShare: Boolean,
@@ -129,12 +131,20 @@ internal class AccountActions(
      * failed attempt that changed nothing, or a first account, wipes nothing. A pointer or
      * share list that cannot be read counts as a change. A store that succeeded also
      * reports the core's node drop.
+     *
+     * When a share already exists, or that cannot be read, the bunker's revoke-all mark is
+     * saved before [store] runs, since nothing can stop the switch once the core has made it;
+     * when the mark cannot be saved, [store] does not run. It becomes the switch's mark when
+     * the store switched; otherwise it is withdrawn unless another change or switch needs it.
      */
     private suspend fun <T> storingNewActiveShare(store: suspend () -> T): T {
         val before = withContext(Dispatchers.IO) {
             val hadShare = runCatching { keepMobile.hasShare() }.getOrDefault(true)
             hadShare to runCatching { storage.getActiveShareKey() }.getOrNull()
         }
+        // Not cancellable: a cancel landing after the save would lose what finishes it. Nested,
+        // since a withContext that also changes dispatcher returns cancellably.
+        val finishMark = if (before.first) withContext(NonCancellable) { withContext(Dispatchers.IO) { markBunkerRevokeAhead() } } else null
         var stored = false
         try {
             return withContext(Dispatchers.IO) { store().also { stored = true } }
@@ -148,7 +158,12 @@ internal class AccountActions(
                 val activeAfter = withContext(Dispatchers.IO) {
                     runCatching { storage.getActiveShareKey() }.getOrNull()
                 }
-                if (storeSwitchedAccount(hadShare, activeBefore, activeAfter)) onAccountSwitched()
+                val switched = storeSwitchedAccount(hadShare, activeBefore, activeAfter)
+                if (finishMark != null) {
+                    withContext(Dispatchers.IO) { runCatching { finishMark(switched) } }
+                        .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Revoke mark withdraw failed: ${it::class.simpleName}") }
+                }
+                if (switched) onAccountSwitched(false)
             }
         }
     }
@@ -226,7 +241,9 @@ internal class AccountActions(
                     // the transition window fail-safe (no grants + old key -> the
                     // request re-prompts). onAccountSwitched clears state account-
                     // agnostically and does not depend on the new active share.
-                    onAccountSwitched()
+                    // A bunker that could not be reset would serve the previous account's
+                    // clients as this one, so the switch stops here, before activation.
+                    check(onAccountSwitched(true)) { "bunker reset failed" }
                     activateShare(authedCipher, account.groupPubkeyHex)
                     refreshAccountState()
                 } catch (e: Exception) {
@@ -254,8 +271,14 @@ internal class AccountActions(
                     // Before the delete, not after the follow-up switch prompt. The core's
                     // teardown leaves a running bunker serving with the deleted share, and
                     // this account's grants would otherwise stand until that prompt is
-                    // answered, which it may never be if the activity goes away first.
-                    onAccountSwitched()
+                    // answered, which it may never be if the activity goes away first. Stops
+                    // the delete when the bunker cannot be reset: the next account would
+                    // otherwise take over its clients, with one left even without a switch.
+                    if (!onAccountSwitched(true)) {
+                        logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), IllegalStateException("bunker reset failed"))
+                        onDismiss()
+                        return@withLock
+                    }
                 }
                 try {
                     withContext(Dispatchers.IO) {
@@ -301,7 +324,7 @@ internal class AccountActions(
             switchToNextAccountAfterDelete(remainingAccounts.first(), onDismiss)
         } else if (wasActive) {
             try {
-                onAccountSwitched()
+                onAccountSwitched(false)
             } finally {
                 refreshAccountState()
                 onDismiss()
@@ -329,8 +352,12 @@ internal class AccountActions(
                             // activating the next account's key, so a signing request
                             // racing this switch cannot resolve an old grant against
                             // the new key (revoke-before-activate; see switchAccount).
-                            onAccountSwitched()
-                            if (switchAuthed != null) {
+                            // Not a stop: the account is already deleted, so the cleanup
+                            // runs whatever the bunker reset does. Activation still waits on
+                            // the reset (see switchAccount); with one account left, which is
+                            // then in use anyway, the reset before the delete already held.
+                            val bunkerReset = onAccountSwitched(false)
+                            if (switchAuthed != null && bunkerReset) {
                                 try {
                                     activateShare(switchAuthed, nextAccount.groupPubkeyHex)
                                 } catch (e: Exception) {
@@ -346,7 +373,7 @@ internal class AccountActions(
             }
         } else {
             try {
-                onAccountSwitched()
+                onAccountSwitched(false)
                 refreshAccountState()
             } finally {
                 onDismiss()

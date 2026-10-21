@@ -490,18 +490,44 @@ class KeepMobileApp : Application() {
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
-    suspend fun onAccountSwitched() {
-        connectionJob?.cancel()
-        reconnectJob?.cancel()
-        pinMismatch = null
+    @androidx.annotation.VisibleForTesting
+    internal var resetBunkerForSwitch: suspend (Context, KeepMobile) -> Boolean =
+        { context, mobile -> BunkerService.resetForAccountSwitch(context, mobile) }
+
+    /**
+     * Clears the previous account's state. Returns false when the bunker's revoke-all mark
+     * could not be saved. With [stopIfBunkerResetFails] it then stops before wiping anything,
+     * and the caller must not change the account: the bunker's clients would act as the new one.
+     */
+    suspend fun onAccountSwitched(stopIfBunkerResetFails: Boolean = false): Boolean {
         BunkerService.stop(this)
-        keepMobile?.let { mobile ->
-            runCatching {
-                BunkerConfigStore.update(mobile) { current ->
-                    BunkerConfigInfo(false, current.authorizedClients)
+        var bunkerResetFailed = false
+        var bunkerResetComplete = true
+        withContext(Dispatchers.IO) {
+            // First: the bunker's clients belong to the previous account; also turns it off.
+            runAccountSwitchCleanup("reset bunker clients") {
+                try {
+                    keepMobile?.let { bunkerResetComplete = resetBunkerForSwitch(this@KeepMobileApp, it) }
+                } catch (e: Exception) {
+                    if (e !is CancellationException) bunkerResetFailed = true
+                    throw e
                 }
             }
         }
+        if (bunkerResetFailed && stopIfBunkerResetFails) {
+            withContext(Dispatchers.IO) {
+                runAccountSwitchCleanup("record bunker reset failure") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
+                        "The bunker was stopped and could not be reset, so the account was not changed; its clients may need pairing again. Try again"
+                    )
+                }
+            }
+            return false
+        }
+        connectionJob?.cancel()
+        reconnectJob?.cancel()
+        pinMismatch = null
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
             // Before the revoke: clearAllAppSettings enumerates permission callers to
@@ -515,6 +541,22 @@ class KeepMobileApp : Application() {
             runAccountSwitchCleanup("clear auto-sign rate limits") { signingRateLimiter?.clearAll() }
             runAccountSwitchCleanup("clear signing audit log") { permissionStore?.clearAuditLog() }
             runAccountSwitchCleanup("clear activity log") { eventLogStore?.clear() }
+            // After the wipe, so it survives: the person has to know before turning the bunker on.
+            if (bunkerResetFailed) {
+                runAccountSwitchCleanup("record bunker reset failure") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
+                        "The bunker could not be reset for this account and may still allow what was approved under the previous one; leave it off and switch accounts again to retry"
+                    )
+                }
+            } else if (!bunkerResetComplete) {
+                runAccountSwitchCleanup("record partial bunker reset") {
+                    eventLogStore?.log(
+                        EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker",
+                        "The bunker was not fully reset for this account; the reset finishes when the bunker is next turned on"
+                    )
+                }
+            }
             // Genesis entry for the new account's fresh audit chain: the per-account wipe
             // above clears the prior trail, so record the activation itself here to keep
             // every account switch auditable (a switch is otherwise evidence-free).
@@ -537,6 +579,7 @@ class KeepMobileApp : Application() {
                 )
             }
         }
+        return !bunkerResetFailed
     }
 
     /**

@@ -23,7 +23,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
+import io.privkey.keep.AccountActions
+import io.privkey.keep.ImportState
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.toAccountInfo
 import io.privkey.keep.nip55.AppPermissionsScreen
 import io.privkey.keep.nip55.EventLogCategory
 import io.privkey.keep.nip55.EventLogLevel
@@ -42,7 +45,13 @@ import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.parseBunkerUrl
 import io.privkey.keep.uniffi.truncateStr
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -80,6 +89,7 @@ class BunkerRevokeE2ETest {
     private val dir by lazy { File(context.filesDir, "bunker-e2e") }
     private val savedFile by lazy { File(context.filesDir, "bunker-e2e-saved.json") }
     private val clientsFile by lazy { File(context.filesDir, "bunker-e2e-clients.txt") }
+    private val testAccounts = mutableSetOf<String>()
     private val testClients = mutableSetOf<String>()
     private val approvedClients = mutableSetOf<String>()
     private var requests = 0
@@ -104,6 +114,7 @@ class BunkerRevokeE2ETest {
         saved.writeTo(savedFile)
         var passed = false
         try {
+            val secondAccount = importSecondAccount(mobile, storage)
             importThrowawayAccount(mobile, storage)
             val bunkerRelay = InstrumentationRegistry.getArguments().getString(RELAY_ARG) ?: FrostSignFixture.RELAY
             mobile.saveRelayConfig(null, RelayConfigInfo(saved.relays.frostRelays, saved.relays.profileRelays, listOf(bunkerRelay)))
@@ -199,6 +210,111 @@ class BunkerRevokeE2ETest {
                 assertNull("the client's stored entry must go", Nip46ClientStore.getClient(context, c.pubkey))
             }
             assertDead(url4, url5)
+
+            // Account switch: the previous account's clients, and their remembered grants,
+            // must not act as the new account.
+            run {
+                val c9 = newClient()
+                assertOk(settled("connect", c9.secret, url5))
+                awaitAuthorized(mobile, c9)
+                val remembered = probeAsync("sign", c9.secret, url5, "1", "90")
+                approve(c9.pubkey)
+                assertOk(awaitProbe(remembered))
+                // The app's own stop: a reset that fails wipes nothing. It also stops the
+                // bunker, which then serves again so the switch below has one to halt.
+                assertStoppedSwitchWipesNothing()
+                BunkerService.start(context)
+                assertEquals(url5, awaitRunning(previous = null))
+                val throwaway = THROWAWAY_GROUP
+                // The delete below must only ever be tried on the test's own account.
+                check(storage.getActiveShareKey() == throwaway) { "the throwaway account is not the active one" }
+                var resetAsked = false
+                val failingReset: suspend (Boolean) -> Boolean = { stop -> resetAsked = resetAsked || stop; false }
+                // A delete or a switch must stop when the bunker cannot be reset, wiping nothing.
+                withAccountActions(mobile, storage, failingReset) { actions, done -> actions.deleteAccount(account(storage, throwaway), done) }
+                assertTrue("the delete must ask to stop on a failed bunker reset", resetAsked)
+                assertTrue("a failed bunker reset must stop the delete", storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == throwaway })
+                assertEquals(throwaway, storage.getActiveShareKey())
+                resetAsked = false
+                withAccountActions(mobile, storage, failingReset) { actions, done -> actions.switchAccount(account(storage, secondAccount), done) }
+                assertTrue("the switch must ask to stop on a failed bunker reset", resetAsked)
+                assertEquals("a failed bunker reset must stop the switch", throwaway, storage.getActiveShareKey())
+                // The app's own switch, in its own order: reset, wipe, then activate.
+                withAccountActions(mobile, storage, { stop -> app.onAccountSwitched(stop) }) { actions, done ->
+                    actions.switchAccount(account(storage, secondAccount), done)
+                }
+                assertEquals("the switch must activate the new account", secondAccount, storage.getActiveShareKey())
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-switch-init")
+                val afterSwitch = mobile.getBunkerConfig()
+                assertFalse("the switch turns the bunker off", afterSwitch.enabled)
+                assertTrue("the switch drops the previous account's clients", afterSwitch.authorizedClients.isEmpty())
+                assertNull(Nip46ClientStore.getClient(context, c9.pubkey))
+                // The user turns the bunker back on under the new account.
+                mobile.saveBunkerConfig(BunkerConfigInfo(true, emptyList()))
+                BunkerService.start(context)
+                val url6 = awaitRunning(previous = null)
+                assertRotated(url5, url6)
+                val switched = System.currentTimeMillis()
+                assertRefused(
+                    "a grant remembered under the previous account must not sign as the new one",
+                    settled("sign", c9.secret, url6, "1", "15"), c9.pubkey, switched, reason = "Permission denied",
+                )
+                assertFalse("the mark is cleared once the grants are revoked", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+                // And it stays revoked: a later start must not restore it.
+                stopService()
+                BunkerService.start(context)
+                assertEquals(url6, awaitRunning(previous = null))
+                val restarted = System.currentTimeMillis()
+                assertRefused(
+                    "a revoked grant must stay revoked across restarts",
+                    settled("sign", c9.secret, url6, "1", "15"), c9.pubkey, restarted, reason = "Permission denied",
+                )
+                assertDead(url5, url6)
+
+                // Import over the active account: the core switches as it stores, so the mark
+                // that revokes the previous account's grants is saved before the store runs.
+                val c10 = newClient()
+                assertOk(settled("connect", c10.secret, url6))
+                awaitAuthorized(mobile, c10)
+                val rememberedHere = probeAsync("sign", c10.secret, url6, "1", "90")
+                approve(c10.pubkey)
+                assertOk(awaitProbe(rememberedHere))
+                val active = storage.getActiveShareKey()
+                val (thirdNsec, thirdAccount) = newTestAccount()
+                val realReset: suspend (Boolean) -> Boolean = { stop -> app.onAccountSwitched(stop) }
+                importThroughActions(mobile, storage, thirdNsec, realReset) { throw IllegalStateException("bunker-e2e: the mark fails") }
+                assertFalse(
+                    "an import must not run when the mark cannot be saved",
+                    storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == thirdAccount },
+                )
+                assertEquals(active, storage.getActiveShareKey())
+                // An import that stores nothing withdraws its mark, and the grants stay.
+                var savedAhead = false
+                importThroughActions(mobile, storage, "nsec1bunkere2einvalid", realReset) {
+                    BunkerService.markRevokeAllAhead(context).also { savedAhead = markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false) }
+                }
+                assertTrue("the import must save the mark before it runs", savedAhead)
+                assertFalse("an import that changed nothing must withdraw its mark", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+                stopService()
+                BunkerService.start(context)
+                assertEquals("an import that changed nothing must not rotate the bunker", url6, awaitRunning(previous = null))
+                assertOk(settled("sign", c10.secret, url6, "1", "15"))
+                // A switching import whose reset then fails still revokes at the next start.
+                importThroughActions(mobile, storage, thirdNsec, onAccountSwitched = { false })
+                assertEquals("the import must activate the new account", thirdAccount, storage.getActiveShareKey())
+                assertTrue("the mark must be saved before the import switches", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-import-init")
+                stopService()
+                BunkerService.start(context)
+                val url7 = awaitRunning(previous = null)
+                assertRotated(url6, url7)
+                val imported = System.currentTimeMillis()
+                assertRefused(
+                    "a grant remembered under the account an import replaced must not sign as the new one",
+                    settled("sign", c10.secret, url7, "1", "15"), c10.pubkey, imported, reason = "Permission denied",
+                )
+                assertFalse("the mark is cleared once the grants are revoked", markers().getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false))
+            }
             passed = true
         } finally {
             screen = Screen.None
@@ -238,7 +354,7 @@ class BunkerRevokeE2ETest {
         }
         step("stop the bunker") { stopService() }
         step("rotate the bunker URL") { runBlocking { BunkerService.rotateBunkerCredentials(mobile) } }
-        failures += saved.restore(context, mobile, storage, testClients, approvedClients)
+        failures += saved.restore(context, mobile, storage, testClients, approvedClients, testAccounts)
         step("delete the request files") { check(!dir.exists() || dir.deleteRecursively()) }
         if (failures.isEmpty()) step("delete the saved state") { check(savedFile.delete() && (!clientsFile.exists() || clientsFile.delete())) }
         return failures
@@ -259,8 +375,9 @@ class BunkerRevokeE2ETest {
             val recorded = if (clientsFile.exists()) clientsFile.readLines().mapNotNull { line -> line.split(" ").takeIf { it.size == 2 } } else emptyList()
             failures += SavedState.readFrom(savedFile).restore(
                 context, mobile, storage,
-                testClients = recorded.map { it[1] }.toSet(),
+                testClients = recorded.filter { it[0] != ACCOUNT }.map { it[1] }.toSet(),
                 approvedClients = recorded.filter { it[0] == APPROVED }.map { it[1] }.toSet(),
+                testAccounts = recorded.filter { it[0] == ACCOUNT }.map { it[1] }.toSet(),
             )
             check(failures.isEmpty()) {
                 "could not restore the state an interrupted run saved (see README): ${failures.joinToString()}"
@@ -290,6 +407,97 @@ class BunkerRevokeE2ETest {
         compose.onNodeWithText("Revoke").performClick()
         // The row goes only after the revoke and its rotation both complete.
         compose.waitUntil(60_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isEmpty() }
+    }
+
+    private fun assertStoppedSwitchWipesNothing() {
+        val log = EventLogStore.getInstance(Nip55Database.getInstance(context))
+        val sentinel = "bunker-e2e sentinel ${System.nanoTime()}"
+        runBlocking { log.log(EventLogCategory.BUNKER, EventLogLevel.INFO, "bunker-e2e", sentinel) }
+        val realReset = app.resetBunkerForSwitch
+        app.resetBunkerForSwitch = { _, _ -> throw IllegalStateException("bunker-e2e: the reset fails") }
+        val result = try {
+            runBlocking { app.onAccountSwitched(true) }
+        } finally {
+            app.resetBunkerForSwitch = realReset
+        }
+        assertFalse("a reset that fails must be reported", result)
+        val entries = runBlocking { log.getRecent(200) }
+        assertTrue("a stopped switch must wipe nothing", entries.any { it.message == sentinel })
+        assertTrue(
+            "a stopped switch must say so",
+            entries.any { it.level == EventLogLevel.ERROR.name && it.message.startsWith("The bunker was stopped and could not be reset") },
+        )
+    }
+
+    private fun account(storage: AndroidKeystoreStorage, key: String) =
+        storage.listAllShares().map { it.toAccountInfo() }.single { it.groupPubkeyHex == key }
+
+    // Runs one of the app's account actions, the biometric prompt answered with the cipher it
+    // was given, and waits for the action to dismiss.
+    private fun withAccountActions(
+        mobile: KeepMobile,
+        storage: AndroidKeystoreStorage,
+        onAccountSwitched: suspend (Boolean) -> Boolean,
+        markBunkerRevokeAhead: () -> (Boolean) -> Unit = { BunkerService.markRevokeAllAhead(context) },
+        action: (AccountActions, () -> Unit) -> Unit,
+    ) {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val dismissed = CompletableDeferred<Unit>()
+        try {
+            val actions = AccountActions(
+                keepMobile = mobile,
+                storage = storage,
+                coroutineScope = scope,
+                appContext = context,
+                onBiometricRequest = { _, _, cipher, onResult -> onResult(cipher) },
+                onAccountSwitched = onAccountSwitched,
+                onAccountDeleted = {},
+                onLiveNodeDropped = {},
+                onStateChanged = {},
+                markBunkerRevokeAhead = markBunkerRevokeAhead,
+            )
+            storage.getActiveShareKey()?.let { actions.setCurrentRelays(mobile.getRelayConfig(it).frostRelays) }
+            action(actions) { dismissed.complete(Unit) }
+            runBlocking { withTimeout(60_000) { dismissed.await() } }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    // Runs the app's own import, waiting for it to finish either way.
+    private fun importThroughActions(
+        mobile: KeepMobile,
+        storage: AndroidKeystoreStorage,
+        nsec: String,
+        onAccountSwitched: suspend (Boolean) -> Boolean,
+        markBunkerRevokeAhead: () -> (Boolean) -> Unit = { BunkerService.markRevokeAllAhead(context) },
+    ) = withAccountActions(mobile, storage, onAccountSwitched, markBunkerRevokeAhead) { actions, done ->
+        actions.importNsec(nsec.toByteArray(), "bunker-e2e-import", storage.getCipherForEncryption()) { state ->
+            if (state is ImportState.Success || state is ImportState.Error) done()
+        }
+    }
+
+    // An account the test owns, as its nsec and group key. Random, so it is never one of the
+    // device's own; recorded before use so cleanup and recovery delete it.
+    private fun newTestAccount(): Pair<String, String> {
+        val secret = ByteArray(32).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        val nsec = probe("nsec", secret)
+        check(nsec.startsWith("nsec1")) { "probe returned no nsec: $nsec" }
+        // An nsec account's group key is the key's own pubkey, so it can be recorded first.
+        val expected = probe("pubkey", secret)
+        clientsFile.appendText("$ACCOUNT $expected\n")
+        testAccounts += expected
+        return nsec to expected
+    }
+
+    // A second account, for the account switch.
+    private fun importSecondAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage): String {
+        val (nsec, expected) = newTestAccount()
+        val group = withCipher(storage, "bunker-e2e-import-second", storage.getCipherForEncryption()) {
+            mobile.importNsec(nsec.toByteArray(), "bunker-e2e-second")
+        }.groupPubkey
+        check(group == expected) { "unexpected group key $group for the second account" }
+        return group
     }
 
     private fun importThrowawayAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage) {
@@ -418,13 +626,13 @@ class BunkerRevokeE2ETest {
 
     // The core does not answer a client that holds no permission, so a refusal can reach the
     // probe as a TIMEOUT. The bunker's own log entry is what proves the request arrived and failed.
-    private fun assertRefused(message: String, result: String, pubkey: String, since: Long) {
+    private fun assertRefused(message: String, result: String, pubkey: String, since: Long, reason: String? = null) {
         assertFalse("$message; got: $result", result.startsWith("OK "))
         val log = EventLogStore.getInstance(Nip55Database.getInstance(context))
         awaitTrue("the bunker logs the refused sign from ${pubkey.take(8)}") {
             runBlocking { log.getRecent(200) }.any {
                 it.timestamp >= since && it.category == EventLogCategory.BUNKER.name && it.level == EventLogLevel.WARN.name &&
-                    it.source == pubkey.take(8) && it.message.startsWith("sign_event")
+                    it.source == pubkey.take(8) && it.message.startsWith("sign_event") && (reason == null || reason in it.message)
             }
         }
     }
@@ -437,6 +645,7 @@ class BunkerRevokeE2ETest {
         val bunker: BunkerConfigInfo,
         val denylist: Set<String>,
         val marker: Boolean,
+        val revokeAllMark: Boolean,
     ) {
         /** Restores each part on its own, so one failure does not skip the rest. Returns the failures. */
         /**
@@ -450,6 +659,7 @@ class BunkerRevokeE2ETest {
             storage: AndroidKeystoreStorage,
             testClients: Set<String>,
             approvedClients: Set<String>,
+            testAccounts: Set<String>,
         ): List<String> {
             val failures = mutableListOf<String>()
             fun step(name: String, block: () -> Unit) = runCatching(block).onFailure {
@@ -462,12 +672,18 @@ class BunkerRevokeE2ETest {
                 (testClients - approvedClients - denylist).forEach { Nip46ClientStore.removeFromDenylist(context, it) }
                 Nip46ClientStore.addAllToDenylist(context, denylist + approvedClients)
             }
-            step("rotation marker") {
+            step("bunker markers") {
                 check(context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
-                    .edit().putBoolean(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES, marker).commit())
+                    .edit()
+                    .putBoolean(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES, marker)
+                    .putBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, revokeAllMark)
+                    .commit())
             }
-            step("active account") { activeKey?.takeIf { it != THROWAWAY_GROUP }?.let { switchAccount(mobile, storage, it) } }
-            step("throwaway account") { dropThrowawayAccount(mobile, storage) }
+            step("active account") { activeKey?.takeIf { it != THROWAWAY_GROUP && it !in testAccounts }?.let { switchAccount(mobile, storage, it) } }
+            step("throwaway account") { dropThrowawayAccount(mobile, storage, testAccounts) }
+            testAccounts.forEach { key ->
+                step("test account ${key.take(8)}") { if (mobile.listShares().any { it.groupPubkey == key }) mobile.deleteShareByKey(key) }
+            }
             return failures
         }
 
@@ -481,6 +697,7 @@ class BunkerRevokeE2ETest {
                 .put("authorizedClients", JSONArray(bunker.authorizedClients))
                 .put("denylist", JSONArray(denylist.toList()))
                 .put("marker", marker)
+                .put("revokeAllMark", revokeAllMark)
             val tmp = File(file.path + ".tmp")
             tmp.writeText(json.toString())
             check(tmp.renameTo(file))
@@ -494,6 +711,8 @@ class BunkerRevokeE2ETest {
                 denylist = Nip46ClientStore.getDenylist(context),
                 marker = context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
                     .getBoolean(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES, false),
+                revokeAllMark = context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false),
             )
 
             fun readFrom(file: File): SavedState {
@@ -505,6 +724,7 @@ class BunkerRevokeE2ETest {
                     bunker = BunkerConfigInfo(json.getBoolean("bunkerEnabled"), list("authorizedClients")),
                     denylist = list("denylist").toSet(),
                     marker = json.getBoolean("marker"),
+                    revokeAllMark = json.optBoolean("revokeAllMark", false),
                 )
             }
         }
@@ -517,6 +737,7 @@ class BunkerRevokeE2ETest {
         // The NIP-19 test vector key: public, used only for this temporary account.
         const val CLIENT = "client"
         const val APPROVED = "approved"
+        const val ACCOUNT = "account"
         const val THROWAWAY_NSEC = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5"
         const val THROWAWAY_GROUP = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e"
 
@@ -526,11 +747,12 @@ class BunkerRevokeE2ETest {
             }
 
         // Matched by its key, so no account of the device's own is ever deleted.
-        fun dropThrowawayAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage) {
+        fun dropThrowawayAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage, testAccounts: Set<String> = emptySet()) {
             val shares = mobile.listShares()
             if (shares.none { it.groupPubkey == THROWAWAY_GROUP }) return
             if (storage.getActiveShareKey() == THROWAWAY_GROUP) {
-                shares.firstOrNull { it.groupPubkey != THROWAWAY_GROUP }?.let { switchAccount(mobile, storage, it.groupPubkey) }
+                shares.firstOrNull { it.groupPubkey != THROWAWAY_GROUP && it.groupPubkey !in testAccounts }
+                    ?.let { switchAccount(mobile, storage, it.groupPubkey) }
             }
             mobile.deleteShareByKey(THROWAWAY_GROUP)
         }

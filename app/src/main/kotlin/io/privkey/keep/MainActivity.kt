@@ -303,7 +303,7 @@ class MainActivity : FragmentActivity() {
                                 app.removeCertificatePin(hostname, spkiHash)
                             },
                             onDismissPinMismatch = app::dismissPinMismatch,
-                            onAccountSwitched = { app.onAccountSwitched() }
+                            onAccountSwitched = { stop -> app.onAccountSwitched(stop) }
                         )
                     } else {
                         ErrorScreen(app.getInitError() ?: stringResource(R.string.main_init_app_failed))
@@ -369,7 +369,7 @@ fun MainScreen(
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
     onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
-    onAccountSwitched: suspend () -> Unit = {}
+    onAccountSwitched: suspend (Boolean) -> Boolean = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
