@@ -65,8 +65,8 @@ android {
         applicationId = "io.privkey.keep"
         minSdk = 33
         targetSdk = 36
-        versionCode = 30
-        versionName = "1.3.1"
+        versionCode = 31
+        versionName = "1.3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Reset the persisted kill switch to its disengaged baseline before every
