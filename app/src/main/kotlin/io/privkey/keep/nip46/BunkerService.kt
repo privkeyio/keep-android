@@ -96,6 +96,8 @@ class BunkerService : Service() {
         internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
         // The core's message for a start that a stop cancelled.
         private const val STOPPED_WHILE_STARTING = "The bunker was stopped while it was starting"
+        private const val START_SETTLE_TIMEOUT_MS = 5_000L
+        private const val START_SETTLE_POLL_MS = 25L
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
@@ -710,9 +712,22 @@ class BunkerService : Service() {
                 return false
             }
 
+            // The core returns from the start before its run task marks the bunker running, and
+            // the bunker can stop again right after. A start that does not settle on running is
+            // tried again with a fresh handler, since this one still counts as starting.
+            // Remove once the core's start returns with the bunker already running.
+            val started = awaitStartSettled(handler)
+            if (started != BunkerStatus.RUNNING) {
+                runCatching { handler.stopBunker() }
+                if (serving && attempt < MAX_START_RETRIES) return true
+                if (BuildConfig.DEBUG) Log.e(TAG, "Bunker start did not settle: $started")
+                _status.value = BunkerStatus.ERROR
+                stopSelf()
+                return false
+            }
             val url = handler.getBunkerUrl()
             _bunkerUrl.value = url
-            _status.value = handler.getBunkerStatus()
+            _status.value = started
 
             updateNotification(isActive = true)
 
@@ -732,6 +747,16 @@ class BunkerService : Service() {
             stopSelf()
             return false
         }
+    }
+
+    private suspend fun awaitStartSettled(handler: BunkerHandler): BunkerStatus {
+        val deadline = System.currentTimeMillis() + START_SETTLE_TIMEOUT_MS
+        var status = handler.getBunkerStatus()
+        while (status == BunkerStatus.STARTING && System.currentTimeMillis() < deadline) {
+            delay(START_SETTLE_POLL_MS)
+            status = handler.getBunkerStatus()
+        }
+        return status
     }
 
     private fun invokeStartBunkerWithProxy(
