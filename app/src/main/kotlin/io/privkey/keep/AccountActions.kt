@@ -125,8 +125,8 @@ internal class AccountActions(
     /**
      * Runs [store], a core call that stores a share and makes it the active one, on the IO
      * dispatcher, and treats it as an account switch when it replaced another account.
-     * Without the switch cleanup the previous account's grants would apply to the new key
-     * and a running bunker would keep serving the previous one. Compared rather than
+     * Without the switch cleanup the previous account's grants and bunker clients would
+     * carry over to the new key. Compared rather than
      * assumed, so a call that switched and then failed is still cleaned up, while a
      * failed attempt that changed nothing, or a first account, wipes nothing. A pointer or
      * share list that cannot be read counts as a change. A store that succeeded also
@@ -268,9 +268,8 @@ internal class AccountActions(
                 // share it resolves when none is set, so it may be this one.
                 val wasActive = activeAccountKey == null || account.groupPubkeyHex == activeAccountKey
                 if (wasActive) {
-                    // Before the delete, not after the follow-up switch prompt. The core's
-                    // teardown leaves a running bunker serving with the deleted share, and
-                    // this account's grants would otherwise stand until that prompt is
+                    // Before the delete, not after the follow-up switch prompt: this account's
+                    // grants and bunker clients would otherwise stand until that prompt is
                     // answered, which it may never be if the activity goes away first. Stops
                     // the delete when the bunker cannot be reset: the next account would
                     // otherwise take over its clients, with one left even without a switch.

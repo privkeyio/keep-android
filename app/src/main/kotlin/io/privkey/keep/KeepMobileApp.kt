@@ -487,6 +487,7 @@ class KeepMobileApp : Application() {
             mobile.initialize(relays)
         }
         liveNode.built(startedAt)
+        io.privkey.keep.nip46.BunkerService.startAfterNodeBuilt(this, mobile)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 

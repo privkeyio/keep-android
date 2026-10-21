@@ -200,37 +200,49 @@ class BunkerService : Service() {
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
             }
-            try {
+            val revokeFailure = try {
                 if (pubkeys == null) revokeAllClientsInEngine(keepMobile) else revoked.forEach { revokeClientInEngine(keepMobile, it) }
-            } finally {
-                // The secret must change even if the core revoke failed, and the core revoke
-                // stopped a running bunker, which this restarts.
-                rotateBunkerCredentials(keepMobile)
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e
             }
+            // The secret must change even if the core revoke failed, and the core revoke
+            // stopped a running bunker, which the rotation restarts.
+            try {
+                rotateBunkerCredentials(keepMobile)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Neither took, so the client's saved grants still match the bunker key and
+                // its connect secret still works: every client is revoked before the next start
+                // serves, which a restart reaches now.
+                if (revokeFailure != null) runCatching { revokeAllMark(context).set() }
+                current()?.restartIfServing()
+                throw (revokeFailure ?: e).also { if (it !== e) it.addSuppressed(e) }
+            }
+            revokeFailure?.let { throw it }
             return saved
         }
 
         /**
-         * Called on an account switch. The bunker's URL, its authorized clients and their
-         * remembered grants are all device-wide, so without this the clients paired under
-         * the previous account would act as the new one: requests reach the user under the
-         * new identity and remembered kinds sign with no prompt. Drops the clients, turns
-         * the bunker off, rotates the URL, and marks every remembered grant to be revoked
-         * on the next start, since revoking needs a running engine. A start that finds the
-         * mark rotates again first, so a rotation that failed here is retried and nothing
-         * serves the old URL while the old grants are still loaded. Nothing is denylisted,
-         * so a client can still be paired to the new account deliberately.
+         * Called on an account switch. The bunker's URL and its authorized clients are
+         * device-wide, so without this the clients paired under the previous account would
+         * reach the user under the new identity. Drops the clients, turns the bunker off,
+         * rotates the URL and revokes every remembered grant, and marks the grants to be
+         * revoked again before the next start serves, so a step that failed here is retried
+         * there. Nothing is denylisted, so a client can still be paired to the new account
+         * deliberately. The core already keeps the previous account's grants from loading,
+         * since it scopes them to the bunker key and the account; this does not rely on that.
          *
-         * Throws when the mark could not be saved, since only it keeps the clients out for good:
-         * a start that finds it rotates first and then revokes every remembered grant. A rotated
-         * URL alone does not, because the bunker key is public and a restored grant needs no
-         * connect. Returns false when another step failed, which the mark still covers, so a
-         * reset over an unreadable bunker config does not block every switch and delete.
+         * Throws when the mark could not be saved, since only it carries the revoke to the
+         * next start when this one failed. Returns false when another step failed, which the
+         * mark still covers, so a reset over an unreadable bunker config does not block every
+         * switch and delete.
          *
-         * Stopgap. The mark and its start-time revoke go once the pinned core revokes all
-         * clients with no running bunker (keep a one-shot revoke for a mark left set by this
-         * version). The turn-off, list clear and rotation go once the core keys the bunker
-         * config by account. The Nip46ClientStore clear stays until that store is per account.
+         * The turn-off, list clear and rotation go once the core keys the bunker config by
+         * account. The Nip46ClientStore clear stays until that store is per account.
          */
         internal suspend fun resetForAccountSwitch(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile): Boolean {
             // The stop the switch asked for is asynchronous: halt a running instance now, so a
@@ -296,8 +308,8 @@ class BunkerService : Service() {
         internal suspend fun rotateBunkerCredentials(keepMobile: io.privkey.keep.uniffi.KeepMobile) {
             current()?.takeIf { it.serving }?.let { return it.rotateBunkerUrl() }
             BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
-            // A service that began starting during the rotation may have loaded the old keys.
-            // Remove once the pinned core's rotation stops a bunker started from any handler.
+            // A service that began starting meanwhile was stopped by the rotation, and this
+            // starts it again on the new keys.
             current()?.takeIf { it.serving }?.rotateBunkerUrl()
         }
 
@@ -317,11 +329,20 @@ class BunkerService : Service() {
 
         /**
          * The core stops the bunker whenever it drops its live node, without telling this
-         * service, so a service still meant to serve starts it again. The start waits for
-         * the node to be built again, as one at launch does.
+         * service, so a service still meant to serve starts it again. The start retries while
+         * the node is missing (about a minute) and then gives up; [startAfterNodeBuilt] starts
+         * it once a node is built.
          */
         internal fun restartAfterNodeDrop() {
             current()?.restartIfServing()
+        }
+
+        /** Starts an enabled bunker that is not running once the core has a node to serve. */
+        internal fun startAfterNodeBuilt(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
+            if (status.value == BunkerStatus.RUNNING || status.value == BunkerStatus.STARTING) return
+            if (!runCatching { keepMobile.getBunkerConfig().enabled }.getOrDefault(false)) return
+            runCatching { start(context) }
+                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not start the bunker after a node build: ${it::class.simpleName}") }
         }
 
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
@@ -618,7 +639,10 @@ class BunkerService : Service() {
             // And revokes every remembered grant before this start can restore one. The core
             // revokes with no bunker running and reports a save that failed, which keeps the
             // mark and fails this start.
-            revokeAllMark(this).revokeIfSet { BunkerHandler(keepMobile).use { it.revokeAllClients() } }
+            revokeAllMark(this).revokeIfSet {
+                BunkerHandler(keepMobile).use { it.revokeAllClients() }
+                authorizedClientsCache.clear()
+            }
             if (rotateOnceForEarlierRevokes(this, keepMobile)) {
                 logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker", "URL rotated because a client was revoked before this version; pair clients again")
             }
@@ -699,10 +723,9 @@ class BunkerService : Service() {
             if (e is io.privkey.keep.uniffi.KeepMobileException.NotInitialized && attempt < MAX_START_RETRIES) {
                 return true
             }
-            // A rotation, a revoke or a teardown stopped the bunker while this started it: a
-            // stop, not a failure. Start again if it is still meant to serve.
-            if (e is io.privkey.keep.uniffi.KeepMobileException.InitializationFailed && e.msg == STOPPED_WHILE_STARTING) {
-                return serving && attempt < MAX_START_RETRIES
+            // onDestroy stopped this handler while it started: a stop, not a failure.
+            if (e is io.privkey.keep.uniffi.KeepMobileException.InitializationFailed && e.msg == STOPPED_WHILE_STARTING && !serving) {
+                return false
             }
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR

@@ -16,10 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * nothing. A process that dies with a change open finds the mark saved.
  *
  * A save that fails stops the change: a switch or delete of the active account, or a store
- * that may replace it. Ceiling: a power cut can roll back a save that reported success. The
- * next start then restores the previous account's remembered grants, and the switch's
- * rotation does not keep a client holding one out, since the bunker key is public. Goes with
- * the start-time revoke.
+ * that may replace it. Ceiling: a power cut can roll back a save that reported success, and
+ * the next start then skips its revoke; the core still does not load the previous account's
+ * grants, since it scopes them to the bunker key and the account. Goes with the start-time
+ * revoke.
  */
 internal class RevokeAllMark(private val prefs: SharedPreferences) {
     private var pending = false
