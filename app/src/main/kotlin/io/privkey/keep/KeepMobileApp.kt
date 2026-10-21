@@ -487,6 +487,7 @@ class KeepMobileApp : Application() {
             mobile.initialize(relays)
         }
         liveNode.built(startedAt)
+        io.privkey.keep.nip46.BunkerService.startAfterNodeBuilt(this, mobile)
         if (BuildConfig.DEBUG) Log.d(TAG, "Initialize completed, peers: ${mobile.getPeers().size}")
     }
 
@@ -696,6 +697,7 @@ class KeepMobileApp : Application() {
      */
     fun onLiveNodeDropped() {
         liveNode.dropped()
+        io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop()
         mainHandler.post {
             // Not over a node an initialize has built since this drop.
             if (!liveNode.isLive()) {

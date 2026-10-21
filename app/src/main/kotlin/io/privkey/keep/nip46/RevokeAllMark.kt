@@ -4,7 +4,8 @@ import android.content.SharedPreferences
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The account-switch mark that makes the next bunker start revoke every remembered grant.
+ * The mark that makes the next bunker start revoke every remembered grant: set by an account
+ * switch, and by a client revoke whose core revoke and rotation both failed.
  * Held in memory as well as in [prefs], so a mark that could not be saved still applies to
  * every start in this process. A start clears it only if no switch set it again after the
  * start read it, since that switch's grants may postdate the revoke.
@@ -16,10 +17,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * nothing. A process that dies with a change open finds the mark saved.
  *
  * A save that fails stops the change: a switch or delete of the active account, or a store
- * that may replace it. Ceiling: a power cut can roll back a save that reported success. The
- * next start then restores the previous account's remembered grants, and the switch's
- * rotation does not keep a client holding one out, since the bunker key is public. Goes with
- * the start-time revoke.
+ * that may replace it. Ceiling: a power cut can roll back a save that reported success, and
+ * the next start then skips its revoke. After a switch the core still does not load the
+ * previous account's grants, since it scopes them to the bunker key and the account; after a
+ * failed client revoke nothing else covers it. Goes with the start-time revoke.
  */
 internal class RevokeAllMark(private val prefs: SharedPreferences) {
     private var pending = false
@@ -71,16 +72,15 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
     fun requestsSoFar(): Int = requests
 
     /**
-     * A start's revoke: runs [revoke] when the mark is set, then clears it if the start is still
-     * [serving] and no storage call failed meanwhile, which [faultsSoFar] counts; null when it
-     * cannot be read. Not under the lock, since [revoke] blocks on the core.
+     * A start's revoke: runs [revoke] when the mark is set and clears it once [revoke] returns,
+     * which the core does only after saving the emptied grants. A [revoke] that throws keeps the
+     * mark. Not under the lock, since [revoke] blocks on the core.
      */
-    fun revokeIfSet(revoke: () -> Unit, serving: () -> Boolean, faultsSoFar: () -> Long?) {
+    fun revokeIfSet(revoke: () -> Unit) {
         val seen = requestsSoFar()
         if (!isSet()) return
-        val faultsBefore = faultsSoFar()
         revoke()
-        clearIfUnchanged(seen) { serving() && faultsBefore != null && faultsSoFar() == faultsBefore }
+        clearIfUnchanged(seen) { true }
     }
 
     /**

@@ -148,8 +148,8 @@ class BunkerRevokeE2ETest {
             BunkerService.start(context)
             val url2 = awaitRunning(previous = null)
             assertRotated(url1, url2)
-            val swept = System.currentTimeMillis()
-            assertRefused("the start must revoke the restored grant of a revoked client", settled("sign", c1.secret, url2, "1", "15"), c1.pubkey, swept)
+            val restarted = System.currentTimeMillis()
+            assertRefused("a grant revoked while the bunker was stopped must not come back on a start", settled("sign", c1.secret, url2, "1", "15"), c1.pubkey, restarted)
             assertDead(url1, url2)
 
             // Revoke from the Bunker screen while the bunker is running.
@@ -342,9 +342,9 @@ class BunkerRevokeE2ETest {
     }
 
     /**
-     * Leaves no test client a way in: a fresh bunker URL, every approved test client
-     * denylisted so the start sweep drops any grant it kept, and the request files (which
-     * hold client secrets and URLs) deleted. Each step runs whatever happened before it.
+     * Leaves no test client a way in: a fresh bunker key, under which the core restores no
+     * grant made before it, every approved test client denylisted, and the request files
+     * (which hold client secrets and URLs) deleted. Each step runs whatever happened before it.
      */
     private fun cleanUp(mobile: KeepMobile, storage: AndroidKeystoreStorage, saved: SavedState): List<String> {
         val failures = mutableListOf<String>()
