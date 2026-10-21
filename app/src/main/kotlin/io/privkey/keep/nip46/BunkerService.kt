@@ -215,14 +215,18 @@ class BunkerService : Service() {
             try {
                 rotateBunkerCredentials(keepMobile)
             } catch (e: CancellationException) {
+                if (revokeFailure != null) runCatching { revokeAllMark(context).set() }
                 throw e
             } catch (e: Exception) {
                 // Neither took, so the client's saved grants still match the bunker key and
                 // its connect secret still works: every client is revoked before the next start
                 // serves, which a restart reaches now.
-                if (revokeFailure != null) runCatching { revokeAllMark(context).set() }
+                val markFailure = if (revokeFailure != null) runCatching { revokeAllMark(context).set() }.exceptionOrNull() else null
                 current()?.restartIfServing()
-                throw (revokeFailure ?: e).also { if (it !== e) it.addSuppressed(e) }
+                throw (revokeFailure ?: e).also { thrown ->
+                    if (thrown !== e) thrown.addSuppressed(e)
+                    markFailure?.let(thrown::addSuppressed)
+                }
             }
             revokeFailure?.let { throw it }
             return saved
@@ -310,8 +314,8 @@ class BunkerService : Service() {
         internal suspend fun rotateBunkerCredentials(keepMobile: io.privkey.keep.uniffi.KeepMobile) {
             current()?.takeIf { it.serving }?.let { return it.rotateBunkerUrl() }
             BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
-            // A service that began starting meanwhile was stopped by the rotation, and this
-            // starts it again on the new keys.
+            // A service that began starting meanwhile was stopped by the rotation; this rotates
+            // once more and starts it again.
             current()?.takeIf { it.serving }?.rotateBunkerUrl()
         }
 
@@ -341,7 +345,8 @@ class BunkerService : Service() {
 
         /** Starts an enabled bunker that is not running once the core has a node to serve. */
         internal fun startAfterNodeBuilt(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
-            if (status.value == BunkerStatus.RUNNING || status.value == BunkerStatus.STARTING) return
+            // A live service's own start, and its retries, own the bunker.
+            if (current()?.serving == true) return
             if (!runCatching { keepMobile.getBunkerConfig().enabled }.getOrDefault(false)) return
             runCatching { start(context) }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not start the bunker after a node build: ${it::class.simpleName}") }
@@ -712,14 +717,19 @@ class BunkerService : Service() {
                 return false
             }
 
-            // The core returns from the start before its run task marks the bunker running, and
-            // the bunker can stop again right after. A start that does not settle on running is
-            // tried again with a fresh handler, since this one still counts as starting.
-            // Remove once the core's start returns with the bunker already running.
+            // The core returns from the start before its run task marks the bunker running, so
+            // the status is read once it leaves starting. A start that has not settled on running
+            // within the timeout is tried again with a fresh handler, since this one still counts
+            // as starting. Remove once the core's start returns with the bunker already running.
             val started = awaitStartSettled(handler)
+            // onDestroy may have stopped it meanwhile, and reports the stop itself.
+            if (!serving) {
+                runCatching { handler.stopBunker() }
+                return false
+            }
             if (started != BunkerStatus.RUNNING) {
                 runCatching { handler.stopBunker() }
-                if (serving && attempt < MAX_START_RETRIES) return true
+                if (attempt < MAX_START_RETRIES) return true
                 if (BuildConfig.DEBUG) Log.e(TAG, "Bunker start did not settle: $started")
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
@@ -749,15 +759,15 @@ class BunkerService : Service() {
         }
     }
 
-    private suspend fun awaitStartSettled(handler: BunkerHandler): BunkerStatus {
-        val deadline = System.currentTimeMillis() + START_SETTLE_TIMEOUT_MS
-        var status = handler.getBunkerStatus()
-        while (status == BunkerStatus.STARTING && System.currentTimeMillis() < deadline) {
-            delay(START_SETTLE_POLL_MS)
-            status = handler.getBunkerStatus()
-        }
-        return status
-    }
+    private suspend fun awaitStartSettled(handler: BunkerHandler): BunkerStatus =
+        withTimeoutOrNull(START_SETTLE_TIMEOUT_MS) {
+            var status = handler.getBunkerStatus()
+            while (status == BunkerStatus.STARTING) {
+                delay(START_SETTLE_POLL_MS)
+                status = handler.getBunkerStatus()
+            }
+            status
+        } ?: BunkerStatus.STARTING
 
     private fun invokeStartBunkerWithProxy(
         handler: BunkerHandler,

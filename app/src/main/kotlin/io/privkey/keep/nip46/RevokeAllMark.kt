@@ -4,7 +4,8 @@ import android.content.SharedPreferences
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The account-switch mark that makes the next bunker start revoke every remembered grant.
+ * The mark that makes the next bunker start revoke every remembered grant: set by an account
+ * switch, and by a client revoke whose core revoke and rotation both failed.
  * Held in memory as well as in [prefs], so a mark that could not be saved still applies to
  * every start in this process. A start clears it only if no switch set it again after the
  * start read it, since that switch's grants may postdate the revoke.
@@ -17,9 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * A save that fails stops the change: a switch or delete of the active account, or a store
  * that may replace it. Ceiling: a power cut can roll back a save that reported success, and
- * the next start then skips its revoke; the core still does not load the previous account's
- * grants, since it scopes them to the bunker key and the account. Goes with the start-time
- * revoke.
+ * the next start then skips its revoke. After a switch the core still does not load the
+ * previous account's grants, since it scopes them to the bunker key and the account; after a
+ * failed client revoke nothing else covers it. Goes with the start-time revoke.
  */
 internal class RevokeAllMark(private val prefs: SharedPreferences) {
     private var pending = false
