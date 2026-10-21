@@ -71,16 +71,15 @@ internal class RevokeAllMark(private val prefs: SharedPreferences) {
     fun requestsSoFar(): Int = requests
 
     /**
-     * A start's revoke: runs [revoke] when the mark is set, then clears it if the start is still
-     * [serving] and no storage call failed meanwhile, which [faultsSoFar] counts; null when it
-     * cannot be read. Not under the lock, since [revoke] blocks on the core.
+     * A start's revoke: runs [revoke] when the mark is set and clears it once [revoke] returns,
+     * which the core does only after saving the emptied grants. A [revoke] that throws keeps the
+     * mark. Not under the lock, since [revoke] blocks on the core.
      */
-    fun revokeIfSet(revoke: () -> Unit, serving: () -> Boolean, faultsSoFar: () -> Long?) {
+    fun revokeIfSet(revoke: () -> Unit) {
         val seen = requestsSoFar()
         if (!isSet()) return
-        val faultsBefore = faultsSoFar()
         revoke()
-        clearIfUnchanged(seen) { serving() && faultsBefore != null && faultsSoFar() == faultsBefore }
+        clearIfUnchanged(seen) { true }
     }
 
     /**

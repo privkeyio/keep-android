@@ -14,6 +14,7 @@ import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
 import io.privkey.keep.uniffi.ShareMetadataInfo
+import io.privkey.keep.uniffi.StorageRead
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.InvalidAlgorithmParameterException
@@ -26,7 +27,6 @@ import java.security.ProviderException
 import java.security.spec.MGF1ParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -243,22 +243,11 @@ class AndroidKeystoreStorage(
         try {
             block()
         } catch (e: KeepMobileException) {
-            if (e !is KeepMobileException.StorageNotFound) faults.incrementAndGet()
             throw e
         } catch (e: Exception) {
-            faults.incrementAndGet()
             Log.e(TAG, "$what could not be completed: ${e::class.simpleName}")
             throw KeepMobileException.StorageException("$what failed: ${e::class.simpleName}")
         }
-
-    private val faults = AtomicLong()
-
-    /**
-     * How many fallible storage calls have failed so far, an absence aside. Two reads that
-     * match show that no storage call failed in between, which is how a caller tells that a
-     * core write whose own result it cannot see did not fail here.
-     */
-    fun faultsSoFar(): Long = faults.get()
 
     private fun isDkgSecretKey(key: String): Boolean = key == DKG_SECRET_STORAGE_KEY
 
@@ -946,6 +935,21 @@ class AndroidKeystoreStorage(
     @Synchronized
     override fun getActiveShareKey(): String? =
         infallibleRead("getActiveShareKey", onFault = null) { activeShareKeyUnguarded() }
+
+    /**
+     * The stored pointer as it is, for the core's decisions to set or clear it: no
+     * registry check, no inference and no write, unlike [getActiveShareKey]. A pointer
+     * that will not decrypt, or a lookup that throws, is [StorageRead.Unavailable], so it
+     * is never taken for an unset pointer.
+     */
+    override fun readActiveShareKey(): StorageRead =
+        infallibleRead("readActiveShareKey", onFault = StorageRead.Unavailable) {
+            when (val read = multiSharePrefs.readString(KEY_ACTIVE_SHARE)) {
+                is PrefRead.Found -> StorageRead.Found(read.value)
+                PrefRead.Absent -> StorageRead.Absent
+                PrefRead.Unreadable -> StorageRead.Unavailable
+            }
+        }
 
     /**
      * Whether one share's own file holds share data, with [onFault] deciding what an

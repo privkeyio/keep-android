@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.uniffi.KeepMobileException
+import io.privkey.keep.uniffi.StorageRead
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -247,6 +248,53 @@ class InfallibleStorageReadTest {
             KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX)
                 .getString("active_share_key", null)
         )
+    }
+
+    @Test
+    fun the_core_read_returns_the_stored_pointer_as_it_is() {
+        // Even one naming a share that will not read, which getActiveShareKey keeps too,
+        // and one naming a share that is no longer in the registry, which it would not.
+        seedTwoSharesWithTheFirstUnreadable(activeKey = GROUP_HEX)
+        assertEquals(StorageRead.Found(GROUP_HEX), storage().readActiveShareKey())
+
+        KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit()
+            .putStringSet("all_share_keys", setOf(SECOND_GROUP_HEX))
+            .commit()
+        assertEquals(StorageRead.Found(GROUP_HEX), storage().readActiveShareKey())
+    }
+
+    @Test
+    fun the_core_read_infers_and_writes_nothing_when_no_pointer_is_stored() {
+        // getActiveShareKey answers this with the readable share; the core's read must
+        // report the absence, since a caller deciding whether to set the pointer acts on it.
+        seedTwoSharesWithTheFirstUnreadable(activeKey = null)
+        assertEquals(SECOND_GROUP_HEX, storage().getActiveShareKey())
+
+        assertEquals(StorageRead.Absent, storage().readActiveShareKey())
+        assertNull(
+            "the read must not store a pointer",
+            KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).getString("active_share_key", null)
+        )
+    }
+
+    @Test
+    fun an_unreadable_pointer_is_unavailable_to_the_core_rather_than_absent() {
+        seedReadableStore()
+        KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit().remove("active_share_key").commit()
+        val stored = writeAndFindStoredName(context, MULTI_PREFS + SUFFIX) {
+            KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit().putString("active_share_key", GROUP_HEX).commit()
+        }
+        corruptStoredValue(context, MULTI_PREFS + SUFFIX, stored)
+
+        assertEquals(StorageRead.Unavailable, storage().readActiveShareKey())
+    }
+
+    @Test
+    fun a_pointer_lookup_that_cannot_complete_is_unavailable_to_the_core() {
+        seedReadableStore()
+        breakNameResolution(MULTI_PREFS + SUFFIX)
+
+        assertEquals(StorageRead.Unavailable, storage().readActiveShareKey())
     }
 
     @Test

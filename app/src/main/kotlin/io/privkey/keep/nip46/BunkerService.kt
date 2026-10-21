@@ -94,6 +94,8 @@ class BunkerService : Service() {
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
         internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
+        // The core's message for a start that a stop cancelled.
+        private const val STOPPED_WHILE_STARTING = "The bunker was stopped while it was starting"
 
         private val HEX_PUBKEY_REGEX = Regex("^[a-fA-F0-9]{64}$")
 
@@ -141,22 +143,23 @@ class BunkerService : Service() {
             current()?.authorizedClientsCache?.remove(pubkey.lowercase())
         }
 
-        internal fun revokeClientInEngine(pubkey: String) {
+        // Through a handler of its own: the core revoke reaches the running engine from any
+        // handler, drops persisted grants with no bunker running, and stops whatever bunker
+        // is running, which the caller restarts.
+        private fun revokeClientInEngine(keepMobile: io.privkey.keep.uniffi.KeepMobile, pubkey: String) {
             current()?.authorizedClientsCache?.remove(pubkey.lowercase())
-            val handler = current()?.bunkerHandler ?: return
             try {
-                handler.revokeClient(pubkey)
+                BunkerHandler(keepMobile).use { it.revokeClient(pubkey) }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Engine client revoke failed: ${e::class.simpleName}")
                 throw e
             }
         }
 
-        internal fun revokeAllClientsInEngine() {
+        private fun revokeAllClientsInEngine(keepMobile: io.privkey.keep.uniffi.KeepMobile) {
             current()?.authorizedClientsCache?.clear()
-            val handler = current()?.bunkerHandler ?: return
             try {
-                handler.revokeAllClients()
+                BunkerHandler(keepMobile).use { it.revokeAllClients() }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Engine revoke-all failed: ${e::class.simpleName}")
                 throw e
@@ -165,13 +168,13 @@ class BunkerService : Service() {
 
         /**
          * The one revoke path for NIP-46 clients: [pubkeys], or every client when null.
-         * Denylists them, drops them from the app's lists and the engine, then rotates the
-         * bunker URL, since the connect secret in it is reusable and a revoked client that
-         * kept it could connect again under a new key. Returns the saved bunker config.
+         * Denylists them, drops them from the app's lists and the core, which also replaces
+         * the connect secret, then rotates the bunker URL and restarts a running bunker.
+         * Returns the saved bunker config.
          *
-         * Stopgap until the core owns revocation: a single core revoke that records the
-         * revocation, drops live and persisted grants and invalidates the connect secret
-         * replaces this sequence, and the Kotlin denylist with it.
+         * The rotation keeps revoke as it was before the core replaced the connect secret
+         * itself: every client pairs again. It can go once the copy says only the revoked
+         * client is affected; the Kotlin denylist goes once the core records revocations.
          */
         internal suspend fun revokeClients(
             context: Context,
@@ -198,10 +201,10 @@ class BunkerService : Service() {
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
             }
             try {
-                if (pubkeys == null) revokeAllClientsInEngine() else revoked.forEach { revokeClientInEngine(it) }
+                if (pubkeys == null) revokeAllClientsInEngine(keepMobile) else revoked.forEach { revokeClientInEngine(keepMobile, it) }
             } finally {
-                // The secret must change even if the engine revoke failed; the next start's
-                // sweep revokes any grant the engine still holds.
+                // The secret must change even if the core revoke failed, and the core revoke
+                // stopped a running bunker, which this restarts.
                 rotateBunkerCredentials(keepMobile)
             }
             return saved
@@ -265,6 +268,9 @@ class BunkerService : Service() {
             pendingNostrConnectRequests.clear()
             // Standalone: the service is being stopped for the switch and must not restart.
             step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
+            // Now rather than only at the next start, since the core revokes with no bunker
+            // running; the mark retries it if this fails.
+            step { BunkerHandler(keepMobile).use { it.revokeAllClients() } }
             // Again, now the config is off: a start asked for since the first halt read it on.
             stop(context)
             current()?.haltForAccountSwitch()
@@ -307,6 +313,15 @@ class BunkerService : Service() {
             if (rotate) BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
             markers.edit().putBoolean(KEY_ROTATED_FOR_EARLIER_REVOKES, true).commit()
             return rotate
+        }
+
+        /**
+         * The core stops the bunker whenever it drops its live node, without telling this
+         * service, so a service still meant to serve starts it again. The start waits for
+         * the node to be built again, as one at launch does.
+         */
+        internal fun restartAfterNodeDrop() {
+            current()?.restartIfServing()
         }
 
         fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
@@ -522,6 +537,21 @@ class BunkerService : Service() {
         }
     }
 
+    private fun restartIfServing() {
+        val keepMobile = keepMobileRef ?: return
+        serviceScope.launch {
+            val relays = runCatching { keepMobile.getRelayConfig(null).bunkerRelays }.getOrDefault(emptyList())
+            val restart = startStopMutex.withLock {
+                if (serving && relays.isNotEmpty()) {
+                    _bunkerUrl.value = null
+                    _status.value = BunkerStatus.STARTING
+                }
+                serving && relays.isNotEmpty()
+            }
+            if (restart) startBunker(keepMobile, relays)
+        }
+    }
+
     private suspend fun haltForAccountSwitch() {
         startStopMutex.withLock {
             serving = false
@@ -585,6 +615,10 @@ class BunkerService : Service() {
             if (revokeAllMark(this).isSet()) {
                 BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
             }
+            // And revokes every remembered grant before this start can restore one. The core
+            // revokes with no bunker running and reports a save that failed, which keeps the
+            // mark and fails this start.
+            revokeAllMark(this).revokeIfSet { BunkerHandler(keepMobile).use { it.revokeAllClients() } }
             if (rotateOnceForEarlierRevokes(this, keepMobile)) {
                 logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker", "URL rotated because a client was revoked before this version; pair clients again")
             }
@@ -652,35 +686,6 @@ class BunkerService : Service() {
                 return false
             }
 
-            try {
-                // An account switch dropped the previous account's clients; their remembered
-                // grants were restored by this start and go here, first, since they are live
-                // until then. The revoke is a silent no-op once onDestroy has stopped the
-                // handler, and onDestroy clears serving first, so the mark is kept for the next
-                // start unless this one is still serving. The pinned core also reports success
-                // when it could not save the emptied grants, so the mark is kept when any storage
-                // call failed meanwhile. Ceiling: an unrelated storage fault, or a lasting one,
-                // also keeps it, and the next start rotates the URL again; a power cut can roll
-                // back the saved grants while the cleared mark stays. Remove that check once the
-                // core's revoke returns a result.
-                revokeAllMark(this).revokeIfSet(
-                    revoke = { handler.revokeAllClients() },
-                    serving = { serving },
-                    faultsSoFar = { (applicationContext as? KeepMobileApp)?.getStorage()?.faultsSoFar() },
-                )
-                // A revoke made while the engine was stopped could not drop the client's
-                // persisted grants, and this start has just restored them. Ceiling: one
-                // storage write per denylisted client on every start, and grants live until
-                // the sweep reaches them. Remove once the pinned core clears persisted grants
-                // on a revoke without a running bunker and drops them on rotation.
-                Nip46ClientStore.getDenylist(this)
-                    .filter { HEX_PUBKEY_REGEX.matches(it) }
-                    .forEach { handler.revokeClient(it) }
-            } catch (e: Exception) {
-                runCatching { handler.stopBunker() }
-                throw e
-            }
-
             val url = handler.getBunkerUrl()
             _bunkerUrl.value = url
             _status.value = handler.getBunkerStatus()
@@ -693,6 +698,11 @@ class BunkerService : Service() {
             if (e is CancellationException) throw e
             if (e is io.privkey.keep.uniffi.KeepMobileException.NotInitialized && attempt < MAX_START_RETRIES) {
                 return true
+            }
+            // A rotation, a revoke or a teardown stopped the bunker while this started it: a
+            // stop, not a failure. Start again if it is still meant to serve.
+            if (e is io.privkey.keep.uniffi.KeepMobileException.InitializationFailed && e.msg == STOPPED_WHILE_STARTING) {
+                return serving && attempt < MAX_START_RETRIES
             }
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start bunker: ${e::class.simpleName}")
             _status.value = BunkerStatus.ERROR

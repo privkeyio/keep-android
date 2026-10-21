@@ -696,6 +696,7 @@ class KeepMobileApp : Application() {
      */
     fun onLiveNodeDropped() {
         liveNode.dropped()
+        io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop()
         mainHandler.post {
             // Not over a node an initialize has built since this drop.
             if (!liveNode.isLive()) {
