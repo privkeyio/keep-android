@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources tools:ignore="MissingTranslation" xmlns:tools="http://schemas.android.com/tools">
+
+    <string name="approver_title">Agent approvals</string>
+    <string name="approver_settings_subtitle">Approve or deny what your agents ask a Keep gateway to sign</string>
+    <string name="approver_settings_action">Open</string>
+    <string name="approver_default_label">My phone</string>
+    <string name="approver_label">Name for this phone</string>
+    <string name="approver_unpaired_body">Pair this phone with a Keep agent gateway. On the gateway host, run keep gateway approver pair and scan the code it shows.</string>
+    <string name="approver_scan">Scan pairing code</string>
+    <string name="approver_scan_title">Scan the gateway\'s pairing code</string>
+    <string name="approver_fingerprint_body">After you sign, the gateway\'s terminal shows a fingerprint. Confirm there only if it matches this one exactly.</string>
+    <string name="approver_pair_sign">Sign and pair</string>
+    <string name="approver_pairing_waiting">Waiting for the gateway. Confirm on its terminal that it shows this fingerprint.</string>
+    <string name="approver_pairing_cancel">Cancel pairing</string>
+    <string name="approver_fingerprint">Fingerprint: %1$s</string>
+    <string name="approver_epoch">Freeze epoch: %1$d</string>
+    <string name="approver_freeze_all">Freeze every agent</string>
+    <string name="approver_all_frozen">Every agent is frozen.</string>
+    <string name="approver_unfreeze_all">Unfreeze every agent</string>
+    <string name="approver_credential_frozen">Frozen: %1$s</string>
+    <string name="approver_unfreeze">Unfreeze</string>
+    <string name="approver_silent">No word from the gateway for an hour. It may be down, cut off, or its messages withheld.</string>
+    <string name="approver_alerts_title">The gateway needs your attention</string>
+    <string name="approver_alerts_dropped">%1$d older alerts were not kept.</string>
+    <string name="approver_alerts_acknowledge">I have read these</string>
+    <string name="approver_no_requests">No requests are waiting.</string>
+    <string name="approver_request_credential">Asked by: %1$s</string>
+    <string name="approver_request_seconds_left">%1$d seconds left</string>
+    <string name="approver_request_expired">Expired, it can no longer be approved</string>
+    <string name="approver_written_by_agent">Written by the agent, not checked by the gateway</string>
+    <string name="approver_field_removed">%1$d hidden characters removed</string>
+    <string name="approver_field_truncated">Cut short, %1$d characters in full</string>
+    <string name="approver_approve">Approve</string>
+    <string name="approver_deny">Deny</string>
+    <string name="approver_forget">Remove pairing</string>
+    <string name="approver_forget_body">This phone forgets the gateway. The gateway keeps this device until it is removed there.</string>
+    <string name="approver_forget_confirm">Remove</string>
+    <string name="approver_biometric_subtitle">Signs with this phone\'s approver key</string>
+    <string name="approver_biometric_pair">Pair with the gateway</string>
+    <string name="approver_biometric_approve">Approve the request</string>
+    <string name="approver_biometric_deny">Deny the request</string>
+    <string name="approver_biometric_unfreeze">Unfreeze</string>
+    <string name="approver_notice_paired">Paired with the gateway</string>
+    <string name="approver_notice_pairing_refused">The gateway refused the pairing: %1$s</string>
+    <string name="approver_notice_request_refused">A request failed its checks and was not shown: %1$s</string>
+    <string name="approver_notice_outcome">Request %1$s</string>
+    <string name="approver_error_key_invalidated">A biometric enrollment changed, so the approver key is gone. Remove this pairing and pair again. You can still freeze.</string>
+    <string name="approver_error_generic">The approver could not do that</string>
+    <string name="approver_notification_channel">Agent approvals</string>
+    <string name="approver_notification_channel_description">Requests from agents waiting for your approval</string>
+    <string name="approver_notification_title">Keep agent approvals</string>
+    <string name="approver_notification_request">A request is waiting for you in the app</string>
+    <string name="approver_notification_alert">The gateway needs your attention</string>
+</resources>

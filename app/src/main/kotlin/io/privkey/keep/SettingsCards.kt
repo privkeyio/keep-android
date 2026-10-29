@@ -315,6 +315,18 @@ fun ExportLogsCard(onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun ApproverSettingsCard(onClick: () -> Unit) {
+    KeepCard(onClick = onClick) {
+        KeepListRow(
+            title = stringResource(R.string.approver_title),
+            subtitle = stringResource(R.string.approver_settings_subtitle),
+            trailing = { KeepRowAction(stringResource(R.string.approver_settings_action)) }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun BackupSettingsCard(onClick: () -> Unit) {
     KeepCard(onClick = onClick) {
         KeepListRow(

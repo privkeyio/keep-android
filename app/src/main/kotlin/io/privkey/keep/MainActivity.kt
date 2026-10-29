@@ -2,6 +2,7 @@ package io.privkey.keep
 
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -38,6 +39,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import io.privkey.keep.approver.ApproverAuthenticator
+import io.privkey.keep.approver.ApproverController
+import io.privkey.keep.approver.ApproverNotifier
+import io.privkey.keep.approver.ApproverScreen
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.descriptor.WalletDescriptorScreen
 import io.privkey.keep.navigation.Route
@@ -73,10 +78,17 @@ import javax.crypto.Cipher
 private const val MAX_SEED_WORDS_LENGTH = 1024
 
 class MainActivity : FragmentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ApproverNotifier.ACTION_SHOW_APPROVER) approverRequested = true
+    }
+
     private var biometricHelper: BiometricHelper? = null
+    private var approverRequested by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) approverRequested = intent?.action == ApproverNotifier.ACTION_SHOW_APPROVER
 
         val app = application as? KeepMobileApp ?: run { finish(); return }
         biometricHelper = BiometricHelper(this, app.getBiometricTimeoutStore())
@@ -303,7 +315,13 @@ class MainActivity : FragmentActivity() {
                                 app.removeCertificatePin(hostname, spkiHash)
                             },
                             onDismissPinMismatch = app::dismissPinMismatch,
-                            onAccountSwitched = { stop -> app.onAccountSwitched(stop) }
+                            onAccountSwitched = { stop -> app.onAccountSwitched(stop) },
+                            approverController = app.getApproverController(),
+                            approverRequested = approverRequested,
+                            onApproverRequestHandled = { approverRequested = false },
+                            authenticateApprover = { signature, title, subtitle ->
+                                biometricHelper?.authenticateSignature(signature, title, subtitle)
+                            }
                         )
                     } else {
                         ErrorScreen(app.getInitError() ?: stringResource(R.string.main_init_app_failed))
@@ -369,7 +387,11 @@ fun MainScreen(
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
     onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
-    onAccountSwitched: suspend (Boolean) -> Boolean = { false }
+    onAccountSwitched: suspend (Boolean) -> Boolean = { false },
+    approverController: ApproverController? = null,
+    approverRequested: Boolean = false,
+    onApproverRequestHandled: () -> Unit = {},
+    authenticateApprover: ApproverAuthenticator = { _, _, _ -> null }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -449,6 +471,13 @@ fun MainScreen(
     var biometricTimeout by remember { mutableStateOf(biometricTimeoutStore.getTimeout()) }
     var biometricLockOnLaunch by remember { mutableStateOf(biometricTimeoutStore.isLockOnLaunchEnabled()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
+    var showApproverScreen by remember { mutableStateOf(false) }
+    LaunchedEffect(approverRequested) {
+        if (approverRequested) {
+            showApproverScreen = approverController != null
+            onApproverRequestHandled()
+        }
+    }
     var showWalletDescriptorScreen by remember { mutableStateOf(false) }
     var descriptorCount by remember { mutableIntStateOf(0) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
@@ -996,6 +1025,15 @@ fun MainScreen(
             permissionStore = permissionStore,
             onAppClick = { selectedAppPackage = it },
             onDismiss = { showConnectedApps = false }
+        )
+        return
+    }
+
+    if (showApproverScreen && approverController != null) {
+        ApproverScreen(
+            controller = approverController,
+            authenticate = authenticateApprover,
+            onDismiss = { showApproverScreen = false }
         )
         return
     }
@@ -1654,6 +1692,7 @@ fun MainScreen(
                     },
                     onSecurityClick = { showSecuritySettings = true },
                     onBackupClick = { showBackupRestore = true },
+                    onApproverClick = approverController?.let { { showApproverScreen = true } },
                     onSigningHistoryClick = { showHistoryScreen = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
@@ -1934,6 +1973,7 @@ private fun SettingsTab(
     onForegroundServiceToggle: (Boolean) -> Unit,
     onSecurityClick: () -> Unit,
     onBackupClick: () -> Unit,
+    onApproverClick: (() -> Unit)?,
     onSigningHistoryClick: () -> Unit,
     onClearLogsAndActivity: suspend () -> Unit
 ) {
@@ -1998,6 +2038,11 @@ private fun SettingsTab(
 
         BackupSettingsCard(onClick = onBackupClick)
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (onApproverClick != null) {
+            ApproverSettingsCard(onClick = onApproverClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         if (hasShare) {
             SigningHistoryCard(onClick = onSigningHistoryClick)
