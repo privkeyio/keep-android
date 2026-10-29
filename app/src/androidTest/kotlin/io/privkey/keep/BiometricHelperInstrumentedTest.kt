@@ -10,6 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.Signature
 import javax.crypto.Cipher
 
 /**
@@ -88,6 +89,24 @@ class BiometricHelperInstrumentedTest {
         val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT))
         assertThrows(BiometricHelper.BiometricException::class.java) {
             runBlocking { helper.authenticateWithCrypto(uninitializedCipher()) }
+        }
+    }
+
+    private fun uninitializedSignature(): Signature = Signature.getInstance("SHA256withECDSA")
+
+    @Test
+    fun authenticateSignature_cancellation_returnsNull() = withActivity { activity ->
+        for (code in listOf(BiometricPrompt.ERROR_USER_CANCELED, BiometricPrompt.ERROR_NEGATIVE_BUTTON)) {
+            val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(code))
+            assertNull(runBlocking { helper.authenticateSignature(uninitializedSignature(), "t", "s") })
+        }
+    }
+
+    @Test
+    fun authenticateSignature_nonCancellationError_throws() = withActivity { activity ->
+        val helper = BiometricHelper.withAuthenticator(activity, null, erroringAuthenticator(BiometricPrompt.ERROR_LOCKOUT))
+        assertThrows(BiometricHelper.BiometricException::class.java) {
+            runBlocking { helper.authenticateSignature(uninitializedSignature(), "t", "s") }
         }
     }
 }

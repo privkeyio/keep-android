@@ -192,6 +192,7 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
         /** The text to show for a failed approver call. */
         fun errorText(context: Context, e: Throwable): String = when (e) {
             is KeepMobileException.InvalidInput -> e.msg
+            is KeepMobileException.InvalidRelayUrl -> e.msg
             is ApproverKeyInvalidatedException -> context.getString(R.string.approver_error_key_invalidated)
             else -> context.getString(R.string.approver_error_generic)
         }
