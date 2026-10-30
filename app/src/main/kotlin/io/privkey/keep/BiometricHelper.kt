@@ -6,6 +6,7 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import io.privkey.keep.storage.BiometricTimeoutStore
+import java.security.Signature
 import javax.crypto.Cipher
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -184,6 +185,42 @@ class BiometricHelper private constructor(
             }
 
             authenticator.authenticate(promptInfo, BiometricPrompt.CryptoObject(cipher), callback)
+        }
+    }
+
+    /**
+     * Prompts for a strong biometric to unlock [signature], a Keystore signing key whose every
+     * use needs one. Returns the unlocked Signature, or null when the person cancels. Never
+     * short-circuited by, and never opens, the biometric timeout window.
+     */
+    suspend fun authenticateSignature(
+        signature: Signature,
+        title: String,
+        subtitle: String
+    ): Signature? {
+        val promptInfo = resolvePromptInfo(title, subtitle, null)
+        return suspendCoroutine { continuation ->
+            val callback = object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    continuation.resume(result.cryptoObject?.signature)
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    val isCancellation = errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                        errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                    if (isCancellation) {
+                        continuation.resume(null)
+                    } else {
+                        continuation.resumeWithException(
+                            BiometricException(errorCode, errString.toString())
+                        )
+                    }
+                }
+
+                override fun onAuthenticationFailed() {}
+            }
+
+            authenticator.authenticate(promptInfo, BiometricPrompt.CryptoObject(signature), callback)
         }
     }
 
