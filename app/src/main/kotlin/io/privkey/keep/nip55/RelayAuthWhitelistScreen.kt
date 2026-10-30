@@ -39,7 +39,7 @@ fun RelayAuthWhitelistScreen(
     var hosts by remember { mutableStateOf<List<String>>(emptyList()) }
     var readFailed by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<Int?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
     var resetFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -89,8 +89,7 @@ fun RelayAuthWhitelistScreen(
             // Nothing below this is usable while the list cannot be read: add refuses
             // to write over a list it could not read, there are no rows to remove, and
             // the gate is rejecting every relay meanwhile. So the fault replaces them
-            // rather than sitting above an input whose every attempt would fail with
-            // the error a bad host gets.
+            // rather than sitting above an input whose every attempt would fail.
             // Outside the fault block below, because a reset can fail and still leave
             // the next read succeeding: the delete is uncertified while the value is
             // gone from this instance's view. Nested under the fault, that outcome
@@ -125,10 +124,11 @@ fun RelayAuthWhitelistScreen(
             ) {
                 OutlinedTextField(
                     value = input,
-                    onValueChange = { input = it; error = false },
+                    onValueChange = { input = it; error = null },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    isError = error,
+                    isError = error != null,
+                    supportingText = error?.let { { Text(stringResource(it)) } },
                     label = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_add_label)) },
                     placeholder = { Text(stringResource(R.string.connections_nip55_relay_auth_whitelist_placeholder)) }
                 )
@@ -136,12 +136,22 @@ fun RelayAuthWhitelistScreen(
                     enabled = input.isNotBlank(),
                     onClick = {
                         scope.launch {
-                            val added = withContext(Dispatchers.IO) { store.add(input) }
-                            if (added == null) {
-                                error = true
-                            } else {
-                                input = ""
-                                reload()
+                            when (withContext(Dispatchers.IO) { store.add(input) }) {
+                                is RelayAuthWhitelistStore.AddResult.Added -> {
+                                    input = ""
+                                    error = null
+                                    reload()
+                                }
+                                RelayAuthWhitelistStore.AddResult.InvalidHost ->
+                                    error = R.string.connections_nip55_relay_auth_whitelist_invalid_host
+                                RelayAuthWhitelistStore.AddResult.Full ->
+                                    error = R.string.connections_nip55_relay_auth_whitelist_full
+                                RelayAuthWhitelistStore.AddResult.Unreadable -> {
+                                    error = R.string.connections_nip55_relay_auth_whitelist_save_failed
+                                    reload()
+                                }
+                                RelayAuthWhitelistStore.AddResult.NotSaved ->
+                                    error = R.string.connections_nip55_relay_auth_whitelist_save_failed
                             }
                         }
                     }
@@ -204,6 +214,7 @@ fun RelayAuthWhitelistScreen(
                     confirmReset = false
                     gateReset {
                         resetFailed = false
+                        error = null
                         // Read again before destroying anything. The fault is latched
                         // from the last read, an Unreadable can be transient, and the
                         // gate is read per request rather than from this screen, so a

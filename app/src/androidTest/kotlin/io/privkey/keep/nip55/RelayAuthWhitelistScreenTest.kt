@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -286,6 +287,75 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(
             context.getString(R.string.connections_nip55_relay_auth_whitelist_reset_failed)
         ).assertDoesNotExist()
+
+        forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    private fun submit(relay: String) {
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add_label))
+            .performTextInput(relay)
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add)).performClick()
+    }
+
+    // A bad host and a full list used to show the same bare error outline.
+    @Test
+    fun aHostThatIsNotARelaySaysSo() {
+        showScreen()
+        awaitText(emptyText)
+
+        submit("wss://")
+
+        awaitText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host))
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full)).assertDoesNotExist()
+    }
+
+    @Test
+    fun aFullListSaysSoRatherThanBlamingTheHost() {
+        val store = RelayAuthWhitelistStore(context)
+        repeat(256) { store.add("relay$it.example.com") }
+        showScreen()
+        awaitText("relay0.example.com")
+
+        submit("wss://overflow.example.com")
+
+        awaitText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full))
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
+    }
+
+    // A retry that succeeds without the input being edited clears the earlier message.
+    @Test
+    fun aRetryThatSucceedsClearsTheEarlierError() {
+        val store = RelayAuthWhitelistStore(context)
+        repeat(256) { store.add("relay$it.example.com") }
+        showScreen()
+        awaitText("relay0.example.com")
+        val full = context.getString(R.string.connections_nip55_relay_auth_whitelist_full)
+
+        submit("wss://overflow.example.com")
+        awaitText(full)
+        store.remove("relay0.example.com")
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add)).performClick()
+
+        awaitText("overflow.example.com")
+        compose.onNodeWithText(full).assertDoesNotExist()
+    }
+
+    // An add that finds the list unreadable switches to the reset view rather than
+    // blaming the host or the size of the list.
+    @Test
+    fun anAddThatFindsTheListUnreadableShowsTheFault() {
+        val storedName = writeAndFindStoredName(context, RelayAuthWhitelistStore.PREFS_NAME) {
+            RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
+        }
+        showScreen()
+        awaitText(STAGED_HOST)
+        corruptStoredValue(context, RelayAuthWhitelistStore.PREFS_NAME, storedName)
+
+        submit("wss://other.example.com")
+
+        awaitText(unreadableText)
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full)).assertDoesNotExist()
 
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
     }
