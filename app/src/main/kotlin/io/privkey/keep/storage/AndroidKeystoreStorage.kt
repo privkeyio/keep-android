@@ -143,8 +143,11 @@ class AndroidKeystoreStorage(
             File(context.noBackupFilesDir, "$APPROVER_STATE_FILE$prefsSuffix"),
             wrappingKey = { keyStore.getKey(alias, null) as? SecretKey },
             createWrappingKey = { getOrCreateKeyWithAlias(alias, requireUserAuth = false) },
+            deleteWrappingKey = { if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias) },
         )
     }
+
+    internal fun checkApproverState(): ApproverStateFile.Check = approverState.check()
 
     @Synchronized
     private fun getOrCreateMetadataKey(): SecretKey =

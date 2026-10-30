@@ -60,6 +60,7 @@
     <string name="approver_reset_confirm">Reset</string>
     <string name="approver_reset_auth">Confirm resetting agent approvals</string>
     <string name="approver_reset_failed">The reset did not finish. Try again.</string>
+    <string name="approver_reset_kept">The pairing could be read again, so it was kept.</string>
     <string name="approver_error_generic">The approver could not do that</string>
     <string name="approver_notification_channel">Agent approvals</string>
     <string name="approver_notification_channel_description">Requests from agents waiting for your approval</string>

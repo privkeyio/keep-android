@@ -9,6 +9,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -89,12 +90,23 @@ class ApproverStateStorageTest {
     fun anUnreadableStateIsAStorageFaultUntilItIsDeleted() {
         storage().storeShareByKey(KEY, "not the approver state".toByteArray(), metadata)
         assertUnreadable()
+        assertEquals(ApproverStateFile.Check.READABLE, storage().checkApproverState())
         keyStore.deleteEntry(ALIAS)
         assertUnreadable()
+        assertEquals(ApproverStateFile.Check.DAMAGED, storage().checkApproverState())
         storage().deleteShareByKey(KEY)
+        assertEquals(ApproverStateFile.Check.ABSENT, storage().checkApproverState())
         val handler = ApproverHandler(KeepMobile(storage()))
         assertFalse(handler.status().paired)
         assertFalse(file.exists())
+    }
+
+    @Test
+    fun deleteDropsTheWrappingKey() {
+        storage().storeShareByKey(KEY, byteArrayOf(1), metadata)
+        assertTrue(keyStore.containsAlias(ALIAS))
+        storage().deleteShareByKey(KEY)
+        assertFalse(keyStore.containsAlias(ALIAS))
     }
 
     private fun assertUnreadable() {

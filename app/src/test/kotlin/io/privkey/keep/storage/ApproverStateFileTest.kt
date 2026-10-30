@@ -33,6 +33,7 @@ class ApproverStateFileTest {
         file,
         wrappingKey = { key },
         createWrappingKey = { newKey().also { key = it } },
+        deleteWrappingKey = { key = null },
         syncDir = { dir ->
             syncs += dir
             replacedBeforeSync += !File(tmp.root, "approver_state.tmp").exists()
@@ -141,6 +142,37 @@ class ApproverStateFileTest {
         assertThrows(KeepMobileException.StorageNotFound::class.java) { store().load() }
         store().delete()
         assertEquals(2, syncs.size)
+    }
+
+    @Test
+    fun deleteAlsoDropsTheWrappingKeySoTheNextStoreMintsOne() {
+        store().store(byteArrayOf(1))
+        val original = key
+        store().delete()
+        assertEquals(null, key)
+        store().store(byteArrayOf(2))
+        assertFalse(key == original)
+        assertArrayEquals(byteArrayOf(2), store().load())
+    }
+
+    @Test
+    fun checkTellsDamageFromAFaultThatMayClear() {
+        assertEquals(ApproverStateFile.Check.ABSENT, store().check())
+        store().store(byteArrayOf(1, 2, 3))
+        assertEquals(ApproverStateFile.Check.READABLE, store().check())
+        val original = key
+        key = KeyGenerator.getInstance("HmacSHA256").generateKey()
+        assertEquals(ApproverStateFile.Check.FAULT, store().check())
+        key = null
+        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        key = newKey()
+        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        key = original
+        val blob = file.readBytes()
+        file.writeBytes(blob.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() })
+        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        file.writeBytes(blob.copyOf(20))
+        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
     }
 
     @Test

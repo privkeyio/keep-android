@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.privkey.keep.approver.ApproverController
 import io.privkey.keep.approver.ApproverKey
+import io.privkey.keep.approver.ApproverReset
+import io.privkey.keep.approver.resetUnreadableApprover
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
@@ -29,6 +31,7 @@ import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AndroidSigningAuditStorage
+import io.privkey.keep.storage.ApproverStateFile
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
@@ -189,7 +192,11 @@ class KeepMobileApp : Application() {
                 }
             }
             .onFailure { e ->
-                approverUnreadable = e is KeepMobileException.StorageException
+                approverUnreadable = e is KeepMobileException.StorageException &&
+                    storage?.checkApproverState().let {
+                        // Readable bytes the core still refused cannot be read by any retry.
+                        it == ApproverStateFile.Check.DAMAGED || it == ApproverStateFile.Check.READABLE
+                    }
                 if (BuildConfig.DEBUG) Log.e(TAG, "Approver unavailable: ${e::class.simpleName}", e)
             }
             .getOrNull()
@@ -197,18 +204,20 @@ class KeepMobileApp : Application() {
 
     fun isApproverUnreadable(): Boolean = approverUnreadable
 
-    // The owner has confirmed this. It forgets a pairing whose saved state cannot be
-    // read, as Remove pairing does for a readable one, and only after one more try
-    // still finds it unreadable, so a fault that has cleared keeps the pairing.
+    // The owner has confirmed this. Forgets the pairing as Remove pairing does, which
+    // the core cannot do while no handler opens.
     @Synchronized
-    fun resetUnreadableApprover(): ApproverController? {
-        val mobile = keepMobile ?: return null
-        initializeApprover(mobile)?.let { return it }
-        if (!approverUnreadable) return null
-        val store = storage ?: return null
-        store.deleteShareByKey(AndroidKeystoreStorage.APPROVER_STATE_KEY)
-        ApproverKey.delete()
-        return initializeApprover(mobile)
+    fun resetUnreadableApprover(): ApproverReset<ApproverController> {
+        val mobile = keepMobile ?: return ApproverReset.NotReset
+        val store = storage ?: return ApproverReset.NotReset
+        return resetUnreadableApprover(
+            open = { initializeApprover(mobile) },
+            unreadable = { approverUnreadable },
+            clear = {
+                store.deleteShareByKey(AndroidKeystoreStorage.APPROVER_STATE_KEY)
+                ApproverKey.delete()
+            },
+        )
     }
 
     // Called only on the main thread (from the state callback's mainHandler.post),
