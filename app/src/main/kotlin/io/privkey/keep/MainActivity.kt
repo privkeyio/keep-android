@@ -806,6 +806,7 @@ fun MainScreen(
                 coroutineScope.launch {
                     if (!confirmApproverOwner(appContext.getString(R.string.approver_reset_auth))) return@launch
                     val reset = runCatching { withContext(Dispatchers.IO) { resetApprover() } }
+                        .onFailure { if (it is CancellationException) throw it }
                         .getOrDefault(ApproverReset.NotReset)
                     val notice = when (reset) {
                         is ApproverReset.Kept -> R.string.approver_reset_kept
