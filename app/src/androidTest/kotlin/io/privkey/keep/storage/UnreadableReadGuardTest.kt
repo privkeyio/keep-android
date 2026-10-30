@@ -103,7 +103,7 @@ class UnreadableReadGuardTest {
 
         assertEquals(
             "an add over an unreadable list must fail rather than replace it",
-            RelayAuthWhitelistStore.AddResult.Failed,
+            RelayAuthWhitelistStore.AddResult.Unreadable,
             RelayAuthWhitelistStore(context).add("wss://other.example.com")
         )
 

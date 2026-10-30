@@ -322,6 +322,24 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
     }
 
+    // A retry that succeeds without the input being edited clears the earlier message.
+    @Test
+    fun aRetryThatSucceedsClearsTheEarlierError() {
+        val store = RelayAuthWhitelistStore(context)
+        repeat(256) { store.add("relay$it.example.com") }
+        showScreen()
+        awaitText("relay0.example.com")
+        val full = context.getString(R.string.connections_nip55_relay_auth_whitelist_full)
+
+        submit("wss://overflow.example.com")
+        awaitText(full)
+        store.remove("relay0.example.com")
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add)).performClick()
+
+        awaitText("overflow.example.com")
+        compose.onNodeWithText(full).assertDoesNotExist()
+    }
+
     // An add that finds the list unreadable switches to the reset view rather than
     // blaming the host or the size of the list.
     @Test

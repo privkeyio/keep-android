@@ -139,16 +139,19 @@ fun RelayAuthWhitelistScreen(
                             when (withContext(Dispatchers.IO) { store.add(input) }) {
                                 is RelayAuthWhitelistStore.AddResult.Added -> {
                                     input = ""
+                                    error = null
                                     reload()
                                 }
                                 RelayAuthWhitelistStore.AddResult.InvalidHost ->
                                     error = R.string.connections_nip55_relay_auth_whitelist_invalid_host
                                 RelayAuthWhitelistStore.AddResult.Full ->
                                     error = R.string.connections_nip55_relay_auth_whitelist_full
-                                RelayAuthWhitelistStore.AddResult.Failed -> {
+                                RelayAuthWhitelistStore.AddResult.Unreadable -> {
                                     error = R.string.connections_nip55_relay_auth_whitelist_save_failed
                                     reload()
                                 }
+                                RelayAuthWhitelistStore.AddResult.NotSaved ->
+                                    error = R.string.connections_nip55_relay_auth_whitelist_save_failed
                             }
                         }
                     }

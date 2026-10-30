@@ -57,8 +57,13 @@ class RelayAuthWhitelistStore(context: Context) {
         data class Added(val host: String) : AddResult
         data object InvalidHost : AddResult
         data object Full : AddResult
-        /** The stored list could not be read, or the write did not reach disk. */
-        data object Failed : AddResult
+        /** The stored list could not be read, so nothing was written. */
+        data object Unreadable : AddResult
+        /**
+         * The write did not reach disk. The host may still be in this process's copy of
+         * the list, so a reload would show it as saved when it is not.
+         */
+        data object NotSaved : AddResult
     }
 
     /** Normalizes [rawUrl] and adds it. */
@@ -71,11 +76,11 @@ class RelayAuthWhitelistStore(context: Context) {
             // This write replaces the whole entry, so going on from a read that failed
             // would leave the list holding nothing but the host being added, deleting
             // every relay the person had allowed.
-            PrefRead.Unreadable -> return AddResult.Failed
+            PrefRead.Unreadable -> return AddResult.Unreadable
         }
         if (host !in current && current.size >= MAX_ENTRIES) return AddResult.Full
         current.add(host)
-        if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return AddResult.Failed
+        if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return AddResult.NotSaved
         return AddResult.Added(host)
     }
 
