@@ -42,10 +42,27 @@ internal fun relayLinkFor(configuredUrl: String, links: List<RelayLinkHealth>): 
 }
 
 private fun stripDefaultRelayPort(scheme: String, authority: String): String {
-    val suffix = when (scheme) {
-        "wss" -> ":443"
-        "ws" -> ":80"
+    val defaultPort = when (scheme) {
+        "wss" -> 443
+        "ws" -> 80
         else -> return authority
     }
-    return if (authority.endsWith(suffix)) authority.removeSuffix(suffix) else authority
+    val at = authority.lastIndexOf('@')
+    val userInfo = if (at >= 0) authority.substring(0, at + 1) else ""
+    val hostPort = if (at >= 0) authority.substring(at + 1) else authority
+    val host: String
+    val portText: String
+    if (hostPort.startsWith("[")) {
+        val bracket = hostPort.indexOf(']')
+        if (bracket < 0 || hostPort.getOrNull(bracket + 1) != ':') return authority
+        host = hostPort.substring(0, bracket + 1)
+        portText = hostPort.substring(bracket + 2)
+    } else {
+        val colon = hostPort.lastIndexOf(':')
+        if (colon < 0) return authority
+        host = hostPort.substring(0, colon)
+        portText = hostPort.substring(colon + 1)
+    }
+    val port = portText.toIntOrNull() ?: return authority
+    return if (port == defaultPort) userInfo + host else authority
 }

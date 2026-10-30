@@ -23,6 +23,10 @@ class RelayLinkHealthTest {
         assertEquals("wss://relay.example.com", normalizeRelayUrl("relay.example.com"))
         assertEquals("ws://relay.example.com", normalizeRelayUrl("ws://relay.example.com:80"))
         assertEquals(
+            "wss://relay.example.com",
+            normalizeRelayUrl("wss://relay.example.com:0443"),
+        )
+        assertEquals(
             "wss://relay.example.com:8443",
             normalizeRelayUrl("wss://relay.example.com:8443"),
         )
