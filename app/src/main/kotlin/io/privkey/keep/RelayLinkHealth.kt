@@ -22,7 +22,8 @@ internal data class RelayLinkHealth(
  * Core health URLs are `RelayUrl::as_str_without_trailing_slash` (WHATWG).
  * This only applies the parts of that form a relay saved from this app can
  * differ on: lowercase scheme and authority, no trailing slash, default
- * ws/wss port omitted, any other port in decimal, `.` / `..` path segments
+ * ws/wss port omitted, any other port in decimal, a dotted IPv4 host in
+ * canonical decimal (a leading-zero octet is octal), `.` / `..` path segments
  * removed, and a raw apostrophe percent-encoded in the query.
  */
 internal fun normalizeRelayUrl(raw: String): String {
@@ -76,14 +77,43 @@ private fun stripDefaultRelayPort(scheme: String, authority: String): String {
         if (bracket < 0 || hostPort.getOrNull(bracket + 1) != ':') return authority
         host = hostPort.substring(0, bracket + 1)
         portText = hostPort.substring(bracket + 2)
-    } else {
-        val colon = hostPort.lastIndexOf(':')
-        if (colon < 0) return authority
-        host = hostPort.substring(0, colon)
-        portText = hostPort.substring(colon + 1)
+        val port = portText.toIntOrNull() ?: return authority
+        return if (port == defaultPort) userInfo + host else "$userInfo$host:$port"
     }
+    val colon = hostPort.lastIndexOf(':')
+    if (colon < 0) return userInfo + canonicalIpv4Host(hostPort)
+    host = hostPort.substring(0, colon)
+    portText = hostPort.substring(colon + 1)
     val port = portText.toIntOrNull() ?: return authority
-    return if (port == defaultPort) userInfo + host else "$userInfo$host:$port"
+    val canonHost = canonicalIpv4Host(host)
+    return if (port == defaultPort) userInfo + canonHost else "$userInfo$canonHost:$port"
+}
+
+/**
+ * Four-octet IPv4 host, serialized the way url 2.5.8 does. An octet with a
+ * leading zero is octal, so `010` is 8, and an 8 or 9 in that octet is not an
+ * IPv4 host. Anything else is returned unchanged.
+ */
+private fun canonicalIpv4Host(host: String): String {
+    val parts = host.split('.')
+    if (parts.size != 4) return host
+    val numbers = ArrayList<Int>(4)
+    for (part in parts) {
+        val number = parseIpv4Octet(part) ?: return host
+        if (number > 255) return host
+        numbers.add(number)
+    }
+    return "${numbers[0]}.${numbers[1]}.${numbers[2]}.${numbers[3]}"
+}
+
+private fun parseIpv4Octet(input: String): Int? {
+    if (input.isEmpty()) return null
+    val octal = input.length >= 2 && input.startsWith('0')
+    val digits = if (octal) input.substring(1) else input
+    if (digits.isEmpty()) return 0
+    val valid = if (octal) digits.all { it in '0'..'7' } else digits.all { it in '0'..'9' }
+    if (!valid) return null
+    return digits.toIntOrNull(if (octal) 8 else 10)
 }
 
 /** WHATWG "remove dot segments", without decoding percent-escapes. */
