@@ -238,6 +238,18 @@ object KeystoreEncryptedPrefs {
         private var namesPredateThisKey = false
         @Volatile
         private var hmacKey: ByteArray? = null
+
+        /**
+         * The stored key record [hmacKey] was resolved against, null when none
+         * was on disk.
+         *
+         * Several instances can hold the same file, and they share its
+         * [SharedPreferences], so one that rotates, mints or clears changes the
+         * record under the others. An instance still hashing under the key it
+         * cached would then write at names the next open cannot compute.
+         */
+        @Volatile
+        private var loadedKeyRecord: String? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
 
         // Migration-only fallback: predictable by design since it only obfuscates
@@ -258,10 +270,10 @@ object KeystoreEncryptedPrefs {
          * file that already held entries: the seed alone, with no file name.
          *
          * It is a constant in this repository's history and in released APKs,
-         * and nothing migrates a file off it, because a stored key is read and
-         * used rather than re-derived. A file still carrying it hashes every
-         * name under something anyone can compute, which is the same exposure
-         * as the fallback epoch and not a name-by-name one.
+         * so a file carrying it hashes every name under something anyone can
+         * compute, which is the same exposure as the fallback epoch and not a
+         * name-by-name one. [rotateOffPublishedKey] moves a file off it on
+         * open, and a file it cannot move keeps it until an open that can.
          */
         private val legacyGlobalKey: ByteArray by lazy {
             MessageDigest.getInstance("SHA-256")
@@ -282,62 +294,99 @@ object KeystoreEncryptedPrefs {
         }
 
         private fun getHmacKey(): ByteArray {
-            hmacKey?.let { return it }
+            currentHmacKey()?.let { return it }
             synchronized(initLockFor(prefsName)) {
-                hmacKey?.let { return it }
-                val stored = basePrefs.getString(HMAC_KEY_PREF, null)
-                namesPredateThisKey = basePrefs.contains(STRANDED_EPOCH_PREF)
-                if (stored != null) {
-                    val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
-                    val key = Base64.decode(decrypted, Base64.NO_WRAP)
-                    // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
-                    // rules out external tampering, so a wrong length here is an internal bug.
-                    // Fail fast: Mac/SecretKeySpec accept any key length and would otherwise
-                    // silently diverge the audit-chain HMACs and key-name hashes.
-                    check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
-                    hmacKey = key
-                    return key
-                }
-                val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
-                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
-                val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
-                val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
-                val hasExistingEntries = basePrefs.contains(registryHash)
-                val fileHoldsEntries =
-                    basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
-                val persisted = if (hasExistingEntries) {
-                    migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
-                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
-                    }
-                } else {
-                    // One commit: the marker has to land with the key it describes,
-                    // or a restart reads a key that looks like it has always been
-                    // this file's and certifies deletes over the stranded entries.
-                    val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
-                    if (fileHoldsEntries) editor.putString(STRANDED_EPOCH_PREF, "1")
-                    editor.commit().also { ok ->
-                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
-                    }
-                }
-                // Entries this cannot name: either nothing here could read an
-                // index for them, so they predate the key being minted now, or
-                // the key just minted did not persist and the store carries on
-                // under its deterministic one while they sit at names derived
-                // with neither. A rollback of this file produces the first; a
-                // value planted at the deterministic index name, which anything
-                // that can write this directory can derive, produces the second
-                // and would otherwise read as a deterministic-epoch file whose
-                // entries are all accounted for.
-                //
-                // Not durable in the second case, and it does not need to be:
-                // nothing committed, so every later open resolves the same way
-                // and recomputes it.
-                val stranded = fileHoldsEntries && (!hasExistingEntries || !persisted)
-                namesPredateThisKey = namesPredateThisKey || stranded
-                val result = if (persisted) key else deterministicHmacKey()
-                hmacKey = result
-                return result
+                currentHmacKey()?.let { return it }
+                if (hmacKey != null) forgetStaleKey()
+                val key = resolveHmacKey()
+                loadedKeyRecord = basePrefs.getString(HMAC_KEY_PREF, null)
+                hmacKey = key
+                return key
             }
+        }
+
+        private fun currentHmacKey(): ByteArray? =
+            hmacKey?.takeIf { basePrefs.getString(HMAC_KEY_PREF, null) == loadedKeyRecord }
+
+        /** Drops everything derived from a key another instance has replaced. Callers hold the per-file monitor. */
+        private fun forgetStaleKey() {
+            hmacKey = null
+            keyCache.clear()
+            reverseKeyCache.clear()
+            registrySeeded = false
+            foldAttempts = 0
+        }
+
+        private fun resolveHmacKey(): ByteArray {
+            val stored = basePrefs.getString(HMAC_KEY_PREF, null)
+            namesPredateThisKey = basePrefs.contains(STRANDED_EPOCH_PREF)
+            if (stored != null) {
+                val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
+                val key = Base64.decode(decrypted, Base64.NO_WRAP)
+                // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
+                // rules out external tampering, so a wrong length here is an internal bug.
+                // Fail fast: Mac/SecretKeySpec accept any key length and would otherwise
+                // silently diverge the audit-chain HMACs and key-name hashes.
+                check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
+                return if (key.contentEquals(legacyGlobalKey)) rotateOffPublishedKey(key) else key
+            }
+            val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+            val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
+            val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
+            val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
+            val hasExistingEntries = basePrefs.contains(registryHash)
+            val fileHoldsEntries =
+                basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
+            val persisted = if (hasExistingEntries) {
+                migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
+                    if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
+                }
+            } else {
+                // One commit: the marker has to land with the key it describes,
+                // or a restart reads a key that looks like it has always been
+                // this file's and certifies deletes over the stranded entries.
+                val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
+                if (fileHoldsEntries) editor.putString(STRANDED_EPOCH_PREF, "1")
+                editor.commit().also { ok ->
+                    if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
+                }
+            }
+            // Entries this cannot name: either nothing here could read an
+            // index for them, so they predate the key being minted now, or
+            // the key just minted did not persist and the store carries on
+            // under its deterministic one while they sit at names derived
+            // with neither. A rollback of this file produces the first; a
+            // value planted at the deterministic index name, which anything
+            // that can write this directory can derive, produces the second
+            // and would otherwise read as a deterministic-epoch file whose
+            // entries are all accounted for.
+            //
+            // Not durable in the second case, and it does not need to be:
+            // nothing committed, so every later open resolves the same way
+            // and recomputes it.
+            val stranded = fileHoldsEntries && (!hasExistingEntries || !persisted)
+            namesPredateThisKey = namesPredateThisKey || stranded
+            return if (persisted) key else deterministicHmacKey()
+        }
+
+        /**
+         * Moves a file off the published global key onto a fresh random one,
+         * re-hashing what its index lists the way the deterministic epoch is left.
+         *
+         * Keeps the published key when the index at its name is missing, will
+         * not decode or dropped entries, or when the commit fails, and the next
+         * open tries again. Names the index does not list stay where they are,
+         * at names nothing computes after this: a value there was refused while
+         * the key was public, since nothing unlisted and unbound is read at a
+         * derivable name, so leaving it costs no value this store reads today.
+         */
+        private fun rotateOffPublishedKey(published: ByteArray): ByteArray {
+            val blob = basePrefs.getString(hmacWithKey(KEY_REGISTRY, published), null) ?: return published
+            val index = decodeRegistry(blob) as? RegistryRead.Decoded ?: return published
+            if (!index.complete) return published
+            val fresh = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+            val encrypted = encrypt(secretKey, Base64.encodeToString(fresh, Base64.NO_WRAP), HMAC_KEY_PREF)
+            return if (rehashEntries(published, fresh, encrypted, index.keys)) fresh else published
         }
 
         private fun hmacWithKey(plainKey: String, key: ByteArray): String {
@@ -369,6 +418,15 @@ object KeystoreEncryptedPrefs {
                 if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable during HMAC migration, falling back to deterministic key")
                 return false
             }
+            return rehashEntries(oldKey, newKey, encryptedHmacKey, plainKeys)
+        }
+
+        private fun rehashEntries(
+            oldKey: ByteArray,
+            newKey: ByteArray,
+            encryptedHmacKey: String,
+            plainKeys: List<String>
+        ): Boolean {
             val editor = basePrefs.edit()
             editor.putString(HMAC_KEY_PREF, encryptedHmacKey)
             if (plainKeys.isEmpty()) {
