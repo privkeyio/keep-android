@@ -132,6 +132,31 @@ class KeystoreEncryptedPrefsRotationTest {
         assertTrue(raw().contains(globalEpochNameOf(VICTIM)))
     }
 
+    // A bound value is read at a derivable name whether or not the index lists
+    // it, so moving past an unlisted one would strand a value read today.
+    @Test
+    fun theMoveWaitsWhileABoundValueIsUnlisted() {
+        stageFileOnThePublishedKey()
+        raw().edit().putString(globalEpochNameOf(UNLISTED), boundValue("b:true", UNLISTED)).commit()
+        val before = raw().getString(HMAC_KEY_PREF, null)
+
+        val prefs = reopen()
+        assertTrue("the unlisted value must still read", prefs.getBoolean(UNLISTED, false))
+        assertTrue(prefs.getBoolean(VICTIM, false))
+        assertEquals("the key must stay", before, raw().getString(HMAC_KEY_PREF, null))
+    }
+
+    // A non-String where the index belongs stops the move rather than the store.
+    @Test
+    fun aNonStringAtTheIndexNameStopsOnlyTheMove() {
+        stageFileOnThePublishedKey()
+        raw().edit().putInt(globalEpochNameOf(KEY_REGISTRY), 1).commit()
+        val before = raw().getString(HMAC_KEY_PREF, null)
+
+        assertTrue(reopen().getBoolean(VICTIM, false))
+        assertEquals(before, raw().getString(HMAC_KEY_PREF, null))
+    }
+
     // An instance that resolved the published key before another one moved the
     // file must follow the move, or its writes land at names nothing computes.
     @Test
@@ -143,11 +168,17 @@ class KeystoreEncryptedPrefsRotationTest {
         assertTrue(reopen().getBoolean(VICTIM, false))
         assertFalse("the move must have happened", raw().contains(globalEpochNameOf(VICTIM)))
 
+        // A key this instance already has a cached name for, which is the write
+        // that never reaches a hash on its own.
+        assertTrue(early.edit().putBoolean(VICTIM, false).commit())
+        assertFalse("a cached write must land where the next open looks", reopen().getBoolean(VICTIM, true))
+
         assertTrue(early.edit().putString(SETTING, "late").commit())
-        assertTrue(early.getBoolean(VICTIM, false))
-        val later = reopen()
-        assertEquals("late", later.getString(SETTING, null))
-        assertTrue(later.getBoolean(VICTIM, false))
+        assertEquals(
+            "and the index must still list every key",
+            mapOf(VICTIM to false, SETTING to "late"),
+            reopen().all
+        )
     }
 
     // The same after a clear through another instance, which empties the file
@@ -158,11 +189,10 @@ class KeystoreEncryptedPrefsRotationTest {
         assertTrue(early.edit().putBoolean(VICTIM, true).commit())
 
         assertTrue(reopen().edit().clear().commit())
-        assertTrue(early.edit().putString(SETTING, "after").commit())
+        assertTrue(early.edit().putBoolean(VICTIM, false).putString(SETTING, "after").commit())
 
         val later = reopen()
-        assertEquals("after", later.getString(SETTING, null))
-        assertFalse(later.getBoolean(VICTIM, false))
+        assertEquals(mapOf(VICTIM to false, SETTING to "after"), later.all)
         assertTrue("a delete of a key never written must still certify", later.edit().remove(ATTACKER).commit())
     }
 
@@ -172,5 +202,6 @@ class KeystoreEncryptedPrefsRotationTest {
         const val VICTIM = "opted_in_com.example.victim"
         const val ATTACKER = "opted_in_com.example.attacker"
         const val SETTING = "some_setting"
+        const val UNLISTED = "unlisted_setting"
     }
 }
