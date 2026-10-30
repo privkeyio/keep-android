@@ -42,6 +42,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.Calendar
 import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 // Both NIP-55 entrypoints refuse a request they cannot record, and the refusal is
@@ -568,7 +569,10 @@ class Nip55ContentProvider : ContentProvider() {
      * whether its parent waits for it. So the append is launched on its own
      * scope and only the wait is cancelled.
      *
-     * The price is that an append still running when the budget expires is
+     * An append that has not yet taken the writer's lock when the budget
+     * expires, typically one waiting behind a stalled append, is fenced and
+     * writes nothing, unless it takes the lock in the moment between the timeout
+     * and the fence. The price is that an append already writing then is
      * reported as not landed, and its row may commit a moment later, so the log
      * can hold an approval for a response that was never returned. That is the
      * same shape as an append interrupted by process death, which the chain
@@ -586,12 +590,11 @@ class Nip55ContentProvider : ContentProvider() {
         eventKind: Int?,
         decision: String,
     ): Boolean {
-        val append = auditScope.async {
-            store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
-            true
-        }
         return runCatching {
-            runBlocking { withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) { append.await() } }
+            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) { claim ->
+                store.logAutomaticOperationIfClaimed(callerPackage, requestType, eventKind, decision, claim)
+                    .takeIf { it }
+            }
         }.getOrNull() == true
     }
 
@@ -662,4 +665,29 @@ class Nip55ContentProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+}
+
+/**
+ * Runs [block] on [scope] and waits at most [budgetMs] for it. [block] calls the claim
+ * it is given right before its first lasting effect and stops if that returns false.
+ * Once the wait gives up it takes the claim itself, so a block that has not claimed by
+ * then does nothing, and only one already past its claim can finish after its caller
+ * was told it did not. It is fenced rather than cancelled, because cancelling a block
+ * past its claim could stop it between steps that must happen together.
+ */
+internal fun <T : Any> awaitWithin(
+    scope: CoroutineScope,
+    budgetMs: Long,
+    block: suspend (claim: () -> Boolean) -> T?,
+): T? {
+    val claimed = AtomicBoolean(false)
+    val claim = { claimed.compareAndSet(false, true) }
+    val work = scope.async { block(claim) }
+    try {
+        return runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+    } finally {
+        // Also when the wait throws, such as on an interrupted thread. A block past
+        // its claim already holds it, so this changes nothing for it.
+        claim()
+    }
 }

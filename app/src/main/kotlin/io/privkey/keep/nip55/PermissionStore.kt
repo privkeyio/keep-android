@@ -262,7 +262,19 @@ class PermissionStore(private val database: Nip55Database) {
         eventKind: Int?,
         decision: String,
         wasAutomatic: Boolean
-    ) = logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic, null)
+    ) {
+        logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic, extraInTransaction = null)
+    }
+
+    // An automatic decision's row, written only if [claim] still holds once the
+    // writer's lock is taken. Returns whether it was written.
+    suspend fun logAutomaticOperationIfClaimed(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        decision: String,
+        claim: () -> Boolean
+    ): Boolean = logOperation(callerPackage, requestType, eventKind, decision, true, claim, null)
 
     // [extraInTransaction] lets a related permission write commit atomically with the
     // audit row in a single Room transaction; the anchor is advanced only once that
@@ -273,11 +285,12 @@ class PermissionStore(private val database: Nip55Database) {
         eventKind: Int?,
         decision: String,
         wasAutomatic: Boolean,
+        claim: () -> Boolean = { true },
         extraInTransaction: (suspend () -> Unit)?
-    ) {
+    ): Boolean {
         val normalizedEventKind = eventKind ?: EVENT_KIND_GENERIC
         val timestamp = System.currentTimeMillis()
-        auditWriter.append({ previousHash ->
+        return auditWriter.append({ previousHash ->
             Nip55AuditLog(
                 timestamp = timestamp,
                 callerPackage = callerPackage,
@@ -296,7 +309,7 @@ class PermissionStore(private val database: Nip55Database) {
                     wasAutomatic = wasAutomatic
                 )
             )
-        }, extraInTransaction)
+        }, extraInTransaction, claim)
     }
 
     /**

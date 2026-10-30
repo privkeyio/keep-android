@@ -14,10 +14,15 @@ import kotlinx.coroutines.sync.withLock
 internal class AuditLogWriter(private val database: Nip55Database) {
     private val auditDao = database.auditLogDao()
 
+    // [claim] is asked under the lock, before anything is read or written, so an
+    // append whose caller has stopped waiting can still be turned away after it has
+    // queued for the lock. Returns whether the row was written.
     suspend fun append(
         buildLog: (previousHash: String?) -> Nip55AuditLog,
-        extraInTransaction: (suspend () -> Unit)? = null
-    ) = mutex.withLock {
+        extraInTransaction: (suspend () -> Unit)? = null,
+        claim: () -> Boolean = { true }
+    ): Boolean = mutex.withLock {
+        if (!claim()) return@withLock false
         val state = reconcile()
         var tamper = false
         database.withTransaction {
@@ -27,6 +32,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         }
         if (tamper) Nip55Database.setAuditTamperDetected()
         advanceAnchor()
+        true
     }
 
     // Head prune (oldest rows only): the tail must be untouched, so a pre-prune
