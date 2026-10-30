@@ -55,6 +55,7 @@ import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -129,6 +130,10 @@ class BunkerService : Service() {
             }
 
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
+        // Moved by every revoke, under the bunker config lock. A connect is saved only if no
+        // revoke came after its bunker started: the core stops that bunker, but one it already
+        // accepted can still be reported after the revoke cleared the pending saves.
+        private val revokeGeneration = AtomicLong()
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
@@ -174,8 +179,9 @@ class BunkerService : Service() {
          * connect secret and stops the bunker, which this restarts. The bunker key stays, so
          * other clients keep their remembered grants. Returns the saved bunker config.
          *
-         * When the core revoke fails the old secret may still work, so every client is
-         * revoked and the URL rotated before the next start serves.
+         * When the core revoke fails the old secret may still work, so the bunker key and
+         * secret are rotated at once, which also orphans every grant, and every client is
+         * revoked before the next start serves.
          */
         internal suspend fun revokeClients(
             context: Context,
@@ -186,6 +192,7 @@ class BunkerService : Service() {
             // Under the config lock, so a connect save that read the list before the core
             // rewrote it cannot write a revoked client back (see authorizeClient).
             val revokeFailure = BunkerConfigStore.withLock {
+                revokeGeneration.incrementAndGet()
                 val service = current()
                 revoked = revokedClientSet(
                     pubkeys,
@@ -194,23 +201,25 @@ class BunkerService : Service() {
                     service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty(),
                 )
                 revoked.forEach { forgetPendingAuth(it) }
-                try {
+                val failure = try {
                     if (pubkeys == null) revokeAllClientsInEngine(keepMobile) else revoked.forEach { revokeClientInEngine(keepMobile, it) }
                     null
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    runCatching { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }.exceptionOrNull()?.let(e::addSuppressed)
                     e
                 }
+                failure
             }
             revoked.forEach { pubkey ->
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
             }
-            // Without the mark the next start could serve the old secret, so it stays stopped.
-            val markFailure = revokeFailure?.let { runCatching { revokeAllMark(context).set() }.exceptionOrNull() }
-            if (markFailure == null) current()?.restartIfServing()
-            revokeFailure?.let { throw it.also { e -> markFailure?.let(e::addSuppressed) } }
+            // The mark holds in memory even when it cannot be saved, so the restart revokes first.
+            revokeFailure?.let { e -> runCatching { revokeAllMark(context).set() }.exceptionOrNull()?.let(e::addSuppressed) }
+            current()?.restartIfServing()
+            revokeFailure?.let { throw it }
             return keepMobile.getBunkerConfig()
         }
 
@@ -253,6 +262,7 @@ class BunkerService : Service() {
                 BunkerConfigStore.update(keepMobile) {
                     // Inside the lock, so a connect save still queued behind it finds its
                     // client no longer pending and does not write it back (see authorizeClient).
+                    revokeGeneration.incrementAndGet()
                     current()?.let { service ->
                         service.authorizedClientsCache.clear()
                         service.pendingAuthSaves.clear()
@@ -311,7 +321,7 @@ class BunkerService : Service() {
             if (markers.getBoolean(KEY_ROTATED_FOR_EARLIER_REVOKES, false)) return false
             val rotate = Nip46ClientStore.getDenylist(context).isNotEmpty()
             if (rotate) BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() }
-            markers.edit().putBoolean(KEY_ROTATED_FOR_EARLIER_REVOKES, true).commit()
+            if (markers.edit().putBoolean(KEY_ROTATED_FOR_EARLIER_REVOKES, true).commit()) Nip46ClientStore.clearDenylist(context)
             return rotate
         }
 
@@ -637,6 +647,7 @@ class BunkerService : Service() {
             }
             val handler = BunkerHandler(keepMobile)
             bunkerHandler = handler
+            val generation = revokeGeneration.get()
 
             val callbacks = object : BunkerCallbacks {
                 override fun onLog(event: BunkerLogEvent) {
@@ -661,7 +672,7 @@ class BunkerService : Service() {
                     // connect is not persisted as an authorized client. Authorization is driven
                     // by an explicit assertion rather than the callback merely having fired.
                     if (shouldPersistConnectAuthorization(authorization)) {
-                        authorizeClient(pubkey, safeName, safeRelays)
+                        authorizeClient(pubkey, generation, safeName, safeRelays)
                     } else {
                         if (BuildConfig.DEBUG) Log.w(TAG, "Bunker: not persisting auto-approved connect ${pubkey.take(8)}")
                         logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, safeName.ifBlank { pubkey.take(8) }, "connect not persisted (auto-approved)")
@@ -834,6 +845,7 @@ class BunkerService : Service() {
 
     private fun authorizeClient(
         pubkey: String,
+        generation: Long,
         name: String? = null,
         relays: List<String> = emptyList(),
     ) {
@@ -851,9 +863,9 @@ class BunkerService : Service() {
                 runCatching {
                     BunkerConfigStore.update(mobile) { config ->
                         // Decided under the same lock as revokeClients, which drops a client from
-                        // pendingAuthSaves when it revokes it, so a revoke that lands while this
-                        // connect is being saved is never undone by it.
-                        if (pk !in pendingAuthSaves) return@update config
+                        // pendingAuthSaves and moves the generation when it revokes, so a revoke
+                        // that lands while this connect is being saved is never undone by it.
+                        if (pk !in pendingAuthSaves || revokeGeneration.get() != generation) return@update config
                         accepted = true
                         if (config.authorizedClients.none { it.lowercase() == pk }) {
                             val combined = config.authorizedClients + pk

@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The mark that makes the next bunker start revoke every remembered grant: set by an account
- * switch, and by a client revoke whose core revoke and rotation both failed.
+ * switch, and by a client revoke whose core revoke failed.
  * Held in memory as well as in [prefs], so a mark that could not be saved still applies to
  * every start in this process. A start clears it only if no switch set it again after the
  * start read it, since that switch's grants may postdate the revoke.

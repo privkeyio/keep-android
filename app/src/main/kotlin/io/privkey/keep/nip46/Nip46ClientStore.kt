@@ -95,6 +95,10 @@ object Nip46ClientStore {
         }.getOrDefault(emptySet())
     }
 
+    fun clearDenylist(context: Context) {
+        getPrefs(context).edit().remove(KEY_DENYLIST).commit()
+    }
+
     @VisibleForTesting
     internal fun setDenylistForTest(context: Context, pubkeys: Set<String>) {
         getPrefs(context).edit().putString(KEY_DENYLIST, JSONArray(pubkeys.toList()).toString()).commit()

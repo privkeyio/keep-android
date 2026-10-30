@@ -93,6 +93,7 @@ class BunkerRevokeRotationTest {
 
             val before = startedBunkerUrl(mobile)
             assertTrue(BunkerService.rotateOnceForEarlierRevokes(context, mobile))
+            assertTrue("the legacy denylist goes once it has been acted on", Nip46ClientStore.getDenylist(context).isEmpty())
             val after = startedBunkerUrl(mobile)
             assertNotEquals(before.secret, after.secret)
             assertNotEquals(before.pubkey, after.pubkey)
