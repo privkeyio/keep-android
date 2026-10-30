@@ -70,6 +70,14 @@ internal fun revokedClientSet(
     pending: Collection<String>,
 ): Set<String> = (pubkeys ?: (configured + cached + pending)).map { it.lowercase() }.toSet()
 
+/**
+ * Whether a connect save from a bunker started at [generation] comes after a revoke that
+ * covers its client: one of that client ([clientRevokedAt], null if never revoked), or one
+ * of every client ([everyClientRevokedAt]). A revoke of other clients does not count.
+ */
+internal fun revokedSince(generation: Long, everyClientRevokedAt: Long, clientRevokedAt: Long?): Boolean =
+    maxOf(everyClientRevokedAt, clientRevokedAt ?: 0L) > generation
+
 class BunkerService : Service() {
 
     companion object {
@@ -131,9 +139,12 @@ class BunkerService : Service() {
 
         private val serviceInstanceRef = AtomicReference<BunkerService?>(null)
         // Moved by every revoke, under the bunker config lock. A connect is saved only if no
-        // revoke came after its bunker started: the core stops that bunker, but one it already
-        // accepted can still be reported after the revoke cleared the pending saves.
+        // revoke of its client came after its bunker started: the core stops that bunker, but
+        // one it already accepted can still be reported after the revoke cleared the pending
+        // saves. Revoke All, a failed revoke and an account switch cover every client.
         private val revokeGeneration = AtomicLong()
+        private val everyClientRevokedAt = AtomicLong()
+        private val clientRevokedAt = ConcurrentHashMap<String, Long>()
         private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
@@ -192,7 +203,7 @@ class BunkerService : Service() {
             // Under the config lock, so a connect save that read the list before the core
             // rewrote it cannot write a revoked client back (see authorizeClient).
             val revokeFailure = BunkerConfigStore.withLock {
-                revokeGeneration.incrementAndGet()
+                val generation = revokeGeneration.incrementAndGet()
                 val service = current()
                 revoked = revokedClientSet(
                     pubkeys,
@@ -200,7 +211,10 @@ class BunkerService : Service() {
                     service?.authorizedClientsCache?.let { synchronized(it) { it.toList() } }.orEmpty(),
                     service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty(),
                 )
-                revoked.forEach { forgetPendingAuth(it) }
+                revoked.forEach {
+                    clientRevokedAt[it] = generation
+                    forgetPendingAuth(it)
+                }
                 val failure = try {
                     if (pubkeys == null) revokeAllClientsInEngine(keepMobile) else revoked.forEach { revokeClientInEngine(keepMobile, it) }
                     null
@@ -210,6 +224,7 @@ class BunkerService : Service() {
                     runCatching { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }.exceptionOrNull()?.let(e::addSuppressed)
                     e
                 }
+                if (pubkeys == null || failure != null) everyClientRevokedAt.set(generation)
                 failure
             }
             revoked.forEach { pubkey ->
@@ -262,7 +277,7 @@ class BunkerService : Service() {
                 BunkerConfigStore.update(keepMobile) {
                     // Inside the lock, so a connect save still queued behind it finds its
                     // client no longer pending and does not write it back (see authorizeClient).
-                    revokeGeneration.incrementAndGet()
+                    everyClientRevokedAt.set(revokeGeneration.incrementAndGet())
                     current()?.let { service ->
                         service.authorizedClientsCache.clear()
                         service.pendingAuthSaves.clear()
@@ -863,9 +878,9 @@ class BunkerService : Service() {
                 runCatching {
                     BunkerConfigStore.update(mobile) { config ->
                         // Decided under the same lock as revokeClients, which drops a client from
-                        // pendingAuthSaves and moves the generation when it revokes, so a revoke
+                        // pendingAuthSaves and records the generation when it revokes, so a revoke
                         // that lands while this connect is being saved is never undone by it.
-                        if (pk !in pendingAuthSaves || revokeGeneration.get() != generation) return@update config
+                        if (pk !in pendingAuthSaves || revokedSince(generation, everyClientRevokedAt.get(), clientRevokedAt[pk])) return@update config
                         accepted = true
                         if (config.authorizedClients.none { it.lowercase() == pk }) {
                             val combined = config.authorizedClients + pk
