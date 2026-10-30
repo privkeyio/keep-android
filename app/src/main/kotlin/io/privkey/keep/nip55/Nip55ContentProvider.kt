@@ -592,7 +592,7 @@ class Nip55ContentProvider : ContentProvider() {
     ): Boolean {
         return runCatching {
             awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) { claim ->
-                store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true, claim = claim)
+                store.logAutomaticOperationIfClaimed(callerPackage, requestType, eventKind, decision, claim)
                     .takeIf { it }
             }
         }.getOrNull() == true

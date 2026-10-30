@@ -117,13 +117,16 @@ class AutoSignAuditRecordTest {
     // lock: nothing is written and the chain still verifies.
     @Test
     fun anAppendRefusedItsClaimWritesNothing() = runBlocking {
-        val written = store.logOperation(
-            CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true, claim = { false }
+        val written = store.logAutomaticOperationIfClaimed(
+            CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", claim = { false }
         )
 
         assertFalse("a refused claim must report nothing written", written)
         assertEquals("and must leave no row", 0, store.getAuditLogCount())
-        assertTrue("a later append still lands", store.logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true))
+        assertTrue(
+            "a later append still lands",
+            store.logAutomaticOperationIfClaimed(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", claim = { true })
+        )
         assertEquals(1, store.getAuditLogCount())
         assertEquals("and the chain verifies", ChainVerificationResult.Valid, store.verifyAuditChain())
     }
