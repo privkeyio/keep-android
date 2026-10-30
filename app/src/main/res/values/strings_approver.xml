@@ -54,7 +54,12 @@
     <string name="approver_retry">Try again</string>
     <string name="approver_background_off">Keep only hears the gateway while it is running. Turn on the background service in Settings to get requests while Keep is closed.</string>
     <string name="approver_forget_auth">Confirm removing the pairing</string>
-    <string name="approver_unavailable">Agent approvals could not start. Its saved state could not be read. Try again in a moment.</string>
+    <string name="approver_unavailable">Agent approvals could not start. Try again in a moment.</string>
+    <string name="approver_reset_title">Agent approvals cannot start</string>
+    <string name="approver_reset_body">The pairing saved on this phone cannot be read. Try again later, or reset to remove the pairing from this phone and pair again. The gateway keeps this device until it is removed there.</string>
+    <string name="approver_reset_confirm">Reset</string>
+    <string name="approver_reset_auth">Confirm resetting agent approvals</string>
+    <string name="approver_reset_failed">The reset did not finish. Try again.</string>
     <string name="approver_error_generic">The approver could not do that</string>
     <string name="approver_notification_channel">Agent approvals</string>
     <string name="approver_notification_channel_description">Requests from agents waiting for your approval</string>

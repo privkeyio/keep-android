@@ -3,6 +3,8 @@ package io.privkey.keep.storage
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.uniffi.ApproverHandler
+import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
@@ -81,6 +83,23 @@ class ApproverStateStorageTest {
         assertFalse(file.exists())
         assertThrows(KeepMobileException.StorageNotFound::class.java) { storage().loadShareByKey(KEY) }
         storage().deleteShareByKey(KEY)
+    }
+
+    @Test
+    fun anUnreadableStateIsAStorageFaultUntilItIsDeleted() {
+        storage().storeShareByKey(KEY, "not the approver state".toByteArray(), metadata)
+        assertUnreadable()
+        keyStore.deleteEntry(ALIAS)
+        assertUnreadable()
+        storage().deleteShareByKey(KEY)
+        val handler = ApproverHandler(KeepMobile(storage()))
+        assertFalse(handler.status().paired)
+        assertFalse(file.exists())
+    }
+
+    private fun assertUnreadable() {
+        assertThrows(KeepMobileException.StorageException::class.java) { ApproverHandler(KeepMobile(storage())) }
+        assertTrue(file.exists())
     }
 
     private companion object {

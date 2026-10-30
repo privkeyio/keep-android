@@ -87,7 +87,7 @@ class AndroidKeystoreStorage(
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
         private const val METADATA_KEY_ALIAS = "keep_metadata"
         private const val METADATA_KEY_PREFIX = "__keep_"
-        private const val APPROVER_STATE_KEY = "__keep_approver"
+        const val APPROVER_STATE_KEY = "__keep_approver"
         private const val APPROVER_STATE_FILE = "approver_state"
         private const val APPROVER_WRAP_ALIAS = "keep_approver_wrap"
 

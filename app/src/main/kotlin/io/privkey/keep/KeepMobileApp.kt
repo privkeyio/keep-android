@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.privkey.keep.approver.ApproverController
+import io.privkey.keep.approver.ApproverKey
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerConfigStore
 import io.privkey.keep.nip46.BunkerService
@@ -41,6 +42,7 @@ import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.ConnectionStatus
 import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.KeepStateCallback
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.PeerStatus
@@ -85,6 +87,8 @@ class KeepMobileApp : Application() {
     private var nip55Handler: Nip55Handler? = null
     @Volatile
     private var approverController: ApproverController? = null
+    @Volatile
+    private var approverUnreadable = false
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
@@ -177,6 +181,7 @@ class KeepMobileApp : Application() {
         return runCatching { ApproverController(this, mobile) }
             .onSuccess { controller ->
                 approverController = controller
+                approverUnreadable = false
                 applicationScope.launch(Dispatchers.IO) {
                     runCatching { controller.startIfPaired() }.onFailure { e ->
                         if (BuildConfig.DEBUG) Log.e(TAG, "Approver failed to start: ${e::class.simpleName}", e)
@@ -184,9 +189,26 @@ class KeepMobileApp : Application() {
                 }
             }
             .onFailure { e ->
+                approverUnreadable = e is KeepMobileException.StorageException
                 if (BuildConfig.DEBUG) Log.e(TAG, "Approver unavailable: ${e::class.simpleName}", e)
             }
             .getOrNull()
+    }
+
+    fun isApproverUnreadable(): Boolean = approverUnreadable
+
+    // The owner has confirmed this. It forgets a pairing whose saved state cannot be
+    // read, as Remove pairing does for a readable one, and only after one more try
+    // still finds it unreadable, so a fault that has cleared keeps the pairing.
+    @Synchronized
+    fun resetUnreadableApprover(): ApproverController? {
+        val mobile = keepMobile ?: return null
+        initializeApprover(mobile)?.let { return it }
+        if (!approverUnreadable) return null
+        val store = storage ?: return null
+        store.deleteShareByKey(AndroidKeystoreStorage.APPROVER_STATE_KEY)
+        ApproverKey.delete()
+        return initializeApprover(mobile)
     }
 
     // Called only on the main thread (from the state callback's mainHandler.post),
