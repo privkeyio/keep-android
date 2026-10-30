@@ -6,8 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -43,40 +41,40 @@ class RelayAuthWhitelistStoreIntegrationTest {
 
     @Test
     fun normalizesThenDedupes() {
-        assertEquals("relay.example.com", store.add("wss://Relay.Example.com/"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), store.add("wss://Relay.Example.com/"))
         // Same host after normalization (scheme/case/trailing slash) must not duplicate.
-        assertEquals("relay.example.com", store.add("relay.example.com"))
-        assertEquals("relay.example.com", store.add("ws://relay.example.com:80"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), store.add("relay.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), store.add("ws://relay.example.com:80"))
 
         assertEquals(listOf("relay.example.com"), store.hosts())
     }
 
     @Test
     fun rejectsUnnormalizableInput() {
-        assertNull(store.add("   "))
-        assertNull(store.add(""))
+        assertEquals(RelayAuthWhitelistStore.AddResult.InvalidHost, store.add("   "))
+        assertEquals(RelayAuthWhitelistStore.AddResult.InvalidHost, store.add(""))
         assertTrue(store.hosts().isEmpty())
     }
 
     @Test
     fun maxEntriesRejectsOnlyNewHostsAtCap() {
         repeat(256) { i ->
-            assertNotNull(store.add("relay$i.example.com"))
+            assertTrue(store.add("relay$i.example.com") is RelayAuthWhitelistStore.AddResult.Added)
         }
         assertEquals(256, store.hosts().size)
 
         // A brand-new host at the cap is rejected.
-        assertNull(store.add("overflow.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Full, store.add("overflow.example.com"))
         assertFalse(store.hosts().contains("overflow.example.com"))
 
         // Re-adding an existing host at the cap is still allowed (idempotent).
-        assertEquals("relay0.example.com", store.add("relay0.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay0.example.com"), store.add("relay0.example.com"))
         assertEquals(256, store.hosts().size)
     }
 
     @Test
     fun removeDeletesEntry() {
-        assertEquals("relay.example.com", store.add("relay.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), store.add("relay.example.com"))
         assertTrue(store.hosts().contains("relay.example.com"))
 
         store.remove("relay.example.com")

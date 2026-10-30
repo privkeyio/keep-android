@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -288,6 +289,37 @@ class RelayAuthWhitelistScreenTest {
         ).assertDoesNotExist()
 
         forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    private fun submit(relay: String) {
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add_label))
+            .performTextInput(relay)
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_add)).performClick()
+    }
+
+    // A bad host and a full list used to show the same bare error outline.
+    @Test
+    fun aHostThatIsNotARelaySaysSo() {
+        showScreen()
+        awaitText(emptyText)
+
+        submit("wss://")
+
+        awaitText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host))
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full)).assertDoesNotExist()
+    }
+
+    @Test
+    fun aFullListSaysSoRatherThanBlamingTheHost() {
+        val store = RelayAuthWhitelistStore(context)
+        repeat(256) { store.add("relay$it.example.com") }
+        showScreen()
+        awaitText("relay0.example.com")
+
+        submit("wss://overflow.example.com")
+
+        awaitText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full))
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
     }
 
     private companion object {

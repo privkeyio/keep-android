@@ -9,8 +9,6 @@ import io.privkey.keep.uniffi.Nip55RelayAuthGate
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -98,13 +96,14 @@ class UnreadableReadGuardTest {
         // being auto-rejected.
         val store = RelayAuthWhitelistStore(context)
         val storedName = writeAndFindStoredName(context, WHITELIST_PREFS) {
-            assertNotNull(store.add("wss://relay.example.com"))
+            assertTrue(store.add("wss://relay.example.com") is RelayAuthWhitelistStore.AddResult.Added)
         }
         corruptStoredValue(context, WHITELIST_PREFS, storedName)
         val corrupted = rawPrefs(context, WHITELIST_PREFS).getString(storedName, null)
 
-        assertNull(
+        assertEquals(
             "an add over an unreadable list must fail rather than replace it",
+            RelayAuthWhitelistStore.AddResult.Failed,
             RelayAuthWhitelistStore(context).add("wss://other.example.com")
         )
 
@@ -119,7 +118,7 @@ class UnreadableReadGuardTest {
     fun removing_a_relay_host_does_not_write_back_a_whitelist_it_could_not_read() {
         val store = RelayAuthWhitelistStore(context)
         val storedName = writeAndFindStoredName(context, WHITELIST_PREFS) {
-            assertNotNull(store.add("wss://relay.example.com"))
+            assertTrue(store.add("wss://relay.example.com") is RelayAuthWhitelistStore.AddResult.Added)
         }
         corruptStoredValue(context, WHITELIST_PREFS, storedName)
         val corrupted = rawPrefs(context, WHITELIST_PREFS).getString(storedName, null)
@@ -141,7 +140,7 @@ class UnreadableReadGuardTest {
         // auto-rejects every kind 22242 request for the life of the install.
         val seeded = RelayAuthWhitelistStore(context)
         val storedName = writeAndFindStoredName(context, WHITELIST_PREFS) {
-            assertNotNull(seeded.add("wss://relay.example.com"))
+            assertTrue(seeded.add("wss://relay.example.com") is RelayAuthWhitelistStore.AddResult.Added)
         }
         corruptStoredValue(context, WHITELIST_PREFS, storedName)
         assertEquals(
@@ -163,7 +162,7 @@ class UnreadableReadGuardTest {
             Nip55RelayAuthGate.DEFER,
             evaluateRelayAuthGate(repaired, EVENT_22242).first
         )
-        assertEquals("relay.example.com", repaired.add("wss://relay.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), repaired.add("wss://relay.example.com"))
         assertEquals(
             "and the gate works again afterwards",
             Nip55RelayAuthGate.WHITELISTED,
@@ -183,7 +182,7 @@ class UnreadableReadGuardTest {
      */
     @Test
     fun clearing_a_whitelist_whose_names_cannot_resolve_recovers_it() {
-        assertNotNull(RelayAuthWhitelistStore(context).add("wss://relay.example.com"))
+        assertTrue(RelayAuthWhitelistStore(context).add("wss://relay.example.com") is RelayAuthWhitelistStore.AddResult.Added)
         breakNameResolution(context, WHITELIST_PREFS)
         assertEquals(
             "the gate has to be closed before the reset, or this proves nothing",
@@ -201,7 +200,7 @@ class UnreadableReadGuardTest {
             Nip55RelayAuthGate.DEFER,
             evaluateRelayAuthGate(repaired, EVENT_22242).first
         )
-        assertEquals("relay.example.com", repaired.add("wss://relay.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), repaired.add("wss://relay.example.com"))
     }
 
     @Test
@@ -325,8 +324,8 @@ class UnreadableReadGuardTest {
         // The guard must not cost the ordinary path: absent is still a first use.
         val store = RelayAuthWhitelistStore(context)
 
-        assertEquals("relay.example.com", store.add("wss://relay.example.com"))
-        assertEquals("other.example.com", store.add("wss://other.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("relay.example.com"), store.add("wss://relay.example.com"))
+        assertEquals(RelayAuthWhitelistStore.AddResult.Added("other.example.com"), store.add("wss://other.example.com"))
 
         assertEquals(listOf("other.example.com", "relay.example.com"), store.hosts())
     }

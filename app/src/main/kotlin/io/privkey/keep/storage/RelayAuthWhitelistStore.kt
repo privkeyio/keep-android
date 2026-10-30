@@ -52,26 +52,31 @@ class RelayAuthWhitelistStore(context: Context) {
         PrefRead.Unreadable -> PrefRead.Unreadable
     }
 
-    /**
-     * Normalizes [rawUrl] and adds it. Returns the normalized host on success, or null
-     * if the input is not a usable relay host, the list is full, or the stored list
-     * could not be read.
-     */
+    /** The outcome of [add], so the screen can say which input was the problem. */
+    sealed interface AddResult {
+        data class Added(val host: String) : AddResult
+        data object InvalidHost : AddResult
+        data object Full : AddResult
+        /** The stored list could not be read, or the write did not reach disk. */
+        data object Failed : AddResult
+    }
+
+    /** Normalizes [rawUrl] and adds it. */
     @Synchronized
-    fun add(rawUrl: String): String? {
-        val host = nip55NormalizeRelayHost(rawUrl) ?: return null
+    fun add(rawUrl: String): AddResult {
+        val host = nip55NormalizeRelayHost(rawUrl) ?: return AddResult.InvalidHost
         val current = when (val read = prefs.readStringSet(KEY_HOSTS)) {
             is PrefRead.Found -> read.value.toMutableSet()
             PrefRead.Absent -> mutableSetOf()
             // This write replaces the whole entry, so going on from a read that failed
             // would leave the list holding nothing but the host being added, deleting
             // every relay the person had allowed.
-            PrefRead.Unreadable -> return null
+            PrefRead.Unreadable -> return AddResult.Failed
         }
-        if (host !in current && current.size >= MAX_ENTRIES) return null
+        if (host !in current && current.size >= MAX_ENTRIES) return AddResult.Full
         current.add(host)
-        if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return null
-        return host
+        if (!prefs.edit().putStringSet(KEY_HOSTS, current).commit()) return AddResult.Failed
+        return AddResult.Added(host)
     }
 
     /**
