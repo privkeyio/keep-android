@@ -1,6 +1,8 @@
 package io.privkey.keep.nip46
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RevokedClientSetTest {
@@ -25,6 +27,18 @@ class RevokedClientSetTest {
     @Test
     fun revokeAllWithNoClientsCoversNothing() {
         assertEquals(emptySet<String>(), revokedClientSet(null, emptyList(), emptyList(), emptyList()))
+    }
+
+    @Test
+    fun aRevokeOfAnotherClientDoesNotDropAConnectBeingSaved() {
+        assertFalse(revokedSince(generation = 3, everyClientRevokedAt = 0, clientRevokedAt = null))
+        assertFalse(revokedSince(generation = 3, everyClientRevokedAt = 2, clientRevokedAt = 1))
+    }
+
+    @Test
+    fun aRevokeOfThisClientOrOfEveryClientAfterTheStartDropsTheSave() {
+        assertTrue(revokedSince(generation = 3, everyClientRevokedAt = 0, clientRevokedAt = 4))
+        assertTrue(revokedSince(generation = 3, everyClientRevokedAt = 4, clientRevokedAt = null))
     }
 
     private companion object {

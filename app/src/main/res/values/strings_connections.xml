@@ -92,9 +92,9 @@
     <string name="connections_bunker_relay_error_private">Private/internal relay addresses are not allowed</string>
     <string name="connections_bunker_relay_error_no_valid">No valid relay URLs found in bunker URL</string>
     <string name="connections_bunker_revoke_all_title">Revoke All Clients</string>
-    <string name="connections_bunker_revoke_all_text">This will disconnect all authorized clients, remove the actions they were allowed to remember, and change the bunker URL, so the old URL can no longer connect. Revoked clients stay blocked until you approve a new connection from them.</string>
+    <string name="connections_bunker_revoke_all_text">This will disconnect all authorized clients, remove the actions they were allowed to remember, and change the bunker URL, so the old URL can no longer connect. A client can connect again only with the new URL.</string>
     <string name="connections_bunker_revoke_client_title">Revoke Client</string>
-    <string name="connections_bunker_revoke_client_text">This client loses access and stays blocked until you approve a new connection from it, and the bunker URL changes so the old URL can no longer connect. Your other clients will need to pair again with the new URL and approve again the actions they were allowed to remember.</string>
+    <string name="connections_bunker_revoke_client_text">This client loses access and the actions it was allowed to remember, and the bunker URL changes so the old URL can no longer connect. Your other clients keep the actions they were allowed to remember. A client that connects again with the old URL needs the new one.</string>
     <string name="connections_bunker_revoke_client_confirm">Revoke</string>
     <string name="connections_bunker_revoke_all_confirm">Revoke All</string>
     <string name="connections_bunker_revoke_all_cancel">Cancel</string>
@@ -174,7 +174,7 @@
     <string name="connections_app_back_cd">Back</string>
     <string name="connections_app_disconnect_client_title">Disconnect Client?</string>
     <string name="connections_app_disconnect_app_title">Disconnect App?</string>
-    <string name="connections_app_disconnect_client_text">This will remove all saved permissions and revoke authorization for <xliff:g id="name" example="App">%1$s</xliff:g>, which stays blocked until you approve a new connection from it. The bunker URL also changes, so your other clients will need to pair again with the new URL and approve again the actions they were allowed to remember.</string>
+    <string name="connections_app_disconnect_client_text">This will remove all saved permissions and revoke authorization for <xliff:g id="name" example="App">%1$s</xliff:g>, and the bunker URL changes so the old URL can no longer connect. Your other clients keep the actions they were allowed to remember. A client that connects again with the old URL needs the new one.</string>
     <string name="connections_app_disconnect_app_text">This will remove all saved permissions for <xliff:g id="name" example="App">%1$s</xliff:g>. The app will need to request permission again.</string>
     <string name="connections_app_disconnect_confirm">Disconnect</string>
     <string name="connections_app_cancel">Cancel</string>

@@ -21,8 +21,8 @@ internal fun shouldPersistConnectAuthorization(authorization: ConnectAuthorizati
     }
 
 /**
- * Orders the NIP-46 request gates (gh #316): the denylist/authorization gate runs
- * before the shared global rate limiter so denylisted/unauthorized traffic cannot
+ * Orders the NIP-46 request gates (gh #316): the authorization gate runs
+ * before the shared global rate limiter so unauthorized traffic cannot
  * burn the global budget. `connect` is the legitimate unauthenticated path, so it
  * passes the authorization gate but is still subject to rate limiting.
  *
@@ -43,8 +43,7 @@ internal fun requestGateDecision(
 
 /**
  * Whether a NIP-46 client is authorized to have its (non-connect) requests
- * served. The denylist always wins; otherwise the client must be present in
- * either the warm-start `pending-auth` set (it just completed a connect
+ * served. The client must be present in either the warm-start `pending-auth` set (it just completed a connect
  * approval before its persisted authorization was reloaded into the cache) or
  * the authorized-clients cache. This is the security-critical authorization
  * boolean feeding [requestGateDecision].
@@ -52,7 +51,6 @@ internal fun requestGateDecision(
  * Pure function: no Service state, no native calls, fully unit-testable.
  */
 internal fun isClientAuthorized(
-    denylisted: Boolean,
     inPendingAuth: Boolean,
     inCache: Boolean
-): Boolean = !denylisted && (inPendingAuth || inCache)
+): Boolean = inPendingAuth || inCache

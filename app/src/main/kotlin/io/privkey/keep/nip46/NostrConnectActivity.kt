@@ -176,8 +176,6 @@ class NostrConnectActivity : FragmentActivity() {
                         BunkerService.uncacheAuthorizedClient(it)
                     }
 
-                    Nip46ClientStore.removeFromDenylist(this@NostrConnectActivity, request.clientPubkey)
-
                     Nip46ClientStore.saveClient(
                         this@NostrConnectActivity,
                         request.clientPubkey,
@@ -212,7 +210,6 @@ class NostrConnectActivity : FragmentActivity() {
                         }
                     }
                     runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, request.clientPubkey) }
-                    runCatching { Nip46ClientStore.addToDenylist(this@NostrConnectActivity, request.clientPubkey) }
                     BunkerService.forgetPendingAuth(request.clientPubkey)
                     BunkerService.uncacheAuthorizedClient(request.clientPubkey)
                     if (permissionStore != null) {

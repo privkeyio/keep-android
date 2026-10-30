@@ -13,29 +13,20 @@ import org.junit.Test
 class IsClientAuthorizedTest {
 
     @Test
-    fun denylistAlwaysWins() {
-        // A denylisted client is unauthorized even if it somehow appears in the
-        // cache or the warm-start pending-auth set.
-        assertFalse(isClientAuthorized(denylisted = true, inPendingAuth = true, inCache = true))
-        assertFalse(isClientAuthorized(denylisted = true, inPendingAuth = false, inCache = true))
-        assertFalse(isClientAuthorized(denylisted = true, inPendingAuth = true, inCache = false))
-    }
-
-    @Test
     fun authorizedViaCache() {
-        assertTrue(isClientAuthorized(denylisted = false, inPendingAuth = false, inCache = true))
+        assertTrue(isClientAuthorized(inPendingAuth = false, inCache = true))
     }
 
     @Test
     fun authorizedViaPendingAuthWarmStart() {
         // A client that just completed connect approval, before its persisted
         // authorization was reloaded into the cache, is authorized via pendingAuth.
-        assertTrue(isClientAuthorized(denylisted = false, inPendingAuth = true, inCache = false))
+        assertTrue(isClientAuthorized(inPendingAuth = true, inCache = false))
     }
 
     @Test
     fun unknownClientIsUnauthorized() {
-        // Not denylisted, but present in neither set -> not authorized (re-prompt).
-        assertFalse(isClientAuthorized(denylisted = false, inPendingAuth = false, inCache = false))
+        // Present in neither set -> not authorized (re-prompt).
+        assertFalse(isClientAuthorized(inPendingAuth = false, inCache = false))
     }
 }

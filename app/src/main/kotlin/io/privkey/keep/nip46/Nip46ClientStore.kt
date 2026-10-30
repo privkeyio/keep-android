@@ -4,6 +4,7 @@ package io.privkey.keep.nip46
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.annotation.VisibleForTesting
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import org.json.JSONArray
@@ -81,6 +82,11 @@ object Nip46ClientStore {
         saveClients(context, clients)
     }
 
+    /**
+     * Clients revoked by versions that kept a denylist. Nothing writes it now: the core
+     * replaces the connect secret on revoke. Read only by the one-time rotation for
+     * revokes made before that ([BunkerService.rotateOnceForEarlierRevokes]).
+     */
     fun getDenylist(context: Context): Set<String> {
         val stored = getPrefs(context).getString(KEY_DENYLIST, null) ?: return emptySet()
         return runCatching {
@@ -89,28 +95,13 @@ object Nip46ClientStore {
         }.getOrDefault(emptySet())
     }
 
-    fun isDenylisted(context: Context, pubkey: String): Boolean =
-        getDenylist(context).contains(pubkey.lowercase())
-
-    fun addToDenylist(context: Context, pubkey: String) = synchronized(lock) {
-        val current = getDenylist(context).toMutableSet()
-        if (current.add(pubkey.lowercase())) saveDenylist(context, current)
+    fun clearDenylist(context: Context) {
+        getPrefs(context).edit().remove(KEY_DENYLIST).commit()
     }
 
-    fun addAllToDenylist(context: Context, pubkeys: Collection<String>) = synchronized(lock) {
-        val current = getDenylist(context).toMutableSet()
-        if (current.addAll(pubkeys.map { it.lowercase() })) saveDenylist(context, current)
-    }
-
-    fun removeFromDenylist(context: Context, pubkey: String) = synchronized(lock) {
-        val current = getDenylist(context).toMutableSet()
-        if (current.remove(pubkey.lowercase())) saveDenylist(context, current)
-    }
-
-    private fun saveDenylist(context: Context, pubkeys: Set<String>) {
-        val json = JSONArray()
-        pubkeys.forEach { json.put(it) }
-        getPrefs(context).edit().putString(KEY_DENYLIST, json.toString()).apply()
+    @VisibleForTesting
+    internal fun setDenylistForTest(context: Context, pubkeys: Set<String>) {
+        getPrefs(context).edit().putString(KEY_DENYLIST, JSONArray(pubkeys.toList()).toString()).commit()
     }
 
     private fun saveClients(context: Context, clients: Map<String, Nip46ClientInfo>) {
