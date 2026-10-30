@@ -1620,6 +1620,7 @@ fun MainScreen(
                     hasShare = hasShare,
                     relays = relays,
                     profileRelays = profileRelays,
+                    relayHealth = appLiveState?.relays ?: emptyList(),
                     certificatePins = certificatePins,
                     proxyEnabled = proxyEnabled,
                     proxyPort = proxyPort,
@@ -2007,6 +2008,7 @@ private fun SettingsTab(
     hasShare: Boolean,
     relays: List<String>,
     profileRelays: List<String>,
+    relayHealth: List<RelayHealth>,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2059,6 +2061,7 @@ private fun SettingsTab(
             ShareSettingsSection(
                 relays = relays,
                 profileRelays = profileRelays,
+                relayHealth = relayHealth,
                 certificatePins = certificatePins,
                 proxyEnabled = proxyEnabled,
                 proxyPort = proxyPort,
@@ -2433,6 +2436,7 @@ private fun PinMismatchDialog(
 private fun ShareSettingsSection(
     relays: List<String>,
     profileRelays: List<String>,
+    relayHealth: List<RelayHealth>,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2452,7 +2456,8 @@ private fun ShareSettingsSection(
         onRemoveRelay = onRemoveRelay,
         profileRelays = profileRelays,
         onAddProfileRelay = onAddProfileRelay,
-        onRemoveProfileRelay = onRemoveProfileRelay
+        onRemoveProfileRelay = onRemoveProfileRelay,
+        relayHealth = relayHealth,
     )
     Spacer(modifier = Modifier.height(16.dp))
 

@@ -1,7 +1,10 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.ui.components.KeepListRow
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -9,11 +12,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.ui.theme.Dimens
+import io.privkey.keep.ui.theme.KeepError
+import io.privkey.keep.ui.theme.KeepGreen
+import io.privkey.keep.ui.theme.KeepMuted
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.PeerStatus
+import io.privkey.keep.uniffi.RelayHealth
+import io.privkey.keep.uniffi.RelayHealthStatus
+import io.privkey.keep.uniffi.formatTimestampDetailed
 
 @Composable
 fun RelaysCard(
@@ -22,7 +33,8 @@ fun RelaysCard(
     onRemoveRelay: (String) -> Unit,
     profileRelays: List<String>,
     onAddProfileRelay: (String) -> Unit,
-    onRemoveProfileRelay: (String) -> Unit
+    onRemoveProfileRelay: (String) -> Unit,
+    relayHealth: List<RelayHealth>,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -47,8 +59,9 @@ fun RelaysCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
+                val links = relayHealth.map { it.toLink() }
                 relays.forEach { relay ->
-                    RelayRow(relay)
+                    RelayHealthRow(relay, relayLinkFor(relay, links))
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -112,6 +125,63 @@ fun RelaysCard(
         )
     }
 }
+
+@Composable
+private fun RelayHealthRow(relay: String, link: RelayLinkHealth?) {
+    // A configured frost relay with no core row is not in the pool (the node
+    // is down, or the URL was excluded before connect). That is offline, not
+    // a status Android invents by probing.
+    val status = link?.status ?: RelayLinkStatus.OFFLINE
+    val color = when (status) {
+        RelayLinkStatus.CONNECTED -> KeepGreen
+        RelayLinkStatus.CONNECTING -> KeepMuted
+        RelayLinkStatus.OFFLINE -> KeepError
+    }
+    val statusLabel = when (status) {
+        RelayLinkStatus.CONNECTED -> stringResource(R.string.connections_relay_status_connected)
+        RelayLinkStatus.CONNECTING -> stringResource(R.string.connections_relay_status_connecting)
+        RelayLinkStatus.OFFLINE -> stringResource(R.string.connections_relay_status_offline)
+    }
+    val subtitle = when {
+        link != null && status == RelayLinkStatus.CONNECTED && link.rttMs != null ->
+            stringResource(
+                R.string.connections_relay_status_with_latency,
+                statusLabel,
+                link.rttMs,
+            )
+        link != null && status == RelayLinkStatus.OFFLINE && link.lastConnectedMs > 0L ->
+            stringResource(
+                R.string.connections_relay_status_last_seen,
+                statusLabel,
+                formatTimestampDetailed(link.lastConnectedMs / 1000),
+            )
+        else -> statusLabel
+    }
+    KeepListRow(
+        title = relay.removePrefix("wss://"),
+        subtitle = subtitle,
+        modifier = Modifier.padding(vertical = Dimens.space4),
+        leading = {
+            Box(
+                Modifier
+                    .size(Dimens.space8)
+                    .clip(CircleShape)
+                    .background(color)
+            )
+        },
+    )
+}
+
+private fun RelayHealth.toLink(): RelayLinkHealth = RelayLinkHealth(
+    url = url,
+    status = when (status) {
+        RelayHealthStatus.CONNECTING -> RelayLinkStatus.CONNECTING
+        RelayHealthStatus.CONNECTED -> RelayLinkStatus.CONNECTED
+        RelayHealthStatus.OFFLINE -> RelayLinkStatus.OFFLINE
+    },
+    lastConnectedMs = lastConnectedMs.toLong(),
+    rttMs = rttMs?.toLong(),
+)
 
 @Composable
 private fun RelayRow(relay: String) {
