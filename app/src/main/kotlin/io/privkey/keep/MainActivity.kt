@@ -43,6 +43,7 @@ import io.privkey.keep.approver.ApproverAuthenticator
 import io.privkey.keep.approver.ApproverController
 import io.privkey.keep.approver.ApproverNotifier
 import io.privkey.keep.approver.ApproverScreen
+import io.privkey.keep.approver.OwnerConfirmation
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.descriptor.WalletDescriptorScreen
 import io.privkey.keep.navigation.Route
@@ -316,11 +317,17 @@ class MainActivity : FragmentActivity() {
                             },
                             onDismissPinMismatch = app::dismissPinMismatch,
                             onAccountSwitched = { stop -> app.onAccountSwitched(stop) },
-                            approverController = app.getApproverController(),
+                            approverController = app::getApproverController,
                             approverRequested = approverRequested,
                             onApproverRequestHandled = { approverRequested = false },
                             authenticateApprover = { signature, title, subtitle ->
                                 biometricHelper?.authenticateSignature(signature, title, subtitle)
+                            },
+                            confirmApproverOwner = { title ->
+                                biometricHelper?.authenticateStrongOrDeviceCredential(
+                                    title,
+                                    getString(R.string.approver_biometric_subtitle)
+                                ) != null
                             }
                         )
                     } else {
@@ -388,10 +395,11 @@ fun MainScreen(
     onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
     onDismissPinMismatch: () -> Unit = {},
     onAccountSwitched: suspend (Boolean) -> Boolean = { false },
-    approverController: ApproverController? = null,
+    approverController: () -> ApproverController? = { null },
     approverRequested: Boolean = false,
     onApproverRequestHandled: () -> Unit = {},
-    authenticateApprover: ApproverAuthenticator = { _, _, _ -> null }
+    authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
+    confirmApproverOwner: OwnerConfirmation = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -471,10 +479,16 @@ fun MainScreen(
     var biometricTimeout by remember { mutableStateOf(biometricTimeoutStore.getTimeout()) }
     var biometricLockOnLaunch by remember { mutableStateOf(biometricTimeoutStore.isLockOnLaunchEnabled()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
-    var showApproverScreen by remember { mutableStateOf(false) }
+    var approver by remember { mutableStateOf<ApproverController?>(null) }
+    val openApprover = {
+        approver = approverController()
+        if (approver == null) {
+            Toast.makeText(appContext, appContext.getString(R.string.approver_unavailable), Toast.LENGTH_LONG).show()
+        }
+    }
     LaunchedEffect(approverRequested) {
         if (approverRequested) {
-            showApproverScreen = approverController != null
+            openApprover()
             onApproverRequestHandled()
         }
     }
@@ -773,6 +787,17 @@ fun MainScreen(
         )
     }
 
+    approver?.let { controller ->
+        ApproverScreen(
+            controller = controller,
+            authenticate = authenticateApprover,
+            confirmOwner = confirmApproverOwner,
+            backgroundServiceEnabled = foregroundServiceEnabled,
+            onDismiss = { approver = null }
+        )
+        return
+    }
+
     if (showPinSetup) {
         PinSetupScreen(
             pinStore = pinStore,
@@ -1025,15 +1050,6 @@ fun MainScreen(
             permissionStore = permissionStore,
             onAppClick = { selectedAppPackage = it },
             onDismiss = { showConnectedApps = false }
-        )
-        return
-    }
-
-    if (showApproverScreen && approverController != null) {
-        ApproverScreen(
-            controller = approverController,
-            authenticate = authenticateApprover,
-            onDismiss = { showApproverScreen = false }
         )
         return
     }
@@ -1692,7 +1708,7 @@ fun MainScreen(
                     },
                     onSecurityClick = { showSecuritySettings = true },
                     onBackupClick = { showBackupRestore = true },
-                    onApproverClick = approverController?.let { { showApproverScreen = true } },
+                    onApproverClick = openApprover,
                     onSigningHistoryClick = { showHistoryScreen = true },
                     onClearLogsAndActivity = {
                         withContext(Dispatchers.IO) {
@@ -1973,7 +1989,7 @@ private fun SettingsTab(
     onForegroundServiceToggle: (Boolean) -> Unit,
     onSecurityClick: () -> Unit,
     onBackupClick: () -> Unit,
-    onApproverClick: (() -> Unit)?,
+    onApproverClick: () -> Unit,
     onSigningHistoryClick: () -> Unit,
     onClearLogsAndActivity: suspend () -> Unit
 ) {
@@ -2039,10 +2055,8 @@ private fun SettingsTab(
         BackupSettingsCard(onClick = onBackupClick)
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (onApproverClick != null) {
-            ApproverSettingsCard(onClick = onApproverClick)
-            Spacer(modifier = Modifier.height(16.dp))
-        }
+        ApproverSettingsCard(onClick = onApproverClick)
+        Spacer(modifier = Modifier.height(16.dp))
 
         if (hasShare) {
             SigningHistoryCard(onClick = onSigningHistoryClick)

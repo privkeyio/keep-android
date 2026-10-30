@@ -83,6 +83,7 @@ class KeepMobileApp : Application() {
     // while onCreate is still running.
     @Volatile
     private var nip55Handler: Nip55Handler? = null
+    @Volatile
     private var approverController: ApproverController? = null
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
@@ -168,19 +169,24 @@ class KeepMobileApp : Application() {
     }
 
     // The approver pairing belongs to the app install, not to an account, so it is
-    // never reset on an account switch.
-    private fun initializeApprover(mobile: KeepMobile) {
-        runCatching {
-            val controller = ApproverController(this, mobile)
-            approverController = controller
-            applicationScope.launch(Dispatchers.IO) {
-                runCatching { controller.startIfPaired() }.onFailure { e ->
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Approver failed to start: ${e::class.simpleName}", e)
+    // never reset on an account switch. A state that cannot be read now (a Keystore
+    // fault at launch) leaves no controller, and the next lookup tries again.
+    @Synchronized
+    private fun initializeApprover(mobile: KeepMobile): ApproverController? {
+        approverController?.let { return it }
+        return runCatching { ApproverController(this, mobile) }
+            .onSuccess { controller ->
+                approverController = controller
+                applicationScope.launch(Dispatchers.IO) {
+                    runCatching { controller.startIfPaired() }.onFailure { e ->
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Approver failed to start: ${e::class.simpleName}", e)
+                    }
                 }
             }
-        }.onFailure { e ->
-            if (BuildConfig.DEBUG) Log.e(TAG, "Approver unavailable: ${e::class.simpleName}", e)
-        }
+            .onFailure { e ->
+                if (BuildConfig.DEBUG) Log.e(TAG, "Approver unavailable: ${e::class.simpleName}", e)
+            }
+            .getOrNull()
     }
 
     // Called only on the main thread (from the state callback's mainHandler.post),
@@ -320,7 +326,8 @@ class KeepMobileApp : Application() {
 
     fun getStorage(): AndroidKeystoreStorage? = storage
 
-    fun getApproverController(): ApproverController? = approverController
+    fun getApproverController(): ApproverController? =
+        approverController ?: keepMobile?.let(::initializeApprover)
 
     fun isSigningKilled(): Boolean {
         if (killSwitchMigrationFailed) return true

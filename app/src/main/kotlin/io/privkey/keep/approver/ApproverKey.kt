@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import java.math.BigInteger
+import java.security.InvalidAlgorithmParameterException
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
@@ -36,9 +36,9 @@ internal object ApproverKey {
             try {
                 generate(challenge, strongBox = true)
                 return
-            } catch (e: StrongBoxUnavailableException) {
-                delete()
             } catch (e: ProviderException) {
+                delete()
+            } catch (e: InvalidAlgorithmParameterException) {
                 delete()
             }
         }

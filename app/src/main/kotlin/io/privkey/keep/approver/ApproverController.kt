@@ -3,6 +3,7 @@ package io.privkey.keep.approver
 import android.content.Context
 import android.os.SystemClock
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import io.privkey.keep.BiometricHelper
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.ApprovalRequest
 import io.privkey.keep.uniffi.ApproverCallbacks
@@ -33,6 +34,8 @@ data class WaitingRequest(val request: ApprovalRequest, val deadlineElapsedMs: L
 data class ApproverState(
     val status: ApproverStatus? = null,
     val requests: List<WaitingRequest> = emptyList(),
+    /** Why serving the pairing could not start, until a start succeeds. */
+    val startError: String? = null,
 )
 
 /** Why an approver key signature could not be made. */
@@ -57,58 +60,54 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
         override fun onEvent(event: ApproverEvent) = handle(event)
     }
 
-    /** Resumes a pairing kept from an earlier run. Blocking. */
+    /**
+     * Shows the kept pairing, then starts serving it. Blocking: the start waits on the
+     * relays, so the state, freeze included, is published before it.
+     */
     fun startIfPaired() {
-        val status = handler.status()
-        if (status.paired || status.pairing) {
-            runCatching { handler.start(callbacks) }
-        }
+        reload()
+        val status = _state.value.status ?: return
+        if (!status.paired && !status.pairing) return
+        val error = runCatching { handler.start(callbacks) }.exceptionOrNull()
+        _state.update { it.copy(startError = error?.let { e -> errorText(context, e) }) }
         reload()
         if (_state.value.requests.isNotEmpty()) notifier.requestWaiting()
     }
 
-    private fun reload() {
+    suspend fun retryStart() = io { startIfPaired() }
+
+    // The core's state is the only truth: every change rereads all of it, and the read and
+    // the write happen together, so an older read can never overwrite a newer one.
+    private fun reload() = synchronized(this) {
         val now = SystemClock.elapsedRealtime()
         val waiting = handler.waitingRequests().map {
             WaitingRequest(it, now + it.secondsLeft.toLong() * 1000)
         }
-        _state.value = ApproverState(handler.status(), waiting)
+        val status = handler.status()
+        _state.update { it.copy(status = status, requests = waiting) }
+        if (waiting.isEmpty()) notifier.clearRequests()
+        if (status.alerts.isEmpty()) notifier.clearAlert()
     }
 
     private fun handle(event: ApproverEvent) {
+        reload()
         when (event) {
             is ApproverEvent.Paired -> notice(R.string.approver_notice_paired)
             is ApproverEvent.PairingRefused -> {
-                ApproverKey.delete()
+                // A gateway's refusal ends the pairing; a reply that fails its checks does not,
+                // and the key must stay for the pairing that goes on.
+                val status = _state.value.status
+                if (status != null && !status.paired && !status.pairing) ApproverKey.delete()
                 notice(context.getString(R.string.approver_notice_pairing_refused, event.reason))
             }
-            is ApproverEvent.Request -> {
-                val deadline = SystemClock.elapsedRealtime() + event.request.secondsLeft.toLong() * 1000
-                _state.update { s ->
-                    s.copy(
-                        requests = s.requests.filterNot { it.request.requestId == event.request.requestId } +
-                            WaitingRequest(event.request, deadline)
-                    )
-                }
-                notifier.requestWaiting()
-                return
-            }
+            is ApproverEvent.Request -> notifier.requestWaiting()
             is ApproverEvent.RequestRefused ->
                 notice(context.getString(R.string.approver_notice_request_refused, event.reason))
-            is ApproverEvent.Outcome -> {
-                removeRequest(event.requestId)
+            is ApproverEvent.Outcome ->
                 notice(context.getString(R.string.approver_notice_outcome, event.outcome))
-                return
-            }
             is ApproverEvent.Anchor -> Unit
             is ApproverEvent.Alert -> notifier.alert()
         }
-        reload()
-    }
-
-    private fun removeRequest(requestId: String) {
-        _state.update { s -> s.copy(requests = s.requests.filterNot { it.request.requestId == requestId }) }
-        if (_state.value.requests.isEmpty()) notifier.clearRequests()
     }
 
     private fun notice(resId: Int) = notice(context.getString(resId))
@@ -141,7 +140,8 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
     }
 
     suspend fun beginPairing(uri: String, label: String): PairingStart = io {
-        check(!handler.status().paired) { "already paired" }
+        val status = handler.status()
+        check(!status.paired && !status.pairing) { "already paired" }
         val challenge = handler.pairingAttestationChallenge(uri)
         ApproverKey.generate(context, challenge)
         handler.beginPairing(uri, ApproverKey.publicKey(), label)
@@ -160,7 +160,7 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
 
     suspend fun sendDecision(requestId: String, approve: Boolean, signature: ByteArray) = io {
         handler.sendDecision(requestId, approve, signature)
-        removeRequest(requestId)
+        reload()
     }
 
     suspend fun freeze(credential: String?) = io {
@@ -183,7 +183,7 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
     suspend fun forget() = io {
         handler.forget()
         ApproverKey.delete()
-        notifier.clearRequests()
+        _state.update { it.copy(startError = null) }
         reload()
     }
 
@@ -198,6 +198,9 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
             // A finger on the sensor before the prompt is shown can authenticate without
             // authorizing this signature; the Keystore then refuses it.
             is SignatureException -> context.getString(R.string.approver_error_try_again)
+            is BiometricHelper.BiometricException -> e.message ?: context.getString(R.string.approver_error_generic)
+            is KeepMobileException.NetworkException -> context.getString(R.string.approver_error_network, e.msg)
+            is KeepMobileException.CertificatePinMismatch -> context.getString(R.string.approver_error_pin_mismatch)
             else -> context.getString(R.string.approver_error_generic)
         }
     }

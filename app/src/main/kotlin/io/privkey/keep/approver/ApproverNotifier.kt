@@ -38,6 +38,8 @@ internal class ApproverNotifier(private val context: Context) {
 
     fun clearRequests() = manager.cancel(REQUEST_ID)
 
+    fun clearAlert() = manager.cancel(ALERT_ID)
+
     @SuppressLint("MissingPermission")
     private fun post(id: Int, textRes: Int) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
