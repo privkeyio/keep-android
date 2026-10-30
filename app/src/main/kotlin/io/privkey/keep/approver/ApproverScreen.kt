@@ -262,6 +262,21 @@ fun ApproverScreen(
 }
 
 @Composable
+fun ApproverResetDialog(onDismiss: () -> Unit, onReset: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.approver_reset_title)) },
+        text = { Text(stringResource(R.string.approver_reset_body)) },
+        confirmButton = {
+            TextButton(onClick = onReset) { Text(stringResource(R.string.approver_reset_confirm)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
+        }
+    )
+}
+
+@Composable
 private fun Unpaired(label: String, onLabelChange: (String) -> Unit, busy: Boolean, onScan: () -> Unit) {
     Text(stringResource(R.string.approver_unpaired_body), style = MaterialTheme.typography.bodyMedium)
     OutlinedTextField(

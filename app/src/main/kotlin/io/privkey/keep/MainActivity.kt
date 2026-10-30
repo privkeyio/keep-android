@@ -42,6 +42,8 @@ import androidx.navigation.compose.rememberNavController
 import io.privkey.keep.approver.ApproverAuthenticator
 import io.privkey.keep.approver.ApproverController
 import io.privkey.keep.approver.ApproverNotifier
+import io.privkey.keep.approver.ApproverReset
+import io.privkey.keep.approver.ApproverResetDialog
 import io.privkey.keep.approver.ApproverScreen
 import io.privkey.keep.approver.OwnerConfirmation
 import io.privkey.keep.descriptor.DescriptorSessionManager
@@ -318,6 +320,8 @@ class MainActivity : FragmentActivity() {
                             onDismissPinMismatch = app::dismissPinMismatch,
                             onAccountSwitched = { stop -> app.onAccountSwitched(stop) },
                             approverController = app::getApproverController,
+                            approverUnreadable = app::isApproverUnreadable,
+                            resetApprover = app::resetUnreadableApprover,
                             approverRequested = approverRequested,
                             onApproverRequestHandled = { approverRequested = false },
                             authenticateApprover = { signature, title, subtitle ->
@@ -396,6 +400,8 @@ fun MainScreen(
     onDismissPinMismatch: () -> Unit = {},
     onAccountSwitched: suspend (Boolean) -> Boolean = { false },
     approverController: () -> ApproverController? = { null },
+    approverUnreadable: () -> Boolean = { false },
+    resetApprover: () -> ApproverReset<ApproverController> = { ApproverReset.NotReset },
     approverRequested: Boolean = false,
     onApproverRequestHandled: () -> Unit = {},
     authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
@@ -480,10 +486,15 @@ fun MainScreen(
     var biometricLockOnLaunch by remember { mutableStateOf(biometricTimeoutStore.isLockOnLaunchEnabled()) }
     var showBunkerScreen by remember { mutableStateOf(false) }
     var approver by remember { mutableStateOf<ApproverController?>(null) }
+    var offerApproverReset by remember { mutableStateOf(false) }
     val openApprover = {
         approver = approverController()
         if (approver == null) {
-            Toast.makeText(appContext, appContext.getString(R.string.approver_unavailable), Toast.LENGTH_LONG).show()
+            if (approverUnreadable()) {
+                offerApproverReset = true
+            } else {
+                Toast.makeText(appContext, appContext.getString(R.string.approver_unavailable), Toast.LENGTH_LONG).show()
+            }
         }
     }
     LaunchedEffect(approverRequested) {
@@ -783,6 +794,32 @@ fun MainScreen(
                 pendingAuthGateCancel()
                 pendingAuthGateCancel = {}
                 pendingAuthGateAction = null
+            }
+        )
+    }
+
+    if (offerApproverReset) {
+        ApproverResetDialog(
+            onDismiss = { offerApproverReset = false },
+            onReset = {
+                offerApproverReset = false
+                coroutineScope.launch {
+                    if (!confirmApproverOwner(appContext.getString(R.string.approver_reset_auth))) return@launch
+                    val reset = runCatching { withContext(Dispatchers.IO) { resetApprover() } }
+                        .onFailure { if (it is CancellationException) throw it }
+                        .getOrDefault(ApproverReset.NotReset)
+                    val notice = when (reset) {
+                        is ApproverReset.Kept -> R.string.approver_reset_kept
+                        is ApproverReset.Cleared -> null
+                        ApproverReset.NotReset -> R.string.approver_reset_failed
+                    }
+                    notice?.let { Toast.makeText(appContext, appContext.getString(it), Toast.LENGTH_LONG).show() }
+                    approver = when (reset) {
+                        is ApproverReset.Kept -> reset.approver
+                        is ApproverReset.Cleared -> reset.approver
+                        ApproverReset.NotReset -> null
+                    }
+                }
             }
         )
     }

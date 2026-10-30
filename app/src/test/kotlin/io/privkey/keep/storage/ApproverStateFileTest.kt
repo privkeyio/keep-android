@@ -33,6 +33,7 @@ class ApproverStateFileTest {
         file,
         wrappingKey = { key },
         createWrappingKey = { newKey().also { key = it } },
+        deleteWrappingKey = { key = null },
         syncDir = { dir ->
             syncs += dir
             replacedBeforeSync += !File(tmp.root, "approver_state.tmp").exists()
@@ -141,6 +142,45 @@ class ApproverStateFileTest {
         assertThrows(KeepMobileException.StorageNotFound::class.java) { store().load() }
         store().delete()
         assertEquals(2, syncs.size)
+    }
+
+    @Test
+    fun deleteAlsoDropsTheWrappingKeySoTheNextStoreMintsOne() {
+        store().store(byteArrayOf(1))
+        val original = key
+        store().delete()
+        assertEquals(null, key)
+        store().store(byteArrayOf(2))
+        assertFalse(key == original)
+        assertArrayEquals(byteArrayOf(2), store().load())
+    }
+
+    @Test
+    fun aLoadRecordsDamageApartFromAFaultThatMayClear() {
+        val state = store()
+        fun loaded(): ApproverStateFile.LoadResult? {
+            runCatching { state.load() }
+            return state.lastLoad
+        }
+        assertEquals(ApproverStateFile.LoadResult.ABSENT, loaded())
+        state.store(byteArrayOf(1, 2, 3))
+        assertEquals(ApproverStateFile.LoadResult.READABLE, loaded())
+        val original = key
+        key = KeyGenerator.getInstance("HmacSHA256").generateKey()
+        assertEquals(ApproverStateFile.LoadResult.FAULT, loaded())
+        key = null
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
+        key = newKey()
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
+        key = original
+        val blob = file.readBytes()
+        file.writeBytes(blob.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() })
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
+        file.writeBytes(blob.copyOf(20))
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
+        file.delete()
+        file.mkdir()
+        assertEquals(ApproverStateFile.LoadResult.FAULT, loaded())
     }
 
     @Test

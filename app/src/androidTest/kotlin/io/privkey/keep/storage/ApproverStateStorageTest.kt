@@ -3,10 +3,13 @@ package io.privkey.keep.storage
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.uniffi.ApproverHandler
+import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -81,6 +84,35 @@ class ApproverStateStorageTest {
         assertFalse(file.exists())
         assertThrows(KeepMobileException.StorageNotFound::class.java) { storage().loadShareByKey(KEY) }
         storage().deleteShareByKey(KEY)
+    }
+
+    @Test
+    fun anUnreadableStateIsAStorageFaultUntilItIsDeleted() {
+        storage().storeShareByKey(KEY, "not the approver state".toByteArray(), metadata)
+        assertUnreadable(ApproverStateFile.LoadResult.READABLE)
+        keyStore.deleteEntry(ALIAS)
+        assertUnreadable(ApproverStateFile.LoadResult.DAMAGED)
+        storage().deleteShareByKey(KEY)
+        val fresh = storage()
+        val handler = ApproverHandler(KeepMobile(fresh))
+        assertEquals(ApproverStateFile.LoadResult.ABSENT, fresh.lastApproverLoad())
+        assertFalse(handler.status().paired)
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun deleteDropsTheWrappingKey() {
+        storage().storeShareByKey(KEY, byteArrayOf(1), metadata)
+        assertTrue(keyStore.containsAlias(ALIAS))
+        storage().deleteShareByKey(KEY)
+        assertFalse(keyStore.containsAlias(ALIAS))
+    }
+
+    private fun assertUnreadable(load: ApproverStateFile.LoadResult) {
+        val store = storage()
+        assertThrows(KeepMobileException.StorageException::class.java) { ApproverHandler(KeepMobile(store)) }
+        assertEquals(load, store.lastApproverLoad())
+        assertTrue(file.exists())
     }
 
     private companion object {

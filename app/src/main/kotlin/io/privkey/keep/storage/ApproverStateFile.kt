@@ -10,6 +10,7 @@ import java.nio.file.LinkOption
 import java.nio.file.NoSuchFileException
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
@@ -40,8 +41,23 @@ internal class ApproverStateFile(
     private val file: File,
     private val wrappingKey: () -> SecretKey?,
     private val createWrappingKey: () -> SecretKey,
+    private val deleteWrappingKey: () -> Unit,
     private val syncDir: (File) -> Unit = ::fsyncDir,
 ) {
+    /**
+     * DAMAGED is a missing wrapping key, a malformed file or one that fails
+     * authentication, which no retry fixes. FAULT is anything that may clear, such
+     * as an I/O error or a busy Keystore.
+     */
+    enum class LoadResult { ABSENT, READABLE, DAMAGED, FAULT }
+
+    /** What the last [load] found, so a caller can tell why the core could not open the state. */
+    @Volatile
+    var lastLoad: LoadResult? = null
+        private set
+
+    private class Damaged(message: String) : Exception(message)
+
     private val dir: File get() = file.absoluteFile.parentFile!!
     private val temp: File get() = File(dir, "${file.name}.tmp")
 
@@ -68,38 +84,64 @@ internal class ApproverStateFile(
     }
 
     @Synchronized
-    fun load(): ByteArray {
+    fun load(): ByteArray = try {
+        read().also { lastLoad = LoadResult.READABLE }
+    } catch (e: KeepMobileException.StorageNotFound) {
+        lastLoad = LoadResult.ABSENT
+        throw e
+    } catch (e: Damaged) {
+        lastLoad = LoadResult.DAMAGED
+        throw KeepMobileException.StorageException(e.message ?: "the approver state is damaged")
+    } catch (e: Exception) {
+        lastLoad = LoadResult.FAULT
+        throw e
+    }
+
+    private fun read(): ByteArray {
         val blob = try {
             Files.readAllBytes(file.toPath())
         } catch (e: NoSuchFileException) {
             throw KeepMobileException.StorageNotFound()
         }
-        val key = wrappingKey() ?: throw KeepMobileException.StorageException(
-            "the approver state is stored but its wrapping key is missing"
-        )
+        val key = wrappingKey() ?: throw Damaged("the approver state is stored but its wrapping key is missing")
         if (blob.size < HEADER_SIZE + TAG_SIZE || blob[0] != VERSION) {
-            throw KeepMobileException.StorageException("the approver state is malformed")
+            throw Damaged("the approver state is malformed")
         }
-        val dek = Cipher.getInstance(GCM).run {
-            init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, blob, 1, IV_SIZE))
-            doFinal(blob, 1 + IV_SIZE, WRAPPED_SIZE)
+        val dek = authenticated {
+            Cipher.getInstance(GCM).run {
+                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, blob, 1, IV_SIZE))
+                doFinal(blob, 1 + IV_SIZE, WRAPPED_SIZE)
+            }
         }
         try {
-            return Cipher.getInstance(GCM).run {
-                init(Cipher.DECRYPT_MODE, SecretKeySpec(dek, "AES"), GCMParameterSpec(TAG_BITS, blob, HEADER_SIZE - IV_SIZE, IV_SIZE))
-                doFinal(blob, HEADER_SIZE, blob.size - HEADER_SIZE)
+            return authenticated {
+                Cipher.getInstance(GCM).run {
+                    init(Cipher.DECRYPT_MODE, SecretKeySpec(dek, "AES"), GCMParameterSpec(TAG_BITS, blob, HEADER_SIZE - IV_SIZE, IV_SIZE))
+                    doFinal(blob, HEADER_SIZE, blob.size - HEADER_SIZE)
+                }
             }
         } finally {
             dek.fill(0)
         }
     }
 
-    /** Also removes a temp file a crashed store left, and syncs even when nothing was there, so a retried delete is durable too. */
+    private fun authenticated(decrypt: () -> ByteArray): ByteArray = try {
+        decrypt()
+    } catch (e: AEADBadTagException) {
+        throw Damaged("the approver state fails authentication")
+    }
+
+    /**
+     * Also removes a temp file a crashed store left, and syncs even when nothing was
+     * there, so a retried delete is durable too. The wrapping key goes last, so a key
+     * that itself was the fault does not survive into the next pairing.
+     */
     @Synchronized
     fun delete() {
         Files.deleteIfExists(temp.toPath())
         Files.deleteIfExists(file.toPath())
         syncDir(dir)
+        deleteWrappingKey()
     }
 
     // Only a missing file is absent. File.exists() answers false on any stat error too.

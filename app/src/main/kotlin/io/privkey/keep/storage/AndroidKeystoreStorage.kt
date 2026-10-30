@@ -87,7 +87,7 @@ class AndroidKeystoreStorage(
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
         private const val METADATA_KEY_ALIAS = "keep_metadata"
         private const val METADATA_KEY_PREFIX = "__keep_"
-        private const val APPROVER_STATE_KEY = "__keep_approver"
+        const val APPROVER_STATE_KEY = "__keep_approver"
         private const val APPROVER_STATE_FILE = "approver_state"
         private const val APPROVER_WRAP_ALIAS = "keep_approver_wrap"
 
@@ -143,8 +143,16 @@ class AndroidKeystoreStorage(
             File(context.noBackupFilesDir, "$APPROVER_STATE_FILE$prefsSuffix"),
             wrappingKey = { keyStore.getKey(alias, null) as? SecretKey },
             createWrappingKey = { getOrCreateKeyWithAlias(alias, requireUserAuth = false) },
+            // The state is already gone, and a store reuses a key left behind, so a
+            // failed delete here must not fail the removal.
+            deleteWrappingKey = {
+                runCatching { if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias) }
+                    .onFailure { Log.e(TAG, "Approver wrapping key not deleted: ${it::class.simpleName}") }
+            },
         )
     }
+
+    internal fun lastApproverLoad(): ApproverStateFile.LoadResult? = approverState.lastLoad
 
     @Synchronized
     private fun getOrCreateMetadataKey(): SecretKey =
