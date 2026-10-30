@@ -263,7 +263,7 @@
     <string name="connections_nip55_relay_auth_whitelist_add_label">Relay URL</string>
     <string name="connections_nip55_relay_auth_whitelist_placeholder">wss://relay.example.com</string>
     <string name="connections_nip55_relay_auth_whitelist_add">Add</string>
-    <string name="connections_nip55_relay_auth_whitelist_invalid_host">Not a relay address. Enter a host such as relay.example.com or a wss:// URL.</string>
+    <string name="connections_nip55_relay_auth_whitelist_invalid_host">Enter the relay\'s host, such as relay.example.com, in ASCII characters (punycode for international names).</string>
     <string name="connections_nip55_relay_auth_whitelist_full">The whitelist is full. Remove a relay before adding another.</string>
     <string name="connections_nip55_relay_auth_whitelist_save_failed">The relay could not be saved. Try again.</string>
     <string name="connections_nip55_relay_auth_whitelist_empty">No relays whitelisted. NIP-42 auth follows normal per-app permissions.</string>

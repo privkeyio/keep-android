@@ -322,6 +322,26 @@ class RelayAuthWhitelistScreenTest {
         compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
     }
 
+    // An add that finds the list unreadable switches to the reset view rather than
+    // blaming the host or the size of the list.
+    @Test
+    fun anAddThatFindsTheListUnreadableShowsTheFault() {
+        val storedName = writeAndFindStoredName(context, RelayAuthWhitelistStore.PREFS_NAME) {
+            RelayAuthWhitelistStore(context).add("wss://$STAGED_HOST")
+        }
+        showScreen()
+        awaitText(STAGED_HOST)
+        corruptStoredValue(context, RelayAuthWhitelistStore.PREFS_NAME, storedName)
+
+        submit("wss://other.example.com")
+
+        awaitText(unreadableText)
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_invalid_host)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_relay_auth_whitelist_full)).assertDoesNotExist()
+
+        forgetWriteProbe(context, RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
     private companion object {
         const val AWAIT_MS = 15_000L
         // Normalized form, which is what the store keeps and the screen renders.

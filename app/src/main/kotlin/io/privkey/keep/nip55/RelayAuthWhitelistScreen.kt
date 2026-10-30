@@ -89,8 +89,7 @@ fun RelayAuthWhitelistScreen(
             // Nothing below this is usable while the list cannot be read: add refuses
             // to write over a list it could not read, there are no rows to remove, and
             // the gate is rejecting every relay meanwhile. So the fault replaces them
-            // rather than sitting above an input whose every attempt would fail with
-            // the error a bad host gets.
+            // rather than sitting above an input whose every attempt would fail.
             // Outside the fault block below, because a reset can fail and still leave
             // the next read succeeding: the delete is uncertified while the value is
             // gone from this instance's view. Nested under the fault, that outcome
@@ -212,6 +211,7 @@ fun RelayAuthWhitelistScreen(
                     confirmReset = false
                     gateReset {
                         resetFailed = false
+                        error = null
                         // Read again before destroying anything. The fault is latched
                         // from the last read, an Unreadable can be transient, and the
                         // gate is read per request rather than from this screen, so a
