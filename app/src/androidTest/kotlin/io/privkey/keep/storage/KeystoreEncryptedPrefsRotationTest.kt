@@ -176,6 +176,20 @@ class KeystoreEncryptedPrefsRotationTest {
         assertEquals(before, raw().getString(HMAC_KEY_PREF, null))
     }
 
+    // The same at a listed key's own name: it reads refused today, and the move
+    // must not leave it behind to read absent.
+    @Test
+    fun aNonStringAtAListedNameHoldsTheMove() {
+        stageFileOnThePublishedKey()
+        raw().edit().putInt(globalEpochNameOf(SETTING), 1).commit()
+        val before = raw().getString(HMAC_KEY_PREF, null)
+
+        val prefs = reopen()
+        assertEquals(PrefRead.Unreadable, prefs.readString(SETTING))
+        assertTrue(prefs.getBoolean(VICTIM, false))
+        assertEquals("the key must stay", before, raw().getString(HMAC_KEY_PREF, null))
+    }
+
     // An instance that resolved the published key before another one moved the
     // file must follow the move, or its writes land at names nothing computes.
     @Test

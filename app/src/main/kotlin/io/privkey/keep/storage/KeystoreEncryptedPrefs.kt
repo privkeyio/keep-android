@@ -467,7 +467,9 @@ object KeystoreEncryptedPrefs {
             for (plainKey in plainKeys) {
                 val oldHash = hmacWithKey(plainKey, oldKey)
                 val newHash = hmacWithKey(plainKey, newKey)
-                val value = runCatching { basePrefs.getString(oldHash, null) }.getOrNull() ?: continue
+                // A non-String here is refused today, and skipping it would leave
+                // it at a name nothing computes, so the move waits instead.
+                val value = runCatching { basePrefs.getString(oldHash, null) }.getOrElse { return false } ?: continue
                 editor.putString(newHash, value)
                 editor.remove(oldHash)
                 mappings.add(KeyMapping(plainKey, oldHash, newHash))
