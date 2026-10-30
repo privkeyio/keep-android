@@ -28,8 +28,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Revoking a client rotates the bunker credentials even when the bunker service is not
- * running, so a revoked client that kept the old bunker URL cannot connect again with it.
+ * Revoking a client replaces the connect secret, and a rotation the bunker key too, even
+ * when the bunker service is not running, so a revoked client that kept the old bunker URL
+ * cannot connect again with it.
  * Starts a real bunker against a public relay, so it is manual-only like the FROST tests,
  * and it rotates the test device's own bunker URL.
  */
@@ -65,15 +66,30 @@ class BunkerRevokeRotationTest {
     }
 
     @Test(timeout = 180_000L)
+    fun revokingWithTheServiceStoppedRetiresTheSecretAndKeepsTheBunkerKey() = runBlocking {
+        val mobile = setUpMobile()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+        val before = startedBunkerUrl(mobile)
+        BunkerService.revokeClients(context, mobile, listOf("cd".repeat(32)))
+        assertNull("the revoke must not have needed the service", BunkerService.current())
+
+        val after = startedBunkerUrl(mobile)
+        assertNotNull(after.secret)
+        assertNotEquals("the old connect secret must be retired", before.secret, after.secret)
+        assertEquals("other clients keep the bunker key", before.pubkey, after.pubkey)
+    }
+
+    @Test(timeout = 180_000L)
     fun aClientRevokedBeforeThisVersionGetsTheUrlRotatedOnce() {
         val mobile = setUpMobile()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val markers = context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
         val probe = "ab".repeat(32)
-        val alreadyDenylisted = probe in Nip46ClientStore.getDenylist(context)
+        val saved = Nip46ClientStore.getDenylist(context)
         try {
             markers.edit().remove(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES).commit()
-            Nip46ClientStore.addToDenylist(context, probe)
+            Nip46ClientStore.setDenylistForTest(context, saved + probe)
 
             val before = startedBunkerUrl(mobile)
             assertTrue(BunkerService.rotateOnceForEarlierRevokes(context, mobile))
@@ -84,7 +100,7 @@ class BunkerRevokeRotationTest {
             assertFalse("the rotation happens once", BunkerService.rotateOnceForEarlierRevokes(context, mobile))
             assertEquals(after.secret, startedBunkerUrl(mobile).secret)
         } finally {
-            if (!alreadyDenylisted) Nip46ClientStore.removeFromDenylist(context, probe)
+            Nip46ClientStore.setDenylistForTest(context, saved)
         }
     }
 

@@ -5,8 +5,8 @@ import org.junit.Test
 
 /**
  * Regression coverage for the NIP-46 gate ordering (gh #316): the global rate
- * limiter must only be consulted after the denylist/authorization gate, so
- * denylisted/unauthorized traffic cannot consume the shared global budget. The
+ * limiter must only be consulted after the authorization gate, so
+ * unauthorized traffic cannot consume the shared global budget. The
  * Service flow (approval Activity, native signing) is out of unit scope.
  */
 class RequestGateTest {
