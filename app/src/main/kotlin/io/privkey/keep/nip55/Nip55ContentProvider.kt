@@ -42,6 +42,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.Calendar
 import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 // Both NIP-55 entrypoints refuse a request they cannot record, and the refusal is
@@ -568,7 +569,8 @@ class Nip55ContentProvider : ContentProvider() {
      * whether its parent waits for it. So the append is launched on its own
      * scope and only the wait is cancelled.
      *
-     * The price is that an append still running when the budget expires is
+     * An append still queued when the budget expires, typically behind a stalled
+     * one, never starts. The price is that an append already running then is
      * reported as not landed, and its row may commit a moment later, so the log
      * can hold an approval for a response that was never returned. That is the
      * same shape as an append interrupted by process death, which the chain
@@ -586,12 +588,11 @@ class Nip55ContentProvider : ContentProvider() {
         eventKind: Int?,
         decision: String,
     ): Boolean {
-        val append = auditScope.async {
-            store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
-            true
-        }
         return runCatching {
-            runBlocking { withTimeoutOrNull(AUDIT_APPEND_BUDGET_MS) { append.await() } }
+            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) {
+                store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
+                true
+            }
         }.getOrNull() == true
     }
 
@@ -662,4 +663,18 @@ class Nip55ContentProvider : ContentProvider() {
     override fun insert(uri: Uri, values: ContentValues?): Uri? = null
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
     override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int = 0
+}
+
+/**
+ * Runs [block] on [scope] and waits at most [budgetMs] for it. A block still queued
+ * when the wait gives up never starts, so only one already running can finish after
+ * its caller was told it did not. It is fenced rather than cancelled, because
+ * cancelling a running block could stop it between steps that must happen together.
+ */
+internal fun <T : Any> awaitWithin(scope: CoroutineScope, budgetMs: Long, block: suspend () -> T): T? {
+    val claimed = AtomicBoolean(false)
+    val work = scope.async { if (claimed.compareAndSet(false, true)) block() else null }
+    val result = runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+    if (result == null) claimed.compareAndSet(false, true)
+    return result
 }
