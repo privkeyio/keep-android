@@ -261,23 +261,25 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
-        wasAutomatic: Boolean
-    ) = logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic, null)
+        wasAutomatic: Boolean,
+        claim: () -> Boolean = { true }
+    ): Boolean = logOperationInTransaction(callerPackage, requestType, eventKind, decision, wasAutomatic, claim, null)
 
     // [extraInTransaction] lets a related permission write commit atomically with the
     // audit row in a single Room transaction; the anchor is advanced only once that
     // transaction durably commits.
-    private suspend fun logOperation(
+    private suspend fun logOperationInTransaction(
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
         wasAutomatic: Boolean,
+        claim: () -> Boolean = { true },
         extraInTransaction: (suspend () -> Unit)?
-    ) {
+    ): Boolean {
         val normalizedEventKind = eventKind ?: EVENT_KIND_GENERIC
         val timestamp = System.currentTimeMillis()
-        auditWriter.append({ previousHash ->
+        return auditWriter.append({ previousHash ->
             Nip55AuditLog(
                 timestamp = timestamp,
                 callerPackage = callerPackage,
@@ -296,7 +298,7 @@ class PermissionStore(private val database: Nip55Database) {
                     wasAutomatic = wasAutomatic
                 )
             )
-        }, extraInTransaction)
+        }, extraInTransaction, claim)
     }
 
     /**
@@ -500,7 +502,7 @@ class PermissionStore(private val database: Nip55Database) {
         val storedRequestType = findRequestType(permission.requestType)
             ?: throw IllegalArgumentException("Unknown requestType in permission $id: ${permission.requestType}")
         val clamped = if (decision == PermissionDecision.ALLOW) clampOnAllow(permission) else null
-        logOperation(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false) {
+        logOperationInTransaction(permission.callerPackage, storedRequestType, permission.eventKind, decision.toString(), wasAutomatic = false) {
             if (decision != PermissionDecision.ALLOW) {
                 dao.updateDecisionClearingLifetime(id, decision.toString())
             } else if (clamped == null) {
@@ -555,7 +557,7 @@ class PermissionStore(private val database: Nip55Database) {
     ) {
         val now = System.currentTimeMillis()
         val nowElapsed = SystemClock.elapsedRealtime()
-        logOperation(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false) {
+        logOperationInTransaction(callerPackage, requestType, eventKind, PermissionDecision.ASK.toString(), wasAutomatic = false) {
             dao.insertPermission(
                 Nip55Permission(
                     callerPackage = callerPackage,

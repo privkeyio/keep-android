@@ -113,6 +113,21 @@ class AutoSignAuditRecordTest {
         assertEquals("and must have written exactly one row", 1, runBlocking { store.getAuditLogCount() })
     }
 
+    // An append whose caller has stopped waiting is turned away under the writer's
+    // lock: nothing is written and the chain still verifies.
+    @Test
+    fun anAppendRefusedItsClaimWritesNothing() = runBlocking {
+        val written = store.logOperation(
+            CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true, claim = { false }
+        )
+
+        assertFalse("a refused claim must report nothing written", written)
+        assertEquals("and must leave no row", 0, store.getAuditLogCount())
+        assertTrue("a later append still lands", store.logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = true))
+        assertEquals(1, store.getAuditLogCount())
+        assertEquals("and the chain verifies", ChainVerificationResult.Valid, store.verifyAuditChain())
+    }
+
     private companion object {
         const val CALLER = "io.privkey.keep.test.autosign.audit"
     }

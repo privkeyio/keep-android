@@ -569,12 +569,12 @@ class Nip55ContentProvider : ContentProvider() {
      * whether its parent waits for it. So the append is launched on its own
      * scope and only the wait is cancelled.
      *
-     * An append still queued when the budget expires, typically behind a stalled
-     * one, is fenced and never starts, unless it claims itself in the moment
-     * between the timeout and the fence. The price is that an append already
-     * running then is reported as not landed, and its row may commit a moment
-     * later, so the log can hold an approval for a response that was never
-     * returned. That is the
+     * An append that has not yet taken the writer's lock when the budget
+     * expires, typically one waiting behind a stalled append, is fenced and
+     * writes nothing, unless it takes the lock in the moment between the timeout
+     * and the fence. The price is that an append already writing then is
+     * reported as not landed, and its row may commit a moment later, so the log
+     * can hold an approval for a response that was never returned. That is the
      * same shape as an append interrupted by process death, which the chain
      * verification already heals, and it is the direction that holds more
      * record rather than less. Asking the log instead of answering from the
@@ -591,9 +591,9 @@ class Nip55ContentProvider : ContentProvider() {
         decision: String,
     ): Boolean {
         return runCatching {
-            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) {
-                store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true)
-                true
+            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) { claim ->
+                store.logOperation(callerPackage, requestType, eventKind, decision, wasAutomatic = true, claim = claim)
+                    .takeIf { it }
             }
         }.getOrNull() == true
     }
@@ -668,19 +668,26 @@ class Nip55ContentProvider : ContentProvider() {
 }
 
 /**
- * Runs [block] on [scope] and waits at most [budgetMs] for it. A block that has not
- * claimed itself by the time the wait gives up never starts, so only one already
- * claimed can finish after its caller was told it did not. It is fenced rather than cancelled, because
- * cancelling a running block could stop it between steps that must happen together.
+ * Runs [block] on [scope] and waits at most [budgetMs] for it. [block] calls the claim
+ * it is given right before its first lasting effect and stops if that returns false.
+ * Once the wait gives up it takes the claim itself, so a block that has not claimed by
+ * then does nothing, and only one already past its claim can finish after its caller
+ * was told it did not. It is fenced rather than cancelled, because cancelling a block
+ * past its claim could stop it between steps that must happen together.
  */
-internal fun <T : Any> awaitWithin(scope: CoroutineScope, budgetMs: Long, block: suspend () -> T): T? {
+internal fun <T : Any> awaitWithin(
+    scope: CoroutineScope,
+    budgetMs: Long,
+    block: suspend (claim: () -> Boolean) -> T?,
+): T? {
     val claimed = AtomicBoolean(false)
-    val work = scope.async { if (claimed.compareAndSet(false, true)) block() else null }
+    val claim = { claimed.compareAndSet(false, true) }
+    val work = scope.async { block(claim) }
     try {
         return runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
     } finally {
-        // Also when the wait throws, such as on an interrupted thread. A block that
-        // already started holds the claim, so this changes nothing for it.
-        claimed.compareAndSet(false, true)
+        // Also when the wait throws, such as on an interrupted thread. A block past
+        // its claim already holds it, so this changes nothing for it.
+        claim()
     }
 }
