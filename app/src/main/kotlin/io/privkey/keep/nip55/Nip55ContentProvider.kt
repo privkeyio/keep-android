@@ -570,9 +570,11 @@ class Nip55ContentProvider : ContentProvider() {
      * scope and only the wait is cancelled.
      *
      * An append still queued when the budget expires, typically behind a stalled
-     * one, never starts. The price is that an append already running then is
-     * reported as not landed, and its row may commit a moment later, so the log
-     * can hold an approval for a response that was never returned. That is the
+     * one, is fenced and never starts, unless it claims itself in the moment
+     * between the timeout and the fence. The price is that an append already
+     * running then is reported as not landed, and its row may commit a moment
+     * later, so the log can hold an approval for a response that was never
+     * returned. That is the
      * same shape as an append interrupted by process death, which the chain
      * verification already heals, and it is the direction that holds more
      * record rather than less. Asking the log instead of answering from the
@@ -666,9 +668,9 @@ class Nip55ContentProvider : ContentProvider() {
 }
 
 /**
- * Runs [block] on [scope] and waits at most [budgetMs] for it. A block still queued
- * when the wait gives up never starts, so only one already running can finish after
- * its caller was told it did not. It is fenced rather than cancelled, because
+ * Runs [block] on [scope] and waits at most [budgetMs] for it. A block that has not
+ * claimed itself by the time the wait gives up never starts, so only one already
+ * claimed can finish after its caller was told it did not. It is fenced rather than cancelled, because
  * cancelling a running block could stop it between steps that must happen together.
  */
 internal fun <T : Any> awaitWithin(scope: CoroutineScope, budgetMs: Long, block: suspend () -> T): T? {
