@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.PairingStart
 import java.security.Signature
+import java.security.SignatureException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -194,6 +195,9 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
             is KeepMobileException.InvalidInput -> e.msg
             is KeepMobileException.InvalidRelayUrl -> e.msg
             is ApproverKeyInvalidatedException -> context.getString(R.string.approver_error_key_invalidated)
+            // A finger on the sensor before the prompt is shown can authenticate without
+            // authorizing this signature; the Keystore then refuses it.
+            is SignatureException -> context.getString(R.string.approver_error_try_again)
             else -> context.getString(R.string.approver_error_generic)
         }
     }

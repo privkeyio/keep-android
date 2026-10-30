@@ -15,6 +15,7 @@
     <string name="approver_pairing_cancel">Cancel pairing</string>
     <string name="approver_fingerprint">Fingerprint: %1$s</string>
     <string name="approver_epoch">Freeze epoch: %1$d</string>
+    <string name="approver_freeze_agent">Freeze this agent</string>
     <string name="approver_freeze_all">Freeze every agent</string>
     <string name="approver_all_frozen">Every agent is frozen.</string>
     <string name="approver_unfreeze_all">Unfreeze every agent</string>
@@ -46,6 +47,7 @@
     <string name="approver_notice_request_refused">A request failed its checks and was not shown: %1$s</string>
     <string name="approver_notice_outcome">Request %1$s</string>
     <string name="approver_error_key_invalidated">A biometric enrollment changed, so the approver key is gone. Remove this pairing and pair again. You can still freeze.</string>
+    <string name="approver_error_try_again">The fingerprint did not unlock the key. Lift your finger and try again.</string>
     <string name="approver_error_generic">The approver could not do that</string>
     <string name="approver_notification_channel">Agent approvals</string>
     <string name="approver_notification_channel_description">Requests from agents waiting for your approval</string>

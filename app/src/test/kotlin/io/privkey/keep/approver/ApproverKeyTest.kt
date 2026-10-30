@@ -63,6 +63,7 @@ class WaitingRequestTest {
         op = "sign_nostr_event",
         reason = "kind 0",
         credential = null,
+        credentialId = null,
         secondsLeft = 30u,
         fields = emptyList(),
         warnings = emptyList(),

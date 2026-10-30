@@ -69,7 +69,13 @@ fun ApproverScreen(
     var begun by remember { mutableStateOf<PairingStart?>(null) }
     var busy by remember { mutableStateOf(false) }
     var confirmForget by remember { mutableStateOf(false) }
-    var label by remember { mutableStateOf(context.getString(R.string.approver_default_label)) }
+    val defaultLabel = stringResource(R.string.approver_default_label)
+    val promptSubtitle = stringResource(R.string.approver_biometric_subtitle)
+    val pairTitle = stringResource(R.string.approver_biometric_pair)
+    val unfreezeTitle = stringResource(R.string.approver_biometric_unfreeze)
+    val approveTitle = stringResource(R.string.approver_biometric_approve)
+    val denyTitle = stringResource(R.string.approver_biometric_deny)
+    var label by remember { mutableStateOf(defaultLabel) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
 
     LaunchedEffect(Unit) {
@@ -98,8 +104,21 @@ fun ApproverScreen(
         }
     }
 
+    // Never gated on busy: stopping an agent must not wait behind a prompt or another call.
+    fun freeze(credentialId: String?) {
+        scope.launch {
+            try {
+                controller.freeze(credentialId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, ApproverController.errorText(context, e), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     suspend fun sign(digest: ByteArray, title: String): ByteArray? =
-        controller.sign(digest) { authenticate(it, title, context.getString(R.string.approver_biometric_subtitle)) }
+        controller.sign(digest) { authenticate(it, title, promptSubtitle) }
 
     if (scanning) {
         BackHandler { scanning = false }
@@ -133,7 +152,7 @@ fun ApproverScreen(
                     busy = busy,
                     onConfirm = {
                         run {
-                            val signature = sign(pending.digest, context.getString(R.string.approver_biometric_pair))
+                            val signature = sign(pending.digest, pairTitle)
                                 ?: return@run
                             begun = null
                             controller.finishPairing(signature)
@@ -152,11 +171,11 @@ fun ApproverScreen(
                     FreezeControls(
                         status = status,
                         busy = busy,
-                        onFreezeAll = { run { controller.freeze(null) } },
+                        onFreezeAll = { freeze(null) },
                         onUnfreeze = { credential ->
                             run {
                                 val digest = controller.unfreezeDigest(credential)
-                                val signature = sign(digest, context.getString(R.string.approver_biometric_unfreeze))
+                                val signature = sign(digest, unfreezeTitle)
                                     ?: return@run
                                 controller.sendUnfreeze(credential, signature)
                             }
@@ -174,14 +193,12 @@ fun ApproverScreen(
                             waiting = waiting,
                             secondsLeft = waiting.secondsLeft(now),
                             busy = busy,
+                            onFreeze = { credentialId -> freeze(credentialId) },
                             onDecide = { approve ->
                                 run {
                                     val id = waiting.request.requestId
                                     val digest = controller.decisionDigest(id, approve)
-                                    val title = context.getString(
-                                        if (approve) R.string.approver_biometric_approve else R.string.approver_biometric_deny
-                                    )
-                                    val signature = sign(digest, title) ?: return@run
+                                    val signature = sign(digest, if (approve) approveTitle else denyTitle) ?: return@run
                                     controller.sendDecision(id, approve, signature)
                                 }
                             }
@@ -335,6 +352,7 @@ private fun RequestCard(
     waiting: WaitingRequest,
     secondsLeft: Long,
     busy: Boolean,
+    onFreeze: (String) -> Unit,
     onDecide: (Boolean) -> Unit,
 ) {
     val request = waiting.request
@@ -378,6 +396,13 @@ private fun RequestCard(
                 Button(onClick = { onDecide(true) }, enabled = !busy && !expired, modifier = Modifier.weight(1f)) {
                     Text(stringResource(R.string.approver_approve))
                 }
+            }
+            request.credentialId?.let { id ->
+                OutlinedButton(
+                    onClick = { onFreeze(id) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.approver_freeze_agent)) }
             }
         }
     }
