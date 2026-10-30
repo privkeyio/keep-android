@@ -11,6 +11,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -49,12 +50,36 @@ class AwaitWithinTest {
     }
 
     @Test
+    fun aBlockQueuedWhenTheWaitIsInterruptedNeverRuns() {
+        val stall = CountDownLatch(1)
+        scope.launch { stall.await() }
+        val ran = AtomicBoolean(false)
+
+        Thread.currentThread().interrupt()
+        assertThrows(InterruptedException::class.java) { awaitWithin(scope, 1_000) { ran.set(true); true } }
+        Thread.interrupted()
+
+        stall.countDown()
+        drain()
+        assertFalse(ran.get())
+    }
+
+    @Test
     fun aBlockAlreadyRunningAtTheBudgetIsLeftToFinish() {
+        val started = CountDownLatch(1)
         val release = CountDownLatch(1)
         val finished = AtomicBoolean(false)
 
-        assertNull(awaitWithin(scope, 100) { release.await(); finished.set(true); true })
+        assertNull(
+            awaitWithin(scope, 1_000) {
+                started.countDown()
+                release.await()
+                finished.set(true)
+                true
+            }
+        )
 
+        assertEquals("the block must have started within the budget", 0, started.count)
         release.countDown()
         drain()
         assertTrue(finished.get())

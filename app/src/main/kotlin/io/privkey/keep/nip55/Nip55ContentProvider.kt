@@ -674,7 +674,11 @@ class Nip55ContentProvider : ContentProvider() {
 internal fun <T : Any> awaitWithin(scope: CoroutineScope, budgetMs: Long, block: suspend () -> T): T? {
     val claimed = AtomicBoolean(false)
     val work = scope.async { if (claimed.compareAndSet(false, true)) block() else null }
-    val result = runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
-    if (result == null) claimed.compareAndSet(false, true)
-    return result
+    try {
+        return runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+    } finally {
+        // Also when the wait throws, such as on an interrupted thread. A block that
+        // already started holds the claim, so this changes nothing for it.
+        claimed.compareAndSet(false, true)
+    }
 }
