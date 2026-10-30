@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import io.privkey.keep.approver.ApproverController
 import io.privkey.keep.approver.ApproverKey
 import io.privkey.keep.approver.ApproverReset
+import io.privkey.keep.approver.approverDamaged
 import io.privkey.keep.approver.resetUnreadableApprover
 import io.privkey.keep.descriptor.DescriptorSessionManager
 import io.privkey.keep.nip46.BunkerConfigStore
@@ -31,7 +32,6 @@ import io.privkey.keep.service.NetworkConnectivityManager
 import io.privkey.keep.service.SigningNotificationManager
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.storage.AndroidSigningAuditStorage
-import io.privkey.keep.storage.ApproverStateFile
 import io.privkey.keep.storage.AutoStartStore
 import io.privkey.keep.storage.BiometricTimeoutStore
 import io.privkey.keep.storage.ForegroundServiceStore
@@ -45,7 +45,6 @@ import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.ConnectionStatus
 import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
-import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.KeepStateCallback
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.PeerStatus
@@ -91,7 +90,7 @@ class KeepMobileApp : Application() {
     @Volatile
     private var approverController: ApproverController? = null
     @Volatile
-    private var approverUnreadable = false
+    private var approverError: Throwable? = null
     private var permissionStore: PermissionStore? = null
     private var callerVerificationStore: CallerVerificationStore? = null
     private var autoSigningSafeguards: AutoSigningSafeguards? = null
@@ -184,7 +183,7 @@ class KeepMobileApp : Application() {
         return runCatching { ApproverController(this, mobile) }
             .onSuccess { controller ->
                 approverController = controller
-                approverUnreadable = false
+                approverError = null
                 applicationScope.launch(Dispatchers.IO) {
                     runCatching { controller.startIfPaired() }.onFailure { e ->
                         if (BuildConfig.DEBUG) Log.e(TAG, "Approver failed to start: ${e::class.simpleName}", e)
@@ -192,17 +191,19 @@ class KeepMobileApp : Application() {
                 }
             }
             .onFailure { e ->
-                approverUnreadable = e is KeepMobileException.StorageException &&
-                    storage?.checkApproverState().let {
-                        // Readable bytes the core still refused cannot be read by any retry.
-                        it == ApproverStateFile.Check.DAMAGED || it == ApproverStateFile.Check.READABLE
-                    }
+                approverError = e
                 if (BuildConfig.DEBUG) Log.e(TAG, "Approver unavailable: ${e::class.simpleName}", e)
             }
             .getOrNull()
     }
 
-    fun isApproverUnreadable(): Boolean = approverUnreadable
+    fun isApproverUnreadable(): Boolean = approverDamaged()
+
+    @Synchronized
+    private fun approverDamaged(): Boolean {
+        val store = storage ?: return false
+        return approverDamaged(approverError, store.lastApproverLoad())
+    }
 
     // The owner has confirmed this. Forgets the pairing as Remove pairing does, which
     // the core cannot do while no handler opens.
@@ -212,7 +213,7 @@ class KeepMobileApp : Application() {
         val store = storage ?: return ApproverReset.NotReset
         return resetUnreadableApprover(
             open = { initializeApprover(mobile) },
-            unreadable = { approverUnreadable },
+            damaged = ::approverDamaged,
             clear = {
                 store.deleteShareByKey(AndroidKeystoreStorage.APPROVER_STATE_KEY)
                 ApproverKey.delete()

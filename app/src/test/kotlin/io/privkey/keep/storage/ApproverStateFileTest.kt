@@ -156,23 +156,31 @@ class ApproverStateFileTest {
     }
 
     @Test
-    fun checkTellsDamageFromAFaultThatMayClear() {
-        assertEquals(ApproverStateFile.Check.ABSENT, store().check())
-        store().store(byteArrayOf(1, 2, 3))
-        assertEquals(ApproverStateFile.Check.READABLE, store().check())
+    fun aLoadRecordsDamageApartFromAFaultThatMayClear() {
+        val state = store()
+        fun loaded(): ApproverStateFile.LoadResult? {
+            runCatching { state.load() }
+            return state.lastLoad
+        }
+        assertEquals(ApproverStateFile.LoadResult.ABSENT, loaded())
+        state.store(byteArrayOf(1, 2, 3))
+        assertEquals(ApproverStateFile.LoadResult.READABLE, loaded())
         val original = key
         key = KeyGenerator.getInstance("HmacSHA256").generateKey()
-        assertEquals(ApproverStateFile.Check.FAULT, store().check())
+        assertEquals(ApproverStateFile.LoadResult.FAULT, loaded())
         key = null
-        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
         key = newKey()
-        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
         key = original
         val blob = file.readBytes()
         file.writeBytes(blob.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() })
-        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
         file.writeBytes(blob.copyOf(20))
-        assertEquals(ApproverStateFile.Check.DAMAGED, store().check())
+        assertEquals(ApproverStateFile.LoadResult.DAMAGED, loaded())
+        file.delete()
+        file.mkdir()
+        assertEquals(ApproverStateFile.LoadResult.FAULT, loaded())
     }
 
     @Test

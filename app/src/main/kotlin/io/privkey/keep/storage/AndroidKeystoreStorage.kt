@@ -143,11 +143,16 @@ class AndroidKeystoreStorage(
             File(context.noBackupFilesDir, "$APPROVER_STATE_FILE$prefsSuffix"),
             wrappingKey = { keyStore.getKey(alias, null) as? SecretKey },
             createWrappingKey = { getOrCreateKeyWithAlias(alias, requireUserAuth = false) },
-            deleteWrappingKey = { if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias) },
+            // The state is already gone, and a store reuses a key left behind, so a
+            // failed delete here must not fail the removal.
+            deleteWrappingKey = {
+                runCatching { if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias) }
+                    .onFailure { Log.e(TAG, "Approver wrapping key not deleted: ${it::class.simpleName}") }
+            },
         )
     }
 
-    internal fun checkApproverState(): ApproverStateFile.Check = approverState.check()
+    internal fun lastApproverLoad(): ApproverStateFile.LoadResult? = approverState.lastLoad
 
     @Synchronized
     private fun getOrCreateMetadataKey(): SecretKey =

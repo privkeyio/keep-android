@@ -44,7 +44,17 @@ internal class ApproverStateFile(
     private val deleteWrappingKey: () -> Unit,
     private val syncDir: (File) -> Unit = ::fsyncDir,
 ) {
-    enum class Check { ABSENT, READABLE, DAMAGED, FAULT }
+    /**
+     * DAMAGED is a missing wrapping key, a malformed file or one that fails
+     * authentication, which no retry fixes. FAULT is anything that may clear, such
+     * as an I/O error or a busy Keystore.
+     */
+    enum class LoadResult { ABSENT, READABLE, DAMAGED, FAULT }
+
+    /** What the last [load] found, so a caller can tell why the core could not open the state. */
+    @Volatile
+    var lastLoad: LoadResult? = null
+        private set
 
     private class Damaged(message: String) : Exception(message)
 
@@ -75,26 +85,16 @@ internal class ApproverStateFile(
 
     @Synchronized
     fun load(): ByteArray = try {
-        read()
-    } catch (e: Damaged) {
-        throw KeepMobileException.StorageException(e.message ?: "the approver state is damaged")
-    }
-
-    /**
-     * Whether a read fails for good. DAMAGED is a missing wrapping key, a malformed
-     * file or one that fails authentication, which no retry fixes. FAULT is anything
-     * that may clear, such as an I/O error or a busy Keystore.
-     */
-    @Synchronized
-    fun check(): Check = try {
-        read().fill(0)
-        Check.READABLE
+        read().also { lastLoad = LoadResult.READABLE }
     } catch (e: KeepMobileException.StorageNotFound) {
-        Check.ABSENT
+        lastLoad = LoadResult.ABSENT
+        throw e
     } catch (e: Damaged) {
-        Check.DAMAGED
+        lastLoad = LoadResult.DAMAGED
+        throw KeepMobileException.StorageException(e.message ?: "the approver state is damaged")
     } catch (e: Exception) {
-        Check.FAULT
+        lastLoad = LoadResult.FAULT
+        throw e
     }
 
     private fun read(): ByteArray {

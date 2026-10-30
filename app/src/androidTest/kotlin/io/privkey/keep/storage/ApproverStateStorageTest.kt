@@ -89,14 +89,13 @@ class ApproverStateStorageTest {
     @Test
     fun anUnreadableStateIsAStorageFaultUntilItIsDeleted() {
         storage().storeShareByKey(KEY, "not the approver state".toByteArray(), metadata)
-        assertUnreadable()
-        assertEquals(ApproverStateFile.Check.READABLE, storage().checkApproverState())
+        assertUnreadable(ApproverStateFile.LoadResult.READABLE)
         keyStore.deleteEntry(ALIAS)
-        assertUnreadable()
-        assertEquals(ApproverStateFile.Check.DAMAGED, storage().checkApproverState())
+        assertUnreadable(ApproverStateFile.LoadResult.DAMAGED)
         storage().deleteShareByKey(KEY)
-        assertEquals(ApproverStateFile.Check.ABSENT, storage().checkApproverState())
-        val handler = ApproverHandler(KeepMobile(storage()))
+        val fresh = storage()
+        val handler = ApproverHandler(KeepMobile(fresh))
+        assertEquals(ApproverStateFile.LoadResult.ABSENT, fresh.lastApproverLoad())
         assertFalse(handler.status().paired)
         assertFalse(file.exists())
     }
@@ -109,8 +108,10 @@ class ApproverStateStorageTest {
         assertFalse(keyStore.containsAlias(ALIAS))
     }
 
-    private fun assertUnreadable() {
-        assertThrows(KeepMobileException.StorageException::class.java) { ApproverHandler(KeepMobile(storage())) }
+    private fun assertUnreadable(load: ApproverStateFile.LoadResult) {
+        val store = storage()
+        assertThrows(KeepMobileException.StorageException::class.java) { ApproverHandler(KeepMobile(store)) }
+        assertEquals(load, store.lastApproverLoad())
         assertTrue(file.exists())
     }
 
