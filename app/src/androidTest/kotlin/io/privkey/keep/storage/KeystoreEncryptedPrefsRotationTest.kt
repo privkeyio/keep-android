@@ -94,17 +94,36 @@ class KeystoreEncryptedPrefsRotationTest {
         assertEquals(mapOf(VICTIM to true, SETTING to "kept"), again.all)
     }
 
-    // A value planted at a derivable name for a key the index does not list was
-    // refused before the move. It must not land on a name the store trusts.
+    // A value at a name the index does not account for is refused today, and a
+    // move would turn that refusal into an absence. It holds the move instead.
     @Test
-    fun aValuePlantedBeforeTheMoveIsNotCarriedAcross() {
+    fun anUnlistedValueHoldsTheMoveAndStaysRefused() {
         stageFileOnThePublishedKey()
         raw().edit().putString(globalEpochNameOf(ATTACKER), legacyValue("b:true")).commit()
+        val before = raw().getString(HMAC_KEY_PREF, null)
 
         val prefs = reopen()
-        assertEquals(PrefRead.Absent, prefs.readBoolean(ATTACKER))
+        assertEquals(PrefRead.Unreadable, prefs.readBoolean(ATTACKER))
         assertFalse(prefs.getBoolean(ATTACKER, false))
-        assertTrue("a delete of it must now certify", prefs.edit().remove(ATTACKER).commit())
+        assertEquals("the key must stay", before, raw().getString(HMAC_KEY_PREF, null))
+    }
+
+    // The fold unions both index copies, so a key listed only in the fallback
+    // copy is read today and must move with the rest.
+    @Test
+    fun aKeyListedOnlyInTheFallbackIndexMovesToo() {
+        stageFileOnThePublishedKey()
+        raw().edit()
+            .putString(globalEpochNameOf(UNLISTED), boundValue("b:true", UNLISTED))
+            .putString(fallbackNameIn(PREFS_NAME, KEY_REGISTRY), boundValue("s:$UNLISTED", KEY_REGISTRY))
+            .commit()
+        val before = raw().getString(HMAC_KEY_PREF, null)
+
+        val prefs = reopen()
+        assertTrue(prefs.getBoolean(UNLISTED, false))
+        assertNotEquals("the file must carry a new key", before, raw().getString(HMAC_KEY_PREF, null))
+        assertFalse(raw().contains(globalEpochNameOf(UNLISTED)))
+        assertTrue("the move must persist", reopen().getBoolean(UNLISTED, false))
     }
 
     // A listed value that will not decrypt is carried across as it is, so it

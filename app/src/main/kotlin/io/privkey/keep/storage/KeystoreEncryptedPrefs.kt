@@ -372,17 +372,19 @@ object KeystoreEncryptedPrefs {
          * Moves a file off the published global key onto a fresh random one,
          * re-hashing what its index lists the way the deterministic epoch is left.
          *
-         * Keeps the published key when the index at its name is missing, will
-         * not decode or dropped entries, or when the commit fails, and the next
-         * open tries again.
+         * Keeps the published key when an index copy is missing at the
+         * published name, or either copy will not decode or dropped entries, or
+         * when the commit fails, and the next open tries again.
          *
-         * It also keeps it while any other name holds a bound value. A bound
-         * value is read at a derivable name whether or not it is listed, and one
-         * written while the index was unreadable is legitimately unlisted, so
-         * moving past it would leave it at a name nothing computes and a delete
-         * would then certify an absence it never established. Unbound values and
-         * non-Strings at unaccounted names are left behind: neither is read today
-         * for a key the index does not list, so leaving them loses nothing.
+         * It also keeps it while the file holds any name the index does not
+         * account for. Whatever is there answers a lookup today, as a value or
+         * as a refusal, and a move would leave it at a name nothing computes, so
+         * that read would turn into an absence and a delete would certify one it
+         * never established. A bound value written while the index was
+         * unreadable is legitimately unlisted, and a refused record of a gate
+         * such as the PIN flag must keep reading unreadable rather than unset.
+         * Anything able to write this directory can hold a file on the published
+         * key this way, which leaves it exactly where it was before.
          *
          * Listed values move as they are, without the decrypt check a fallback
          * relocation makes. One that will not decrypt then reads unreadable at
@@ -393,18 +395,28 @@ object KeystoreEncryptedPrefs {
             val blob = runCatching { basePrefs.getString(indexName, null) }.getOrNull() ?: return published
             val index = decodeRegistry(blob) as? RegistryRead.Decoded ?: return published
             if (!index.complete) return published
-            val accounted = mutableSetOf(HMAC_KEY_PREF, STRANDED_EPOCH_PREF, indexName, fallbackHashOf(KEY_REGISTRY))
-            for (plainKey in index.keys) {
+            // The fold unions both copies, so a key listed only in the fallback
+            // copy is read today and has to move too.
+            val fallbackIndexName = fallbackHashOf(KEY_REGISTRY)
+            val fallbackKeys = if (!basePrefs.contains(fallbackIndexName)) {
+                emptyList()
+            } else {
+                val fallbackBlob = runCatching { basePrefs.getString(fallbackIndexName, null) }.getOrNull()
+                    ?: return published
+                val fallbackIndex = decodeRegistry(fallbackBlob) as? RegistryRead.Decoded ?: return published
+                if (!fallbackIndex.complete) return published
+                fallbackIndex.keys
+            }
+            val listed = (index.keys + fallbackKeys).distinct()
+            val accounted = mutableSetOf(HMAC_KEY_PREF, STRANDED_EPOCH_PREF, indexName, fallbackIndexName)
+            for (plainKey in listed) {
                 accounted += hmacWithKey(plainKey, published)
                 accounted += fallbackHashOf(plainKey)
             }
-            val strandsABoundValue = basePrefs.all.any { (name, value) ->
-                name !in accounted && value is String && value.startsWith(BOUND_PREFIX)
-            }
-            if (strandsABoundValue) return published
+            if (basePrefs.all.keys.any { it !in accounted }) return published
             val fresh = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
             val encrypted = encrypt(secretKey, Base64.encodeToString(fresh, Base64.NO_WRAP), HMAC_KEY_PREF)
-            return if (rehashEntries(published, fresh, encrypted, index.keys)) fresh else published
+            return if (rehashEntries(published, fresh, encrypted, listed)) fresh else published
         }
 
         private fun hmacWithKey(plainKey: String, key: ByteArray): String {
@@ -517,6 +529,7 @@ object KeystoreEncryptedPrefs {
 
         private fun locateKey(plainKey: String): KeyLookup {
             getHmacKey()
+            val resolved = hmacKey
             keyCache[plainKey]?.let { encKey ->
                 if (basePrefs.contains(encKey)) return KeyLookup.Found(encKey)
             }
@@ -532,8 +545,7 @@ object KeystoreEncryptedPrefs {
                 ) {
                     return KeyLookup.Refused(hash)
                 }
-                keyCache[plainKey] = hash
-                reverseKeyCache[hash] = plainKey
+                cacheName(plainKey, hash, resolved)
                 return KeyLookup.Found(hash)
             }
             // An entry written while the store was using its fallback derivation
@@ -594,12 +606,25 @@ object KeystoreEncryptedPrefs {
                 // copy behind it.
                 fallbackHash -> KeyLookup.Found(fallbackHash)
                 else -> {
-                    keyCache[plainKey] = movedTo
-                    reverseKeyCache[movedTo] = plainKey
+                    cacheName(plainKey, movedTo, resolved)
                     KeyLookup.Found(movedTo)
                 }
             }
         }
+
+        /**
+         * Caches [name] for [plainKey] only while [resolvedAt] is still the key
+         * in use. A lookup runs without the monitor, so a replacement can land
+         * after it hashed, and a name derived from the old key left in the cache
+         * would send the next write where nothing looks.
+         */
+        private fun cacheName(plainKey: String, name: String, resolvedAt: ResolvedKey?) =
+            synchronized(initLockFor(prefsName)) {
+                if (hmacKey === resolvedAt) {
+                    keyCache[plainKey] = name
+                    reverseKeyCache[name] = plainKey
+                }
+            }
 
         /// Fold the persisted registry into [keyCache] once per instance, so a
         /// registry rewrite unions with what is already stored instead of
