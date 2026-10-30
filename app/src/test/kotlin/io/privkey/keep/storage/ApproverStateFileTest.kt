@@ -26,6 +26,7 @@ class ApproverStateFileTest {
     private val file: File get() = File(tmp.root, "approver_state")
     private var key: SecretKey? = null
     private val syncs = mutableListOf<File>()
+    private val replacedBeforeSync = mutableListOf<Boolean>()
     private var failSync = false
 
     private fun store() = ApproverStateFile(
@@ -34,6 +35,7 @@ class ApproverStateFileTest {
         createWrappingKey = { newKey().also { key = it } },
         syncDir = { dir ->
             syncs += dir
+            replacedBeforeSync += !File(tmp.root, "approver_state.tmp").exists()
             if (failSync) throw IllegalStateException("sync failed")
         },
     )
@@ -46,7 +48,19 @@ class ApproverStateFileTest {
         store().store(data)
         assertArrayEquals(data, store().load())
         assertEquals(listOf(tmp.root.absoluteFile), syncs)
+        assertEquals(listOf(true), replacedBeforeSync)
         assertFalse(File(tmp.root, "approver_state.tmp").exists())
+    }
+
+    @Test
+    fun aRenameThatFailsLeavesTheTargetAndNoTempFile() {
+        key = newKey()
+        file.mkdir()
+        File(file, "child").writeBytes(byteArrayOf(7))
+        assertThrows(KeepMobileException.StorageException::class.java) { store().store(byteArrayOf(1)) }
+        assertArrayEquals(byteArrayOf(7), File(file, "child").readBytes())
+        assertFalse(File(tmp.root, "approver_state.tmp").exists())
+        assertTrue(syncs.isEmpty())
     }
 
     @Test
@@ -126,6 +140,14 @@ class ApproverStateFileTest {
         assertEquals(listOf(tmp.root.absoluteFile), syncs)
         assertThrows(KeepMobileException.StorageNotFound::class.java) { store().load() }
         store().delete()
-        assertTrue(syncs.size == 1)
+        assertEquals(2, syncs.size)
+    }
+
+    @Test
+    fun deleteRemovesATempFileACrashedStoreLeft() {
+        store().store(byteArrayOf(1))
+        File(tmp.root, "approver_state.tmp").writeBytes(byteArrayOf(2))
+        store().delete()
+        assertFalse(File(tmp.root, "approver_state.tmp").exists())
     }
 }

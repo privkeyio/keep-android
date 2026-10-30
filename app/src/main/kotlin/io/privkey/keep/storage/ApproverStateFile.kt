@@ -5,6 +5,10 @@ import android.system.OsConstants
 import io.privkey.keep.uniffi.KeepMobileException
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
@@ -44,7 +48,7 @@ internal class ApproverStateFile(
     @Synchronized
     fun store(data: ByteArray) {
         val key = wrappingKey() ?: run {
-            if (file.exists()) throw KeepMobileException.StorageException(
+            if (stored()) throw KeepMobileException.StorageException(
                 "the approver state is stored but its wrapping key is missing"
             )
             createWrappingKey()
@@ -65,8 +69,11 @@ internal class ApproverStateFile(
 
     @Synchronized
     fun load(): ByteArray {
-        if (!file.exists()) throw KeepMobileException.StorageNotFound()
-        val blob = file.readBytes()
+        val blob = try {
+            Files.readAllBytes(file.toPath())
+        } catch (e: NoSuchFileException) {
+            throw KeepMobileException.StorageNotFound()
+        }
         val key = wrappingKey() ?: throw KeepMobileException.StorageException(
             "the approver state is stored but its wrapping key is missing"
         )
@@ -87,11 +94,20 @@ internal class ApproverStateFile(
         }
     }
 
+    /** Also removes a temp file a crashed store left, and syncs even when nothing was there, so a retried delete is durable too. */
     @Synchronized
     fun delete() {
-        if (!file.exists()) return
-        if (!file.delete()) throw KeepMobileException.StorageException("the approver state could not be deleted")
+        Files.deleteIfExists(temp.toPath())
+        Files.deleteIfExists(file.toPath())
         syncDir(dir)
+    }
+
+    // Only a missing file is absent. File.exists() answers false on any stat error too.
+    private fun stored(): Boolean = try {
+        Files.readAttributes(file.toPath(), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+        true
+    } catch (e: NoSuchFileException) {
+        false
     }
 
     private fun seal(key: SecretKey, data: ByteArray): ByteArray {
