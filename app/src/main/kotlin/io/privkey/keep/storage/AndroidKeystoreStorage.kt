@@ -17,6 +17,7 @@ import io.privkey.keep.uniffi.ShareMetadataInfo
 import io.privkey.keep.uniffi.StorageRead
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.security.InvalidAlgorithmParameterException
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -56,9 +57,10 @@ class AndroidKeystoreStorage(
     @get:VisibleForTesting
     internal val keystoreAlias: String = KEYSTORE_ALIAS,
     // Test seam: suffix appended to every SharedPreferences namespace (legacy
-    // single-share prefs, per-share prefs, and the multi-share registry). Empty in
-    // production; an instrumented test sets it so its storeShare/deleteShare write
-    // and clear an isolated sandbox instead of the app's real share data.
+    // single-share prefs, per-share prefs, and the multi-share registry), and to the
+    // approver state file and its wrapping key alias. Empty in production; an
+    // instrumented test sets it so its storeShare/deleteShare write and clear an
+    // isolated sandbox instead of the app's real share data.
     @get:VisibleForTesting
     internal val prefsSuffix: String = ""
 ) : SecureStorage {
@@ -85,6 +87,9 @@ class AndroidKeystoreStorage(
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
         private const val METADATA_KEY_ALIAS = "keep_metadata"
         private const val METADATA_KEY_PREFIX = "__keep_"
+        private const val APPROVER_STATE_KEY = "__keep_approver"
+        private const val APPROVER_STATE_FILE = "approver_state"
+        private const val APPROVER_WRAP_ALIAS = "keep_approver_wrap"
 
         // Pending-DKG secret: its own auth-gated (requireUserAuth) alias, distinct
         // from the non-auth metadata namespace above and from the per-share AES
@@ -131,6 +136,15 @@ class AndroidKeystoreStorage(
     private val multiSharePrefs: ReadablePrefs by lazy { createEncryptedPrefs("$MULTI_PREFS_NAME$prefsSuffix") }
 
     private fun isMetadataKey(key: String): Boolean = key.startsWith(METADATA_KEY_PREFIX)
+
+    private val approverState: ApproverStateFile by lazy {
+        val alias = "$APPROVER_WRAP_ALIAS$prefsSuffix"
+        ApproverStateFile(
+            File(context.noBackupFilesDir, "$APPROVER_STATE_FILE$prefsSuffix"),
+            wrappingKey = { keyStore.getKey(alias, null) as? SecretKey },
+            createWrappingKey = { getOrCreateKeyWithAlias(alias, requireUserAuth = false) },
+        )
+    }
 
     @Synchronized
     private fun getOrCreateMetadataKey(): SecretKey =
@@ -797,6 +811,10 @@ class AndroidKeystoreStorage(
             storeDkgSecret(data)
             return
         }
+        if (key == APPROVER_STATE_KEY) {
+            approverState.store(data)
+            return
+        }
         if (isMetadataKey(key)) {
             storeMetadata(key, data, metadata)
             return
@@ -815,6 +833,9 @@ class AndroidKeystoreStorage(
         require(key.isNotBlank()) { "Share key must not be blank" }
         if (isDkgSecretKey(key)) {
             return loadDkgSecret()
+        }
+        if (key == APPROVER_STATE_KEY) {
+            return approverState.load()
         }
         if (isMetadataKey(key)) {
             return loadMetadata(key)
@@ -879,6 +900,10 @@ class AndroidKeystoreStorage(
         require(key.isNotBlank()) { "Share key must not be blank" }
         if (isDkgSecretKey(key)) {
             deleteDkgSecret()
+            return
+        }
+        if (key == APPROVER_STATE_KEY) {
+            approverState.delete()
             return
         }
         if (isMetadataKey(key)) {
