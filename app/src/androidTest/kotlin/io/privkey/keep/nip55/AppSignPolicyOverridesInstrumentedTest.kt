@@ -54,10 +54,12 @@ class AppSignPolicyOverridesInstrumentedTest {
         ).allowMainThreadQueries().build()
         store = PermissionStore(database)
         core = newCore()
+        AppSignPolicyOverrides.activeAccount = { ACCOUNT }
     }
 
     @After
     fun teardown() {
+        AppSignPolicyOverrides.activeAccount = { null }
         database.close()
         clearPrefs()
     }
@@ -81,26 +83,26 @@ class AppSignPolicyOverridesInstrumentedTest {
 
     @Test
     fun theStricterOfTheTwoStoresResolves() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
         // The row is a floor: a write that reached one store and not the other must not
         // widen the app, whichever side holds the looser tier.
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
 
-        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.MANUAL)
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
 
         // Across the middle tier too, since stricter() leans on the declaration order.
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.BASIC.ordinal)
         assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
     @Test
     fun agreeingStoresReturnThatValue() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
 
         assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.override(core, store, PKG))
@@ -112,7 +114,7 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         // Not migrated yet, so the tier is unknown rather than Basic. Resolving to the
         // global instead would loosen an app pinned stricter than it.
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.override(core, store, PKG))
     }
 
@@ -120,7 +122,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     fun noOverrideOnlyWhenNeitherSideKnowsOfOne() = runBlocking {
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
 
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         // A tier with no row to index it still means a tier exists, so it is unknown
         // rather than absent and resolves strict. Falling to the global here would loosen
         // an app whose only surviving record is stricter than the global.
@@ -161,7 +163,7 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.BASIC)
 
-        assertEquals(SignPolicySelection.BASIC, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(ACCOUNT, PKG))
         assertEquals(SignPolicy.BASIC.ordinal, store.getAppSignPolicyOverride(PKG))
         assertEquals(SignPolicySelection.BASIC, AppSignPolicyOverrides.override(core, store, PKG))
     }
@@ -179,7 +181,7 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.setOverride(core, store, PKG, null)
 
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
         assertNull(store.getAppSignPolicyOverride(PKG))
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
         assertEquals(
@@ -222,12 +224,12 @@ class AppSignPolicyOverridesInstrumentedTest {
                 durationMs = null
             )
         )
-        core.setAppOverride(PKG, SignPolicySelection.BASIC)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.BASIC)
 
         store.cleanupExpired(core, AutoSigningSafeguards(context))
 
-        assertNull(core.appOverride(PKG))
-        assertNull(newCore().appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
+        assertNull(newCore().appOverride(ACCOUNT, PKG))
         assertNull(store.getAppSignPolicyOverride(PKG))
         // Back to the global, exactly where an expired row left the app before the
         // override moved into the core.
@@ -304,26 +306,154 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         store.cleanupExpired(core)
 
-        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(ACCOUNT, PKG))
         assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
     }
 
+    /**
+     * The wipe drops the rows and leaves each tier to the account that set it. Another
+     * account cannot read it, and back on its own account a tier with no row resolves
+     * to Manual rather than to the old choice.
+     */
     @Test
-    fun accountSwitchLeavesNoCoreOverrideBehind() = runBlocking {
-        core.setGlobalPolicy(SignPolicySelection.AUTO)
-        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.MANUAL)
-        AppSignPolicyOverrides.setOverride(core, store, OTHER_PKG, SignPolicySelection.BASIC)
+    fun accountSwitchDropsTheRowsAndLeavesTheTierToItsAccount() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.AUTO)
+        store.setAppExpiry(OTHER_PKG, AppExpiryDuration.ONE_HOUR)
 
-        store.clearAllAppSettings(core)
+        store.clearAllAppSettings()
 
-        assertNull(core.appOverride(PKG))
-        assertNull(core.appOverride(OTHER_PKG))
-        assertNull(newCore().appOverride(PKG))
+        assertNull(store.getAppSettings(PKG))
+        assertNull(store.getAppSettings(OTHER_PKG))
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, PKG))
+
+        AppSignPolicyOverrides.activeAccount = { OTHER_ACCOUNT }
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
-        assertEquals(
-            SignPolicySelection.AUTO,
-            AppSignPolicyOverrides.effectivePolicy(core, store, OTHER_PKG)
-        )
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+
+        AppSignPolicyOverrides.activeAccount = { ACCOUNT }
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+    }
+
+    /** With no active account every app is Manual, and a tier cannot be written anywhere. */
+    @Test
+    fun withNoActiveAccountEveryAppIsManual() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.AUTO)
+        AppSignPolicyOverrides.activeAccount = { null }
+
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.AUTO)
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
+    }
+
+    /**
+     * A tier set before overrides were per account is only a floor until it is adopted,
+     * so an app pinned looser than the global resolves to the global. Adoption makes it
+     * the active account's again, and no other account's.
+     */
+    @Test
+    fun adoptionRestoresALooseningLegacyTierForTheActiveAccountOnly() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        writeLegacyOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+
+        assertTrue(markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false))
+        assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(OTHER_ACCOUNT, PKG))
+    }
+
+    /** A tier the user chose after the pin is kept, not replaced by the legacy one. */
+    @Test
+    fun adoptionKeepsATierAlreadyScopedToTheAccount() = runBlocking {
+        writeLegacyOverride(PKG, SignPolicySelection.AUTO)
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.BASIC)
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(ACCOUNT, PKG))
+    }
+
+    /**
+     * No active account with a pinned row is a read fault, not an empty device, so the
+     * adoption waits for a start that can read the account instead of giving up.
+     */
+    @Test
+    fun adoptionWithNoActiveAccountRetriesWhileARowCarriesATier() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        writeLegacyOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        AppSignPolicyOverrides.activeAccount = { null }
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false))
+
+        AppSignPolicyOverrides.activeAccount = { ACCOUNT }
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, PKG))
+    }
+
+    /** With no account and no pinned row there is nothing to adopt, so it is done. */
+    @Test
+    fun adoptionWithNoActiveAccountAndNoPinnedRowIsDone() = runBlocking {
+        writeLegacyOverride(PKG, SignPolicySelection.AUTO)
+        AppSignPolicyOverrides.activeAccount = { null }
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+
+        assertTrue(markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false))
+    }
+
+    /** A set marker, which an account switch also sets, stops the adoption. */
+    @Test
+    fun theAdoptionMarkerStopsTheAdoption() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        writeLegacyOverride(PKG, SignPolicySelection.AUTO)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        markers.edit().putBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, true).commit()
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(ACCOUNT, PKG))
+    }
+
+    /** A legacy tier that will not read is not adopted, and the marker waits for a retry. */
+    @Test
+    fun anUnreadableLegacyTierLeavesTheMarkerUnsetForARetry() = runBlocking {
+        val faulty = SignPolicyStore(UnreadableKeyStorage("sign_policy_override:$PKG"))
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(faulty, store, markers)
+
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false))
+    }
+
+    /** The row copy waits for an account rather than claiming packages it cannot copy. */
+    @Test
+    fun theRowCopyWaitsForAnActiveAccount() = runBlocking {
+        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
+        AppSignPolicyOverrides.activeAccount = { null }
+
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+        assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
+
+        AppSignPolicyOverrides.activeAccount = { ACCOUNT }
+        AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, PKG))
+    }
+
+    // The core's own encoding of a selection: Manual 0, Basic 1, Auto 2.
+    private fun writeLegacyOverride(pkg: String, selection: SignPolicySelection) {
+        val ordinal = when (selection) {
+            SignPolicySelection.MANUAL -> 0
+            SignPolicySelection.BASIC -> 1
+            SignPolicySelection.AUTO -> 2
+        }
+        assertTrue(SignPolicySelectionPrefs(context).save("sign_policy_override:$pkg", ordinal.toString()))
     }
 
     /**
@@ -416,83 +546,6 @@ class AppSignPolicyOverridesInstrumentedTest {
         assertNull(store.getAppSettings(PKG))
     }
 
-    /**
-     * A storeless account switch cannot clear a tier, so it cannot drop the row that
-     * indexes one. That row must not hand the next account the previous one's choice or
-     * its time box either, so it is rewritten to the strictest tier with no window.
-     */
-    @Test
-    fun aStorelessAccountSwitchTombstonesRowsItCannotClear() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
-        store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
-        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR)
-        store.setAppExpiry(OTHER_PKG, AppExpiryDuration.ONE_HOUR)
-
-        store.clearAllAppSettings(null)
-
-        // A row carrying no tier has nothing to index, so it goes.
-        assertNull(store.getAppSettings(OTHER_PKG))
-        val kept = store.getAppSettings(PKG)
-        assertNotNull(kept)
-        assertEquals(SignPolicy.MANUAL.ordinal, kept?.signPolicyOverride)
-        assertNull(kept?.expiresAt)
-        assertNull(kept?.durationMs)
-        assertEquals(
-            SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.override(core, store, PKG)
-        )
-    }
-
-    /**
-     * A tier whose row is gone is invisible to the app-settings table, so the wipe has to
-     * reach it through another record of the package.
-     */
-    @Test
-    fun accountSwitchClearsACoreOverrideWithNoRoomRow() = runBlocking {
-        store.grantPermission(
-            callerPackage = PKG,
-            requestType = Nip55RequestType.SIGN_EVENT,
-            eventKind = 1,
-            duration = PermissionDuration.FOREVER
-        )
-        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
-        assertNull(store.getAppSettings(PKG))
-
-        store.clearAllAppSettings(core)
-
-        assertNull(core.appOverride(PKG))
-        assertNull(newCore().appOverride(PKG))
-    }
-
-    /**
-     * The storage backend swallows failures, so a clear that does not stick returns
-     * normally. The read-back has to catch it and the row has to stay, or the override
-     * is stranded where nothing can find it again.
-     */
-    @Test
-    fun accountSwitchKeepsRowsWhoseClearDoesNotVerify() = runBlocking {
-        val flaky = SignPolicyStore(UnremovableStorage(PKG))
-        // Pinned to AUTO, not MANUAL, so the rewrite below is observable: starting at
-        // MANUAL would satisfy the assertion whether or not it happened.
-        AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.AUTO)
-        AppSignPolicyOverrides.setOverride(flaky, store, OTHER_PKG, SignPolicySelection.BASIC)
-
-        store.clearAllAppSettings(flaky)
-
-        // Unprocessed package: the tier is still in the core and still indexed by its row,
-        // but the row was rewritten to the strictest tier so the next account inherits
-        // nothing, and the floor therefore resolves Manual rather than the old AUTO.
-        assertEquals(SignPolicySelection.AUTO, flaky.appOverride(PKG))
-        assertEquals(SignPolicy.MANUAL.ordinal, store.getAppSignPolicyOverride(PKG))
-        assertEquals(
-            SignPolicySelection.MANUAL,
-            AppSignPolicyOverrides.override(flaky, store, PKG)
-        )
-        // The verified package is gone from both stores.
-        assertNull(flaky.appOverride(OTHER_PKG))
-        assertNull(store.getAppSettings(OTHER_PKG))
-    }
-
     @Test
     fun expirySweepKeepsARowWhoseClearDoesNotVerify() = runBlocking {
         val flaky = SignPolicyStore(UnremovableStorage(PKG))
@@ -507,7 +560,7 @@ class AppSignPolicyOverridesInstrumentedTest {
                 durationMs = null
             )
         )
-        flaky.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        flaky.setAppOverride(ACCOUNT, PKG, SignPolicySelection.MANUAL)
 
         store.cleanupExpired(flaky)
 
@@ -518,7 +571,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         // of its own, and the signing path applies the policy before it evaluates app
         // expiry, so a surviving AUTO would auto-approve on the way past.
         assertNull(AppSignPolicyOverrides.override(flaky, store, PKG))
-        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(ACCOUNT, PKG))
     }
 
     /**
@@ -540,7 +593,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         // looser tier, not one that holds nothing: an empty store resolves Manual through
         // the unknown arm and would pass without any floor at all.
         val nextProcess = SignPolicyStore(UncommittableStorage())
-        nextProcess.setAppOverride(PKG, SignPolicySelection.AUTO)
+        nextProcess.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         assertEquals(
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.override(nextProcess, store, PKG)
@@ -564,8 +617,8 @@ class AppSignPolicyOverridesInstrumentedTest {
         val result = runCatching { AppSignPolicyOverrides.setOverride(core, store, PKG, null) }
 
         assertTrue(result.isFailure)
-        assertEquals(SignPolicySelection.BASIC, core.appOverride(PKG))
-        assertEquals(SignPolicySelection.BASIC, newCore().appOverride(PKG))
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.BASIC, newCore().appOverride(ACCOUNT, PKG))
     }
 
     /**
@@ -575,7 +628,7 @@ class AppSignPolicyOverridesInstrumentedTest {
      */
     @Test
     fun aClearWithoutACoreStoreDropsTheRow() = runBlocking {
-        core.setAppOverride(PKG, SignPolicySelection.AUTO)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
 
         AppSignPolicyOverrides.setOverride(null, store, PKG, null)
@@ -603,7 +656,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         AppSignPolicyOverrides.setOverride(flaky, store, PKG, null)
 
         assertNull(store.getAppSettings(PKG))
-        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, flaky.appOverride(ACCOUNT, PKG))
         // The clear took effect in that the chosen tier is gone, but the leftover is known
         // to one side only, so it resolves strict instead of following the global.
         assertEquals(
@@ -641,9 +694,9 @@ class AppSignPolicyOverridesInstrumentedTest {
         }
 
         assertTrue(result.isFailure)
-        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(ACCOUNT, PKG))
         // And durably, not just in the store's in-memory map.
-        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(ACCOUNT, PKG))
     }
 
     @Test
@@ -653,10 +706,10 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
-        assertEquals(SignPolicySelection.MANUAL, core.appOverride(PKG))
-        assertEquals(SignPolicySelection.BASIC, core.appOverride(OTHER_PKG))
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(ACCOUNT, OTHER_PKG))
         // A fresh instance proves the copy was persisted, not just cached.
-        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(ACCOUNT, PKG))
     }
 
     @Test
@@ -672,13 +725,13 @@ class AppSignPolicyOverridesInstrumentedTest {
     fun migrationIsIdempotentAndNeverOverwritesTheCore() = runBlocking {
         // Room still holds the old, looser value the user has since tightened.
         store.setAppSignPolicyOverride(PKG, SignPolicy.AUTO.ordinal)
-        core.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        core.setAppOverride(ACCOUNT, PKG, SignPolicySelection.MANUAL)
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
         AppSignPolicyOverrides.migrateLegacyOverrides(newCore(), store, markers)
 
-        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(PKG))
+        assertEquals(SignPolicySelection.MANUAL, newCore().appOverride(ACCOUNT, PKG))
     }
 
     @Test
@@ -701,7 +754,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         // expiry. Nor does the Room fallback serve it while it waits for the sweep: the
         // core applies the policy at its sign-policy gate, before the one that denies an
         // expired app, so a retained AUTO would auto-approve on the way past.
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
         assertNull(AppSignPolicyOverrides.override(core, store, PKG))
     }
 
@@ -773,14 +826,14 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
-        assertNull("an expired row must not be copied", core.appOverride(PKG))
+        assertNull("an expired row must not be copied", core.appOverride(ACCOUNT, PKG))
         assertFalse(markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false))
 
         database.appSettingsDao().insertOrUpdate(expired.copy(expiresAt = now + 600_000L))
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
-        assertEquals(SignPolicySelection.AUTO, core.appOverride(PKG))
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, PKG))
     }
 
     /**
@@ -796,7 +849,7 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
     }
 
     @Test
@@ -810,8 +863,8 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         AppSignPolicyOverrides.migrateLegacyOverrides(core, store, markers)
 
-        assertNull(core.appOverride(PKG))
-        assertEquals(SignPolicySelection.BASIC, core.appOverride(OTHER_PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.BASIC, core.appOverride(ACCOUNT, OTHER_PKG))
     }
 
     /**
@@ -831,7 +884,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         val faulting = SignPolicyStore(unreadable)
         // What an unconfirmed setOverride write leaves behind: the core durably holds the
         // stricter tier while reads of it come back empty.
-        faulting.setAppOverride(PKG, SignPolicySelection.MANUAL)
+        faulting.setAppOverride(ACCOUNT, PKG, SignPolicySelection.MANUAL)
         val before = unreadable.saved.toList()
 
         AppSignPolicyOverrides.migrateLegacyOverrides(faulting, store, markers)
@@ -859,7 +912,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         // would: the repair is what is there to be read, not the row's AUTO.
         assertEquals(
             SignPolicySelection.MANUAL,
-            SignPolicyStore(uncommittable).appOverride(PKG)
+            SignPolicyStore(uncommittable).appOverride(ACCOUNT, PKG)
         )
     }
 
@@ -883,7 +936,7 @@ class AppSignPolicyOverridesInstrumentedTest {
             unwritable.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)
         )
         // And nothing was copied, since the attempt could not be recorded.
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
     }
 
     /**
@@ -925,7 +978,7 @@ class AppSignPolicyOverridesInstrumentedTest {
         core.setGlobalPolicy(SignPolicySelection.AUTO)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
-        assertNull(core.appOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
         assertEquals(
             SignPolicySelection.MANUAL,
             AppSignPolicyOverrides.effectivePolicy(core, store, PKG)
@@ -933,6 +986,8 @@ class AppSignPolicyOverridesInstrumentedTest {
     }
 
     private companion object {
+        const val ACCOUNT = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
+        const val OTHER_ACCOUNT = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
         const val PKG = "com.test.app"
         const val OTHER_PKG = "com.test.other"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
@@ -969,7 +1024,7 @@ private class UncommittableStorage : SignPolicySelectionStorage {
 /**
  * A real backend for the real core store, not a stubbed uniffi type: it implements the
  * same [SignPolicySelectionStorage] trait the production encrypted-prefs class does,
- * and reproduces the failure the write paths have to survive. Removals for
+ * and reproduces the failure the write paths have to survive. Clears and removals for
  * [unremovablePackage] are dropped and reported as the failed durable write they are,
  * which is what the production backend returns when `commit()` fails.
  */
@@ -980,13 +1035,36 @@ private class UnremovableStorage(private val unremovablePackage: String) : SignP
     override fun load(key: String): StorageRead =
         values[key]?.let { StorageRead.Found(it) } ?: StorageRead.Absent
 
+    // A clear is stored as the core's "follows global" value, so that is the write
+    // that does not persist.
     override fun save(key: String, value: String): Boolean {
+        if (key.endsWith(unremovablePackage) && value == "global") return false
         values[key] = value
         return true
     }
 
     override fun remove(key: String): Boolean {
         if (key.endsWith(unremovablePackage)) return false
+        values.remove(key)
+        return true
+    }
+}
+
+/** A backend that cannot read one key, as a value that will not decrypt reads. */
+private class UnreadableKeyStorage(private val unreadableKey: String) : SignPolicySelectionStorage {
+
+    private val values = HashMap<String, String>()
+
+    override fun load(key: String): StorageRead =
+        if (key == unreadableKey) StorageRead.Unavailable
+        else values[key]?.let { StorageRead.Found(it) } ?: StorageRead.Absent
+
+    override fun save(key: String, value: String): Boolean {
+        values[key] = value
+        return true
+    }
+
+    override fun remove(key: String): Boolean {
         values.remove(key)
         return true
     }

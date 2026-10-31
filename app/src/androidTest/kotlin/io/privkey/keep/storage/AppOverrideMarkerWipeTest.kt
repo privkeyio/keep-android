@@ -80,6 +80,10 @@ class AppOverrideMarkerWipeTest {
             markers().getBoolean(runWide, false)
         )
         assertTrue(
+            "and the legacy adoption closed, or the next account adopts the previous one's tiers",
+            markers().getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false)
+        )
+        assertTrue(
             "and the file's other migrations must be left alone",
             markers().getBoolean(UNRELATED_MARKER, false)
         )

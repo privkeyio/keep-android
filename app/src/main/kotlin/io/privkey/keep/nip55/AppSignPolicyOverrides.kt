@@ -35,9 +35,34 @@ private const val TAG = "AppSignPolicyOverrides"
  * rather than to whichever side answered, which may be the stale one. So a partial write,
  * an unmigrated row and a read fault all tighten rather than loosen.
  *
+ * The core scopes each tier to an account, the active group key, and the row does not, so
+ * every core call here reads the account per call through [activeAccount]. With no active
+ * account the call throws, and every caller already treats a core fault as the strict
+ * outcome: Manual on read, an unconfirmed write, a clear that is not confirmed.
+ *
  * The content provider and the UI both go through here so the two cannot drift.
  */
 object AppSignPolicyOverrides {
+
+    /** The active account's group key. Set by the application at startup. */
+    @Volatile
+    internal var activeAccount: () -> String? = { null }
+
+    private fun requireAccount(): String =
+        checkNotNull(activeAccount()) { "No active account" }
+
+    internal fun coreOverride(
+        core: SignPolicyStore,
+        callerPackage: String,
+        account: String = requireAccount()
+    ): SignPolicySelection? = core.appOverride(account, callerPackage)
+
+    internal fun setCoreOverride(
+        core: SignPolicyStore,
+        callerPackage: String,
+        selection: SignPolicySelection?,
+        account: String = requireAccount()
+    ): Boolean = core.setAppOverride(account, callerPackage, selection)
 
     /** The override in force, or null when the app has none. */
     suspend fun override(
@@ -80,7 +105,7 @@ object AppSignPolicyOverrides {
         if (row != null && row.isExpired()) return@runCatching null
         // An out-of-range stored ordinal resolves to Manual, the strictest tier.
         val fromRow = row?.signPolicyOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
-        val fromCore = core?.appOverride(callerPackage)
+        val fromCore = core?.let { coreOverride(it, callerPackage) }
         // Neither side knows of one: the app is not pinned, so the global applies.
         if (fromRow == null && fromCore == null) return@runCatching null
         // Exactly one side knows of one, so a tier exists but which one is unknown: the
@@ -187,8 +212,11 @@ object AppSignPolicyOverrides {
     private fun wrote(
         core: SignPolicyStore,
         callerPackage: String,
-        selection: SignPolicySelection?
-    ): Boolean = runCatching { core.setAppOverride(callerPackage, selection) }.getOrDefault(false)
+        selection: SignPolicySelection?,
+        account: String? = null
+    ): Boolean = runCatching {
+        setCoreOverride(core, callerPackage, selection, account ?: requireAccount())
+    }.getOrDefault(false)
 
     /**
      * Copies the row values into the core at startup, which is what moves a pinned app
@@ -227,6 +255,11 @@ object AppSignPolicyOverrides {
         // only this one, and none of the per-package ones. Honoring it first is what keeps
         // them from being migrated a second time.
         if (markers.getBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, false)) return
+        // Each package's marker is claimed before its core read, and that read throws with
+        // no account, so running now would mark packages that were never copied. Taken once:
+        // a switch during the run must not land the previous account's row tiers in the
+        // next account's scope, so the run stops when the account changes.
+        val account = activeAccount() ?: return
 
         val everyRowAttempted = runCatching {
             var complete = true
@@ -274,7 +307,8 @@ object AppSignPolicyOverrides {
                 // A read that could not answer is not a licence to copy: the tier it failed
                 // to produce may be stricter than this row's. Caught per package so one
                 // package's fault does not abandon the rest of the run.
-                val existing = runCatching { core.appOverride(settings.callerPackage) }
+                if (activeAccount() != account) return
+                val existing = runCatching { coreOverride(core, settings.callerPackage, account) }
                 if (existing.isFailure || existing.getOrNull() != null) continue
                 // A copy that did not confirm pins Manual instead of being retried. `false`
                 // does not say which value is stored, and the platform prefs serve the new
@@ -284,8 +318,8 @@ object AppSignPolicyOverrides {
                 // pinned, and the read of it faults, the retry widens the app. Tightening
                 // instead costs the user a re-pick.
                 val tier = SignPolicy.fromOrdinal(ordinal).toSelection()
-                if (!wrote(core, settings.callerPackage, tier)) {
-                    wrote(core, settings.callerPackage, SignPolicySelection.MANUAL)
+                if (!wrote(core, settings.callerPackage, tier, account)) {
+                    wrote(core, settings.callerPackage, SignPolicySelection.MANUAL, account)
                 }
             }
             complete
@@ -302,6 +336,47 @@ object AppSignPolicyOverrides {
                 .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
             SignPolicySelectionPrefs.removeAppOverrideMarkers(markers, edit)
             edit.commit()
+        }
+    }
+
+    /**
+     * Moves each pinned app's tier from the core's pre-account key into the active
+     * account, once.
+     *
+     * Before account scoping the core kept one tier per package. It still reads that key,
+     * but only as a floor under the global policy, so an app pinned looser than the global
+     * would resolve to the global until its tier is adopted. Only the active account can
+     * adopt: an account switch, which is also what deleting the active account runs,
+     * wipes the rows and sets the marker, so no later account inherits the earlier one's
+     * tiers. No active account is set only when no row carries a tier, since then there
+     * is nothing to adopt. A row with a tier and no account is a read fault rather than
+     * an empty device, so it waits for a later start instead of giving the tiers up.
+     *
+     * Only packages with a row are adopted. One without a row resolves to Manual whatever
+     * the core holds, so adopting it would change nothing. The marker is set only once
+     * every adoption returned true, so a read fault is retried at the next start, and a
+     * retry is safe because the core never replaces a tier already scoped to the account.
+     */
+    suspend fun adoptLegacyOverrides(
+        core: SignPolicyStore,
+        permissions: PermissionStore,
+        markers: SharedPreferences
+    ) {
+        if (markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false)) return
+        val account = activeAccount()
+        val adopted = runCatching {
+            val pinned = permissions.getAllAppSettings().filter { it.signPolicyOverride != null }
+            if (account == null) {
+                pinned.isEmpty()
+            } else {
+                pinned.map { runCatching { core.adoptLegacyOverride(account, it.callerPackage) }.getOrDefault(false) }
+                    .all { it }
+            }
+        }.getOrDefault(false)
+        if (adopted) {
+            markers.edit().putBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, true).commit()
+        } else if (BuildConfig.DEBUG) {
+            Log.w(TAG, "Sign-policy override adoption incomplete; retrying at next start")
         }
     }
 }
