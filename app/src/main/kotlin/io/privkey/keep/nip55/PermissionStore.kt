@@ -149,7 +149,7 @@ class PermissionStore(private val database: Nip55Database) {
      * durable `true` leaves the override in place and the caller keeps that row.
      */
     private fun coreOverrideCleared(signPolicyStore: SignPolicyStore, callerPackage: String): Boolean =
-        runCatching { signPolicyStore.setAppOverride(callerPackage, null) }.getOrDefault(false)
+        runCatching { AppSignPolicyOverrides.setCoreOverride(signPolicyStore, callerPackage, null) }.getOrDefault(false)
 
     // Decision resolution (incl. the rule that sensitive kinds never fall back
     // to a generic grant) lives in Rust; Android fetches the candidate rows and
@@ -589,64 +589,34 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun revokeAllPermissions() = dao.deleteAll()
 
     /**
-     * Wipe every app settings row, clearing each package's core sign-policy override
-     * first so no override survives an account switch.
+     * Wipe every app settings row on an account switch.
      *
-     * Every clear is gated on the core's durable-write result, and a row is dropped only
-     * when its tier is confirmed gone or when it never carried one. Any other row is kept:
-     * the row is the only record that the package still holds a tier, so a later wipe can
-     * resume it, and dropping it would strand a tier Kotlin can no longer see and could
-     * never clear again.
-     *
-     * The candidates are the settings rows plus the permission and audit callers. The
-     * core store cannot be enumerated, so a tier whose row is already gone
-     * is only reachable through some other record of that package.
+     * The core tiers stay. They are scoped to the account that set them, so the next
+     * account cannot read them, and clearing one would store a "follows global" marker
+     * that is looser than an unscoped legacy tier the core still applies as a floor.
+     * Without its row a tier resolves to Manual, so returning to that account cannot
+     * widen anything either. A row that cannot be deleted is rewritten to the strictest
+     * tier with no window instead, so it cannot hand the next account the previous one's
+     * choice.
      */
-    suspend fun clearAllAppSettings(signPolicyStore: SignPolicyStore? = null) {
-        if (signPolicyStore == null) {
-            // Nothing can be cleared or confirmed this session. Rows carrying no override
-            // go. A row that carries one has to stay, because it is the only index of a
-            // tier still sitting in the core, but it must not hand the next account the
-            // previous one's choice: it is rewritten to the strictest tier with no
-            // window, which still indexes the tier for a later wipe to clear. The next
-            // wipe that has a store retries them, exactly as the expiry sweep does.
-            wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
-                wipeStep("rewrite ${row.callerPackage}") {
-                    if (row.signPolicyOverride == null) {
-                        appSettingsDao.delete(row.callerPackage)
-                    } else {
-                        strictestTombstone(row.callerPackage)
-                    }
-                }
-            }
-            return
-        }
-        val packages = LinkedHashSet<String>()
-        // Best effort, and an enumeration that throws only narrows which tiers get
-        // cleared: the per-row rule below is safe whether or not the candidate set is
-        // complete, so there is nothing to gate on it.
-        wipeStep("enumerate settings callers") { appSettingsDao.getAll().forEach { packages.add(it.callerPackage) } }
-        wipeStep("enumerate permission callers") { packages.addAll(dao.getDistinctCallers()) }
-        wipeStep("enumerate audit callers") { packages.addAll(auditDao.getDistinctCallers()) }
-
-        val cleared = packages.filter { coreOverrideCleared(signPolicyStore, it) }.toSet()
-        // A row goes only when its tier is confirmed gone, or when it never carried one.
-        // Any other row stays, which keeps its tier indexed: that row resolves to Manual
-        // and a later wipe can retry it, whereas deleting it would leave the tier in the
-        // core with nothing pointing at it. Re-reading here rather than reusing the
-        // snapshot also covers a row that appeared while the clears were running, which a
-        // bulk delete would otherwise have un-indexed.
-        // Per row, so one failure cannot leave the rest of the previous account's tiers
-        // in place. The enumeration is wrapped for the same reason.
+    suspend fun clearAllAppSettings() {
         wipeStep("enumerate rows") { appSettingsDao.getAll() }.orEmpty().forEach { row ->
-            wipeStep("clear ${row.callerPackage}") {
-                if (row.callerPackage in cleared || row.signPolicyOverride == null) {
-                    appSettingsDao.delete(row.callerPackage)
-                } else {
-                    strictestTombstone(row.callerPackage)
-                }
-            }
+            val deleted = wipeStep("clear ${row.callerPackage}") { appSettingsDao.delete(row.callerPackage) } != null
+            if (!deleted) wipeStep("tombstone ${row.callerPackage}") { strictestTombstone(row.callerPackage) }
         }
+    }
+
+    private suspend fun strictestTombstone(callerPackage: String) {
+        appSettingsDao.insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = callerPackage,
+                expiresAt = null,
+                signPolicyOverride = SignPolicy.MANUAL.ordinal,
+                createdAt = System.currentTimeMillis(),
+                createdAtElapsed = SystemClock.elapsedRealtime(),
+                durationMs = null
+            )
+        )
     }
 
     /**
@@ -667,29 +637,6 @@ class PermissionStore(private val database: Nip55Database) {
             if (BuildConfig.DEBUG) Log.e("PermissionStore", "account-switch wipe: $what", e)
             null
         }
-
-    /**
-     * Rewrite a kept row to the strictest tier with no expiry window.
-     *
-     * Used by the account-switch wipe for a row it cannot drop, because that row still
-     * indexes a tier sitting in the core. Keeping the row as it stands would carry the
-     * previous account's choice and its time-boxed window into the new account, and the
-     * resolver takes the stricter of row and core, so the row's tier is load-bearing.
-     * Manual with no window keeps the tier reachable for a later wipe without granting
-     * the new account anything.
-     */
-    private suspend fun strictestTombstone(callerPackage: String) {
-        appSettingsDao.insertOrUpdate(
-            Nip55AppSettings(
-                callerPackage = callerPackage,
-                expiresAt = null,
-                signPolicyOverride = SignPolicy.MANUAL.ordinal,
-                createdAt = System.currentTimeMillis(),
-                createdAtElapsed = SystemClock.elapsedRealtime(),
-                durationMs = null
-            )
-        )
-    }
 
     suspend fun clearAllVelocity() = velocityDao.deleteAll()
 
@@ -754,7 +701,7 @@ class PermissionStore(private val database: Nip55Database) {
     /**
      * Drops the settings row only. The row is the index for the package's core
      * sign-policy tier, so a caller that wants the override gone has to clear the tier
-     * too, as [cleanupExpired] and [clearAllAppSettings] do; otherwise the tier is left
+     * too, as [cleanupExpired] does; otherwise the tier is left
      * in the core where nothing can reach it. Safe as it stands because every caller is
      * test teardown.
      */
@@ -817,6 +764,7 @@ private fun calculateEntryHash(
         decision,
         timestamp,
         wasAutomatic,
+        null,
         hmacKey
     )
 }
@@ -830,6 +778,7 @@ private fun Nip55AuditLog.toRustAuditEntry(): Nip55AuditEntry =
         eventKind = eventKind,
         decision = decision,
         wasAutomatic = wasAutomatic,
+        requestId = null,
         previousHash = previousHash,
         entryHash = entryHash
     )

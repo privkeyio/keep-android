@@ -13,6 +13,7 @@ import androidx.annotation.VisibleForTesting
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
+import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import io.privkey.keep.uniffi.StorageRead
 import kotlinx.coroutines.Dispatchers
@@ -785,9 +786,88 @@ class AndroidKeystoreStorage(
     }
 
     private fun saveShareDataByKey(key: String, encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
+        requireWritableShareSlot(key, metadata)
         writeShareToPrefs(getSharePrefs(key), encrypted, iv, metadata)
         addKeyToRegistry(key)
     }
+
+    /**
+     * Refuses a write over share data the registry does not list, unless that record
+     * holds this same group and share index.
+     *
+     * The core guards a restore or import with [readShareRegistry], and a share file the
+     * registry does not list looks absent to it, so its write would replace a different
+     * share of the same group. Share files are named by a digest of the key, so an
+     * unlisted one cannot be enumerated for the registry read and is caught here instead.
+     * The same group and index is let through: that is the write a crash between the data
+     * and the registry add leaves to be redone. A record that will not read is refused,
+     * as the core refuses one it lists. Reading the registry first also keeps an
+     * unreadable registry from leaving share data behind that [addKeyToRegistry] then
+     * refuses to list.
+     */
+    private fun requireWritableShareSlot(key: String, metadata: ShareMetadataInfo) {
+        val listed = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> key in read.value
+            PrefRead.Absent -> false
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("Share registry could not be read")
+        }
+        if (listed) return
+        when (val record = shareRecord(key)) {
+            ShareRecord.Absent -> return
+            is ShareRecord.Readable -> if (record.metadata.identifier == metadata.identifier) return
+            ShareRecord.Unreadable -> Unit
+        }
+        throw KeepMobileException.StorageException("An unlisted share is stored for this group")
+    }
+
+    private sealed interface ShareRecord {
+        data object Absent : ShareRecord
+        data object Unreadable : ShareRecord
+        data class Readable(val metadata: ShareMetadataInfo) : ShareRecord
+    }
+
+    /**
+     * One share file as stored. Metadata that will not parse, or that names a group other
+     * than [key], is unreadable: the encrypted prefs answer a value that will not decrypt
+     * with the default, so an empty group key is a fault and not a share.
+     */
+    private fun shareRecord(key: String): ShareRecord = try {
+        val sharePrefs = getSharePrefs(key)
+        when (sharePrefs.readString(KEY_SHARE_DATA)) {
+            PrefRead.Absent -> ShareRecord.Absent
+            PrefRead.Unreadable -> ShareRecord.Unreadable
+            is PrefRead.Found -> readMetadataFromPrefs(sharePrefs)
+                ?.takeIf { meta ->
+                    meta.groupPubkey.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+                        .equals(key, ignoreCase = true)
+                }
+                ?.let { ShareRecord.Readable(it) }
+                ?: ShareRecord.Unreadable
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "share record read could not be completed: ${e::class.simpleName}")
+        ShareRecord.Unreadable
+    }
+
+    override fun readShareRegistry(): ShareRegistryRead =
+        infallibleRead("readShareRegistry", onFault = ShareRegistryRead.Unavailable) {
+            val keys = when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+                is PrefRead.Found -> read.value
+                PrefRead.Absent -> emptySet()
+                PrefRead.Unreadable -> return@infallibleRead ShareRegistryRead.Unavailable
+            }
+            val shares = mutableListOf<ShareMetadataInfo>()
+            val unreadable = mutableListOf<String>()
+            for (key in keys) {
+                when (val record = shareRecord(key)) {
+                    ShareRecord.Absent -> Unit
+                    ShareRecord.Unreadable -> unreadable += key
+                    is ShareRecord.Readable -> shares += record.metadata
+                }
+            }
+            ShareRegistryRead.Readable(shares, unreadable)
+        }
 
     private fun addKeyToRegistry(key: String) {
         // This write replaces the whole registry, so it cannot proceed from a read that

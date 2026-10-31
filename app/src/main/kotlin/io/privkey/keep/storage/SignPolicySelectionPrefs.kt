@@ -117,6 +117,9 @@ class SignPolicySelectionPrefs(context: Context) : SignPolicySelectionStorage {
         // Same one-shot reasoning as MIGRATION_MARKER, for the per-app override copy
         // that AppSignPolicyOverrides.migrateLegacyOverrides performs.
         internal const val APP_OVERRIDE_MIGRATION_MARKER = "keep_sign_policy_app_overrides_migrated"
+        // Set once the pre-account per-app tiers were adopted into the active account, or
+        // once an account switch made adopting them into any later account wrong.
+        internal const val LEGACY_OVERRIDE_ADOPTION_MARKER = "keep_sign_policy_legacy_overrides_adopted"
         const val GLOBAL_POLICY_KEY = "global_sign_policy"
 
         // Deliberately not derived from APP_OVERRIDE_MIGRATION_MARKER. Every key with this

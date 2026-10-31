@@ -140,6 +140,7 @@ class KeepMobileApp : Application() {
                 .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Legacy migration failed: ${it::class.simpleName}", it) }
             val newKeepMobile = KeepMobile(newStorage)
             storage = newStorage
+            AppSignPolicyOverrides.activeAccount = { runCatching { newStorage.getActiveShareKey() }.getOrNull() }
             killSwitchStore = KillSwitchStore(this)
             signPolicyStore = SignPolicyStore(SignPolicySelectionPrefs(this))
             relayAuthWhitelistStore = RelayAuthWhitelistStore(this)
@@ -302,14 +303,14 @@ class KeepMobileApp : Application() {
                 // into the core (which has no expiry) as a permanent override. The
                 // one-shot gating lives in the migration itself.
                 signPolicyStore?.let { policyStore ->
-                    AppSignPolicyOverrides.migrateLegacyOverrides(
-                        policyStore,
-                        store,
-                        getSharedPreferences(
-                            SignPolicySelectionPrefs.MARKER_PREFS_NAME,
-                            Context.MODE_PRIVATE
-                        )
+                    val markers = getSharedPreferences(
+                        SignPolicySelectionPrefs.MARKER_PREFS_NAME,
+                        Context.MODE_PRIVATE
                     )
+                    // Before the row copy: that copy skips any package the core already
+                    // answers for, and an unadopted pre-account tier answers as a floor.
+                    AppSignPolicyOverrides.adoptLegacyOverrides(policyStore, store, markers)
+                    AppSignPolicyOverrides.migrateLegacyOverrides(policyStore, store, markers)
                 }
                 callerVerificationStore?.cleanupExpiredNonces()
                 runCatching {
@@ -591,10 +592,7 @@ class KeepMobileApp : Application() {
         pinMismatch = null
         DescriptorSessionManager.clearAll()
         withContext(Dispatchers.IO) {
-            // Before the revoke: clearAllAppSettings enumerates permission callers to
-            // find overrides whose mirror row is already gone, and revokeAllPermissions
-            // empties that index.
-            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings(signPolicyStore) }
+            runAccountSwitchCleanup("clear app settings") { permissionStore?.clearAllAppSettings() }
             runAccountSwitchCleanup("revoke permissions") { permissionStore?.revokeAllPermissions() }
             runAccountSwitchCleanup("clear velocity") { permissionStore?.clearAllVelocity() }
             runAccountSwitchCleanup("clear caller trust") { callerVerificationStore?.clearAllTrust() }
@@ -663,10 +661,11 @@ class KeepMobileApp : Application() {
      * strictest tier.
      *
      * Setting the marker costs nothing legitimate. After a switch no surviving
-     * row's tier should ever be copied: it belongs to the previous account, and
-     * on a clean wipe what survives are tombstones already rewritten to the
-     * strictest tier. New choices are written to both sides directly and never
-     * went through this migration.
+     * row's tier should ever be copied: it belongs to the previous account. New
+     * choices are written to both sides directly and never went through this
+     * migration. The legacy-override adoption marker is set with it for the same
+     * reason: a pre-account tier is the previous account's and must never be
+     * adopted into the next one.
      *
      * [markers] is a parameter so a test can drive this against a file of its
      * own: the real one is shared with the other migrations and with the
@@ -676,6 +675,7 @@ class KeepMobileApp : Application() {
     internal fun clearAppOverrideMarkers(markers: SharedPreferences) {
         val edit = markers.edit()
             .putBoolean(SignPolicySelectionPrefs.APP_OVERRIDE_MIGRATION_MARKER, true)
+            .putBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, true)
         // Reads the committed state, so the marker staged above is not swept with
         // the per-package ones; it carries a different prefix either way.
         SignPolicySelectionPrefs.removeAppOverrideMarkers(markers, edit)

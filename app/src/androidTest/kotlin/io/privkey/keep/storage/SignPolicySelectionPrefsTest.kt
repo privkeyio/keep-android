@@ -189,13 +189,13 @@ class SignPolicySelectionPrefsTest {
     fun anUndecryptableOverrideResolvesToManualRatherThanTheGlobal() {
         newStore().setGlobalPolicy(SignPolicySelection.AUTO)
         val storedName = writeAndFindStoredName(context, SELECTION_PREFS) {
-            newStore().setAppOverride(PKG, SignPolicySelection.BASIC)
+            newStore().setAppOverride(ACCOUNT, PKG, SignPolicySelection.BASIC)
         }
         corruptStoredValue(context, SELECTION_PREFS, storedName)
 
         val store = newStore()
-        assertEquals(SignPolicySelection.MANUAL, store.appOverride(PKG))
-        assertEquals(SignPolicySelection.MANUAL, store.effectivePolicy(PKG))
+        assertEquals(SignPolicySelection.MANUAL, store.appOverride(ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.MANUAL, store.effectivePolicy(ACCOUNT, PKG))
         forgetWriteProbe(context, SELECTION_PREFS)
     }
 
@@ -205,19 +205,20 @@ class SignPolicySelectionPrefsTest {
     @Test
     fun aReadableOverrideWinsOverTheGlobal() {
         newStore().setGlobalPolicy(SignPolicySelection.AUTO)
-        newStore().setAppOverride(PKG, SignPolicySelection.BASIC)
+        newStore().setAppOverride(ACCOUNT, PKG, SignPolicySelection.BASIC)
 
-        assertEquals(SignPolicySelection.BASIC, newStore().effectivePolicy(PKG))
+        assertEquals(SignPolicySelection.BASIC, newStore().effectivePolicy(ACCOUNT, PKG))
     }
 
     @Test
     fun aPackageWithNoOverrideGetsTheGlobal() {
         newStore().setGlobalPolicy(SignPolicySelection.AUTO)
 
-        assertEquals(SignPolicySelection.AUTO, newStore().effectivePolicy(PKG))
+        assertEquals(SignPolicySelection.AUTO, newStore().effectivePolicy(ACCOUNT, PKG))
     }
 
     private companion object {
+        const val ACCOUNT = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
         const val PKG = "com.test.app"
         const val SELECTION_PREFS = "keep_sign_policy_selection"
         const val LEGACY_PREFS = "keep_sign_policy"
