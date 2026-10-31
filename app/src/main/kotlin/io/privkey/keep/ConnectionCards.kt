@@ -22,15 +22,34 @@ fun RelaysCard(
     onRemoveRelay: (String) -> Unit,
     profileRelays: List<String>,
     onAddProfileRelay: (String) -> Unit,
-    onRemoveProfileRelay: (String) -> Unit
+    onRemoveProfileRelay: (String) -> Unit,
+    relayConfigUnreadable: Boolean,
+    onResetRelayConfig: () -> Unit
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var confirmReset by remember(relayConfigUnreadable) { mutableStateOf(false) }
 
     KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stringResource(R.string.connections_relays_title), style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(12.dp))
+
+            if (relayConfigUnreadable) {
+                Text(
+                    stringResource(R.string.connections_relays_unreadable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { confirmReset = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.connections_relays_reset_button))
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             Text(stringResource(R.string.connections_relays_active_title), style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(4.dp))
@@ -90,6 +109,24 @@ fun RelaysCard(
                 Text(stringResource(R.string.connections_relays_profile_edit_button))
             }
         }
+    }
+
+    // Gated on the fault too, so the dialog closes if a refresh finds the record readable.
+    if (confirmReset && relayConfigUnreadable) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.connections_relays_reset_title)) },
+            text = { Text(stringResource(R.string.connections_relays_reset_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    onResetRelayConfig()
+                }) { Text(stringResource(R.string.connections_relays_reset_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
     }
 
     if (showEditDialog) {

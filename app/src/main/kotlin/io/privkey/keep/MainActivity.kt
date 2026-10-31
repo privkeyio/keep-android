@@ -332,6 +332,12 @@ class MainActivity : FragmentActivity() {
                                     title,
                                     getString(R.string.approver_biometric_subtitle)
                                 ) != null
+                            },
+                            confirmRelayResetOwner = { title ->
+                                biometricHelper?.authenticateStrongOrDeviceCredential(
+                                    title,
+                                    getString(R.string.connections_relays_reset_auth_subtitle)
+                                ) != null
                             }
                         )
                     } else {
@@ -405,7 +411,8 @@ fun MainScreen(
     approverRequested: Boolean = false,
     onApproverRequestHandled: () -> Unit = {},
     authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
-    confirmApproverOwner: OwnerConfirmation = { false }
+    confirmApproverOwner: OwnerConfirmation = { false },
+    confirmRelayResetOwner: OwnerConfirmation = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -450,6 +457,7 @@ fun MainScreen(
     var createGroupRun by remember { mutableStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     var relays by remember { mutableStateOf<List<String>>(emptyList()) }
+    var relayConfigUnreadable by remember { mutableStateOf(false) }
     var killSwitchEnabled by remember { mutableStateOf(runCatching { keepMobile.getKillSwitch() }.getOrDefault(true)) }
     var autoStartEnabled by remember { mutableStateOf(autoStartStore.isEnabled()) }
 
@@ -609,6 +617,7 @@ fun MainScreen(
                 allAccounts = state.allAccounts
                 relays = state.relays
                 profileRelays = state.profileRelays
+                relayConfigUnreadable = state.relayConfigUnreadable
                 activeDidBackup = state.activeDidBackup
             }
         )
@@ -645,17 +654,15 @@ fun MainScreen(
             val initial = withContext(Dispatchers.IO) {
                 val a = storage.listAllShares().map { it.toAccountInfo() }
                 val k = storage.getActiveShareKey()
-                val config = runCatching { keepMobile.getRelayConfig(k) }.getOrNull()
-                    ?: RelayConfigInfo(emptyList(), emptyList(), emptyList())
-                val r = config.frostRelays
-                val pr = config.profileRelays
+                val config = readRelayConfig(k, keepMobile::getRelayConfig)
                 val pdkg = runCatching { keepMobile.pendingDkgShare() }
-                AccountInitial(a, k, r, pr, pdkg)
+                AccountInitial(a, k, config.config.frostRelays, config.config.profileRelays, config.unreadable, pdkg)
             }
             allAccounts = initial.accounts
             activeAccountKey = initial.activeKey
             relays = initial.relays
             profileRelays = initial.profileRelays
+            relayConfigUnreadable = initial.relayConfigUnreadable
             // A discard/recover that bumps the epoch while this read was in flight has
             // already cleared the marker; drop the stale write so this read can't resurrect
             // it, mirroring the poll guard below. Complete the check either way so the gate
@@ -1624,6 +1631,7 @@ fun MainScreen(
                     hasShare = hasShare,
                     relays = relays,
                     profileRelays = profileRelays,
+                    relayConfigUnreadable = relayConfigUnreadable,
                     certificatePins = certificatePins,
                     proxyEnabled = proxyEnabled,
                     proxyPort = proxyPort,
@@ -1667,6 +1675,24 @@ fun MainScreen(
                         val updated = profileRelays - relay
                         profileRelays = updated
                         coroutineScope.launch { saveProfileRelays(updated) }
+                    },
+                    onResetRelayConfig = {
+                        val confirmedKey = activeAccountKey
+                        coroutineScope.launch {
+                            if (confirmedKey == null) return@launch
+                            if (!confirmRelayResetOwner(appContext.getString(R.string.connections_relays_reset_auth))) return@launch
+                            val reset = runCatching { accountActions.resetUnreadableRelayConfig(confirmedKey) }
+                                .onFailure { if (it is CancellationException) throw it }
+                            // A record that reads again after a failed reset is no longer
+                            // a fault, so only a reset that left it unreadable is reported.
+                            if (reset.isFailure && relayConfigUnreadable) {
+                                Toast.makeText(
+                                    appContext,
+                                    appContext.getString(R.string.connections_relays_reset_failed),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     },
                     onStagePin = { hostname, spkiHash ->
                         coroutineScope.launch {
@@ -2011,6 +2037,7 @@ private fun SettingsTab(
     hasShare: Boolean,
     relays: List<String>,
     profileRelays: List<String>,
+    relayConfigUnreadable: Boolean,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2021,6 +2048,7 @@ private fun SettingsTab(
     onRemoveRelay: (String) -> Unit,
     onAddProfileRelay: (String) -> Unit,
     onRemoveProfileRelay: (String) -> Unit,
+    onResetRelayConfig: () -> Unit,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
     onClearAllPins: () -> Unit,
@@ -2063,6 +2091,7 @@ private fun SettingsTab(
             ShareSettingsSection(
                 relays = relays,
                 profileRelays = profileRelays,
+                relayConfigUnreadable = relayConfigUnreadable,
                 certificatePins = certificatePins,
                 proxyEnabled = proxyEnabled,
                 proxyPort = proxyPort,
@@ -2070,6 +2099,7 @@ private fun SettingsTab(
                 onRemoveRelay = onRemoveRelay,
                 onAddProfileRelay = onAddProfileRelay,
                 onRemoveProfileRelay = onRemoveProfileRelay,
+                onResetRelayConfig = onResetRelayConfig,
                 onStagePin = onStagePin,
                 onRetirePin = onRetirePin,
                 onClearAllPins = onClearAllPins,
@@ -2288,6 +2318,7 @@ private data class AccountInitial(
     val activeKey: String?,
     val relays: List<String>,
     val profileRelays: List<String>,
+    val relayConfigUnreadable: Boolean,
     val pendingDkgShare: Result<PendingShareInfo?>
 )
 
@@ -2437,6 +2468,7 @@ private fun PinMismatchDialog(
 private fun ShareSettingsSection(
     relays: List<String>,
     profileRelays: List<String>,
+    relayConfigUnreadable: Boolean,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2444,6 +2476,7 @@ private fun ShareSettingsSection(
     onRemoveRelay: (String) -> Unit,
     onAddProfileRelay: (String) -> Unit,
     onRemoveProfileRelay: (String) -> Unit,
+    onResetRelayConfig: () -> Unit,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
     onClearAllPins: () -> Unit,
@@ -2456,7 +2489,9 @@ private fun ShareSettingsSection(
         onRemoveRelay = onRemoveRelay,
         profileRelays = profileRelays,
         onAddProfileRelay = onAddProfileRelay,
-        onRemoveProfileRelay = onRemoveProfileRelay
+        onRemoveProfileRelay = onRemoveProfileRelay,
+        relayConfigUnreadable = relayConfigUnreadable,
+        onResetRelayConfig = onResetRelayConfig
     )
     Spacer(modifier = Modifier.height(16.dp))
 
