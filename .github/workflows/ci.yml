@@ -214,7 +214,14 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_6
-          script: ./gradlew connectedDebugAndroidTest --no-daemon
+          # The NIP-55 cross-process tests need the harness client installed as a
+          # separate app. It is built after the app so the build-tools Gradle fetched
+          # are on disk, and the flag makes a missing client fail the run, not skip.
+          script: |
+            ./gradlew assembleDebug assembleDebugAndroidTest --no-daemon
+            testharness/nip55queryclient/build.sh
+            adb install -r testharness/nip55queryclient/out/queryclient.apk
+            ./gradlew connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.crossProcessManual=1
 
       # The console log names the failing task but not the failing test, and the
       # emulator's build dir does not survive the job, so a red run is otherwise

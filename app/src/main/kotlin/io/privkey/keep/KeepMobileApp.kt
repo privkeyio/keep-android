@@ -76,9 +76,11 @@ class KeepMobileApp : Application() {
     private var storage: AndroidKeystoreStorage? = null
     private var killSwitchStore: KillSwitchStore? = null
     private var signPolicyStore: SignPolicyStore? = null
+    @Volatile
     private var relayAuthWhitelistStore: RelayAuthWhitelistStore? = null
     private var autoStartStore: AutoStartStore? = null
     private var foregroundServiceStore: ForegroundServiceStore? = null
+    @Volatile
     private var pinStore: PinStore? = null
     private var biometricTimeoutStore: BiometricTimeoutStore? = null
     private var onboardingStore: OnboardingStore? = null
@@ -411,6 +413,16 @@ class KeepMobileApp : Application() {
     fun getForegroundServiceStore(): ForegroundServiceStore? = foregroundServiceStore
 
     fun getPinStore(): PinStore? = pinStore
+
+    // A test that deletes one of these files under the live store leaves that store out of
+    // step with what a fresh instance reads and writes, so the tests that drive the
+    // provider reopen it rather than depend on running before such a test.
+    @androidx.annotation.VisibleForTesting
+    internal fun reopenPinStore(): PinStore = PinStore(this).also { pinStore = it }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun reopenRelayAuthWhitelistStore(): RelayAuthWhitelistStore =
+        RelayAuthWhitelistStore(this).also { relayAuthWhitelistStore = it }
 
     fun getBiometricTimeoutStore(): BiometricTimeoutStore? = biometricTimeoutStore
 

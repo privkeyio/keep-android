@@ -31,7 +31,12 @@ Notes:
   with the debug keystore (`~/.android/debug.keystore`, auto-generated if missing).
 - The test computes the installed client's live signing hash at runtime, so any
   machine's debug keystore works; nothing depends on a hardcoded hash.
-- Without `-e crossProcessManual 1` the test reports SKIPPED (assumption failure),
-  keeping default `connectedAndroidTest`/CI green. It also SKIPS if the client is
-  not installed.
+- Without `-e crossProcessManual 1` the test reports SKIPPED (assumption failure).
+  With it, a missing client fails the run. CI builds and installs the client and
+  passes the flag.
+- The gate tests set a PIN, engage the kill switch and stage an unreadable relay-auth
+  list, then remove them. They refuse to run over a PIN or relay-auth list already
+  set, but still run them only on a test device.
+- Uninstall the client after a manual run, since it is exported and queries keep
+  under its own identity: `adb uninstall io.privkey.keeptest.queryclient`.
 - Build artifacts land in `out/` and are not committed.
