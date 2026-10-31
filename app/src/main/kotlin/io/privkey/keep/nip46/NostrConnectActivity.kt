@@ -157,24 +157,16 @@ class NostrConnectActivity : FragmentActivity() {
                 }
                 queued = true
 
-                withContext(Dispatchers.IO) {
-                    val evicted = mutableListOf<String>()
+                val full = withContext(Dispatchers.IO) {
+                    var full = false
                     if (mobile != null) {
                         BunkerConfigStore.update(mobile) { config ->
-                            if (!config.authorizedClients.any { it.lowercase() == request.clientPubkey.lowercase() }) {
-                                val combined = config.authorizedClients + request.clientPubkey.lowercase()
-                                val capped = combined.takeLast(BunkerService.MAX_AUTHORIZED_CLIENTS)
-                                evicted.addAll(combined.dropLast(capped.size))
-                                io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
-                            } else {
-                                config
-                            }
+                            val clients = BunkerService.withClientAdded(config.authorizedClients, request.clientPubkey)
+                                ?: return@update config.also { full = true }
+                            io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, clients)
                         }
                     }
-                    evicted.forEach {
-                        runCatching { Nip46ClientStore.removeClient(this@NostrConnectActivity, it) }
-                        BunkerService.uncacheAuthorizedClient(it)
-                    }
+                    if (full) return@withContext true
 
                     Nip46ClientStore.saveClient(
                         this@NostrConnectActivity,
@@ -195,6 +187,14 @@ class NostrConnectActivity : FragmentActivity() {
                             )
                         }
                     }
+                    false
+                }
+                if (full) {
+                    BunkerService.dequeueNostrConnectRequest(request)
+                    Toast.makeText(this@NostrConnectActivity, getString(io.privkey.keep.R.string.nip46_client_limit_toast), Toast.LENGTH_LONG).show()
+                    onComplete(false)
+                    finish()
+                    return@launch
                 }
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Persistence failed: ${e::class.simpleName}")

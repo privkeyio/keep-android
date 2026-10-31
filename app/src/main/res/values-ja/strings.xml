@@ -117,4 +117,5 @@
     <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> 件の共同署名リクエスト</string>
     <string name="cosign_confirm_approved">共同署名しました</string>
     <string name="cosign_confirm_rejected">リクエストを拒否しました</string>
+    <string name="nip46_client_limit_toast">接続中のアプリが多すぎます。別のアプリを接続する前に、いずれかを取り消してください。</string>
 </resources>

@@ -100,6 +100,17 @@ class BunkerService : Service() {
         internal const val APPROVAL_TIMEOUT_MS = 55_000L
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
+
+        // A full list refuses a new client rather than evicting the oldest, which kept
+        // its engine grants and could connect again with the secret. Null when full.
+        internal fun withClientAdded(clients: List<String>, pubkey: String): List<String>? {
+            val pk = pubkey.lowercase()
+            return when {
+                clients.any { it.lowercase() == pk } -> clients
+                clients.size >= MAX_AUTHORIZED_CLIENTS -> null
+                else -> clients + pk
+            }
+        }
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
         internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
@@ -873,36 +884,31 @@ class BunkerService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val mobile = keepMobileRef ?: return@launch
-                val evicted = mutableListOf<String>()
                 var accepted = false
+                var full = false
                 runCatching {
                     BunkerConfigStore.update(mobile) { config ->
                         // Decided under the same lock as revokeClients, which drops a client from
                         // pendingAuthSaves and records the generation when it revokes, so a revoke
                         // that lands while this connect is being saved is never undone by it.
                         if (pk !in pendingAuthSaves || revokedSince(generation, everyClientRevokedAt.get(), clientRevokedAt[pk])) return@update config
+                        val clients = withClientAdded(config.authorizedClients, pk)
+                            ?: return@update config.also { full = true }
                         accepted = true
-                        if (config.authorizedClients.none { it.lowercase() == pk }) {
-                            val combined = config.authorizedClients + pk
-                            val capped = combined.takeLast(MAX_AUTHORIZED_CLIENTS)
-                            evicted.addAll(combined.dropLast(capped.size))
-                            io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, capped)
-                        } else {
-                            config
-                        }
+                        io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, clients)
                     }
                 }.onSuccess {
                     if (accepted) authorizedClientsCache.add(pk)
                 }.onFailure {
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to persist authorized client: ${it::class.simpleName}")
                 }
+                if (full) {
+                    logActivity(EventLogCategory.BUNKER, EventLogLevel.WARN, pk.take(8), "connect not saved: client limit reached")
+                    return@launch
+                }
                 if (!accepted) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Ignoring connect from revoked client")
                     return@launch
-                }
-                evicted.forEach {
-                    authorizedClientsCache.remove(it.lowercase())
-                    runCatching { Nip46ClientStore.removeClient(this@BunkerService, it) }
                 }
                 if (name != null) {
                     runCatching { Nip46ClientStore.saveClient(this@BunkerService, pk, sanitizeDisplayName(name), relays) }

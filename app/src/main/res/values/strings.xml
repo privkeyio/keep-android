@@ -123,4 +123,5 @@
     <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> co-sign requests</string>
     <string name="cosign_confirm_approved">Co-signed</string>
     <string name="cosign_confirm_rejected">Request rejected</string>
+    <string name="nip46_client_limit_toast">Too many connected apps. Revoke one before connecting another.</string>
 </resources>
