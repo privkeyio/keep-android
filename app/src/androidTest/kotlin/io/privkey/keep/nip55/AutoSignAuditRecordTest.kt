@@ -152,6 +152,26 @@ class AutoSignAuditRecordTest {
         assertTrue(store.hasSignedKindBefore(CALLER, 1))
     }
 
+    // The request id is inside the row's MAC, so changing it, or dropping it, breaks the
+    // chain, and the approval it named no longer counts.
+    @Test
+    fun aChangedRequestIdBreaksTheChain() = assertRequestIdIsBound("'${"a".repeat(32)}'")
+
+    @Test
+    fun aDroppedRequestIdBreaksTheChain() = assertRequestIdIsBound("NULL")
+
+    private fun assertRequestIdIsBound(replacement: String) = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        val row = store.getAuditLog(1).single()
+
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE nip55_audit_log SET requestId = $replacement WHERE id = ${row.id}"
+        )
+
+        assertTrue(store.verifyAuditChain() !is ChainVerificationResult.Valid)
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
     // The approval a caller was told did not land is named by an abandoned row after
     // it, and no longer makes the kind familiar.
     @Test
