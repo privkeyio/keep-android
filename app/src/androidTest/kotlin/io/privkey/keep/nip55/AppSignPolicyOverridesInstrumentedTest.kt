@@ -369,6 +369,23 @@ class AppSignPolicyOverridesInstrumentedTest {
         assertEquals(SignPolicySelection.MANUAL, core.effectivePolicy(OTHER_ACCOUNT, PKG))
     }
 
+    /**
+     * A legacy tier stricter than the global floors every account until one adopts it.
+     * After that it is that account's, and the others follow their own policy.
+     */
+    @Test
+    fun anAdoptedLegacyTierStopsFlooringOtherAccounts() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.AUTO)
+        writeLegacyOverride(PKG, SignPolicySelection.MANUAL)
+        store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
+        assertEquals(SignPolicySelection.MANUAL, core.effectivePolicy(OTHER_ACCOUNT, PKG))
+
+        AppSignPolicyOverrides.adoptLegacyOverrides(core, store, markers)
+
+        assertEquals(SignPolicySelection.MANUAL, core.appOverride(ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.AUTO, core.effectivePolicy(OTHER_ACCOUNT, PKG))
+    }
+
     /** A tier the user chose after the pin is kept, not replaced by the legacy one. */
     @Test
     fun adoptionKeepsATierAlreadyScopedToTheAccount() = runBlocking {

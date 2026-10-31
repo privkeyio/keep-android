@@ -352,6 +352,13 @@ class KeepMobileApp : Application() {
             if (config.enabled) {
                 BunkerService.start(this)
             }
+            if (BunkerService.clientsOverCap(config.authorizedClients).isNotEmpty()) {
+                applicationScope.launch(Dispatchers.IO) {
+                    runCatching { BunkerService.revokeClientsOverCap(this@KeepMobileApp, mobile) }.onFailure { e ->
+                        if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke clients over the cap: ${e::class.simpleName}")
+                    }
+                }
+            }
         }.onFailure { e ->
             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to initialize BunkerService: ${e::class.simpleName}", e)
         }

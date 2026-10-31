@@ -111,6 +111,16 @@ class BunkerService : Service() {
                 else -> clients + pk
             }
         }
+        // Lists saved before the cap could exceed it, and the core now refuses to save one
+        // that does, so the oldest clients past it are revoked, grants and all.
+        internal fun clientsOverCap(clients: List<String>): List<String> =
+            clients.dropLast(MAX_AUTHORIZED_CLIENTS)
+
+        internal suspend fun revokeClientsOverCap(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
+            val excess = clientsOverCap(keepMobile.getBunkerConfig().authorizedClients)
+            if (excess.isNotEmpty()) revokeClients(context, keepMobile, excess)
+        }
+
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
         internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
