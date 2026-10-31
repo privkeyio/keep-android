@@ -37,9 +37,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.Calendar
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
@@ -90,6 +92,11 @@ class Nip55ContentProvider : ContentProvider() {
         private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
         private val REJECTED_COLUMNS = arrayOf("rejected")
         private val ERROR_COLUMNS = arrayOf("error")
+
+        private val requestIds = SecureRandom()
+
+        private fun newRequestId(): String =
+            ByteArray(16).also(requestIds::nextBytes).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
         private fun hashPackageName(pkg: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(pkg.toByteArray(Charsets.UTF_8))
@@ -530,7 +537,7 @@ class Nip55ContentProvider : ContentProvider() {
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
-    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, "allow")
+    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, "allow", newRequestId())
 
     /**
      * The same bounded, caller-thread append for a decision that refused.
@@ -552,7 +559,7 @@ class Nip55ContentProvider : ContentProvider() {
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
-    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, decision)
+    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, decision, requestId = null)
 
     /**
      * One bounded append, reporting whether it landed within the budget.
@@ -574,14 +581,13 @@ class Nip55ContentProvider : ContentProvider() {
      * writes nothing, unless it takes the lock in the moment between the timeout
      * and the fence. The price is that an append already writing then is
      * reported as not landed, and its row may commit a moment later, so the log
-     * can hold an approval for a response that was never returned. That is the
-     * same shape as an append interrupted by process death, which the chain
-     * verification already heals, and it is the direction that holds more
-     * record rather than less. Asking the log instead of answering from the
-     * call would narrow it, and was tried: a row cannot be tied to the append
-     * that wrote it without a per-append identity it does not carry, so one
-     * request's row answers for another's, which is a weaker gate than the one
-     * this exists to be.
+     * can hold an approval for a response that was never returned. An approval
+     * carries a [requestId] for that case: an abandoned row with the same id is
+     * queued for the writer's lock, which the approval already holds once past its
+     * claim, so it lands after the approval, and the approval no longer counts as
+     * signed (see [PermissionStore.hasSignedKindBefore]).
+     * Process death between the two leaves the approval standing, which is the
+     * direction that holds more record rather than less.
      */
     private fun appendAudited(
         store: PermissionStore,
@@ -589,10 +595,19 @@ class Nip55ContentProvider : ContentProvider() {
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
+        requestId: String?,
     ): Boolean {
+        val abandon = {
+            if (requestId != null) {
+                auditScope.launch {
+                    runCatching { store.logAbandoned(callerPackage, requestType, eventKind, requestId) }
+                        .onFailure { Log.w(TAG, "Abandoned audit row not written: ${it::class.simpleName}") }
+                }
+            }
+        }
         return runCatching {
-            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS) { claim ->
-                store.logAutomaticOperationIfClaimed(callerPackage, requestType, eventKind, decision, claim)
+            awaitWithin(auditScope, AUDIT_APPEND_BUDGET_MS, onLate = { abandon() }) { claim ->
+                store.logAutomaticOperationIfClaimed(callerPackage, requestType, eventKind, decision, requestId, claim)
                     .takeIf { it }
             }
         }.getOrNull() == true
@@ -673,21 +688,25 @@ class Nip55ContentProvider : ContentProvider() {
  * Once the wait gives up it takes the claim itself, so a block that has not claimed by
  * then does nothing, and only one already past its claim can finish after its caller
  * was told it did not. It is fenced rather than cancelled, because cancelling a block
- * past its claim could stop it between steps that must happen together.
+ * past its claim could stop it between steps that must happen together. [onLate] runs
+ * in exactly that case: the caller gets no result while the block is past its claim.
  */
 internal fun <T : Any> awaitWithin(
     scope: CoroutineScope,
     budgetMs: Long,
+    onLate: () -> Unit = {},
     block: suspend (claim: () -> Boolean) -> T?,
 ): T? {
     val claimed = AtomicBoolean(false)
     val claim = { claimed.compareAndSet(false, true) }
     val work = scope.async { block(claim) }
+    var result: T? = null
     try {
-        return runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+        result = runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+        return result
     } finally {
         // Also when the wait throws, such as on an interrupted thread. A block past
         // its claim already holds it, so this changes nothing for it.
-        claim()
+        if (!claim() && result == null) onLate()
     }
 }

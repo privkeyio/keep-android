@@ -37,6 +37,7 @@ enum class RiskFactor(val weight: Int, val description: String) {
 class RiskAssessor(
     private val auditDao: Nip55AuditLogDao,
     private val appSettingsDao: Nip55AppSettingsDao,
+    private val signedKindBefore: suspend (packageName: String, eventKind: Int) -> Boolean,
     private val elapsedRealtimeProvider: () -> Long = { SystemClock.elapsedRealtime() },
     private val currentTimeMillisProvider: () -> Long = { System.currentTimeMillis() },
     private val currentHourProvider: () -> Int = { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
@@ -60,7 +61,7 @@ class RiskAssessor(
     ): RiskAssessment {
         val recentCount = getRecentRequestCount(packageName)
         val hasSignedKindBefore = precomputedHasSignedKindBefore ?: if (eventKind != null) {
-            auditDao.countByPackageAndKind(packageName, eventKind) > 0
+            signedKindBefore(packageName, eventKind)
         } else {
             true
         }

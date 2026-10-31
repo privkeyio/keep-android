@@ -35,6 +35,10 @@ const val AUDIT_OP_EXPORT_SHARE = "EXPORT_SHARE"
 const val AUDIT_OP_ACCOUNT_SWITCH = "ACCOUNT_SWITCH"
 const val AUDIT_OP_ACCOUNT_DELETE = "ACCOUNT_DELETE"
 
+// Written with the request id of an automatic approval whose caller was told it was
+// refused, after that approval's row, so the approval does not count as signed.
+const val AUDIT_DECISION_ABANDONED = "abandoned"
+
 // Relay scope sentinels for kind-22242 (NIP-42) grants. RELAY_NONE is used for all
 // other grants, where the relay dimension is not meaningful.
 const val RELAY_NONE = ""
@@ -95,7 +99,8 @@ data class Nip55AuditLog(
     val decision: String,
     val wasAutomatic: Boolean,
     val previousHash: String? = null,
-    val entryHash: String = ""
+    val entryHash: String = "",
+    val requestId: String? = null
 )
 
 @Entity(

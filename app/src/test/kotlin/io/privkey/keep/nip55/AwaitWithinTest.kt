@@ -19,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The audit append's wait, on a single-thread scope like the provider's and a lock
@@ -31,6 +32,8 @@ class AwaitWithinTest {
     private val scope = CoroutineScope(Dispatchers.IO.limitedParallelism(1) + SupervisorJob())
     private val lock = Mutex()
     private val wrote = AtomicBoolean(false)
+    private val late = AtomicInteger(0)
+    private val onLate = { late.incrementAndGet(); Unit }
 
     @After
     fun stop() = scope.cancel()
@@ -46,8 +49,9 @@ class AwaitWithinTest {
 
     @Test
     fun aBlockThatFinishesInTimeReturnsItsResult() {
-        assertEquals(true, awaitWithin(scope, 1_000) { claim -> write(claim) })
+        assertEquals(true, awaitWithin(scope, 1_000, onLate) { claim -> write(claim) })
         assertTrue(wrote.get())
+        assertEquals("a block that answered in time is not late", 0, late.get())
     }
 
     @Test
@@ -55,11 +59,12 @@ class AwaitWithinTest {
         val stall = CountDownLatch(1)
         scope.launch { stall.await() }
 
-        assertNull(awaitWithin(scope, 100) { claim -> write(claim) })
+        assertNull(awaitWithin(scope, 100, onLate) { claim -> write(claim) })
 
         stall.countDown()
         drain()
         assertFalse(wrote.get())
+        assertEquals("a fenced block is not late", 0, late.get())
     }
 
     // A stalled append that suspends while holding the lock, as one inside a Room
@@ -101,7 +106,7 @@ class AwaitWithinTest {
         val finished = AtomicBoolean(false)
 
         assertNull(
-            awaitWithin(scope, 1_000) { claim ->
+            awaitWithin(scope, 1_000, onLate) { claim ->
                 if (!claim()) return@awaitWithin null
                 claimed.countDown()
                 release.await()
@@ -111,6 +116,7 @@ class AwaitWithinTest {
         )
 
         assertEquals("the block must have claimed within the budget", 0, claimed.count)
+        assertEquals("a block past its claim at the budget is late", 1, late.get())
         release.countDown()
         drain()
         assertTrue(finished.get())
