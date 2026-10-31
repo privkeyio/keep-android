@@ -236,8 +236,20 @@ object KeystoreEncryptedPrefs {
          * what a delete is then allowed to claim.
          */
         private var namesPredateThisKey = false
+        /**
+         * The derivation key in use, with the stored key record it was resolved
+         * against (null when none was on disk). One value, so a lock-free reader
+         * never pairs a key with another key's record.
+         *
+         * Several instances can hold the same file, and they share its
+         * [SharedPreferences], so one that rotates, mints or clears changes the
+         * record under the others. An instance still hashing under the key it
+         * cached would then write at names the next open cannot compute.
+         */
+        private class ResolvedKey(val key: ByteArray, val record: String?)
+
         @Volatile
-        private var hmacKey: ByteArray? = null
+        private var hmacKey: ResolvedKey? = null
         private val listenerMap = ConcurrentHashMap<SharedPreferences.OnSharedPreferenceChangeListener, SharedPreferences.OnSharedPreferenceChangeListener>()
 
         // Migration-only fallback: predictable by design since it only obfuscates
@@ -258,10 +270,10 @@ object KeystoreEncryptedPrefs {
          * file that already held entries: the seed alone, with no file name.
          *
          * It is a constant in this repository's history and in released APKs,
-         * and nothing migrates a file off it, because a stored key is read and
-         * used rather than re-derived. A file still carrying it hashes every
-         * name under something anyone can compute, which is the same exposure
-         * as the fallback epoch and not a name-by-name one.
+         * so a file carrying it hashes every name under something anyone can
+         * compute, which is the same exposure as the fallback epoch and not a
+         * name-by-name one. [rotateOffPublishedKey] moves a file off it on
+         * open, and a file it cannot move keeps it until an open that can.
          */
         private val legacyGlobalKey: ByteArray by lazy {
             MessageDigest.getInstance("SHA-256")
@@ -282,62 +294,129 @@ object KeystoreEncryptedPrefs {
         }
 
         private fun getHmacKey(): ByteArray {
-            hmacKey?.let { return it }
+            currentHmacKey()?.let { return it }
             synchronized(initLockFor(prefsName)) {
-                hmacKey?.let { return it }
-                val stored = basePrefs.getString(HMAC_KEY_PREF, null)
-                namesPredateThisKey = basePrefs.contains(STRANDED_EPOCH_PREF)
-                if (stored != null) {
-                    val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
-                    val key = Base64.decode(decrypted, Base64.NO_WRAP)
-                    // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
-                    // rules out external tampering, so a wrong length here is an internal bug.
-                    // Fail fast: Mac/SecretKeySpec accept any key length and would otherwise
-                    // silently diverge the audit-chain HMACs and key-name hashes.
-                    check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
-                    hmacKey = key
-                    return key
-                }
-                val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
-                val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
-                val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
-                val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
-                val hasExistingEntries = basePrefs.contains(registryHash)
-                val fileHoldsEntries =
-                    basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
-                val persisted = if (hasExistingEntries) {
-                    migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
-                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
-                    }
-                } else {
-                    // One commit: the marker has to land with the key it describes,
-                    // or a restart reads a key that looks like it has always been
-                    // this file's and certifies deletes over the stranded entries.
-                    val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
-                    if (fileHoldsEntries) editor.putString(STRANDED_EPOCH_PREF, "1")
-                    editor.commit().also { ok ->
-                        if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
-                    }
-                }
-                // Entries this cannot name: either nothing here could read an
-                // index for them, so they predate the key being minted now, or
-                // the key just minted did not persist and the store carries on
-                // under its deterministic one while they sit at names derived
-                // with neither. A rollback of this file produces the first; a
-                // value planted at the deterministic index name, which anything
-                // that can write this directory can derive, produces the second
-                // and would otherwise read as a deterministic-epoch file whose
-                // entries are all accounted for.
-                //
-                // Not durable in the second case, and it does not need to be:
-                // nothing committed, so every later open resolves the same way
-                // and recomputes it.
-                val stranded = fileHoldsEntries && (!hasExistingEntries || !persisted)
-                namesPredateThisKey = namesPredateThisKey || stranded
-                val result = if (persisted) key else deterministicHmacKey()
-                hmacKey = result
-                return result
+                currentHmacKey()?.let { return it }
+                if (hmacKey != null) forgetStaleKey()
+                val key = resolveHmacKey()
+                hmacKey = ResolvedKey(key, basePrefs.getString(HMAC_KEY_PREF, null))
+                return key
             }
+        }
+
+        private fun currentHmacKey(): ByteArray? =
+            hmacKey?.takeIf { basePrefs.getString(HMAC_KEY_PREF, null) == it.record }?.key
+
+        /** Drops everything derived from a key another instance has replaced. Callers hold the per-file monitor. */
+        private fun forgetStaleKey() {
+            hmacKey = null
+            keyCache.clear()
+            reverseKeyCache.clear()
+            registrySeeded = false
+            foldAttempts = 0
+        }
+
+        private fun resolveHmacKey(): ByteArray {
+            val stored = basePrefs.getString(HMAC_KEY_PREF, null)
+            namesPredateThisKey = basePrefs.contains(STRANDED_EPOCH_PREF)
+            if (stored != null) {
+                val decrypted = decrypt(secretKey, stored, HMAC_KEY_PREF)
+                val key = Base64.decode(decrypted, Base64.NO_WRAP)
+                // Our own 32-byte key, stored base64 then GCM-encrypted; GCM authentication
+                // rules out external tampering, so a wrong length here is an internal bug.
+                // Fail fast: Mac/SecretKeySpec accept any key length and would otherwise
+                // silently diverge the audit-chain HMACs and key-name hashes.
+                check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
+                return if (key.contentEquals(legacyGlobalKey)) rotateOffPublishedKey(key) else key
+            }
+            val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+            val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
+            val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
+            val registryHash = hmacWithKey(KEY_REGISTRY, deterministicHmacKey())
+            val hasExistingEntries = basePrefs.contains(registryHash)
+            val fileHoldsEntries =
+                basePrefs.all.keys.any { it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF }
+            val persisted = if (hasExistingEntries) {
+                migrateFromDeterministicKey(key, encryptedHmacKey).also { ok ->
+                    if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "HMAC migration failed, using deterministic fallback key")
+                }
+            } else {
+                // One commit: the marker has to land with the key it describes,
+                // or a restart reads a key that looks like it has always been
+                // this file's and certifies deletes over the stranded entries.
+                val editor = basePrefs.edit().putString(HMAC_KEY_PREF, encryptedHmacKey)
+                if (fileHoldsEntries) editor.putString(STRANDED_EPOCH_PREF, "1")
+                editor.commit().also { ok ->
+                    if (!ok && BuildConfig.DEBUG) Log.e("KeystoreEncryptedPrefs", "Failed to persist new HMAC key")
+                }
+            }
+            // Entries this cannot name: either nothing here could read an
+            // index for them, so they predate the key being minted now, or
+            // the key just minted did not persist and the store carries on
+            // under its deterministic one while they sit at names derived
+            // with neither. A rollback of this file produces the first; a
+            // value planted at the deterministic index name, which anything
+            // that can write this directory can derive, produces the second
+            // and would otherwise read as a deterministic-epoch file whose
+            // entries are all accounted for.
+            //
+            // Not durable in the second case, and it does not need to be:
+            // nothing committed, so every later open resolves the same way
+            // and recomputes it.
+            val stranded = fileHoldsEntries && (!hasExistingEntries || !persisted)
+            namesPredateThisKey = namesPredateThisKey || stranded
+            return if (persisted) key else deterministicHmacKey()
+        }
+
+        /**
+         * Moves a file off the published global key onto a fresh random one,
+         * re-hashing what its index lists the way the deterministic epoch is left.
+         *
+         * Keeps the published key when an index copy is missing at the
+         * published name, or either copy will not decode or dropped entries, or
+         * when the commit fails, and the next open tries again.
+         *
+         * It also keeps it while the file holds any name the index does not
+         * account for. Whatever is there answers a lookup today, as a value or
+         * as a refusal, and a move would leave it at a name nothing computes, so
+         * that read would turn into an absence and a delete would certify one it
+         * never established. A bound value written while the index was
+         * unreadable is legitimately unlisted, and a refused record of a gate
+         * such as the PIN flag must keep reading unreadable rather than unset.
+         * Anything able to write this directory can hold a file on the published
+         * key this way, which leaves it exactly where it was before.
+         *
+         * Listed values move as they are, without the decrypt check a fallback
+         * relocation makes. One that will not decrypt then reads unreadable at
+         * the new name as it did at the old one, and a delete can now clear it.
+         */
+        private fun rotateOffPublishedKey(published: ByteArray): ByteArray {
+            val indexName = hmacWithKey(KEY_REGISTRY, published)
+            val blob = runCatching { basePrefs.getString(indexName, null) }.getOrNull() ?: return published
+            val index = decodeRegistry(blob) as? RegistryRead.Decoded ?: return published
+            if (!index.complete) return published
+            // The fold unions both copies, so a key listed only in the fallback
+            // copy is read today and has to move too.
+            val fallbackIndexName = fallbackHashOf(KEY_REGISTRY)
+            val fallbackKeys = if (!basePrefs.contains(fallbackIndexName)) {
+                emptyList()
+            } else {
+                val fallbackBlob = runCatching { basePrefs.getString(fallbackIndexName, null) }.getOrNull()
+                    ?: return published
+                val fallbackIndex = decodeRegistry(fallbackBlob) as? RegistryRead.Decoded ?: return published
+                if (!fallbackIndex.complete) return published
+                fallbackIndex.keys
+            }
+            val listed = (index.keys + fallbackKeys).distinct()
+            val accounted = mutableSetOf(HMAC_KEY_PREF, STRANDED_EPOCH_PREF, indexName, fallbackIndexName)
+            for (plainKey in listed) {
+                accounted += hmacWithKey(plainKey, published)
+                accounted += fallbackHashOf(plainKey)
+            }
+            if (basePrefs.all.keys.any { it !in accounted }) return published
+            val fresh = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
+            val encrypted = encrypt(secretKey, Base64.encodeToString(fresh, Base64.NO_WRAP), HMAC_KEY_PREF)
+            return if (rehashEntries(published, fresh, encrypted, listed)) fresh else published
         }
 
         private fun hmacWithKey(plainKey: String, key: ByteArray): String {
@@ -369,6 +448,15 @@ object KeystoreEncryptedPrefs {
                 if (BuildConfig.DEBUG) Log.w("KeystoreEncryptedPrefs", "Registry unreadable during HMAC migration, falling back to deterministic key")
                 return false
             }
+            return rehashEntries(oldKey, newKey, encryptedHmacKey, plainKeys)
+        }
+
+        private fun rehashEntries(
+            oldKey: ByteArray,
+            newKey: ByteArray,
+            encryptedHmacKey: String,
+            plainKeys: List<String>
+        ): Boolean {
             val editor = basePrefs.edit()
             editor.putString(HMAC_KEY_PREF, encryptedHmacKey)
             if (plainKeys.isEmpty()) {
@@ -379,14 +467,16 @@ object KeystoreEncryptedPrefs {
             for (plainKey in plainKeys) {
                 val oldHash = hmacWithKey(plainKey, oldKey)
                 val newHash = hmacWithKey(plainKey, newKey)
-                val value = basePrefs.getString(oldHash, null) ?: continue
+                // A non-String here is refused today, and skipping it would leave
+                // it at a name nothing computes, so the move waits instead.
+                val value = runCatching { basePrefs.getString(oldHash, null) }.getOrElse { return false } ?: continue
                 editor.putString(newHash, value)
                 editor.remove(oldHash)
                 mappings.add(KeyMapping(plainKey, oldHash, newHash))
             }
             val oldRegistryHash = hmacWithKey(KEY_REGISTRY, oldKey)
             val newRegistryHash = hmacWithKey(KEY_REGISTRY, newKey)
-            val registryValue = basePrefs.getString(oldRegistryHash, null)
+            val registryValue = runCatching { basePrefs.getString(oldRegistryHash, null) }.getOrNull()
             if (registryValue != null) {
                 editor.putString(newRegistryHash, registryValue)
                 editor.remove(oldRegistryHash)
@@ -440,6 +530,8 @@ object KeystoreEncryptedPrefs {
             (locateKey(plainKey) as? KeyLookup.Found)?.encKey
 
         private fun locateKey(plainKey: String): KeyLookup {
+            getHmacKey()
+            val resolved = hmacKey
             keyCache[plainKey]?.let { encKey ->
                 if (basePrefs.contains(encKey)) return KeyLookup.Found(encKey)
             }
@@ -455,8 +547,7 @@ object KeystoreEncryptedPrefs {
                 ) {
                     return KeyLookup.Refused(hash)
                 }
-                keyCache[plainKey] = hash
-                reverseKeyCache[hash] = plainKey
+                cacheName(plainKey, hash, resolved)
                 return KeyLookup.Found(hash)
             }
             // An entry written while the store was using its fallback derivation
@@ -497,9 +588,11 @@ object KeystoreEncryptedPrefs {
                 // there now is what gets relocated to a name this will trust
                 // from then on.
                 val value = acceptableValueAt(plainKey, fallbackHash)
+                // Recomputed here: the key may have been replaced since the miss.
+                val target = calculateKeyHash(plainKey)
                 when {
                     value == null -> null
-                    basePrefs.edit().putString(hash, value).remove(fallbackHash).commit() -> hash
+                    basePrefs.edit().putString(target, value).remove(fallbackHash).commit() -> target
                     else -> fallbackHash
                 }
             }
@@ -509,18 +602,31 @@ object KeystoreEncryptedPrefs {
                 // a delete would then certify as an absence it never established.
                 null -> if (basePrefs.contains(fallbackHash)) KeyLookup.Refused(fallbackHash)
                 else KeyLookup.Absent
-                hash -> {
-                    keyCache[plainKey] = hash
-                    reverseKeyCache[hash] = plainKey
-                    KeyLookup.Found(hash)
-                }
                 // Consolidation did not stick. Report where the entry actually is
                 // so this lookup is still correct, but do not cache it: a cached
                 // old location would send the next write there and leave a second
                 // copy behind it.
-                else -> KeyLookup.Found(fallbackHash)
+                fallbackHash -> KeyLookup.Found(fallbackHash)
+                else -> {
+                    cacheName(plainKey, movedTo, resolved)
+                    KeyLookup.Found(movedTo)
+                }
             }
         }
+
+        /**
+         * Caches [name] for [plainKey] only while [resolvedAt] is still the key
+         * in use. A lookup runs without the monitor, so a replacement can land
+         * after it hashed, and a name derived from the old key left in the cache
+         * would send the next write where nothing looks.
+         */
+        private fun cacheName(plainKey: String, name: String, resolvedAt: ResolvedKey?) =
+            synchronized(initLockFor(prefsName)) {
+                if (hmacKey === resolvedAt) {
+                    keyCache[plainKey] = name
+                    reverseKeyCache[name] = plainKey
+                }
+            }
 
         /// Fold the persisted registry into [keyCache] once per instance, so a
         /// registry rewrite unions with what is already stored instead of
@@ -598,14 +704,16 @@ object KeystoreEncryptedPrefs {
          * it, so the current name is derivable too and earns no more trust than
          * the fallback one; the lookup applies this there as well, for a store
          * left on its deterministic key and for one carrying the global key a
-         * build in the v0.6.0 window persisted. What discriminates
-         * there is mostly boundness rather than the index: reaching that state
-         * takes an index this cannot decode, which is also what stops the index
-         * being rebuilt, so nothing is listed and nothing unbound is admitted.
-         * That is the intended answer, since a file genuinely holding
-         * deterministic-epoch entries migrates off that key on first access and
-         * never reads through this at all. The index still decides the narrow
-         * case where the index decoded and the minted key failed to commit.
+         * build in the v0.6.0 window persisted and could not yet be moved off.
+         * What discriminates there is mostly boundness rather than the index:
+         * staying on the deterministic key takes an index this cannot decode,
+         * which is also what stops the index being rebuilt, so nothing is listed
+         * and nothing unbound is admitted. That is the intended answer, since a
+         * file genuinely holding deterministic-epoch entries migrates off that
+         * key on first access and never reads through this at all. The index
+         * decides the narrower cases: a minted key that failed to commit, and a
+         * published-key file whose move is waiting on an incomplete index, a
+         * bound value it cannot account for, or a commit that failed.
          *
          * The cost is paid on a cold hit only, and it is one decrypt the read
          * repeats a moment later; a repeat read answers from the name cache
@@ -1113,6 +1221,10 @@ object KeystoreEncryptedPrefs {
                     // hash. For the rate-limiter store that means a package's
                     // usage counters and cooling-off entries silently stop being
                     // found, which reads as "no usage yet".
+                    // Before the fold and before any cached name is used, so a
+                    // key another instance replaced is dropped with every name
+                    // derived from it rather than written under.
+                    getHmacKey()
                     ensureRegistrySeeded(countAttempt = true)
                 }
 
