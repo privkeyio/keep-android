@@ -111,15 +111,19 @@ class BunkerService : Service() {
                 else -> clients + pk
             }
         }
-        // Lists saved before the cap could exceed it, and the core now refuses to save one
-        // that does, so the oldest clients past it are revoked, grants and all.
         internal fun clientsOverCap(clients: List<String>): List<String> =
             clients.dropLast(MAX_AUTHORIZED_CLIENTS)
 
-        internal suspend fun revokeClientsOverCap(context: Context, keepMobile: io.privkey.keep.uniffi.KeepMobile) {
-            val excess = clientsOverCap(keepMobile.getBunkerConfig().authorizedClients)
-            if (excess.isNotEmpty()) revokeClients(context, keepMobile, excess)
-        }
+        /**
+         * Revokes the oldest clients past [MAX_AUTHORIZED_CLIENTS], which a list saved before
+         * the cap can hold and the core now refuses to save. They are chosen under the config
+         * lock, so a revoke that landed first is counted. Returns the saved bunker config.
+         */
+        internal suspend fun revokeClientsOverCap(
+            context: Context,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+        ): io.privkey.keep.uniffi.BunkerConfigInfo =
+            revokeSelected(context, keepMobile) { clientsOverCap(it) }
 
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
@@ -219,6 +223,13 @@ class BunkerService : Service() {
             context: Context,
             keepMobile: io.privkey.keep.uniffi.KeepMobile,
             pubkeys: Collection<String>?,
+        ): io.privkey.keep.uniffi.BunkerConfigInfo =
+            revokeSelected(context, keepMobile) { pubkeys }
+
+        private suspend fun revokeSelected(
+            context: Context,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+            select: (List<String>) -> Collection<String>?,
         ): io.privkey.keep.uniffi.BunkerConfigInfo {
             var revoked = emptySet<String>()
             // Under the config lock, so a connect save that read the list before the core
@@ -226,9 +237,11 @@ class BunkerService : Service() {
             val revokeFailure = BunkerConfigStore.withLock {
                 val generation = revokeGeneration.incrementAndGet()
                 val service = current()
+                val config = keepMobile.getBunkerConfig()
+                val pubkeys = select(config.authorizedClients)
                 revoked = revokedClientSet(
                     pubkeys,
-                    keepMobile.getBunkerConfig().authorizedClients,
+                    config.authorizedClients,
                     service?.authorizedClientsCache?.let { synchronized(it) { it.toList() } }.orEmpty(),
                     service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty(),
                 )

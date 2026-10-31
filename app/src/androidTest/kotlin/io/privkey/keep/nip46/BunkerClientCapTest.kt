@@ -70,6 +70,19 @@ class BunkerClientCapTest {
         assertEquals(true, mobile.getBunkerConfig().enabled)
     }
 
+    // Older versions checked only for 64 hex characters, so a key need not be on the curve.
+    // The core takes any 32 bytes as a client key, so it is revoked like the rest.
+    @Test
+    fun aKeyOffTheCurveIsRevokedLikeAnyOther() = runBlocking {
+        val kept = (1..BunkerService.MAX_AUTHORIZED_CLIENTS).map { "%064x".format(it) }
+        storeLegacyList(listOf(OFF_CURVE) + OLDEST + kept)
+
+        val saved = BunkerService.revokeClientsOverCap(context, mobile)
+
+        assertEquals(kept, saved.authorizedClients)
+        assertEquals(kept, mobile.getBunkerConfig().authorizedClients)
+    }
+
     @Test
     fun aListWithinTheCapIsLeftAlone() = runBlocking {
         val clients = OLDEST + (1..BunkerService.MAX_AUTHORIZED_CLIENTS - OLDEST.size).map { "%064x".format(it) }
@@ -85,6 +98,9 @@ class BunkerClientCapTest {
         const val ALIAS = "keep_frost_share$SUFFIX"
         const val MULTI_PREFS = "keep_multi_share_prefs$SUFFIX"
         const val CONFIG_KEY = "__keep_bunker_config_v1"
+
+        // Above the field prime, so no point has it as its x coordinate.
+        const val OFF_CURVE = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
         // x coordinates of G, 2G and 3G on secp256k1, so the core can parse them to revoke.
         val OLDEST = listOf(
