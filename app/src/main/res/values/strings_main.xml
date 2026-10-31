@@ -133,6 +133,8 @@
     <string name="account_import_invalid_share">Invalid share format</string>
     <string name="account_import_invalid_nsec">Invalid nsec format</string>
     <string name="account_import_failed">Import failed. Please try again.</string>
+    <string name="account_import_already_stored">This key is already stored on this device.</string>
+    <string name="account_import_other_share_stored">Another share of this group is already stored on this device.</string>
     <string name="account_view_seed_title">View Seed Words</string>
     <string name="account_view_seed_subtitle">Authenticate to view seed words</string>
     <string name="account_view_seed_none">No seed words available for this account</string>

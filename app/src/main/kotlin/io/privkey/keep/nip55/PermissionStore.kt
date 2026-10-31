@@ -619,7 +619,8 @@ class PermissionStore(private val database: Nip55Database) {
      *
      * The core tiers stay. They are scoped to the account that set them, so the next
      * account cannot read them, and clearing one would store a "follows global" marker
-     * that is looser than an unscoped legacy tier the core still applies as a floor.
+     * that is looser than an unscoped legacy tier the core still applies as a floor
+     * until an account adopts it.
      * Without its row a tier resolves to Manual, so returning to that account cannot
      * widen anything either. A row that cannot be deleted is rewritten to the strictest
      * tier with no window instead, so it cannot hand the next account the previous one's

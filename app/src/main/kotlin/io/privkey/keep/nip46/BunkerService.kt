@@ -111,6 +111,26 @@ class BunkerService : Service() {
                 else -> clients + pk
             }
         }
+        internal fun clientsOverCap(clients: List<String>): List<String> =
+            clients.dropLast(MAX_AUTHORIZED_CLIENTS)
+
+        /**
+         * Revokes the oldest clients past [MAX_AUTHORIZED_CLIENTS], which a list saved before
+         * the cap can hold and the core now refuses to save. They are chosen under the config
+         * lock, so a revoke that landed first is counted. Returns how many were chosen.
+         */
+        internal suspend fun revokeClientsOverCap(
+            context: Context,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+        ): Int {
+            var chosen = 0
+            revokeSelected(context, keepMobile) { clientsOverCap(it).also { over -> chosen = over.size } }
+            return chosen
+        }
+
+        /** Whether every client is to be revoked before the next start serves. */
+        internal fun revokeAllPending(context: Context): Boolean = revokeAllMark(context).isSet()
+
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
         internal const val KEY_REVOKE_ALL_ON_START = "revoke_all_on_start"
@@ -209,16 +229,30 @@ class BunkerService : Service() {
             context: Context,
             keepMobile: io.privkey.keep.uniffi.KeepMobile,
             pubkeys: Collection<String>?,
+        ): io.privkey.keep.uniffi.BunkerConfigInfo =
+            revokeSelected(context, keepMobile) { pubkeys }
+
+        private suspend fun revokeSelected(
+            context: Context,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+            select: (List<String>) -> Collection<String>?,
         ): io.privkey.keep.uniffi.BunkerConfigInfo {
             var revoked = emptySet<String>()
+            var nothingChosen = false
             // Under the config lock, so a connect save that read the list before the core
             // rewrote it cannot write a revoked client back (see authorizeClient).
             val revokeFailure = BunkerConfigStore.withLock {
+                val config = keepMobile.getBunkerConfig()
+                val pubkeys = select(config.authorizedClients)
+                if (pubkeys?.isEmpty() == true) {
+                    nothingChosen = true
+                    return@withLock null
+                }
                 val generation = revokeGeneration.incrementAndGet()
                 val service = current()
                 revoked = revokedClientSet(
                     pubkeys,
-                    keepMobile.getBunkerConfig().authorizedClients,
+                    config.authorizedClients,
                     service?.authorizedClientsCache?.let { synchronized(it) { it.toList() } }.orEmpty(),
                     service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty(),
                 )
@@ -238,6 +272,7 @@ class BunkerService : Service() {
                 if (pubkeys == null || failure != null) everyClientRevokedAt.set(generation)
                 failure
             }
+            if (nothingChosen) return keepMobile.getBunkerConfig()
             revoked.forEach { pubkey ->
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }

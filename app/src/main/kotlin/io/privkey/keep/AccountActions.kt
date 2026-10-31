@@ -13,6 +13,7 @@ import io.privkey.keep.uniffi.DkgConfig
 import io.privkey.keep.uniffi.DkgProgressCallback
 import io.privkey.keep.uniffi.DkgProgressUpdate
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.PendingShareInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
@@ -87,6 +88,13 @@ sealed class CreateGroupState {
  */
 internal fun storeSwitchedAccount(hadShare: Boolean, activeBefore: String?, activeAfter: String?): Boolean =
     hadShare && (activeAfter == null || activeAfter != activeBefore)
+
+// Matches the core's refusal text until it has a typed variant for a stored key.
+internal fun importFailureMessage(e: Exception): Int = when ((e as? KeepMobileException.InvalidShare)?.msg) {
+    "This key is already stored" -> R.string.account_import_already_stored
+    "Another share of this group is already stored" -> R.string.account_import_other_share_stored
+    else -> R.string.account_import_failed
+}
 
 internal class AccountActions(
     private val keepMobile: KeepMobile,
@@ -1043,7 +1051,7 @@ internal class AccountActions(
                         }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.e("AccountActions", "Import failed: ${e::class.simpleName}")
-                        onImportStateChanged(ImportState.Error(appContext.getString(R.string.account_import_failed)))
+                        onImportStateChanged(ImportState.Error(appContext.getString(importFailureMessage(e))))
                     } finally {
                         if (pendingSet) storage.clearPendingCipher(importId)
                     }

@@ -29,6 +29,16 @@ class WithClientAddedTest {
         assertEquals(full, BunkerService.withClientAdded(full, full.first()))
     }
 
+    @Test
+    fun aListWithinTheCapHasNothingOverIt() {
+        assertEquals(emptyList<String>(), BunkerService.clientsOverCap(full))
+    }
+
+    @Test
+    fun theOldestClientsPastTheCapAreOverIt() {
+        assertEquals(listOf(A, B), BunkerService.clientsOverCap(listOf(A, B) + full))
+    }
+
     private companion object {
         const val A = "aa00000000000000000000000000000000000000000000000000000000000000"
         const val B = "bb00000000000000000000000000000000000000000000000000000000000000"
