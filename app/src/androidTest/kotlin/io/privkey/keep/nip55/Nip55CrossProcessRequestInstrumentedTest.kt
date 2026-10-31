@@ -300,11 +300,12 @@ class Nip55CrossProcessRequestInstrumentedTest {
     // the relay-auth list cannot be read, since that list may exclude the relay.
     @Test
     fun crossProcess_unreadableRelayAuthList_rejectsRelayAuth() {
+        val before = latestAuditId()
         val r = withRelayAuthGrant(listUnreadable = true) { relayAuthQuery("relayauth") }
         assertEquals("an unreadable list must reject relay auth", listOf("rejected"), r.cols)
         // The rejected cursor carries no reason and a timeout produces it too, so the
-        // audit row is what shows the relay-auth gate is the one that refused.
-        assertEquals("deny_relay_whitelist", latestDecision())
+        // audit row this request wrote is what shows the relay-auth gate refused it.
+        assertEquals("deny_relay_whitelist", latestDecision(after = before))
     }
 
     // The control: the same grant and list, readable, is not rejected. Without a signing
@@ -344,8 +345,13 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
     }
 
-    private fun latestDecision(): String? = runBlocking {
-        app().getPermissionStore()!!.getAuditLog(limit = 20).firstOrNull { it.callerPackage == clientPkg }?.decision
+    private fun latestAuditId(): Long = runBlocking {
+        app().getPermissionStore()!!.getAuditLog(limit = 1).firstOrNull()?.id ?: 0L
+    }
+
+    private fun latestDecision(after: Long): String? = runBlocking {
+        app().getPermissionStore()!!.getAuditLog(limit = 20)
+            .firstOrNull { it.callerPackage == clientPkg && it.id > after }?.decision
     }
 
     // These tests set a PIN and then remove it, so they refuse to run over one already
