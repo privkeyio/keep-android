@@ -145,6 +145,22 @@ class BunkerRevokeE2ETest {
             assertEquals(url1, awaitRunning(previous = null))
             assertOk(settled("sign", c1.secret, url1, "1", "30"))
 
+            // At the client cap, a connect that holds the bunker secret is refused and granted nothing.
+            val listed = mobile.getBunkerConfig().authorizedClients
+            val full = listed + probe("pubkeys", (BunkerService.MAX_AUTHORIZED_CLIENTS - listed.size).toString()).split(" ")
+            mobile.saveBunkerConfig(BunkerConfigInfo(true, full))
+            val stranger = newClient()
+            val capped = System.currentTimeMillis()
+            assertEquals("ERR Capacity exceeded", settled("connect", stranger.secret, url1))
+            assertRefused(
+                "a client refused at the cap must not sign",
+                settled("sign", stranger.secret, url1, "1", "15"), stranger.pubkey, capped, reason = "Permission denied",
+            )
+            assertNull("a client refused at the cap must not be asked about", resumedApproval(stranger.pubkey))
+            assertEquals("a client refused at the cap must not be listed", full, mobile.getBunkerConfig().authorizedClients)
+            assertNull("a client refused at the cap must not be stored", Nip46ClientStore.getClient(context, stranger.pubkey))
+            mobile.saveBunkerConfig(BunkerConfigInfo(true, listed))
+
             // Revoke from the Bunker screen while the bunker is stopped.
             stopService()
             screen = Screen.Bunker(1)
