@@ -322,7 +322,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
 
     private fun <T> withRelayAuthGrant(listUnreadable: Boolean, block: () -> T): T {
         val store = app().getPermissionStore()!!
-        val relays = app().getRelayAuthWhitelistStore()!!
+        val relays = app().reopenRelayAuthWhitelistStore()
         assertEquals("refusing to touch an existing relay-auth list", PrefRead.Found(emptyList<String>()), relays.readHosts())
         try {
             runBlocking {
