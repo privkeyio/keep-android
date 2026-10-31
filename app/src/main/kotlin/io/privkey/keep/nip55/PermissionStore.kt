@@ -19,11 +19,15 @@ import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val MINUTE_MS = 60 * 1000L
 private const val HOUR_MS = 60 * MINUTE_MS
 private const val DAY_MS = 24 * HOUR_MS
 private const val WEEK_MS = 7 * DAY_MS
+private const val FAMILIARITY_BUDGET_MS = 2_000L
 
 class PermissionStore(private val database: Nip55Database) {
     private val dao = database.permissionDao()
@@ -405,9 +409,14 @@ class PermissionStore(private val database: Nip55Database) {
 
     // Chain verification (keyed-HMAC walk: legacy/truncated/broken/tampered) lives
     // in Rust; Android supplies the ordered rows and the keystore HMAC key.
-    suspend fun verifyAuditChain(): ChainVerificationResult = verifiedAuditRows().first
+    suspend fun verifyAuditChain(): ChainVerificationResult =
+        verifyAuditChainOnce().also {
+            if (it !is ChainVerificationResult.Valid && it !is ChainVerificationResult.PartiallyVerified) {
+                auditWriter.distrust()
+            }
+        }
 
-    private suspend fun verifiedAuditRows(): Pair<ChainVerificationResult, List<Nip55AuditLog>> {
+    private suspend fun verifyAuditChainOnce(): ChainVerificationResult {
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
         // Read rows + anchor + tamper flag atomically under the audit write lock so no
@@ -422,13 +431,13 @@ class PermissionStore(private val database: Nip55Database) {
         val latestHash = latest?.entryHash ?: ""
         val latestId = latest?.id ?: 0L
         if (anchor == null) {
-            if (tamperDetected) return ChainVerificationResult.Tampered(latestId) to entries
+            if (tamperDetected) return ChainVerificationResult.Tampered(latestId)
             // First verify on an upgraded/fresh install: trust-on-first-use seed the
             // anchor from the current intact tail rather than flagging it.
             if (shouldSeed(anchor, rustResult)) {
                 auditWriter.reconcileAnchor(count, latestHash)
             }
-            return rustResult to entries
+            return rustResult
         }
         val rustIntact = rustResult is ChainVerificationResult.Valid ||
             rustResult is ChainVerificationResult.PartiallyVerified
@@ -438,14 +447,14 @@ class PermissionStore(private val database: Nip55Database) {
             isResumableAppend(anchor, count, latest?.previousHash, latestHash, rustIntact)
         ) {
             auditWriter.reconcileAnchor(count, latestHash)
-            return rustResult to entries
+            return rustResult
         }
         // A crash between a head prune commit and its anchor advance leaves fewer rows with
         // the tail unchanged; re-pin to the lower count. Tail truncation changes the tail
         // hash, so it falls through to resolveChainVerification and is still flagged.
         if (!tamperDetected && isResumablePrune(anchor, count, latestHash, rustIntact)) {
             auditWriter.reconcileAnchor(count, latestHash)
-            return rustResult to entries
+            return rustResult
         }
         return resolveChainVerification(
             tamperDetected,
@@ -454,7 +463,7 @@ class PermissionStore(private val database: Nip55Database) {
             latestHash,
             latestId,
             rustResult
-        ) to entries
+        )
     }
 
     suspend fun getAuditLogCount(): Int = auditDao.getCount()
@@ -726,14 +735,37 @@ class PermissionStore(private val database: Nip55Database) {
         appSettingsDao.delete(callerPackage)
     }
 
-    // Counted over the rows the chain verification read, and only when it holds, since
-    // a row written without the key could otherwise lift the first-kind risk factor.
-    suspend fun hasSignedKindBefore(callerPackage: String, eventKind: Int): Boolean {
-        val (result, entries) = verifiedAuditRows()
-        if (result !is ChainVerificationResult.Valid && result !is ChainVerificationResult.PartiallyVerified) {
-            return false
+    // Answered from the writer's familiarity, which counts only rows of a chain that
+    // verified, since a row written without the key could otherwise lift the first-kind
+    // risk factor. Bounded because the writer's lock can be held by a stalled append, and
+    // an unknown history reads as never signed, which keeps the factor.
+    suspend fun hasSignedKindBefore(callerPackage: String, eventKind: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(FAMILIARITY_BUDGET_MS) {
+                auditWriter.familiar(callerPackage, eventKind, ::chainIntact)
+            } ?: false
         }
-        return signedKindBefore(entries, callerPackage, eventKind)
+
+    // The verdict [verifyAuditChain] reaches on the same rows, without its anchor heals,
+    // which a calling app must not be able to trigger.
+    private fun chainIntact(entries: List<Nip55AuditLog>, anchor: AuditAnchor?, tamperDetected: Boolean): Boolean {
+        val hmacKey = Nip55Database.getHmacKey() ?: return false
+        val rustResult = nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
+            .toChainVerificationResult()
+        val rustIntact = rustResult is ChainVerificationResult.Valid ||
+            rustResult is ChainVerificationResult.PartiallyVerified
+        if (tamperDetected) return false
+        if (anchor == null) return rustIntact
+        val latest = entries.lastOrNull()
+        val count = entries.size.toLong()
+        val latestHash = latest?.entryHash ?: ""
+        if (isResumableAppend(anchor, count, latest?.previousHash, latestHash, rustIntact) ||
+            isResumablePrune(anchor, count, latestHash, rustIntact)
+        ) {
+            return true
+        }
+        val result = resolveChainVerification(false, anchor, count, latestHash, latest?.id ?: 0L, rustResult)
+        return result is ChainVerificationResult.Valid || result is ChainVerificationResult.PartiallyVerified
     }
 
     suspend fun getAppAgeMs(callerPackage: String): Long? =
@@ -794,25 +826,8 @@ private fun calculateEntryHash(
     )
 }
 
-/**
- * Whether [entries], in id order, hold an automatic or manual approval for this caller
- * and kind that counts as signed. Legacy rows carry no MAC and do not count, and an
- * approval followed by an abandoned row with its request id, caller and kind does not
- * count either, because its caller was told it was refused.
- */
-internal fun signedKindBefore(entries: List<Nip55AuditLog>, callerPackage: String, eventKind: Int): Boolean {
-    val abandonedLater = HashSet<Triple<String, String, Int?>>()
-    for (entry in entries.asReversed()) {
-        if (entry.entryHash.isEmpty()) continue
-        val requestId = entry.requestId
-        if (entry.decision == AUDIT_DECISION_ABANDONED) {
-            if (requestId != null) abandonedLater.add(Triple(requestId, entry.callerPackage, entry.eventKind))
-        } else if (entry.decision == "allow" && entry.callerPackage == callerPackage && entry.eventKind == eventKind) {
-            if (requestId == null || Triple(requestId, entry.callerPackage, entry.eventKind) !in abandonedLater) return true
-        }
-    }
-    return false
-}
+internal fun signedKindBefore(entries: List<Nip55AuditLog>, callerPackage: String, eventKind: Int): Boolean =
+    AuditFamiliarity(trusted = true).apply { entries.forEach(::add) }.signed(callerPackage, eventKind)
 
 private fun Nip55AuditLog.toRustAuditEntry(): Nip55AuditEntry =
     Nip55AuditEntry(

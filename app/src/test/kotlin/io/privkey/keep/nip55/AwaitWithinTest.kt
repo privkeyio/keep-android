@@ -122,6 +122,20 @@ class AwaitWithinTest {
         assertTrue(finished.get())
     }
 
+    // A block that claimed and then failed is late too, since its caller cannot tell
+    // whether its effect landed. For the audit append that can cost an abandoned row
+    // naming no approval, which counts for nothing.
+    @Test
+    fun aBlockThatClaimedAndThenThrewIsLate() {
+        assertThrows(IllegalStateException::class.java) {
+            awaitWithin<Boolean>(scope, 1_000, onLate) { claim ->
+                check(!claim()) { "failed after its claim" }
+                true
+            }
+        }
+        assertEquals(1, late.get())
+    }
+
     @Test
     fun theQueueKeepsServingAfterAFencedBlock() {
         val stall = CountDownLatch(1)

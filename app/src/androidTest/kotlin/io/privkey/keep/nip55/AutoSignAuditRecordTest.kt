@@ -158,6 +158,7 @@ class AutoSignAuditRecordTest {
     fun anAbandonedApprovalDoesNotCountAsSigned() = runBlocking {
         assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
         val id = requireNotNull(store.getAuditLog(1).single().requestId)
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
 
         store.logAbandoned(CALLER, Nip55RequestType.SIGN_EVENT, 1, id)
 
@@ -197,23 +198,40 @@ class AutoSignAuditRecordTest {
     @Test
     fun aChainThatDoesNotVerifyMakesNoKindFamiliar() = runBlocking {
         assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+
+        forgeRow(kind = 7)
+
+        assertFalse(store.hasSignedKindBefore(CALLER, 7))
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // Once familiarity is known it is kept from the writer's own rows, so a row forged
+    // after that adds nothing, and the verification that finds it withdraws the rest.
+    @Test
+    fun aRowForgedAfterFamiliarityIsKnownAddsNothing() = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
         assertTrue(store.hasSignedKindBefore(CALLER, 1))
 
+        forgeRow(kind = 7)
+        assertFalse("a forged row adds nothing", store.hasSignedKindBefore(CALLER, 7))
+
+        assertTrue(store.verifyAuditChain() !is ChainVerificationResult.Valid)
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    private suspend fun forgeRow(kind: Int) {
         database.auditLogDao().insert(
             Nip55AuditLog(
                 timestamp = System.currentTimeMillis(),
                 callerPackage = CALLER,
                 requestType = Nip55RequestType.SIGN_EVENT.name,
-                eventKind = 7,
+                eventKind = kind,
                 decision = "allow",
                 wasAutomatic = true,
                 previousHash = database.auditLogDao().getLastEntryHash(),
                 entryHash = "0".repeat(64)
             )
         )
-
-        assertFalse(store.hasSignedKindBefore(CALLER, 7))
-        assertFalse(store.hasSignedKindBefore(CALLER, 1))
     }
 
     private companion object {

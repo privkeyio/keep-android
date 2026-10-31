@@ -75,6 +75,12 @@ class SignedKindBeforeTest {
         assertTrue(signedKindBefore(rows, CALLER, KIND))
     }
 
+    @Test
+    fun anUntrustedChainCountsNothing() {
+        val familiarity = AuditFamiliarity(trusted = false).apply { add(row("allow", ID_A)) }
+        assertFalse(familiarity.signed(CALLER, KIND))
+    }
+
     private companion object {
         const val CALLER = "com.example.app"
         const val KIND = 1
