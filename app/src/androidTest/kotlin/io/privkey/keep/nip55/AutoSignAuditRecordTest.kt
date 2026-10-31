@@ -219,7 +219,33 @@ class AutoSignAuditRecordTest {
         assertFalse(store.hasSignedKindBefore(CALLER, 1))
     }
 
-    private suspend fun forgeRow(kind: Int) {
+    // Familiarity is kept per database, so an approval written through another store,
+    // as the bunker's is, counts for this one.
+    @Test
+    fun anApprovalWrittenThroughAnotherStoreCounts() = runBlocking {
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+
+        PermissionStore(database).logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // A row the anchor cannot account for is caught by the next append, which withdraws
+    // familiarity without waiting for a verification.
+    @Test
+    fun aTamperCaughtAtAnAppendWithdrawsFamiliarity() = runBlocking {
+        val provider = Nip55ContentProvider()
+        assertTrue(provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+
+        forgeRow(kind = 7, previousHash = "f".repeat(64))
+        provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 2)
+
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+        assertFalse(store.hasSignedKindBefore(CALLER, 2))
+    }
+
+    private suspend fun forgeRow(kind: Int, previousHash: String? = null) {
         database.auditLogDao().insert(
             Nip55AuditLog(
                 timestamp = System.currentTimeMillis(),
@@ -228,7 +254,7 @@ class AutoSignAuditRecordTest {
                 eventKind = kind,
                 decision = "allow",
                 wasAutomatic = true,
-                previousHash = database.auditLogDao().getLastEntryHash(),
+                previousHash = previousHash ?: database.auditLogDao().getLastEntryHash(),
                 entryHash = "0".repeat(64)
             )
         )

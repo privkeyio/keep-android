@@ -1,8 +1,10 @@
 package io.privkey.keep.nip55
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * The single seam through which the anchored nip55_audit_log table may be mutated.
@@ -16,11 +18,13 @@ internal class AuditLogWriter(private val database: Nip55Database) {
 
     // [claim] is asked under the lock, before anything is read or written, so an
     // append whose caller has stopped waiting can still be turned away after it has
-    // queued for the lock. Returns whether the row was written.
+    // queued for the lock. Returns whether the row was written. [familiar] is false for
+    // a row whose hash is not this chain's HMAC, which familiarity must not count.
     suspend fun append(
         buildLog: (previousHash: String?) -> Nip55AuditLog,
         extraInTransaction: (suspend () -> Unit)? = null,
-        claim: () -> Boolean = { true }
+        claim: () -> Boolean = { true },
+        familiar: Boolean = true
     ): Boolean = mutex.withLock {
         if (!claim()) return@withLock false
         val state = reconcile()
@@ -35,7 +39,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         if (tamper) {
             Nip55Database.setAuditTamperDetected()
             familiarity[database] = AuditFamiliarity(trusted = false)
-        } else {
+        } else if (familiar) {
             familiarity[database]?.add(row)
         }
         advanceAnchor()
@@ -102,7 +106,9 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         eventKind: Int,
         chainIntact: (List<Nip55AuditLog>, AuditAnchor?, Boolean) -> Boolean
     ): Boolean = mutex.withLock {
-        val known = familiarity[database] ?: run {
+        // Not cancellable once started, so a caller's timeout cannot discard a build
+        // that every later query would then have to start again under the lock.
+        val known = familiarity[database] ?: withContext(NonCancellable) {
             val state = reconcile()
             if (state.unreadable) Nip55Database.setAuditTamperDetected()
             val rows = auditDao.getAllOrdered()
