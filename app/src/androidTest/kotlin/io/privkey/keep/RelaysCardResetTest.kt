@@ -1,5 +1,8 @@
 package io.privkey.keep
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -62,6 +65,36 @@ class RelaysCardResetTest {
 
         text(R.string.connections_relays_reset_title).assertDoesNotExist()
         assertEquals(0, resets)
+    }
+
+    @Test
+    fun aFaultThatClearsAndReturns_doesNotReopenTheDialog() {
+        var unreadable by mutableStateOf(true)
+        compose.setContent {
+            KeepAndroidTheme {
+                RelaysCard(
+                    relays = emptyList(),
+                    onAddRelay = {},
+                    onRemoveRelay = {},
+                    profileRelays = emptyList(),
+                    onAddProfileRelay = {},
+                    onRemoveProfileRelay = {},
+                    relayConfigUnreadable = unreadable,
+                    onResetRelayConfig = {}
+                )
+            }
+        }
+
+        text(R.string.connections_relays_reset_button).performClick()
+        text(R.string.connections_relays_reset_title).assertIsDisplayed()
+        unreadable = false
+        compose.waitForIdle()
+        text(R.string.connections_relays_reset_title).assertDoesNotExist()
+        unreadable = true
+        compose.waitForIdle()
+
+        text(R.string.connections_relays_reset_button).assertIsDisplayed()
+        text(R.string.connections_relays_reset_title).assertDoesNotExist()
     }
 
     @Test

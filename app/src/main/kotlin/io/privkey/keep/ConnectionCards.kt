@@ -28,7 +28,7 @@ fun RelaysCard(
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
-    var confirmReset by remember { mutableStateOf(false) }
+    var confirmReset by remember(relayConfigUnreadable) { mutableStateOf(false) }
 
     KeepCard(contentPadding = PaddingValues(0.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {

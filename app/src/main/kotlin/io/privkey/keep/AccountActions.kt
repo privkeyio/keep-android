@@ -46,6 +46,23 @@ internal fun readRelayConfig(activeKey: String?, read: (String?) -> RelayConfigI
         onFailure = { RelayConfigRead(EMPTY_RELAY_CONFIG, unreadable = activeKey != null) }
     )
 
+/**
+ * Resets the relay config of [expectedKey], the account the owner confirmed, only while it
+ * is still the active one and two more reads both fail, so a Keystore fault that has
+ * cleared keeps the record. Returns whether the reset ran.
+ */
+internal fun resetIfStillUnreadable(
+    expectedKey: String,
+    activeKey: String?,
+    read: (String) -> Unit,
+    reset: (String) -> Unit,
+): Boolean {
+    check(activeKey == expectedKey) { "the active account changed" }
+    repeat(2) { if (runCatching { read(expectedKey) }.isSuccess) return false }
+    reset(expectedKey)
+    return true
+}
+
 // Per-round timeout for the DKG. The ceremony has three blocking network rounds
 // (Round1, Round2, Confirming), so the whole run can approach 3x this before the
 // share is persisted.
@@ -670,17 +687,21 @@ internal class AccountActions(
     }
 
     /**
-     * Replaces the active account's relay config when it cannot be read, then refreshes the
+     * Replaces [expectedKey]'s relay config when it still cannot be read, then refreshes the
      * account state whether or not that succeeded, so a record that has become readable
-     * again drops the offer. The key is read under [accountMutex] so a switch cannot move
-     * the reset onto another account. The caller confirms the owner first.
+     * again drops the offer. Refused when another account has become active, so the reset
+     * cannot land on an account the owner did not confirm. The caller confirms the owner first.
      */
-    suspend fun resetUnreadableRelayConfig() {
+    suspend fun resetUnreadableRelayConfig(expectedKey: String) {
         accountMutex.withLock {
             try {
                 withContext(Dispatchers.IO) {
-                    val key = checkNotNull(storage.getActiveShareKey()) { "no active account" }
-                    keepMobile.resetUnreadableRelayConfig(key)
+                    resetIfStillUnreadable(
+                        expectedKey,
+                        storage.getActiveShareKey(),
+                        read = { keepMobile.getRelayConfig(it) },
+                        reset = { keepMobile.resetUnreadableRelayConfig(it) },
+                    )
                 }
             } finally {
                 withContext(NonCancellable) { runCatching { refreshAccountState() } }

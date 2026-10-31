@@ -28,7 +28,7 @@
     <string name="connections_relays_unreadable">This device\'s relay settings for this account cannot be read. Reset them to connect to relays again.</string>
     <string name="connections_relays_reset_button">Reset relay settings</string>
     <string name="connections_relays_reset_title">Reset relay settings?</string>
-    <string name="connections_relays_reset_message">This device\'s relay settings for this account could not be read. Resetting restores the default relays. It also blocks the other shares of this group from sending to and receiving from this device until peer policies allow them again, and it clears the NIP-46 app grants for this account.</string>
+    <string name="connections_relays_reset_message">This device\'s relay settings for this account could not be read. Resetting replaces them with the default public relay and clears the profile relays, so any relays you chose are lost. Backups made afterward block the other shares of this group from sending to and receiving from this device.</string>
     <string name="connections_relays_reset_confirm">Reset</string>
     <string name="connections_relays_reset_auth">Confirm resetting relay settings</string>
     <string name="connections_relays_reset_auth_subtitle">Authenticate to reset relay settings</string>

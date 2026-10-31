@@ -1677,9 +1677,11 @@ fun MainScreen(
                         coroutineScope.launch { saveProfileRelays(updated) }
                     },
                     onResetRelayConfig = {
+                        val confirmedKey = activeAccountKey
                         coroutineScope.launch {
+                            if (confirmedKey == null) return@launch
                             if (!confirmRelayResetOwner(appContext.getString(R.string.connections_relays_reset_auth))) return@launch
-                            val reset = runCatching { accountActions.resetUnreadableRelayConfig() }
+                            val reset = runCatching { accountActions.resetUnreadableRelayConfig(confirmedKey) }
                                 .onFailure { if (it is CancellationException) throw it }
                             // A record that reads again after a failed reset is no longer
                             // a fault, so only a reset that left it unreadable is reported.
