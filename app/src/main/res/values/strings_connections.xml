@@ -25,6 +25,11 @@
     <string name="connections_relays_error_unreachable">Could not resolve relay host</string>
     <string name="connections_relays_error_private">Private/internal relay addresses are not allowed</string>
     <string name="connections_relays_done">Done</string>
+    <string name="connections_relay_status_connected">Connected</string>
+    <string name="connections_relay_status_connecting">Connecting</string>
+    <string name="connections_relay_status_offline">Offline</string>
+    <string name="connections_relay_status_with_latency"><xliff:g id="status" example="Connected">%1$s</xliff:g> · <xliff:g id="latency_ms" example="42">%2$d</xliff:g> ms</string>
+    <string name="connections_relay_status_last_seen"><xliff:g id="status" example="Offline">%1$s</xliff:g> · Last seen <xliff:g id="when" example="2026-10-30 10:20">%2$s</xliff:g></string>
 
     <!-- ConnectionCards: Connect card -->
     <string name="connections_connect_connecting">Connecting...</string>
