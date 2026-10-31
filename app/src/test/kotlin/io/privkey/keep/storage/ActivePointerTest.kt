@@ -19,7 +19,7 @@ class ActivePointerTest {
     private val b = "bb".repeat(32)
 
     /** Every key holds share data. */
-    private val allHold: (String, Boolean) -> Boolean = { _, _ -> true }
+    private val allHold: (String) -> Boolean = { true }
 
     @Test
     fun aValidPointerIsUsed() {
@@ -80,7 +80,7 @@ class ActivePointerTest {
         // Names a listed group whose share data is gone.
         assertEquals(
             ActivePointer.Use(a),
-            activePointer(setOf(a, b), PrefRead.Found(b)) { key, _ -> key == a },
+            activePointer(setOf(a, b), PrefRead.Found(b)) { key -> key == a },
         )
     }
 
@@ -88,35 +88,15 @@ class ActivePointerTest {
     fun noCandidateHoldsShareData() {
         assertEquals(
             ActivePointer.None,
-            activePointer(setOf(a, b), PrefRead.Absent) { _, _ -> false },
+            activePointer(setOf(a, b), PrefRead.Absent) { false },
         )
     }
 
-    // The fault rule differs by caller and the decision has to pass it through:
-    // for the pointer's own account a fault answers true, so a transient fault
-    // keeps the account rather than moving it; while scanning it answers false,
-    // so one unreadable share does not hide a readable one.
-    //
-    // Asserted through the outcome rather than by recording the calls: a probe
-    // whose answer depends on `onFault` makes the two rules visible in the
-    // result, and does not break when the call order or count changes without
-    // changing the decision.
     @Test
-    fun theFaultRuleDecidesPerCaller() {
-        // `a` faults. As the pointer's own account that keeps it.
+    fun aStalePointerWithSeveralCandidatesIsNotAGuess() {
         assertEquals(
-            ActivePointer.Use(a),
-            activePointer(setOf(a, b), PrefRead.Found(a)) { key, onFault ->
-                if (key == a) onFault else true
-            },
-        )
-        // The same faulting `a`, now reached by the scan, is excluded, leaving
-        // `b` as the only candidate.
-        assertEquals(
-            ActivePointer.Use(b),
-            activePointer(setOf(a, b), PrefRead.Absent) { key, onFault ->
-                if (key == a) onFault else true
-            },
+            ActivePointer.None,
+            activePointer(setOf(a, b), PrefRead.Found("cc".repeat(32)), allHold),
         )
     }
 }
