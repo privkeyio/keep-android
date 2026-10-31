@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.BackupInfo
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.backupMinPassphraseLength
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -56,6 +57,7 @@ fun BackupRestoreScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
     onGetCipher: () -> Cipher?,
+    onGetRestoreCipher: () -> Cipher?,
     onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -105,11 +107,19 @@ fun BackupRestoreScreen(
     val passphraseMinLengthMsg = stringResource(R.string.backup_restore_passphrase_min_length, minPassphraseLength)
     val passphraseMismatchMsg = stringResource(R.string.backup_restore_passphrase_mismatch)
 
-    fun requireBiometricAuth(onAuthed: (authedCipher: Cipher) -> Unit) {
+    fun requireBiometricAuth(
+        getCipher: () -> Cipher? = onGetCipher,
+        onAuthed: (authedCipher: Cipher) -> Unit
+    ) {
         val cipher = try {
-            onGetCipher()
+            getCipher()
         } catch (e: BiometricHelper.BiometricNotReadyException) {
             Toast.makeText(context, e.message ?: biometricUnavailableMsg, Toast.LENGTH_LONG).show()
+            return
+        } catch (e: KeepMobileException) {
+            if (BuildConfig.DEBUG) Log.e("BackupRestore", "Cipher init failed: ${e::class.simpleName}")
+            val reason = (e as? KeepMobileException.StorageException)?.msg ?: authUnavailableMsg
+            Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
             return
         }
         if (cipher == null) {
@@ -420,7 +430,10 @@ fun BackupRestoreScreen(
                 TextButton(
                     onClick = {
                         confirmingRestore = null
-                        requireBiometricAuth { authedCipher ->
+                        // A restore writes shares, so it needs a cipher that encrypts,
+                        // as an import does. The backup's decrypting cipher could not
+                        // write them, and a device with no share has none to offer.
+                        requireBiometricAuth(onGetRestoreCipher) { authedCipher ->
                             val requestId = UUID.randomUUID().toString()
                             restoreState = RestoreState.Restoring
                             val passphrase = restorePassphrase
