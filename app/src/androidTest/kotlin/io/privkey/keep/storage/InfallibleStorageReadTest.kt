@@ -176,22 +176,25 @@ class InfallibleStorageReadTest {
 
     @Test
     fun an_unreadable_share_does_not_block_selecting_a_readable_active_one() {
-        // Separate from the list assertion above so each half of the per-share guard
-        // is proven on its own. No stored pointer, so this is the fallback scan: it
-        // reaches the unreadable share first and has to survive it to find the
-        // readable one.
+        // No stored pointer, so this is the fallback scan. The unreadable share still
+        // counts, so two listed accounts are not taken for one and the readable share
+        // is not picked as a guess, the case keep-mobile's resolver refuses. The person
+        // can still choose it.
         seedTwoSharesWithTheFirstUnreadable(activeKey = null)
+        val storage = storage()
 
+        assertNull("an unreadable share must not leave the readable one to be guessed", storage.getActiveShareKey())
+        storage.setActiveShareKey(SECOND_GROUP_HEX)
         assertEquals(
             "a readable share must still be selectable as active",
             SECOND_GROUP_HEX,
-            storage().getActiveShareKey()
+            storage.getActiveShareKey()
         )
     }
 
     @Test
     fun an_unreadable_active_share_is_not_silently_swapped_for_a_readable_one() {
-        // The opposite answer, and the reason the fault value is per caller. The
+        // A fault keeps the pointer's own account too. The
         // active account is the one the stored pointer names; treating "cannot read
         // it" as "it is gone" would sign as a different account while NIP-55 grants
         // are keyed on the calling package alone and survive the switch.
@@ -265,10 +268,13 @@ class InfallibleStorageReadTest {
 
     @Test
     fun the_core_read_infers_and_writes_nothing_when_no_pointer_is_stored() {
-        // getActiveShareKey answers this with the readable share; the core's read must
+        // getActiveShareKey answers this with the only share; the core's read must
         // report the absence, since a caller deciding whether to set the pointer acts on it.
-        seedTwoSharesWithTheFirstUnreadable(activeKey = null)
-        assertEquals(SECOND_GROUP_HEX, storage().getActiveShareKey())
+        seedShareFile(GROUP_HEX, GROUP_B64)
+        KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit()
+            .putStringSet("all_share_keys", setOf(GROUP_HEX))
+            .commit()
+        assertEquals(GROUP_HEX, storage().getActiveShareKey())
 
         assertEquals(StorageRead.Absent, storage().readActiveShareKey())
         assertNull(

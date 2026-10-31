@@ -1078,21 +1078,19 @@ class AndroidKeystoreStorage(
         }
 
     /**
-     * Whether one share's own file holds share data, with [onFault] deciding what an
-     * unreadable file answers, because the two callers need opposite answers.
+     * Whether one share's own file holds share data, answering `true` when the file
+     * cannot be read.
      *
-     * For the stored active pointer a fault answers `true`: that account is the active
-     * one, and falling through to the scan would silently sign as a different account,
-     * while NIP-55 grants are keyed on the calling package alone and are cleared only
-     * by an explicit switch. Keeping the pointer lets the caller's own fallible read
-     * report the fault instead.
-     *
-     * For the scan a fault answers `false`, so one unreadable share does not abandon
-     * the scan and hide a readable one further down the registry. `hasShare` uses
-     * neither: there the question is whether a share might exist at all.
+     * For the stored active pointer that keeps the account: falling through to the scan
+     * would silently sign as a different account, while NIP-55 grants are keyed on the
+     * calling package alone and are cleared only by an explicit switch. For the scan it
+     * keeps an unreadable share in the count, so a fault cannot make a device with
+     * several accounts look like it has one. Either way the caller's own fallible read
+     * reports the fault. `hasShare` uses neither: there the question is whether a share
+     * might exist at all.
      */
-    private fun storesShareData(key: String, onFault: Boolean): Boolean =
-        infallibleRead("share presence check", onFault = onFault) {
+    private fun storesShareData(key: String): Boolean =
+        infallibleRead("share presence check", onFault = true) {
             getSharePrefs(key).contains(KEY_SHARE_DATA)
         }
 
@@ -1106,7 +1104,7 @@ class AndroidKeystoreStorage(
             // under the same fault rule the membership path below uses.
             PrefRead.Unreadable -> {
                 val stored = multiSharePrefs.readString(KEY_ACTIVE_SHARE)
-                return if (stored is PrefRead.Found && storesShareData(stored.value, onFault = true)) {
+                return if (stored is PrefRead.Found && storesShareData(stored.value)) {
                     stored.value
                 } else {
                     null
