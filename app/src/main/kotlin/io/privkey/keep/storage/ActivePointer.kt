@@ -26,39 +26,31 @@ internal sealed interface ActivePointer {
  * An unreadable pointer answers [ActivePointer.None] rather than falling through
  * to the registry. A pointer that is present and cannot be read is not the same
  * as no pointer, and scanning past it would sign as whichever account sorts
- * first, which is the failure the fault rule on `storesShareData` already warns
- * about for the record behind the pointer.
+ * first.
  *
- * Inference only answers when exactly one registry entry reads as holding share
- * data. One leaves nothing to choose, so answering it keeps a single-account
- * device working. Several means answering any of them is a choice the user did
- * not make, so this reports none and lets the core's "Multiple shares found,
- * please select one" arm be what happens.
+ * Inference only answers when exactly one registry entry holds share data, and
+ * a share that cannot be read counts as holding it. One leaves nothing to choose,
+ * so answering it keeps a single-account device working. Several means answering
+ * any of them is a choice the user did not make, so this reports none and lets
+ * the core's "Multiple shares found, please select one" arm be what happens. A
+ * fault never drops a share from the count: a two-account device with one
+ * unreadable share would otherwise look like a one-account device and be pinned
+ * to the readable share, which keep-mobile's resolver refuses for the same
+ * reason. A lone unreadable share is still answered, so the load that follows
+ * reports its fault rather than "no active account".
  *
- * One readable candidate, not one candidate: `holdsShareData` answers a
- * `Boolean`, so a share whose file cannot be read is indistinguishable here from
- * one holding nothing, and a two-account device with one unreadable share is
- * inferred rather than refused. That is the same shape as the fault keep-mobile
- * describes, where one readable share looks like owning one share, so this rule
- * narrows that window rather than closing it: what it does remove is the
- * persisted write that made such a guess outlive the fault. Closing it needs a
- * probe that can say unreadable, which is a wider change than this.
- *
- * @param holdsShareData whether that group's own file holds share data, with the
- *   second argument the answer an unreadable file gives: `true` when checking
- *   the pointer's own account, so a fault keeps the account rather than moving
- *   it, and `false` when scanning, so one unreadable share does not hide a
- *   readable one.
+ * @param holdsShareData whether that group's own file holds share data, answering
+ *   `true` when the file cannot be read.
  */
 internal fun activePointer(
     registry: Set<String>,
     pointer: PrefRead<String>,
-    holdsShareData: (key: String, onFault: Boolean) -> Boolean,
+    holdsShareData: (key: String) -> Boolean,
 ): ActivePointer {
     if (registry.isEmpty()) return ActivePointer.None
     when (pointer) {
         is PrefRead.Found ->
-            if (registry.contains(pointer.value) && holdsShareData(pointer.value, true)) {
+            if (registry.contains(pointer.value) && holdsShareData(pointer.value)) {
                 return ActivePointer.Use(pointer.value)
             }
         // Present and unreadable: never scan past it.
@@ -68,6 +60,6 @@ internal fun activePointer(
     }
     // Reached when there is no pointer, or the pointer is stale: it names a group
     // the registry no longer lists, or one whose share data is gone.
-    val candidates = registry.filter { holdsShareData(it, false) }
+    val candidates = registry.filter(holdsShareData)
     return if (candidates.size == 1) ActivePointer.Use(candidates.single()) else ActivePointer.None
 }
