@@ -9,12 +9,18 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.storage.PinRecord
+import io.privkey.keep.storage.PinStore
+import io.privkey.keep.storage.PrefRead
+import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.SignPolicy
+import io.privkey.keep.storage.corruptExistingValue
 import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -99,27 +105,28 @@ class Nip55CrossProcessRequestInstrumentedTest {
         // keep can only read the client's signing hash AFTER the client has interacted
         // with keep's provider (package visibility). Drive one throwaway query to
         // establish that visibility; an untrusted caller just gets an error cursor here.
-        // ActivityNotFoundException => the client APK is not installed -> skip, don't fail.
+        // ActivityNotFoundException => the client APK is not installed, which fails the run.
         try {
             runClientQuery(
                 rid("prime"), "io.privkey.keep.SIGN_EVENT",
                 arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
             )
         } catch (e: android.content.ActivityNotFoundException) {
-            assumeTrue(
+            // The flag says the client is meant to be there, as it is in CI, so a missing
+            // one fails rather than skips: a skip would read as green.
+            fail(
                 "cross-process client $clientPkg not installed; build it with " +
                     "testharness/nip55queryclient/build.sh and `adb install -r " +
-                    "testharness/nip55queryclient/out/queryclient.apk`, then rerun",
-                false
+                    "testharness/nip55queryclient/out/queryclient.apk`, then rerun"
             )
         }
 
         // Now read the live hash via the exact production path keep uses at query time.
         val live = store!!.getPackageSignatureHash(clientPkg)
-        assumeTrue(
+        assertNotNull(
             "live signing hash for $clientPkg unavailable (client not installed/visible); " +
                 "reinstall testharness/nip55queryclient/out/queryclient.apk and rerun",
-            live != null
+            live
         )
         android.util.Log.i(
             "KEEPQC-TEST",
@@ -234,10 +241,132 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
     }
 
+    // --- Gates ahead of the request: each refuses an external caller outright ---
+
+    private val signProjection = arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
+
+    @Test
+    fun crossProcess_killSwitch_refuses() {
+        val mobile = app().getKeepMobile()!!
+        try {
+            mobile.setKillSwitch(true)
+            val r = parse(runClientQuery(rid("kill"), "io.privkey.keep.SIGN_EVENT", signProjection))
+            assertEquals(listOf("error"), r.cols)
+            assertEquals("Signing is disabled (kill switch is active)", r.row0)
+        } finally {
+            mobile.setKillSwitch(false)
+        }
+    }
+
+    @Test
+    fun crossProcess_lockedPin_refuses() {
+        val pins = requireNoPin()
+        try {
+            assertTrue(pins.setPin(TEST_PIN))
+            pins.invalidateSession()
+            val r = parse(runClientQuery(rid("pin"), "io.privkey.keep.SIGN_EVENT", signProjection))
+            assertEquals(listOf("error"), r.cols)
+            assertEquals(LOCKED, r.row0)
+        } finally {
+            pins.disablePin(TEST_PIN)
+            assertEquals("the PIN must be gone for the tests after this", PinRecord.NOT_SET, pins.pinRecord())
+        }
+    }
+
+    // A PIN record that will not decrypt must still lock: read as "no PIN", it would
+    // let a background app sign on a device whose owner set one. The hash is what is
+    // broken, since a broken flag beside a usable hash still reads as a set PIN.
+    @Test
+    fun crossProcess_unreadablePinRecord_refuses() {
+        val pins = requireNoPin()
+        try {
+            assertTrue(pins.setPin(TEST_PIN))
+            pins.invalidateSession()
+            val hash = requireNotNull(rawPinHash())
+            corruptExistingValue(context, PinStore.PREFS_NAME, PIN_HASH) { it.putString(PIN_HASH, hash) }
+            val r = parse(runClientQuery(rid("pinbad"), "io.privkey.keep.SIGN_EVENT", signProjection))
+            assertEquals(listOf("error"), r.cols)
+            assertEquals(LOCKED, r.row0)
+        } finally {
+            pins.clearPin()
+            assertEquals("the PIN must be gone for the tests after this", PinRecord.NOT_SET, pins.pinRecord())
+        }
+    }
+
+    private fun rawPinHash(): String? =
+        io.privkey.keep.storage.KeystoreEncryptedPrefs.create(context, PinStore.PREFS_NAME).getString(PIN_HASH, null)
+
+    // An app holding a standing grant for relay auth must not have it honored while
+    // the relay-auth list cannot be read, since that list may exclude the relay.
+    @Test
+    fun crossProcess_unreadableRelayAuthList_rejectsRelayAuth() {
+        val r = withRelayAuthGrant(listUnreadable = true) { relayAuthQuery("relayauth") }
+        assertEquals("an unreadable list must reject relay auth", listOf("rejected"), r.cols)
+        // The rejected cursor carries no reason and a timeout produces it too, so the
+        // audit row is what shows the relay-auth gate is the one that refused.
+        assertEquals("deny_relay_whitelist", latestDecision())
+    }
+
+    // The control: the same grant and list, readable, is not rejected. Without a signing
+    // key the approval it leads to fails, which is still not a rejection.
+    @Test
+    fun crossProcess_readableRelayAuthList_doesNotReject() {
+        val r = withRelayAuthGrant(listUnreadable = false) { relayAuthQuery("relayauthok") }
+        assertTrue("a readable list holding the relay must not reject: ${r.raw}", r.cols != listOf("rejected"))
+    }
+
+    private fun relayAuthQuery(label: String): Report {
+        val event = """{"kind":22242,"content":"","tags":[["relay","wss://$RELAY_HOST"],["challenge","c"]]}"""
+        return parse(runClientQuery(rid(label), "io.privkey.keep.SIGN_EVENT", arrayOf(event, "", "")))
+    }
+
+    private fun <T> withRelayAuthGrant(listUnreadable: Boolean, block: () -> T): T {
+        val store = app().getPermissionStore()!!
+        val relays = app().getRelayAuthWhitelistStore()!!
+        assertEquals("refusing to touch an existing relay-auth list", PrefRead.Found(emptyList<String>()), relays.readHosts())
+        try {
+            runBlocking {
+                store.grantPermission(clientPkg, Nip55RequestType.SIGN_EVENT, RELAY_AUTH_KIND, PermissionDuration.FOREVER, RELAY_HOST)
+            }
+            assertTrue(relays.add("wss://$RELAY_HOST") is RelayAuthWhitelistStore.AddResult.Added)
+            if (listUnreadable) {
+                corruptExistingValue(context, RelayAuthWhitelistStore.PREFS_NAME, RELAY_HOSTS) {
+                    it.putStringSet(RELAY_HOSTS, setOf(RELAY_HOST))
+                }
+            }
+            return block()
+        } finally {
+            assertTrue("the relay-auth list must be cleared for the tests after this", relays.clear())
+            runBlocking {
+                store.revokePermission(clientPkg)
+                store.clearAppSettings(clientPkg)
+            }
+        }
+    }
+
+    private fun latestDecision(): String? = runBlocking {
+        app().getPermissionStore()!!.getAuditLog(limit = 20).firstOrNull { it.callerPackage == clientPkg }?.decision
+    }
+
+    // These tests set a PIN and then remove it, so they refuse to run over one already
+    // set rather than replace the owner's.
+    private fun requireNoPin(): PinStore {
+        val pins = app().getPinStore()!!
+        assertEquals("refusing to replace an existing PIN", PinRecord.NOT_SET, pins.pinRecord())
+        return pins
+    }
+
     companion object {
-        // Manual gate (mirrors FrostSignFixture.MANUAL_ARG): every test method reports
-        // SKIPPED unless invoked with -e crossProcessManual 1, so default
-        // connectedAndroidTest / CI stays green without the harness client installed.
+        const val TEST_PIN = "2580"
+        const val LOCKED = "Keep is locked, please unlock it first"
+        const val PIN_HASH = "pin_hash"
+        const val RELAY_HOSTS = "relay_auth_whitelist_hosts"
+        const val RELAY_AUTH_KIND = 22242
+        const val RELAY_HOST = "relay.example.com"
+
+        // Opt-in gate (mirrors FrostSignFixture.MANUAL_ARG): every test method reports
+        // SKIPPED unless invoked with -e crossProcessManual 1, so a local run without the
+        // harness client stays green. CI builds and installs the client and sets it.
         const val MANUAL_ARG = "crossProcessManual"
     }
 }
