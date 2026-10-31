@@ -938,6 +938,10 @@ fun MainScreen(
             keepMobile = keepMobile,
             storage = storage,
             onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
+            onGetRestoreCipher = {
+                requireBiometricReady()
+                storage.getCipherForEncryption()
+            },
             onBiometricAuth = { cipher, callback ->
                 onBiometricRequest(
                     appContext.getString(R.string.main_vault_backup_title),

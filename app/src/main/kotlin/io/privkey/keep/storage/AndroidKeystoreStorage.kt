@@ -286,8 +286,7 @@ class AndroidKeystoreStorage(
         return "$KEYSTORE_PREFIX$legacySanitized"
     }
 
-    private fun getSharePrefs(key: String): ReadablePrefs =
-        createEncryptedPrefs("$PREFS_PREFIX${sanitizeKey(key)}$prefsSuffix")
+    private fun getSharePrefs(key: String): ReadablePrefs = createEncryptedPrefs(sharePrefsNameFor(key))
 
     private fun getKeystoreAlias(key: String): String = "$KEYSTORE_PREFIX${sanitizeKey(key)}"
 
@@ -650,6 +649,9 @@ class AndroidKeystoreStorage(
     @VisibleForTesting
     internal fun keystoreAliasFor(key: String): String = getKeystoreAlias(key)
 
+    @VisibleForTesting
+    internal fun sharePrefsNameFor(key: String): String = "$PREFS_PREFIX${sanitizeKey(key)}$prefsSuffix"
+
     private fun isLegacyAccount(key: String): Boolean {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return false
@@ -850,6 +852,14 @@ class AndroidKeystoreStorage(
         }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
+        // Before the cipher is taken: the core probes for a share it is about to write,
+        // and a probe that spent the request's only cipher left the write without one.
+        // Only a record that is not there skips it. One that is there and will not read
+        // goes on to the decrypt, so the probe never reports a stored share as absent
+        // and invites a write over it.
+        if (getSharePrefs(key).readString(KEY_SHARE_DATA) == PrefRead.Absent) {
+            throw KeepMobileException.StorageException("No share stored for key: $key")
+        }
         val cipher = consumePendingCipher(requestId, CipherRole.DECRYPT)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareByKeyWithCipher(cipher, key)
