@@ -411,6 +411,11 @@ class KeepMobileApp : Application() {
 
     fun getPinStore(): PinStore? = pinStore
 
+    // A test that deletes the PIN file under the live store leaves it reading names from
+    // a key the file no longer holds, so the tests that drive the provider reopen it.
+    @androidx.annotation.VisibleForTesting
+    internal fun reopenPinStore(): PinStore = PinStore(this).also { pinStore = it }
+
     fun getBiometricTimeoutStore(): BiometricTimeoutStore? = biometricTimeoutStore
 
     fun getOnboardingStore(): OnboardingStore? = onboardingStore

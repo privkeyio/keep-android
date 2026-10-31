@@ -351,7 +351,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
     // These tests set a PIN and then remove it, so they refuse to run over one already
     // set rather than replace the owner's.
     private fun requireNoPin(): PinStore {
-        val pins = app().getPinStore()!!
+        val pins = app().reopenPinStore()
         assertEquals("refusing to replace an existing PIN", PinRecord.NOT_SET, pins.pinRecord())
         return pins
     }
