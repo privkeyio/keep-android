@@ -117,13 +117,19 @@ class BunkerService : Service() {
         /**
          * Revokes the oldest clients past [MAX_AUTHORIZED_CLIENTS], which a list saved before
          * the cap can hold and the core now refuses to save. They are chosen under the config
-         * lock, so a revoke that landed first is counted. Returns the saved bunker config.
+         * lock, so a revoke that landed first is counted. Returns how many were chosen.
          */
         internal suspend fun revokeClientsOverCap(
             context: Context,
             keepMobile: io.privkey.keep.uniffi.KeepMobile,
-        ): io.privkey.keep.uniffi.BunkerConfigInfo =
-            revokeSelected(context, keepMobile) { clientsOverCap(it) }
+        ): Int {
+            var chosen = 0
+            revokeSelected(context, keepMobile) { clientsOverCap(it).also { over -> chosen = over.size } }
+            return chosen
+        }
+
+        /** Whether every client is to be revoked before the next start serves. */
+        internal fun revokeAllPending(context: Context): Boolean = revokeAllMark(context).isSet()
 
         internal const val BUNKER_MARKERS_PREFS = "keep_bunker_markers"
         internal const val KEY_ROTATED_FOR_EARLIER_REVOKES = "rotated_for_earlier_revokes"
@@ -232,13 +238,18 @@ class BunkerService : Service() {
             select: (List<String>) -> Collection<String>?,
         ): io.privkey.keep.uniffi.BunkerConfigInfo {
             var revoked = emptySet<String>()
+            var nothingChosen = false
             // Under the config lock, so a connect save that read the list before the core
             // rewrote it cannot write a revoked client back (see authorizeClient).
             val revokeFailure = BunkerConfigStore.withLock {
-                val generation = revokeGeneration.incrementAndGet()
-                val service = current()
                 val config = keepMobile.getBunkerConfig()
                 val pubkeys = select(config.authorizedClients)
+                if (pubkeys?.isEmpty() == true) {
+                    nothingChosen = true
+                    return@withLock null
+                }
+                val generation = revokeGeneration.incrementAndGet()
+                val service = current()
                 revoked = revokedClientSet(
                     pubkeys,
                     config.authorizedClients,
@@ -261,6 +272,7 @@ class BunkerService : Service() {
                 if (pubkeys == null || failure != null) everyClientRevokedAt.set(generation)
                 failure
             }
+            if (nothingChosen) return keepMobile.getBunkerConfig()
             revoked.forEach { pubkey ->
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }

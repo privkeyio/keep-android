@@ -77,9 +77,8 @@ class BunkerClientCapTest {
         val kept = (1..BunkerService.MAX_AUTHORIZED_CLIENTS).map { "%064x".format(it) }
         storeLegacyList(listOf(OFF_CURVE) + OLDEST + kept)
 
-        val saved = BunkerService.revokeClientsOverCap(context, mobile)
+        assertEquals(OLDEST.size + 1, BunkerService.revokeClientsOverCap(context, mobile))
 
-        assertEquals(kept, saved.authorizedClients)
         assertEquals(kept, mobile.getBunkerConfig().authorizedClients)
     }
 
@@ -88,7 +87,7 @@ class BunkerClientCapTest {
         val clients = OLDEST + (1..BunkerService.MAX_AUTHORIZED_CLIENTS - OLDEST.size).map { "%064x".format(it) }
         storeLegacyList(clients)
 
-        BunkerService.revokeClientsOverCap(context, mobile)
+        assertEquals(0, BunkerService.revokeClientsOverCap(context, mobile))
 
         assertEquals(clients, mobile.getBunkerConfig().authorizedClients)
     }

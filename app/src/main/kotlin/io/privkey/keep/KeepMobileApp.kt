@@ -355,23 +355,22 @@ class KeepMobileApp : Application() {
             if (BunkerService.clientsOverCap(config.authorizedClients).isNotEmpty()) {
                 applicationScope.launch(Dispatchers.IO) {
                     runCatching { BunkerService.revokeClientsOverCap(this@KeepMobileApp, mobile) }
-                        .onSuccess { saved ->
-                            val removed = config.authorizedClients.size - saved.authorizedClients.size
-                            runCatching {
+                        .onSuccess { removed ->
+                            if (removed > 0) runCatching {
                                 eventLogStore?.log(
                                     EventLogCategory.BUNKER, EventLogLevel.WARN, "bunker",
-                                    "Removed $removed of the oldest apps to keep the list at ${BunkerService.MAX_AUTHORIZED_CLIENTS}. They need pairing again"
+                                    "Removed $removed of the oldest apps to keep the list at ${BunkerService.MAX_AUTHORIZED_CLIENTS}. They need pairing again, and the bunker URL changed"
                                 )
                             }
                         }
                         .onFailure { e ->
                             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke clients over the cap: ${e::class.simpleName}")
-                            runCatching {
-                                eventLogStore?.log(
-                                    EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker",
-                                    "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}. Revoke older apps if bunker settings do not save"
-                                )
+                            val message = if (BunkerService.revokeAllPending(this@KeepMobileApp)) {
+                                "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}, so every app is revoked and needs pairing again"
+                            } else {
+                                "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}. Revoke older apps if bunker settings do not save"
                             }
+                            runCatching { eventLogStore?.log(EventLogCategory.BUNKER, EventLogLevel.ERROR, "bunker", message) }
                         }
                 }
             }
