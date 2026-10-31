@@ -349,8 +349,10 @@ class KeepMobileApp : Application() {
         runCatching {
             val mobile = keepMobile ?: return
             val config = mobile.getBunkerConfig()
+            // On its own, so a start refused in the background does not skip the trim below.
             if (config.enabled) {
-                BunkerService.start(this)
+                runCatching { BunkerService.start(this) }
+                    .onFailure { e -> if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start BunkerService: ${e::class.simpleName}", e) }
             }
             if (BunkerService.clientsOverCap(config.authorizedClients).isNotEmpty()) {
                 applicationScope.launch(Dispatchers.IO) {
@@ -366,7 +368,7 @@ class KeepMobileApp : Application() {
                         .onFailure { e ->
                             if (BuildConfig.DEBUG) Log.e(TAG, "Failed to revoke clients over the cap: ${e::class.simpleName}")
                             val message = if (BunkerService.revokeAllPending(this@KeepMobileApp)) {
-                                "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}, so every app is revoked and needs pairing again"
+                                "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}, so every app will be revoked before the bunker next starts and will need pairing again"
                             } else {
                                 "Could not trim the app list to ${BunkerService.MAX_AUTHORIZED_CLIENTS}. Revoke older apps if bunker settings do not save"
                             }
