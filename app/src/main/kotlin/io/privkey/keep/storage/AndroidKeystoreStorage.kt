@@ -1091,7 +1091,8 @@ class AndroidKeystoreStorage(
      */
     private fun storesShareData(key: String): Boolean =
         infallibleRead("share presence check", onFault = true) {
-            getSharePrefs(key).contains(KEY_SHARE_DATA)
+            // Not contains(): it answers false for an entry the file refuses to read.
+            getSharePrefs(key).readString(KEY_SHARE_DATA) != PrefRead.Absent
         }
 
     private fun activeShareKeyUnguarded(): String? {
@@ -1222,8 +1223,8 @@ class AndroidKeystoreStorage(
         // calling package alone and are cleared only by an explicit account switch. A
         // pointer left dangling is the lesser cost: the resolver no longer heals it,
         // because it writes nothing now, but it still answers an unambiguous registry,
-        // so one readable share keeps working and several ask for a choice.
-        if (multiSharePrefs.getString(KEY_ACTIVE_SHARE, null) == null) {
+        // so one listed share keeps working and several, readable or not, ask for a choice.
+        if (multiSharePrefs.readString(KEY_ACTIVE_SHARE) == PrefRead.Absent) {
             multiSharePrefs.edit().putString(KEY_ACTIVE_SHARE, groupPubkeyHex).commit()
         }
         prefs.edit().clear().apply()

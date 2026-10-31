@@ -193,6 +193,26 @@ class InfallibleStorageReadTest {
     }
 
     @Test
+    fun a_stale_pointer_does_not_leave_the_readable_share_to_be_guessed() {
+        // The pointer names a group the registry does not list, so the scan runs, and
+        // the unreadable share still counts there.
+        seedTwoSharesWithTheFirstUnreadable(activeKey = "cc".repeat(32))
+
+        assertNull(storage().getActiveShareKey())
+    }
+
+    @Test
+    fun a_lone_unreadable_share_is_answered_so_its_load_reports_the_fault() {
+        seedShareFile(GROUP_HEX, GROUP_B64)
+        KeystoreEncryptedPrefs.create(context, MULTI_PREFS + SUFFIX).edit()
+            .putStringSet("all_share_keys", setOf(GROUP_HEX))
+            .commit()
+        breakNameResolution(shareStoreName(GROUP_HEX) + SUFFIX)
+
+        assertEquals(GROUP_HEX, storage().getActiveShareKey())
+    }
+
+    @Test
     fun an_unreadable_active_share_is_not_silently_swapped_for_a_readable_one() {
         // A fault keeps the pointer's own account too. The
         // active account is the one the stored pointer names; treating "cannot read
