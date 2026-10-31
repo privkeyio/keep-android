@@ -33,6 +33,19 @@ private val EMPTY_RELAY_CONFIG = RelayConfigInfo(emptyList(), emptyList(), empty
 
 internal const val MAX_ACCOUNT_NAME_LENGTH = 64
 
+internal data class RelayConfigRead(val config: RelayConfigInfo, val unreadable: Boolean)
+
+/**
+ * The active account's relay config, shown as empty when it cannot be read. Only a failed
+ * read for an account counts as unreadable: with no active key there is no record of an
+ * account to reset.
+ */
+internal fun readRelayConfig(activeKey: String?, read: (String?) -> RelayConfigInfo): RelayConfigRead =
+    runCatching { read(activeKey) }.fold(
+        onSuccess = { RelayConfigRead(it, unreadable = false) },
+        onFailure = { RelayConfigRead(EMPTY_RELAY_CONFIG, unreadable = activeKey != null) }
+    )
+
 // Per-round timeout for the DKG. The ceremony has three blocking network rounds
 // (Round1, Round2, Confirming), so the whole run can approach 3x this before the
 // share is persisted.
@@ -77,6 +90,7 @@ internal class AccountActions(
         val allAccounts: List<AccountInfo>,
         val relays: List<String>,
         val profileRelays: List<String>,
+        val relayConfigUnreadable: Boolean,
         val activeDidBackup: Boolean?
     )
 
@@ -174,12 +188,15 @@ internal class AccountActions(
             val shareInfo = keepMobile.getShareInfo()
             val activeKey = storage.getActiveShareKey()
             val accounts = storage.listAllShares().map { it.toAccountInfo() }
-            val config = runCatching { keepMobile.getRelayConfig(activeKey) }.getOrNull()
-                ?: EMPTY_RELAY_CONFIG
+            val relayConfig = readRelayConfig(activeKey, keepMobile::getRelayConfig)
             val activeDidBackup = runCatching { keepMobile.getActiveShareMetadata()?.didBackup }
                 .onFailure { Log.w("AccountActions", "getActiveShareMetadata failed: ${it::class.simpleName}") }
                 .getOrNull()
-            AccountState(hasShare, shareInfo, activeKey, accounts, config.frostRelays, config.profileRelays, activeDidBackup)
+            AccountState(
+                hasShare, shareInfo, activeKey, accounts,
+                relayConfig.config.frostRelays, relayConfig.config.profileRelays, relayConfig.unreadable,
+                activeDidBackup
+            )
         }
         onStateChanged(result)
     }
@@ -649,6 +666,25 @@ internal class AccountActions(
             dkgRunId.set(null)
             dkgCancelPending.set(false)
             dkgInProgress.set(false)
+        }
+    }
+
+    /**
+     * Replaces the active account's relay config when it cannot be read, then refreshes the
+     * account state whether or not that succeeded, so a record that has become readable
+     * again drops the offer. The key is read under [accountMutex] so a switch cannot move
+     * the reset onto another account. The caller confirms the owner first.
+     */
+    suspend fun resetUnreadableRelayConfig() {
+        accountMutex.withLock {
+            try {
+                withContext(Dispatchers.IO) {
+                    val key = checkNotNull(storage.getActiveShareKey()) { "no active account" }
+                    keepMobile.resetUnreadableRelayConfig(key)
+                }
+            } finally {
+                withContext(NonCancellable) { runCatching { refreshAccountState() } }
+            }
         }
     }
 
