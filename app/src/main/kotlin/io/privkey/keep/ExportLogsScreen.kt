@@ -302,6 +302,7 @@ private suspend fun buildExportContent(
                 obj.put("wasAutomatic", e.wasAutomatic)
                 obj.put("previousHash", e.previousHash ?: JSONObject.NULL)
                 obj.put("entryHash", e.entryHash)
+                obj.put("requestId", e.requestId ?: JSONObject.NULL)
                 array.put(obj)
             }
             Triple(array.toString(2), entries.size, totalCount)

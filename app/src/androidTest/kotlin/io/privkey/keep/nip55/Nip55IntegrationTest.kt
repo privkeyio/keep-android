@@ -343,20 +343,14 @@ class Nip55IntegrationTest {
 
     @Test
     fun riskAssessor_sensitiveKind_flagsHighRisk() = runBlocking {
-        val auditDao = database.auditLogDao()
-        val appSettingsDao = database.appSettingsDao()
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
-
-        val result = assessor.assess("com.test.app", 0)
+        val result = store.riskAssessor.assess("com.test.app", 0)
         assertTrue("Kind 0 (metadata) should be flagged as sensitive", result.factors.contains(RiskFactor.SENSITIVE_EVENT_KIND))
         assertTrue("Sensitive event should require auth", result.requiredAuth.atLeast(AuthLevel.PIN))
     }
 
     @Test
     fun riskAssessor_normalKind_lowRisk() = runBlocking {
-        val auditDao = database.auditLogDao()
         val appSettingsDao = database.appSettingsDao()
-        val assessor = RiskAssessor(auditDao, appSettingsDao)
 
         appSettingsDao.insertOrUpdate(Nip55AppSettings(
             callerPackage = "com.test.app",
@@ -367,18 +361,11 @@ class Nip55IntegrationTest {
             durationMs = null
         ))
 
-        for (i in 1..5) {
-            auditDao.insert(Nip55AuditLog(
-                callerPackage = "com.test.app",
-                requestType = "SIGN_EVENT",
-                eventKind = 1,
-                decision = "allow",
-                wasAutomatic = false,
-                timestamp = System.currentTimeMillis() - i * 60 * 1000L
-            ))
+        repeat(5) {
+            store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         }
 
-        val result = assessor.assess("com.test.app", 1)
+        val result = store.riskAssessor.assess("com.test.app", 1)
         assertEquals("Normal kind 1 with history should have low risk", AuthLevel.NONE, result.requiredAuth)
     }
 

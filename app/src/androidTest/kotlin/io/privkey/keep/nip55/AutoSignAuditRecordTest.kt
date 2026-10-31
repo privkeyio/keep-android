@@ -5,7 +5,12 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.uniffi.Nip55RequestType
+import android.os.SystemClock
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -118,20 +123,165 @@ class AutoSignAuditRecordTest {
     @Test
     fun anAppendRefusedItsClaimWritesNothing() = runBlocking {
         val written = store.logAutomaticOperationIfClaimed(
-            CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", claim = { false }
+            CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", requestId = null, claim = { false }
         )
 
         assertFalse("a refused claim must report nothing written", written)
         assertEquals("and must leave no row", 0, store.getAuditLogCount())
         assertTrue(
             "a later append still lands",
-            store.logAutomaticOperationIfClaimed(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", claim = { true })
+            store.logAutomaticOperationIfClaimed(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", requestId = null, claim = { true })
         )
         assertEquals(1, store.getAuditLogCount())
         assertEquals("and the chain verifies", ChainVerificationResult.Valid, store.verifyAuditChain())
     }
 
+    // Each auto-signed row carries its own request id inside the MAC, and the kind
+    // counts as signed afterwards.
+    @Test
+    fun anAutoSignedRowCarriesARequestIdAndCountsAsSigned() = runBlocking {
+        val provider = Nip55ContentProvider()
+        assertTrue(provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        assertTrue(provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+
+        val ids = store.getAuditLog(10).map { it.requestId }
+        assertEquals(2, ids.size)
+        ids.forEach { assertTrue("a 32 lowercase hex id, got $it", it != null && REQUEST_ID.matches(it)) }
+        assertTrue("each request gets its own id", ids[0] != ids[1])
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // The request id is inside the row's MAC, so changing it, or dropping it, breaks the
+    // chain, and the approval it named no longer counts.
+    @Test
+    fun aChangedRequestIdBreaksTheChain() = assertRequestIdIsBound("'${"a".repeat(32)}'")
+
+    @Test
+    fun aDroppedRequestIdBreaksTheChain() = assertRequestIdIsBound("NULL")
+
+    private fun assertRequestIdIsBound(replacement: String) = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        val row = store.getAuditLog(1).single()
+
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE nip55_audit_log SET requestId = $replacement WHERE id = ${row.id}"
+        )
+
+        assertTrue(store.verifyAuditChain() !is ChainVerificationResult.Valid)
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // The approval a caller was told did not land is named by an abandoned row after
+    // it, and no longer makes the kind familiar.
+    @Test
+    fun anAbandonedApprovalDoesNotCountAsSigned() = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        val id = requireNotNull(store.getAuditLog(1).single().requestId)
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+
+        store.logAbandoned(CALLER, Nip55RequestType.SIGN_EVENT, 1, id)
+
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // The case the abandoned row exists for: an append that has claimed and then
+    // stalls past the budget is reported as not landed, and its row commits later.
+    // A transaction held on another thread stalls it inside its own.
+    @Test
+    fun anApprovalThatLandsAfterItsCallerGaveUpIsAbandoned() = runBlocking {
+        val holding = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val blocker = thread { database.runInTransaction { holding.countDown(); release.await(30, TimeUnit.SECONDS) } }
+        assertTrue(holding.await(5, TimeUnit.SECONDS))
+
+        val recorded = try {
+            Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1)
+        } finally {
+            release.countDown()
+            blocker.join()
+        }
+
+        assertFalse("an append past the budget must not report success", recorded)
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (store.getAuditLogCount() < 2 && SystemClock.elapsedRealtime() < deadline) delay(50)
+        val rows = store.getAuditLog(10).sortedBy { it.id }
+        assertEquals(listOf("allow", AUDIT_DECISION_ABANDONED), rows.map { it.decision })
+        assertEquals("the abandoned row names the approval", rows[0].requestId, rows[1].requestId)
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // A row written without the key breaks the chain, and nothing in a chain that does
+    // not verify can make a kind familiar, the forged row included.
+    @Test
+    fun aChainThatDoesNotVerifyMakesNoKindFamiliar() = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+
+        forgeRow(kind = 7)
+
+        assertFalse(store.hasSignedKindBefore(CALLER, 7))
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // Once familiarity is known it is kept from the writer's own rows, so a row forged
+    // after that adds nothing, and the verification that finds it withdraws the rest.
+    @Test
+    fun aRowForgedAfterFamiliarityIsKnownAddsNothing() = runBlocking {
+        assertTrue(Nip55ContentProvider().recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+
+        forgeRow(kind = 7)
+        assertFalse("a forged row adds nothing", store.hasSignedKindBefore(CALLER, 7))
+
+        assertTrue(store.verifyAuditChain() !is ChainVerificationResult.Valid)
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // Familiarity is kept per database, so an approval written through another store,
+    // as the bunker's is, counts for this one.
+    @Test
+    fun anApprovalWrittenThroughAnotherStoreCounts() = runBlocking {
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+
+        PermissionStore(database).logOperation(CALLER, Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    // A row the anchor cannot account for is caught by the next append, which withdraws
+    // familiarity without waiting for a verification.
+    @Test
+    fun aTamperCaughtAtAnAppendWithdrawsFamiliarity() = runBlocking {
+        val provider = Nip55ContentProvider()
+        assertTrue(provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 1))
+        assertTrue(store.hasSignedKindBefore(CALLER, 1))
+
+        forgeRow(kind = 7, previousHash = "f".repeat(64))
+        provider.recordAutoSigned(store, CALLER, Nip55RequestType.SIGN_EVENT, 2)
+
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+        assertFalse(store.hasSignedKindBefore(CALLER, 2))
+    }
+
+    private suspend fun forgeRow(kind: Int, previousHash: String? = null) {
+        database.auditLogDao().insert(
+            Nip55AuditLog(
+                timestamp = System.currentTimeMillis(),
+                callerPackage = CALLER,
+                requestType = Nip55RequestType.SIGN_EVENT.name,
+                eventKind = kind,
+                decision = "allow",
+                wasAutomatic = true,
+                previousHash = previousHash ?: database.auditLogDao().getLastEntryHash(),
+                entryHash = "0".repeat(64)
+            )
+        )
+    }
+
     private companion object {
         const val CALLER = "io.privkey.keep.test.autosign.audit"
+        val REQUEST_ID = Regex("[0-9a-f]{32}")
     }
 }

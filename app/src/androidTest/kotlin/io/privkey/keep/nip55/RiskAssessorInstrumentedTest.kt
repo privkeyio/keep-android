@@ -18,7 +18,7 @@ class RiskAssessorInstrumentedTest {
     }
 
     private fun createAssessor(
-        auditDao: Nip55AuditLogDao,
+        auditDao: FakeAuditLogDao,
         appSettingsDao: Nip55AppSettingsDao,
         elapsedRealtime: Long = TEST_ELAPSED_TIME,
         currentTimeMillis: Long = TEST_WALL_CLOCK,
@@ -26,6 +26,7 @@ class RiskAssessorInstrumentedTest {
     ) = RiskAssessor(
         auditDao = auditDao,
         appSettingsDao = appSettingsDao,
+        signedKindBefore = { _, _ -> auditDao.kindCount > 0 },
         elapsedRealtimeProvider = { elapsedRealtime },
         currentTimeMillisProvider = { currentTimeMillis },
         currentHourProvider = { currentHour }
@@ -208,7 +209,7 @@ class RiskAssessorInstrumentedTest {
     }
 
     private class FakeAuditLogDao(
-        private val kindCount: Int = 0,
+        val kindCount: Int = 0,
         private val recentCount: Int = 0
     ) : Nip55AuditLogDao {
         override suspend fun insert(log: Nip55AuditLog): Long = 0
@@ -224,7 +225,6 @@ class RiskAssessorInstrumentedTest {
         override suspend fun getLastPreviousHash(): String? = null
         override suspend fun getAllOrdered(): List<Nip55AuditLog> = emptyList()
         override suspend fun getCount(): Int = 0
-        override suspend fun countByPackageAndKind(packageName: String, eventKind: Int): Int = kindCount
         override suspend fun countSince(packageName: String, since: Long): Int = recentCount
         override suspend fun deleteAll() {}
     }

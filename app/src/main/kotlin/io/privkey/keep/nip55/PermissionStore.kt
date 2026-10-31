@@ -19,11 +19,15 @@ import io.privkey.keep.uniffi.nip55EffectiveGrantDuration
 import io.privkey.keep.uniffi.nip55ResolveDecision
 import io.privkey.keep.uniffi.nip55VerifyAuditChain
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val MINUTE_MS = 60 * 1000L
 private const val HOUR_MS = 60 * MINUTE_MS
 private const val DAY_MS = 24 * HOUR_MS
 private const val WEEK_MS = 7 * DAY_MS
+private const val FAMILIARITY_BUDGET_MS = 2_000L
 
 class PermissionStore(private val database: Nip55Database) {
     private val dao = database.permissionDao()
@@ -32,7 +36,7 @@ class PermissionStore(private val database: Nip55Database) {
     private val velocityDao = database.velocityDao()
     private val auditWriter = AuditLogWriter(database)
 
-    val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao) }
+    val riskAssessor: RiskAssessor by lazy { RiskAssessor(auditDao, appSettingsDao, ::hasSignedKindBefore) }
 
     /**
      * Retires what an expired app-settings window granted, so the app has to be approved
@@ -273,8 +277,20 @@ class PermissionStore(private val database: Nip55Database) {
         requestType: Nip55RequestType,
         eventKind: Int?,
         decision: String,
+        requestId: String?,
         claim: () -> Boolean
-    ): Boolean = logOperation(callerPackage, requestType, eventKind, decision, true, claim, null)
+    ): Boolean = logOperation(callerPackage, requestType, eventKind, decision, true, claim, requestId, null)
+
+    // Names the automatic approval written with [requestId] as one its caller was told
+    // was refused, so [hasSignedKindBefore] does not count it.
+    suspend fun logAbandoned(
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        requestId: String
+    ) {
+        logOperation(callerPackage, requestType, eventKind, AUDIT_DECISION_ABANDONED, true, requestId = requestId, extraInTransaction = null)
+    }
 
     // [extraInTransaction] lets a related permission write commit atomically with the
     // audit row in a single Room transaction; the anchor is advanced only once that
@@ -286,6 +302,7 @@ class PermissionStore(private val database: Nip55Database) {
         decision: String,
         wasAutomatic: Boolean,
         claim: () -> Boolean = { true },
+        requestId: String? = null,
         extraInTransaction: (suspend () -> Unit)?
     ): Boolean {
         val normalizedEventKind = eventKind ?: EVENT_KIND_GENERIC
@@ -306,8 +323,10 @@ class PermissionStore(private val database: Nip55Database) {
                     eventKind = normalizedEventKind,
                     decision = decision,
                     timestamp = timestamp,
-                    wasAutomatic = wasAutomatic
-                )
+                    wasAutomatic = wasAutomatic,
+                    requestId = requestId
+                ),
+                requestId = requestId
             )
         }, extraInTransaction, claim)
     }
@@ -390,7 +409,14 @@ class PermissionStore(private val database: Nip55Database) {
 
     // Chain verification (keyed-HMAC walk: legacy/truncated/broken/tampered) lives
     // in Rust; Android supplies the ordered rows and the keystore HMAC key.
-    suspend fun verifyAuditChain(): ChainVerificationResult {
+    suspend fun verifyAuditChain(): ChainVerificationResult =
+        verifyAuditChainOnce().also {
+            if (it !is ChainVerificationResult.Valid && it !is ChainVerificationResult.PartiallyVerified) {
+                auditWriter.distrust()
+            }
+        }
+
+    private suspend fun verifyAuditChainOnce(): ChainVerificationResult {
         val hmacKey = Nip55Database.getHmacKey()
             ?: throw IllegalStateException("HMAC key not initialized - cannot verify audit chain")
         // Read rows + anchor + tamper flag atomically under the audit write lock so no
@@ -709,8 +735,38 @@ class PermissionStore(private val database: Nip55Database) {
         appSettingsDao.delete(callerPackage)
     }
 
+    // Answered from the writer's familiarity, which counts only rows of a chain that
+    // verified, since a row written without the key could otherwise lift the first-kind
+    // risk factor. Bounded because the writer's lock can be held by a stalled append, and
+    // an unknown history reads as never signed, which keeps the factor.
     suspend fun hasSignedKindBefore(callerPackage: String, eventKind: Int): Boolean =
-        auditDao.countByPackageAndKind(callerPackage, eventKind) > 0
+        withContext(Dispatchers.IO) {
+            withTimeoutOrNull(FAMILIARITY_BUDGET_MS) {
+                auditWriter.familiar(callerPackage, eventKind, ::chainIntact)
+            } ?: false
+        }
+
+    // The verdict [verifyAuditChain] reaches on the same rows, without its anchor heals,
+    // which a calling app must not be able to trigger.
+    private fun chainIntact(entries: List<Nip55AuditLog>, anchor: AuditAnchor?, tamperDetected: Boolean): Boolean {
+        val hmacKey = Nip55Database.getHmacKey() ?: return false
+        val rustResult = nip55VerifyAuditChain(entries.map { it.toRustAuditEntry() }, hmacKey)
+            .toChainVerificationResult()
+        val rustIntact = rustResult is ChainVerificationResult.Valid ||
+            rustResult is ChainVerificationResult.PartiallyVerified
+        if (tamperDetected) return false
+        if (anchor == null) return rustIntact
+        val latest = entries.lastOrNull()
+        val count = entries.size.toLong()
+        val latestHash = latest?.entryHash ?: ""
+        if (isResumableAppend(anchor, count, latest?.previousHash, latestHash, rustIntact) ||
+            isResumablePrune(anchor, count, latestHash, rustIntact)
+        ) {
+            return true
+        }
+        val result = resolveChainVerification(false, anchor, count, latestHash, latest?.id ?: 0L, rustResult)
+        return result is ChainVerificationResult.Valid || result is ChainVerificationResult.PartiallyVerified
+    }
 
     suspend fun getAppAgeMs(callerPackage: String): Long? =
         riskAssessor.getAppAgeMs(callerPackage)
@@ -752,7 +808,8 @@ private fun calculateEntryHash(
     eventKind: Int?,
     decision: String,
     timestamp: Long,
-    wasAutomatic: Boolean
+    wasAutomatic: Boolean,
+    requestId: String? = null
 ): String {
     val hmacKey = Nip55Database.getHmacKey()
         ?: throw IllegalStateException("HMAC key not initialized - cannot compute audit entry hash")
@@ -764,10 +821,13 @@ private fun calculateEntryHash(
         decision,
         timestamp,
         wasAutomatic,
-        null,
+        requestId,
         hmacKey
     )
 }
+
+internal fun signedKindBefore(entries: List<Nip55AuditLog>, callerPackage: String, eventKind: Int): Boolean =
+    AuditFamiliarity(trusted = true).apply { entries.forEach(::add) }.signed(callerPackage, eventKind)
 
 private fun Nip55AuditLog.toRustAuditEntry(): Nip55AuditEntry =
     Nip55AuditEntry(
@@ -778,7 +838,7 @@ private fun Nip55AuditLog.toRustAuditEntry(): Nip55AuditEntry =
         eventKind = eventKind,
         decision = decision,
         wasAutomatic = wasAutomatic,
-        requestId = null,
+        requestId = requestId,
         previousHash = previousHash,
         entryHash = entryHash
     )

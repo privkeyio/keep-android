@@ -62,7 +62,7 @@ class AndroidSigningAuditStorage(
                     )
                 }
                 log
-            })
+            }, familiar = false)
         }
     }
 
