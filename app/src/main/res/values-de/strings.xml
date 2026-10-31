@@ -118,4 +118,5 @@
     <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> Mitsignieren-Anfragen</string>
     <string name="cosign_confirm_approved">Mitsigniert</string>
     <string name="cosign_confirm_rejected">Anfrage abgelehnt</string>
+    <string name="nip46_client_limit_toast">Zu viele verbundene Apps. Widerrufe eine, bevor du eine weitere verbindest.</string>
 </resources>

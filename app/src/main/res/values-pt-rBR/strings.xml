@@ -119,4 +119,5 @@
     <string name="cosign_notification_title_multi"><xliff:g id="count" example="2">%1$d</xliff:g> solicitações de coassinatura</string>
     <string name="cosign_confirm_approved">Coassinado</string>
     <string name="cosign_confirm_rejected">Solicitação recusada</string>
+    <string name="nip46_client_limit_toast">Muitos apps conectados. Revogue um antes de conectar outro.</string>
 </resources>
