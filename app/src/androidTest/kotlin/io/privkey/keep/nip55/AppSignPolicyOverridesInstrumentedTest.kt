@@ -351,7 +351,8 @@ class AppSignPolicyOverridesInstrumentedTest {
     /**
      * A tier set before overrides were per account is only a floor until it is adopted,
      * so an app pinned looser than the global resolves to the global. Adoption makes it
-     * the active account's again, and no other account's.
+     * the active account's again. It is then no floor for any other account, which
+     * follows its own policy for the app.
      */
     @Test
     fun adoptionRestoresALooseningLegacyTierForTheActiveAccountOnly() = runBlocking {
@@ -364,7 +365,8 @@ class AppSignPolicyOverridesInstrumentedTest {
 
         assertTrue(markers.getBoolean(SignPolicySelectionPrefs.LEGACY_OVERRIDE_ADOPTION_MARKER, false))
         assertEquals(SignPolicySelection.AUTO, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
-        assertEquals(SignPolicySelection.MANUAL, core.appOverride(OTHER_ACCOUNT, PKG))
+        assertNull(core.appOverride(OTHER_ACCOUNT, PKG))
+        assertEquals(SignPolicySelection.MANUAL, core.effectivePolicy(OTHER_ACCOUNT, PKG))
     }
 
     /** A tier the user chose after the pin is kept, not replaced by the legacy one. */
