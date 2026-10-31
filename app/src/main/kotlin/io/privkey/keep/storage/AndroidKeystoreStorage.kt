@@ -944,12 +944,9 @@ class AndroidKeystoreStorage(
                 throw KeepMobileException.StorageException("Share registry could not be read")
         }
 
-        val sharePrefs = getSharePrefs(key)
-        val cleared = sharePrefs.edit().clear().commit()
-        if (!cleared) {
-            throw KeepMobileException.StorageException("Failed to clear share metadata")
-        }
-
+        // The key goes before the data. A share whose data was cleared while its key
+        // stayed looks absent, so a restore or import writes it under the default key
+        // and every later read picks the leftover key instead.
         val alias = getKeystoreAlias(key)
         val legacyAlias = getLegacyKeystoreAlias(key)
         try {
@@ -961,6 +958,12 @@ class AndroidKeystoreStorage(
             }
         } catch (e: Exception) {
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
+        }
+
+        val sharePrefs = getSharePrefs(key)
+        val cleared = sharePrefs.edit().clear().commit()
+        if (!cleared) {
+            throw KeepMobileException.StorageException("Failed to clear share metadata")
         }
 
         val updatedKeys = existingKeys - key
