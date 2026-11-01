@@ -57,10 +57,8 @@ class DuplicateImportRefusalTest {
         }
     }
 
-    private fun refusal(call: () -> ShareInfo): Int {
-        val e = assertThrows(KeepMobileException.InvalidShare::class.java) { stored(call) }
-        return importFailureMessage(e)
-    }
+    private fun <E : KeepMobileException> refusal(type: Class<E>, call: () -> ShareInfo): Int =
+        importFailureMessage(assertThrows(type) { stored(call) })
 
     @Test
     fun aStoredKeyAgainIsNamedAsAlreadyStored() {
@@ -69,7 +67,7 @@ class DuplicateImportRefusalTest {
 
         assertEquals(
             R.string.account_import_already_stored,
-            refusal { mobile.createAccountFromMnemonic(mnemonic.copyOf(), "", "dup-import-test") }
+            refusal(KeepMobileException.KeyAlreadyStored::class.java) { mobile.createAccountFromMnemonic(mnemonic.copyOf(), "", "dup-import-test") }
         )
     }
 
@@ -80,7 +78,18 @@ class DuplicateImportRefusalTest {
 
         assertEquals(
             R.string.account_import_other_share_stored,
-            refusal { mobile.importShare(shares[1].exportData, PASSPHRASE, "dup-import-test") }
+            refusal(KeepMobileException.GroupShareAlreadyStored::class.java) { mobile.importShare(shares[1].exportData, PASSPHRASE, "dup-import-test") }
+        )
+    }
+
+    @Test
+    fun theSameShareAgainIsNamedAsAlreadyStored() {
+        val shares = mobile.frostGenerate(2u.toUShort(), 2u.toUShort(), "dup-import-test", PASSPHRASE).shares
+        stored { mobile.importShare(shares[0].exportData, PASSPHRASE, "dup-import-test") }
+
+        assertEquals(
+            R.string.account_import_share_stored,
+            refusal(KeepMobileException.ShareAlreadyStored::class.java) { mobile.importShare(shares[0].exportData, PASSPHRASE, "dup-import-test") }
         )
     }
 

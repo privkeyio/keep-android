@@ -94,13 +94,15 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
         when (event) {
             is ApproverEvent.Paired -> notice(R.string.approver_notice_paired)
             is ApproverEvent.PairingRefused -> {
-                // A gateway's refusal ends the pairing; a reply that fails its checks does not,
-                // and the key must stay for the pairing that goes on.
-                val status = _state.value.status
-                if (status != null && !status.paired && !status.pairing) ApproverKey.delete()
+                // Only the key of the pairing that ended goes: a pairing begun since has its own.
+                if (event.ended && runCatching { ApproverKey.publicKey() }.getOrNull()?.contentEquals(event.approverKey) == true) {
+                    ApproverKey.delete()
+                }
                 notice(context.getString(R.string.approver_notice_pairing_refused, event.reason))
             }
             is ApproverEvent.Request -> notifier.requestWaiting()
+            // The reload above drops it from the waiting list, and a repeat after a restart is nothing new.
+            is ApproverEvent.RequestExpired -> Unit
             is ApproverEvent.RequestRefused ->
                 notice(context.getString(R.string.approver_notice_request_refused, event.reason))
             is ApproverEvent.Outcome ->
