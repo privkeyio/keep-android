@@ -59,9 +59,10 @@ class BunkerClientCapTest {
     fun aListOverTheCapIsCutToTheNewestClients() = runBlocking {
         val kept = (1..BunkerService.MAX_AUTHORIZED_CLIENTS).map { "%064x".format(it) }
         storeLegacyList(OLDEST + kept)
-        assertThrows(KeepMobileException::class.java) {
+        val refused = assertThrows(KeepMobileException.TooManyAuthorizedClients::class.java) {
             mobile.saveBunkerConfig(BunkerConfigInfo(true, mobile.getBunkerConfig().authorizedClients))
         }
+        assertEquals("the app's cap is the core's", BunkerService.MAX_AUTHORIZED_CLIENTS, refused.max.toInt())
 
         BunkerService.revokeClientsOverCap(context, mobile)
 
