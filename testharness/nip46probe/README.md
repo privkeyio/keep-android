@@ -6,7 +6,8 @@ The test runs the real `BunkerService` against a public relay and drives each re
 
 - a client signs with a remembered grant after a plain restart (control), and is refused after a revoke made while the bunker was stopped;
 - the old bunker URL no longer connects after a revoke, and the new one does over the same relay;
-- a prompt approved after its client was revoked does not sign.
+- a prompt approved after its client was revoked does not sign;
+- with 100 clients listed, a connect that holds the bunker secret is refused, and that client cannot sign and is not listed.
 
 The probe and the test exchange requests through the app's `files/bunker-e2e` directory over `adb shell run-as`. Requests reach the probe, and its replies reach the device, on stdin, so client secrets, test account keys and bunker URLs never appear in a process listing. The probe prints one line per request: `OK`, `ERR`, `TIMEOUT`, or `UNSENT` when no relay took the request, so a request that never left cannot pass for a dead URL.
 
@@ -19,6 +20,7 @@ testharness/nip46probe/run-revoke-e2e.sh
 
 Notes:
 - Needs `cargo`, `adb` with one device attached, and network access to the relay in `FrostSignFixture.RELAY`. Set `BUNKER_RELAY` to use another relay.
+- The test needs the app's share key to work without a biometric. On a device with an enrolled fingerprint that key is biometric-bound, and the first import fails with "Key user not authenticated". On a fresh emulator with no screen lock, run `FrostSignHandlerVerifyTest` once first (`adb shell am instrument -w -e frostSignManual 1 -e class io.privkey.keep.nip55.FrostSignHandlerVerifyTest io.privkey.keep.test/androidx.test.runner.AndroidJUnitRunner`). It creates the key without auth and imports the fixture share. It fails at its peer wait unless the other fixture signers are online, which does not matter here.
 - Turn the bunker off in the app first. With it on, the app starts the bunker as soon as the test launches it, and the test skips rather than take over a running bunker.
 - The test imports a temporary account from a public test-vector key (the fixture share is 2-of-3 and cannot sign alone). It saves the device's accounts, relay and bunker settings, legacy denylist and rotation markers to a file before changing anything, and restores them afterwards, or at the start of the next run if this one was killed.
 - Every run ends with a fresh bunker key, under which the core restores no grant a test client was given, so no test client keeps a way in. Clients paired with the device's bunker before the run need to pair again.
