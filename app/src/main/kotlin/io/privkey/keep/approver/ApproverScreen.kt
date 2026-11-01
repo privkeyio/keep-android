@@ -182,7 +182,9 @@ fun ApproverScreen(
                 )
                 else -> {
                     if (!status.running) {
-                        NotRunning(state.startError, busy, onRetry = { run { controller.retryStart() } })
+                        NotRunning(state.startError ?: status.lastError, busy, onRetry = { run { controller.retryStart() } })
+                    } else {
+                        status.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
                     if (!backgroundServiceEnabled) {
                         Text(stringResource(R.string.approver_background_off), style = MaterialTheme.typography.bodySmall)

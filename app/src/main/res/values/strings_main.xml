@@ -66,6 +66,7 @@
     <string name="main_pending_dkg_recover_subtitle">Unlock to recover your signing group share</string>
     <string name="main_pending_dkg_recovered">Share recovered</string>
     <string name="main_pending_dkg_recover_failed">Recovery failed. Please try again.</string>
+    <string name="main_pending_dkg_recover_share_stored">This device already holds a different key for this share, so it was not recovered. The pending share is kept.</string>
     <string name="main_pending_dkg_discard_confirm_title">Discard Pending Share?</string>
     <string name="main_pending_dkg_discard_confirm_text">This permanently deletes the pending share. This can\'t be undone, and the group will need to be created again.</string>
     <string name="main_pending_dkg_discard_auth_title">Discard Pending Share</string>
@@ -135,6 +136,7 @@
     <string name="account_import_failed">Import failed. Please try again.</string>
     <string name="account_import_already_stored">This key is already stored on this device.</string>
     <string name="account_import_other_share_stored">Another share of this group is already stored on this device.</string>
+    <string name="account_import_share_stored">This share is already stored on this device.</string>
     <string name="account_view_seed_title">View Seed Words</string>
     <string name="account_view_seed_subtitle">Authenticate to view seed words</string>
     <string name="account_view_seed_none">No seed words available for this account</string>
