@@ -147,7 +147,11 @@ class BunkerRevokeE2ETest {
 
             // At the client cap, a connect that holds the bunker secret is refused and granted nothing.
             val listed = mobile.getBunkerConfig().authorizedClients
-            val full = listed + probe("pubkeys", (BunkerService.MAX_AUTHORIZED_CLIENTS - listed.size).toString()).split(" ")
+            val filler = probe("pubkeys", (BunkerService.MAX_AUTHORIZED_CLIENTS - listed.size).toString()).split(" ")
+            val full = listed + filler
+            check(full.size == BunkerService.MAX_AUTHORIZED_CLIENTS && filler.all { it.matches(Regex("[0-9a-f]{64}")) }) {
+                "the probe returned no client keys: ${filler.first().take(80)}"
+            }
             mobile.saveBunkerConfig(BunkerConfigInfo(true, full))
             val stranger = newClient()
             val capped = System.currentTimeMillis()
@@ -707,7 +711,7 @@ class BunkerRevokeE2ETest {
             step("active account") { activeKey?.takeIf { it != THROWAWAY_GROUP && it !in testAccounts }?.let { switchAccount(mobile, storage, it) } }
             step("throwaway account") { dropThrowawayAccount(mobile, storage, testAccounts) }
             testAccounts.forEach { key ->
-                step("test account ${key.take(8)}") { if (mobile.listShares().any { it.groupPubkey == key }) mobile.deleteShareByKey(key) }
+                step("test account ${key.take(8)}") { if (storedAccounts(storage).contains(key)) mobile.deleteShareByKey(key) }
             }
             return failures
         }
@@ -771,13 +775,18 @@ class BunkerRevokeE2ETest {
 
         // Matched by its key, so no account of the device's own is ever deleted.
         fun dropThrowawayAccount(mobile: KeepMobile, storage: AndroidKeystoreStorage, testAccounts: Set<String> = emptySet()) {
-            val shares = mobile.listShares()
-            if (shares.none { it.groupPubkey == THROWAWAY_GROUP }) return
+            val shares = storedAccounts(storage)
+            if (THROWAWAY_GROUP !in shares) return
             if (storage.getActiveShareKey() == THROWAWAY_GROUP) {
-                shares.firstOrNull { it.groupPubkey != THROWAWAY_GROUP && it.groupPubkey !in testAccounts }
-                    ?.let { switchAccount(mobile, storage, it.groupPubkey) }
+                shares.firstOrNull { it != THROWAWAY_GROUP && it !in testAccounts }
+                    ?.let { switchAccount(mobile, storage, it) }
             }
             mobile.deleteShareByKey(THROWAWAY_GROUP)
         }
+
+        // From the registry, not KeepMobile.listShares, which leaves out every share whose
+        // record cannot be loaded without a cipher and so answers nothing here.
+        fun storedAccounts(storage: AndroidKeystoreStorage): List<String> =
+            storage.listAllShares().map { it.toAccountInfo().groupPubkeyHex }
     }
 }
