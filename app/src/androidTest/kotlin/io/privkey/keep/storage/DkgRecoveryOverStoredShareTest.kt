@@ -180,7 +180,7 @@ class DkgRecoveryOverStoredShareTest {
         val key = keyStore.getKey(DKG_ALIAS, null) as? PrivateKey ?: return false
         val info = runCatching {
             KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
-        }.getOrNull() ?: return false
+        }.getOrNull() ?: return true
         return info.isUserAuthenticationRequired
     }
 

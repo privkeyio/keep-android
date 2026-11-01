@@ -760,8 +760,9 @@ internal class AccountActions(
     /**
      * Finish importing a vault-protected pending DKG share. Two authorized ciphers
      * are needed and gathered in one biometric chain (like [renameShare]): an RSA
-     * decrypt cipher to unwrap the auth-gated secret, then an AES encrypt cipher to
-     * store the recovered share. The ephemeral ceremony passphrase rides inside the
+     * decrypt cipher to unwrap the auth-gated secret, then the share's AES cipher: a
+     * decrypt cipher when its group is already stored, since the core then reads that
+     * share to compare it, or else an encrypt cipher to store it. The ephemeral ceremony passphrase rides inside the
      * secret, so no passphrase is asked of the user. [onResult] receives the stored
      * share, or null on any failure/cancel.
      */
@@ -805,12 +806,12 @@ internal class AccountActions(
                     onDismiss(null)
                     return@onBiometricRequest
                 }
-                requestEncryptCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
+                requestShareCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
             }
         }
     }
 
-    private fun requestEncryptCipherAndRecover(
+    private fun requestShareCipherAndRecover(
         groupPubkeyHex: String,
         title: String,
         subtitle: String,
@@ -823,7 +824,7 @@ internal class AccountActions(
             // to check it holds the same key, so that read's cipher is what it needs.
             val shareAttempt = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (storage.listAllShares().any { it.toAccountInfo().groupPubkeyHex == groupPubkeyHex }) {
+                    if (shareExists(groupPubkeyHex)) {
                         storage.getCipherForShareDecryption(groupPubkeyHex)?.let { it to AndroidKeystoreStorage.CipherRole.DECRYPT }
                     } else {
                         storage.getCipherForShareEncryption(groupPubkeyHex) to AndroidKeystoreStorage.CipherRole.ENCRYPT

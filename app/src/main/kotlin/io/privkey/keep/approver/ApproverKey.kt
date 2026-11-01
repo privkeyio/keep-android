@@ -28,6 +28,7 @@ internal object ApproverKey {
     private fun keyStore(): KeyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
 
     /** Replaces any approver key with a new one attested over [challenge]. */
+    @Synchronized
     fun generate(context: Context, challenge: ByteArray) {
         delete()
         val strongBox = context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE) &&
@@ -110,6 +111,12 @@ internal object ApproverKey {
 
     fun delete() {
         runCatching { keyStore().deleteEntry(ALIAS) }
+    }
+
+    /** Deletes the approver key only if it is still [expected], so a key generated since stays. */
+    @Synchronized
+    fun deleteIfMatches(expected: ByteArray) {
+        if (runCatching { publicKey() }.getOrNull()?.contentEquals(expected) == true) delete()
     }
 
     internal fun compress(x: BigInteger, y: BigInteger): ByteArray {

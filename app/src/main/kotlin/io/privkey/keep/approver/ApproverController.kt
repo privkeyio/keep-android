@@ -95,9 +95,7 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
             is ApproverEvent.Paired -> notice(R.string.approver_notice_paired)
             is ApproverEvent.PairingRefused -> {
                 // Only the key of the pairing that ended goes: a pairing begun since has its own.
-                if (event.ended && runCatching { ApproverKey.publicKey() }.getOrNull()?.contentEquals(event.approverKey) == true) {
-                    ApproverKey.delete()
-                }
+                if (event.ended) ApproverKey.deleteIfMatches(event.approverKey)
                 notice(context.getString(R.string.approver_notice_pairing_refused, event.reason))
             }
             is ApproverEvent.Request -> notifier.requestWaiting()
