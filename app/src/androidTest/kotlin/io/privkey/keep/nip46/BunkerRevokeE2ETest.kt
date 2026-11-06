@@ -156,10 +156,9 @@ class BunkerRevokeE2ETest {
             val stranger = newClient()
             val capped = System.currentTimeMillis()
             assertEquals("ERR Capacity exceeded", settled("connect", stranger.secret, url1))
-            assertRefused(
-                "a client refused at the cap must not sign",
-                settled("sign", stranger.secret, url1, "1", "15"), stranger.pubkey, capped, reason = "Permission denied",
-            )
+            val cappedSign = settled("sign", stranger.secret, url1, "1", "15")
+            assertEquals("ERR Permission denied", cappedSign)
+            assertRefused("a client refused at the cap must not sign", cappedSign, stranger.pubkey, capped, reason = "Permission denied")
             assertNull("a client refused at the cap must not be asked about", resumedApproval(stranger.pubkey))
             assertEquals("a client refused at the cap must not be listed", full, mobile.getBunkerConfig().authorizedClients)
             assertNull("a client refused at the cap must not be stored", Nip46ClientStore.getClient(context, stranger.pubkey))
