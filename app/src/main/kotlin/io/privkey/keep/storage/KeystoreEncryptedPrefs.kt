@@ -68,6 +68,9 @@ object KeystoreEncryptedPrefs {
         return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
     }
 
+    /** The Keystore alias of [prefsName]'s own key. */
+    internal fun keyAliasFor(prefsName: String): String = KEY_ALIAS_PREFIX + prefsName
+
     /**
      * Empties [prefsName] and drops its key without opening it, for a file whose key no
      * longer loads, so [create] would throw. Clearing needs no key. Reports whether both

@@ -77,8 +77,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import javax.crypto.Cipher
+import kotlin.coroutines.resume
 
 private const val MAX_SEED_WORDS_LENGTH = 1024
 
@@ -446,6 +448,9 @@ fun MainScreen(
     // write its older status over theirs.
     var shareStoreEpoch by remember { mutableStateOf(0) }
     var showUnreadableShareRemoved by remember { mutableStateOf(false) }
+    // Null while the set-aside list cannot be read.
+    var setAsideShares by remember { mutableStateOf<List<String>?>(emptyList()) }
+    var setAsideToDiscard by remember { mutableStateOf<String?>(null) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
     var showCreateGroupScreen by remember { mutableStateOf(false) }
@@ -682,9 +687,12 @@ fun MainScreen(
                 val k = storage.getActiveShareKey()
                 val config = readRelayConfig(k, keepMobile::getRelayConfig)
                 val pdkg = runCatching { keepMobile.pendingDkgShare() }
-                AccountInitial(a, k, config.config.frostRelays, config.config.profileRelays, config.unreadable, pdkg, keepMobile.shareStoreStatus())
+                AccountInitial(a, k, config.config.frostRelays, config.config.profileRelays, config.unreadable, pdkg, keepMobile.shareStoreStatus(), readSetAside(keepMobile))
             }
-            if (shareStoreEpoch == shareEpochAtRead) shareStoreStatus = initial.shareStoreStatus
+            if (shareStoreEpoch == shareEpochAtRead) {
+                shareStoreStatus = initial.shareStoreStatus
+                setAsideShares = initial.setAside
+            }
             allAccounts = initial.accounts
             activeAccountKey = initial.activeKey
             relays = initial.relays
@@ -742,10 +750,11 @@ fun MainScreen(
                     // Marker-only read, no biometric; safe to poll.
                     val pdkg = runCatching { keepMobile.pendingDkgShare() }
                         .onFailure { if (it is CancellationException) throw it }
-                    PollResult(h, s, a, k, dc, db, pdkg, keepMobile.shareStoreStatus())
+                    PollResult(h, s, a, k, dc, db, pdkg, keepMobile.shareStoreStatus(), readSetAside(keepMobile))
                 }
-                if (!shareStoreRetrying && shareStoreEpoch == shareEpochAtRead) {
+                if (!shareStoreRetrying && !shareRemovalInFlight && shareStoreEpoch == shareEpochAtRead) {
                     shareStoreStatus = pollResult.shareStoreStatus
+                    setAsideShares = pollResult.setAside
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
@@ -1020,39 +1029,94 @@ fun MainScreen(
         }
     }
 
+    // A fresh authentication for changing a share. A key that needs the owner's
+    // authentication is unlocked by the prompt itself, so the probe can decrypt with it.
+    // Otherwise the owner confirms with a strong biometric or the device credential.
+    suspend fun authorizeShareChange(group: String, title: String): Pair<Boolean, Cipher?> {
+        val cipher = withContext(Dispatchers.IO) { storage.cipherForShareProbe(group) }
+            ?: return confirmShareRemovalOwner(title) to null
+        val authed = suspendCancellableCoroutine { cont ->
+            onBiometricRequest(title, appContext.getString(R.string.share_unreadable_remove_auth_subtitle), cipher) {
+                if (cont.isActive) cont.resume(it)
+            }
+        }
+        return (authed != null) to authed
+    }
+
+    suspend fun reloadShareStore() {
+        shareStoreEpoch++
+        val (now, setAside) = withContext(Dispatchers.IO) { keepMobile.shareStoreStatus() to readSetAside(keepMobile) }
+        shareStoreStatus = now
+        setAsideShares = setAside
+        retryFailedShares = retryFailedShares.filterTo(mutableSetOf()) { it in unreadableGroups(now) }
+    }
+
+    fun changeShare(block: suspend () -> Unit) {
+        if (shareRemovalInFlight) return
+        shareRemovalInFlight = true
+        coroutineScope.launch {
+            try {
+                block()
+            } finally {
+                shareRemovalInFlight = false
+            }
+        }
+    }
+
     unreadableShareToRemove?.let { group ->
         RemoveUnreadableShareDialog(
             group = group,
             onConfirm = {
                 unreadableShareToRemove = null
-                if (shareRemovalInFlight) return@RemoveUnreadableShareDialog
-                shareRemovalInFlight = true
-                coroutineScope.launch {
-                    if (!confirmShareRemovalOwner(appContext.getString(R.string.share_unreadable_remove_auth_title))) {
-                        shareRemovalInFlight = false
-                        return@launch
+                changeShare {
+                    val title = appContext.getString(R.string.share_unreadable_remove_auth_title)
+                    val (authorized, cipher) = authorizeShareChange(group, title)
+                    if (!authorized) return@changeShare
+                    val outcome = suspendCancellableCoroutine { cont ->
+                        accountActions.removeUnreadableShare(group, cipher) { if (cont.isActive) cont.resume(it) }
                     }
-                    accountActions.removeUnreadableShare(group) { outcome ->
-                        coroutineScope.launch {
-                            try {
-                                shareStoreEpoch++
-                                val now = withContext(Dispatchers.IO) { keepMobile.shareStoreStatus() }
-                                shareStoreStatus = now
-                                retryFailedShares = retryFailedShares.filterTo(mutableSetOf()) { it in unreadableGroups(now) }
-                                when (outcome) {
-                                    ShareRemoval.REMOVED -> showUnreadableShareRemoved = true
-                                    ShareRemoval.NO_LONGER_UNREADABLE ->
-                                        Toast.makeText(appContext, R.string.share_unreadable_readable_again, Toast.LENGTH_SHORT).show()
-                                    ShareRemoval.FAILED -> Unit
-                                }
-                            } finally {
-                                shareRemovalInFlight = false
-                            }
-                        }
+                    reloadShareStore()
+                    val message = when (outcome) {
+                        UnreadableShareRemoval.REMOVED -> R.string.share_unreadable_set_aside
+                        UnreadableShareRemoval.READABLE -> R.string.share_unreadable_readable_again
+                        UnreadableShareRemoval.RECOVERABLE -> R.string.share_unreadable_recoverable
+                        UnreadableShareRemoval.UNVERIFIED -> R.string.share_unreadable_unverified
+                        UnreadableShareRemoval.ABSENT -> R.string.share_unreadable_absent
+                        UnreadableShareRemoval.REGISTRY_UNAVAILABLE -> R.string.share_unreadable_registry_unavailable
+                        null -> return@changeShare
                     }
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
                 }
             },
             onDismiss = { unreadableShareToRemove = null },
+        )
+    }
+
+    fun restoreSetAside(group: String) = changeShare {
+        val restored = suspendCancellableCoroutine { cont ->
+            accountActions.restoreQuarantinedShare(group) { if (cont.isActive) cont.resume(it) }
+        }
+        reloadShareStore()
+        if (restored) Toast.makeText(appContext, R.string.share_set_aside_restored, Toast.LENGTH_SHORT).show()
+    }
+
+    setAsideToDiscard?.let { group ->
+        DiscardSetAsideShareDialog(
+            group = group,
+            onConfirm = {
+                setAsideToDiscard = null
+                changeShare {
+                    val title = appContext.getString(R.string.share_set_aside_discard_auth_title)
+                    val (authorized, cipher) = authorizeShareChange(group, title)
+                    if (!authorized) return@changeShare
+                    val discarded = suspendCancellableCoroutine { cont ->
+                        accountActions.discardQuarantinedShare(group, cipher) { if (cont.isActive) cont.resume(it) }
+                    }
+                    reloadShareStore()
+                    if (discarded) showUnreadableShareRemoved = true
+                }
+            },
+            onDismiss = { setAsideToDiscard = null },
         )
     }
 
@@ -1648,6 +1712,10 @@ fun MainScreen(
                     shareStoreRetrying = shareStoreRetrying,
                     onRetryShareStore = ::retryShareStore,
                     onRemoveUnreadableShare = { unreadableShareToRemove = it },
+                    setAsideShares = setAsideShares,
+                    shareChangeInFlight = shareRemovalInFlight,
+                    onRestoreSetAside = ::restoreSetAside,
+                    onDiscardSetAside = { setAsideToDiscard = it },
                     hasShare = hasShare,
                     shareInfo = shareInfo,
                     allAccounts = allAccounts,
@@ -1974,6 +2042,10 @@ private fun HomeTab(
     shareStoreRetrying: Boolean,
     onRetryShareStore: () -> Unit,
     onRemoveUnreadableShare: (String) -> Unit,
+    setAsideShares: List<String>?,
+    shareChangeInFlight: Boolean,
+    onRestoreSetAside: (String) -> Unit,
+    onDiscardSetAside: (String) -> Unit,
     hasShare: Boolean,
     shareInfo: ShareInfo?,
     allAccounts: List<AccountInfo>,
@@ -2073,6 +2145,23 @@ private fun HomeTab(
                 retrying = shareStoreRetrying,
                 onRetry = onRetryShareStore,
                 onRemove = onRemoveUnreadableShare,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (setAsideShares == null) {
+            Text(
+                stringResource(R.string.share_set_aside_unreadable),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        } else if (setAsideShares.isNotEmpty()) {
+            SetAsideSharesCard(
+                groups = setAsideShares,
+                busy = shareChangeInFlight,
+                onRestore = onRestoreSetAside,
+                onDiscard = onDiscardSetAside,
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -2478,8 +2567,14 @@ private data class AccountInitial(
     val profileRelays: List<String>,
     val relayConfigUnreadable: Boolean,
     val pendingDkgShare: Result<PendingShareInfo?>,
-    val shareStoreStatus: ShareStoreStatus
+    val shareStoreStatus: ShareStoreStatus,
+    val setAside: List<String>?
 )
+
+private fun readSetAside(keepMobile: KeepMobile): List<String>? =
+    runCatching { keepMobile.listQuarantinedShares() }
+        .onFailure { if (it is CancellationException) throw it }
+        .getOrNull()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2515,7 +2610,8 @@ private data class PollResult(
     val descriptorCount: Int,
     val activeDidBackup: Boolean?,
     val pendingDkgShare: Result<PendingShareInfo?>,
-    val shareStoreStatus: ShareStoreStatus
+    val shareStoreStatus: ShareStoreStatus,
+    val setAside: List<String>?
 )
 
 @Composable

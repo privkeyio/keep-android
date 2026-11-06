@@ -91,4 +91,56 @@ class UnreadableSharesCardTest {
         assertEquals(true, dismissed)
         assertEquals(false, confirmed)
     }
+
+    @Test
+    fun aSetAsideShareCanBePutBackOrDiscarded() {
+        var restored: String? = null
+        var discarded: String? = null
+        compose.setContent {
+            KeepAndroidTheme {
+                SetAsideSharesCard(
+                    groups = listOf(group),
+                    busy = false,
+                    onRestore = { restored = it },
+                    onDiscard = { discarded = it },
+                )
+            }
+        }
+
+        compose.onNodeWithText(shortGroup(group)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.share_set_aside_restore)).performClick()
+        compose.onNodeWithText(context.getString(R.string.share_set_aside_discard)).performClick()
+
+        assertEquals(group, restored)
+        assertEquals(group, discarded)
+    }
+
+    @Test
+    fun setAsideButtonsAreDisabledWhileAChangeRuns() {
+        compose.setContent {
+            KeepAndroidTheme {
+                SetAsideSharesCard(groups = listOf(group), busy = true, onRestore = {}, onDiscard = {})
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.share_set_aside_restore)).assertIsNotEnabled()
+        compose.onNodeWithText(context.getString(R.string.share_set_aside_discard)).assertIsNotEnabled()
+    }
+
+    @Test
+    fun theDiscardDialogNamesTheAccountAndCanBeDismissed() {
+        var confirmed = false
+        var dismissed = false
+        compose.setContent {
+            KeepAndroidTheme {
+                DiscardSetAsideShareDialog(group, onConfirm = { confirmed = true }, onDismiss = { dismissed = true })
+            }
+        }
+
+        compose.onNodeWithText(context.getString(R.string.share_set_aside_discard_text, shortGroup(group))).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.share_unreadable_keep)).performClick()
+
+        assertEquals(true, dismissed)
+        assertEquals(false, confirmed)
+    }
 }

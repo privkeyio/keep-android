@@ -4,10 +4,11 @@ import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.AccountActions
-import io.privkey.keep.ShareRemoval
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.ShareProbe
 import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.ShareStoreStatus
+import io.privkey.keep.uniffi.UnreadableShareRemoval
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -25,6 +27,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import android.util.Base64
 import javax.crypto.Cipher
 
 @RunWith(AndroidJUnit4::class)
@@ -46,12 +49,13 @@ class UnreadableShareRemovalTest {
     @After
     fun teardown() {
         scope.cancel()
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         created.forEach { group ->
             runCatching { mobile.deleteShareByKey(group) }
+            storage.shareKeyAliases(group).forEach { keyStore.deleteEntry(it) }
             context.deleteSharedPreferences(storage.sharePrefsNameFor(group))
         }
         context.deleteSharedPreferences(MULTI_PREFS)
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         keyStore.aliases().toList().filter { it.startsWith(ALIAS) }.forEach { keyStore.deleteEntry(it) }
     }
 
@@ -85,72 +89,139 @@ class UnreadableShareRemovalTest {
         raw.edit().putString(groupName, "not-a-stored-value").commit()
     }
 
-    private fun remove(group: String): ShareRemoval {
-        val done = CompletableDeferred<ShareRemoval>()
-        AccountActions(
-            keepMobile = mobile,
-            storage = storage,
-            coroutineScope = scope,
-            appContext = context,
-            onBiometricRequest = { _, _, cipher, onResult -> onResult(cipher) },
-            onAccountSwitched = { true },
-            onAccountDeleted = {},
-            onLiveNodeDropped = { nodeDrops++ },
-            onStateChanged = {},
-            markBunkerRevokeAhead = { { _ -> } },
-        ).removeUnreadableShare(group) { done.complete(it) }
+    private fun actions() = AccountActions(
+        keepMobile = mobile,
+        storage = storage,
+        coroutineScope = scope,
+        appContext = context,
+        onBiometricRequest = { _, _, cipher, onResult -> onResult(cipher) },
+        onAccountSwitched = { true },
+        onAccountDeleted = {},
+        onLiveNodeDropped = { nodeDrops++ },
+        onStateChanged = {},
+        markBunkerRevokeAhead = { { _ -> } },
+    )
+
+    private fun <T> await(start: ((T) -> Unit) -> Unit): T {
+        val done = CompletableDeferred<T>()
+        start { done.complete(it) }
         return runBlocking { withTimeout(60_000) { done.await() } }
     }
 
+    private fun remove(group: String): UnreadableShareRemoval? =
+        await { actions().removeUnreadableShare(group, null, it) }
+
+    private fun restore(group: String): Boolean = await { actions().restoreQuarantinedShare(group, it) }
+
+    private fun discard(group: String): Boolean = await { actions().discardQuarantinedShare(group, null, it) }
+
+    private fun loseKeys(group: String) {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        storage.shareKeyAliases(group).forEach { keyStore.deleteEntry(it) }
+    }
+
+    private fun registered(): Int = (storage.readShareRegistry() as ShareRegistryRead.Readable).shares.size
+
     @Test
-    fun anUnreadableShareIsRemovedAndItsGroupCanBeImportedAgain() {
+    fun aShareWhoseKeysAreGoneIsSetAsideRestoredAndDiscarded() {
         val export = share()
         val group = import(export)
         breakShare(group)
+        loseKeys(group)
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
-        assertTrue("the core refuses to write over it while it is stored", runCatching { import(export) }.isFailure)
+        assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
 
-        assertEquals(ShareRemoval.REMOVED, remove(group))
-
-        assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
+        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
         assertEquals(1, nodeDrops)
+        assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+        assertEquals(0, registered())
+        assertTrue("a set-aside share is not written over", runCatching { import(export) }.isFailure)
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+
+        assertTrue(restore(group))
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+        assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
+
+        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
+        assertTrue(discard(group))
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+        assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
         assertEquals(group, import(export))
-        val read = storage.readShareRegistry() as ShareRegistryRead.Readable
-        assertEquals(1, read.shares.size)
+        assertEquals(1, registered())
     }
 
     @Test
-    fun aShareThatReadsIsNotRemoved() {
+    fun aShareWhoseCiphertextFailsItsTagIsSetAside() {
+        val group = import(share())
+        val prefs = KeystoreEncryptedPrefs.create(context, storage.sharePrefsNameFor(group))
+        assertTrue(prefs.edit().putString(SHARE_DATA, Base64.encodeToString(ByteArray(64) { 7 }, Base64.NO_WRAP)).commit())
+        breakShare(group)
+        assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
+
+        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
+    @Test
+    fun aListedUnreadableShareWhoseSecretLoadsIsKept() {
+        val group = import(share())
+        breakShare(group)
+        assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
+        assertTrue(storage.probeShareByKey(group) is ShareProbe.Loads)
+
+        assertEquals(UnreadableShareRemoval.RECOVERABLE, remove(group))
+        assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
+        assertEquals(0, nodeDrops)
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+    }
+
+    @Test
+    fun aShareThatReadsIsNotSetAside() {
         val group = import(share())
 
-        assertEquals(ShareRemoval.NO_LONGER_UNREADABLE, remove(group))
+        assertEquals(UnreadableShareRemoval.READABLE, remove(group))
 
-        val read = storage.readShareRegistry() as ShareRegistryRead.Readable
-        assertEquals(1, read.shares.size)
+        assertEquals(1, registered())
         assertEquals(0, nodeDrops)
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
     }
 
-    // The share file's own key no longer loads, so the file cannot be opened at all. The
-    // delete has removed the share's Keystore aliases by the time it reaches the file, so
-    // it has to empty it without opening it, or the share could never be removed.
+    // The share file's own key no longer loads, so its ciphertext cannot be read and
+    // whether the secret is lost cannot be told. It stays listed.
     @Test
-    fun aShareWhoseFileKeyWillNotLoadIsStillRemoved() {
-        val export = share()
-        val group = import(export)
-        val prefsName = storage.sharePrefsNameFor(group)
-        val fileKey = "keep_prefs_$prefsName"
+    fun aShareWhoseFileWillNotOpenIsKeptUnverified() {
+        val group = import(share())
+        val fileKey = "keep_prefs_${storage.sharePrefsNameFor(group)}"
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(fileKey)
         KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
             initialize(KeyGenParameterSpec.Builder(fileKey, KeyProperties.PURPOSE_SIGN).setDigests(KeyProperties.DIGEST_SHA256).build())
         }.generateKeyPair()
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
 
-        assertEquals(ShareRemoval.REMOVED, remove(group))
+        assertEquals(UnreadableShareRemoval.UNVERIFIED, remove(group))
+        assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+    }
 
+    @Test
+    fun aSetAsideShareThatLoadsIsNotDiscarded() {
+        val group = import(share())
+        storage.quarantineShareByKey(group)
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+
+        assertFalse(discard(group))
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+        assertTrue(storage.probeShareByKey(group) is ShareProbe.Loads)
+
+        assertTrue(restore(group))
+        assertEquals(1, registered())
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
-        assertTrue(rawPrefs(context, prefsName).all.isEmpty())
-        assertEquals(group, import(export))
+    }
+
+    @Test
+    fun theProbeAnswersUnknownForKeysThatAreNotShares() {
+        assertEquals(ShareProbe.Unknown, storage.probeShareByKey(""))
     }
 
     private companion object {
@@ -158,6 +229,7 @@ class UnreadableShareRemovalTest {
         const val ALIAS = "keep_frost_share$SUFFIX"
         const val MULTI_PREFS = "keep_multi_share_prefs$SUFFIX"
         const val GROUP_PUBKEY = "share_group_pubkey"
+        const val SHARE_DATA = "share_data"
         const val PASSPHRASE = "unreadable-removal-test-passphrase"
     }
 }

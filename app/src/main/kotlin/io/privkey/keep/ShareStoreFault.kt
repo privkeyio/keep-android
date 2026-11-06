@@ -32,8 +32,6 @@ internal fun afterRetry(failedBefore: Set<String>, retried: Collection<String>, 
     return (failedBefore + retried).filterTo(mutableSetOf()) { it in stillUnreadable }
 }
 
-internal enum class ShareRemoval { REMOVED, NO_LONGER_UNREADABLE, FAILED }
-
 internal fun shortGroup(group: String): String =
     if (group.length > 16) "${group.take(8)}…${group.takeLast(8)}" else group
 
@@ -109,6 +107,54 @@ internal fun UnreadableShareRemovedDialog(onRestore: () -> Unit, onImport: () ->
                 TextButton(onClick = onImport) { Text(stringResource(R.string.share_unreadable_import)) }
                 TextButton(onClick = onDone) { Text(stringResource(R.string.share_unreadable_done)) }
             }
+        },
+    )
+}
+
+/** Accounts set aside as unreadable, each of which can be put back or discarded. */
+@Composable
+internal fun SetAsideSharesCard(
+    groups: List<String>,
+    busy: Boolean,
+    onRestore: (String) -> Unit,
+    onDiscard: (String) -> Unit,
+) {
+    KeepCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                stringResource(R.string.share_set_aside_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(stringResource(R.string.share_set_aside_text), style = MaterialTheme.typography.bodyMedium)
+            groups.forEach { group ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(shortGroup(group), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onRestore(group) }, enabled = !busy) {
+                        Text(stringResource(R.string.share_set_aside_restore))
+                    }
+                    TextButton(onClick = { onDiscard(group) }, enabled = !busy) {
+                        Text(stringResource(R.string.share_set_aside_discard), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun DiscardSetAsideShareDialog(group: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.share_set_aside_discard_title)) },
+        text = { Text(stringResource(R.string.share_set_aside_discard_text, shortGroup(group))) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.share_set_aside_discard_confirm), color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.share_unreadable_keep)) }
         },
     )
 }
