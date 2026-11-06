@@ -27,6 +27,7 @@ import io.privkey.keep.uniffi.Nip55Outcome
 import io.privkey.keep.uniffi.Nip55Request
 import io.privkey.keep.uniffi.Nip55RequestRateLimiter
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55Response
 import io.privkey.keep.uniffi.Nip55VelocityCheck
 import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.evaluateNip55Request
@@ -46,6 +47,7 @@ import java.util.Calendar
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 // Both NIP-55 entrypoints refuse a request they cannot record, and the refusal is
 // the same one: the foreground path (Nip55Activity) reports it from here so a reword
@@ -54,6 +56,9 @@ internal const val STORE_UNAVAILABLE_MESSAGE = "Permission store is not availabl
 
 /** An auto-signed request whose audit row was not observed to land. */
 private class AuditAppendIncomplete : Exception("Audit append did not complete")
+
+/** A handler call its caller stopped waiting for. */
+internal class HandlerTimedOut : Exception("Handler call timed out")
 
 class Nip55ContentProvider : ContentProvider() {
     companion object {
@@ -87,6 +92,16 @@ class Nip55ContentProvider : ContentProvider() {
         // refused. The append itself is not cancelled at it; see appendAudited.
         private const val AUDIT_APPEND_BUDGET_MS = 5_000L
 
+        // How long a caller waits for the handler, which can wait on co-signers for
+        // the core's own sign timeout (about 193s). The call is not cancelled at it;
+        // see handleBounded.
+        private const val HANDLER_BUDGET_MS = 30_000L
+
+        // Handler calls that may run at once, counting ones whose caller stopped
+        // waiting, so calls stuck on absent co-signers cannot take every binder
+        // thread. A request beyond them is refused.
+        private const val HANDLER_PERMITS = 2
+
 
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
         private val ENCRYPT_COLUMNS = arrayOf("signature", "result")
@@ -107,6 +122,10 @@ class Nip55ContentProvider : ContentProvider() {
     private val rateLimiter by lazy { Nip55RequestRateLimiter() }
     private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(REQUEST_PERMITS)
+    internal val handlerPermits = Semaphore(HANDLER_PERMITS)
+    private val handlerScope = CoroutineScope(
+        Dispatchers.IO.limitedParallelism(HANDLER_PERMITS) + SupervisorJob(),
+    )
 
     // Scope for orphaned FFI work. A policy-store / rate-limiter call reaches a
     // blocking, non-cancellable UniFFI call (e.g. SigningRateLimiter.checkAndRecord,
@@ -448,6 +467,12 @@ class Nip55ContentProvider : ContentProvider() {
             scope = v3Scope
         )
 
+        // Taken before the pre-approval, so a request refused here leaves none behind.
+        if (!handlerPermits.tryAcquire()) {
+            Log.w(TAG, "Background request refused: handler calls at capacity")
+            recordAutoDecision(store, callerPackage, requestType, eventKind, "deny_busy")
+            return errorCursor("Request failed", id)
+        }
         val km = app.getKeepMobile()
         if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
             val preApprove = runWithTimeout {
@@ -461,12 +486,13 @@ class Nip55ContentProvider : ContentProvider() {
             }
             if (preApprove == null || preApprove.isFailure) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove?.exceptionOrNull()?.message ?: "timeout"}")
+                handlerPermits.release()
                 runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
                 return errorCursor("Request failed", id)
             }
         }
 
-        return runCatching { h.handleRequest(request, callerPackage) }
+        return runCatching { handleBounded(store, callerPackage, requestType, eventKind) { h.handleRequest(request, callerPackage) } }
             .mapCatching { response ->
                 // Same self-verification as the foreground path: compare the handler's
                 // returned pubkey against the independently-read stored group pubkey
@@ -505,6 +531,7 @@ class Nip55ContentProvider : ContentProvider() {
                 // Logged in every build for this one: it is the case whose record
                 // is the thing that failed, so nothing else would carry it.
                 if (e is AuditAppendIncomplete) Log.w(TAG, "Auto-signed request refused: audit append did not complete")
+                if (e is HandlerTimedOut) Log.w(TAG, "Background request refused: handler did not answer in time")
                 if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
                 if (e is BiometricHelper.BiometricNotReadyException) {
                     errorCursor(e.message ?: "Biometric authentication is unavailable", id)
@@ -512,6 +539,47 @@ class Nip55ContentProvider : ContentProvider() {
                     errorCursor("Request failed", id)
                 }
             }
+    }
+
+    /**
+     * The handler's response, holding one of [handlerPermits], which the caller has
+     * taken and which is given back when the call ends rather than when the caller
+     * stops waiting. Throws [HandlerTimedOut] once [HANDLER_BUDGET_MS] passes.
+     *
+     * A response that arrives after that was produced, a signature included, and is
+     * never returned, so it is recorded as an approval and then as abandoned under
+     * the same request id: the log holds every response the handler gave, and one the
+     * caller never received does not count as signed.
+     *
+     * `internal` with [call] and [budgetMs] as parameters so a test can drive it, since
+     * the provider refuses a same-uid caller.
+     */
+    internal fun handleBounded(
+        store: PermissionStore,
+        callerPackage: String,
+        requestType: Nip55RequestType,
+        eventKind: Int?,
+        budgetMs: Long = HANDLER_BUDGET_MS,
+        call: () -> Nip55Response,
+    ): Nip55Response {
+        val onLate = { _: Nip55Response ->
+            Log.w(TAG, "Background response arrived after its caller was refused")
+            val requestId = newRequestId()
+            auditScope.launch {
+                runCatching {
+                    store.logAutomaticOperationIfClaimed(callerPackage, requestType, eventKind, "allow", requestId) { true }
+                    store.logAbandoned(callerPackage, requestType, eventKind, requestId)
+                }.onFailure { Log.w(TAG, "Late response not recorded: ${it::class.simpleName}") }
+            }
+            Unit
+        }
+        return awaitOrHandOff(handlerScope, budgetMs, onLate) {
+            try {
+                call()
+            } finally {
+                handlerPermits.release()
+            }
+        } ?: throw HandlerTimedOut()
     }
 
     /**
@@ -710,3 +778,40 @@ internal fun <T : Any> awaitWithin(
         if (!claim() && result == null) onLate()
     }
 }
+
+/**
+ * Runs [block] on [scope] and waits at most [budgetMs] for its result, or null when
+ * the wait gives up. The result belongs to whichever comes first, the caller taking
+ * it or the caller giving up: one that arrives after the caller gave up, or while the
+ * caller's wait is failing, goes to [onLate] instead, exactly once, so a result is
+ * never produced without either being returned or handed on. A block that throws
+ * produced nothing: its exception reaches a caller still waiting and is dropped
+ * otherwise.
+ */
+internal fun <T : Any> awaitOrHandOff(
+    scope: CoroutineScope,
+    budgetMs: Long,
+    onLate: (T) -> Unit,
+    block: suspend () -> T,
+): T? {
+    val state = AtomicInteger(HANDOFF_PENDING)
+    val ready = AtomicReference<T>()
+    val work = scope.async {
+        val result = block()
+        ready.set(result)
+        if (!state.compareAndSet(HANDOFF_PENDING, HANDOFF_READY)) onLate(result)
+    }
+    var waited = false
+    try {
+        runBlocking { withTimeoutOrNull(budgetMs) { work.await() } }
+        waited = true
+    } finally {
+        if (!waited && !state.compareAndSet(HANDOFF_PENDING, HANDOFF_ABANDONED)) onLate(ready.get())
+    }
+    if (state.compareAndSet(HANDOFF_PENDING, HANDOFF_ABANDONED)) return null
+    return ready.get()
+}
+
+private const val HANDOFF_PENDING = 0
+private const val HANDOFF_READY = 1
+private const val HANDOFF_ABANDONED = 2

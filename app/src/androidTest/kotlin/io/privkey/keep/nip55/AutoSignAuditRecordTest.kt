@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.uniffi.Nip55RequestType
+import io.privkey.keep.uniffi.Nip55Response
 import android.os.SystemClock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -15,6 +16,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -211,6 +213,53 @@ class AutoSignAuditRecordTest {
         assertEquals("the abandoned row names the approval", rows[0].requestId, rows[1].requestId)
         assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
         assertFalse(store.hasSignedKindBefore(CALLER, 1))
+    }
+
+    private fun response() = Nip55Response(result = "f".repeat(128), event = null, error = null, id = null, rejected = false)
+
+    // A handler that answers after its caller was refused still produced a response,
+    // a signature included. It is recorded as an approval named abandoned, so the log
+    // holds it and it does not count as signed, and its permit comes back only then.
+    @Test
+    fun aHandlerResponseAfterTheBudgetIsRecordedAsAbandoned() = runBlocking {
+        val provider = Nip55ContentProvider()
+        val free = provider.handlerPermits.availablePermits()
+        assertTrue(provider.handlerPermits.tryAcquire())
+        val release = CountDownLatch(1)
+
+        try {
+            provider.handleBounded(store, CALLER, Nip55RequestType.SIGN_EVENT, 1, budgetMs = 200) {
+                release.await(30, TimeUnit.SECONDS)
+                response()
+            }
+            fail("a handler past the budget must not answer the caller")
+        } catch (e: HandlerTimedOut) {
+        }
+        assertEquals("the permit is held while the call runs", free - 1, provider.handlerPermits.availablePermits())
+        assertEquals(0, store.getAuditLogCount())
+
+        release.countDown()
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (store.getAuditLogCount() < 2 && SystemClock.elapsedRealtime() < deadline) delay(50)
+        val rows = store.getAuditLog(10).sortedBy { it.id }
+        assertEquals(listOf("allow", AUDIT_DECISION_ABANDONED), rows.map { it.decision })
+        assertEquals("the abandoned row names the approval", rows[0].requestId, rows[1].requestId)
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+        assertFalse(store.hasSignedKindBefore(CALLER, 1))
+        assertEquals(free, provider.handlerPermits.availablePermits())
+    }
+
+    // An answer in time goes to the caller, which records it itself before returning it.
+    @Test
+    fun aHandlerResponseInTimeIsReturnedWithNoRowOfItsOwn() = runBlocking {
+        val provider = Nip55ContentProvider()
+        val free = provider.handlerPermits.availablePermits()
+        assertTrue(provider.handlerPermits.tryAcquire())
+
+        assertEquals(response(), provider.handleBounded(store, CALLER, Nip55RequestType.SIGN_EVENT, 1) { response() })
+        assertEquals(free, provider.handlerPermits.availablePermits())
+        delay(200)
+        assertEquals(0, store.getAuditLogCount())
     }
 
     // A row written without the key breaks the chain, and nothing in a chain that does
