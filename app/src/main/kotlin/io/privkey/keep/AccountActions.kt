@@ -381,7 +381,7 @@ internal class AccountActions(
         coroutineScope.launch {
             val outcome = accountMutex.withLock {
                 val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-                val wasActive = activeAccountKey == null || groupPubkeyHex == activeAccountKey
+                val wasActive = activeAccountKey == null || groupPubkeyHex.equals(activeAccountKey, ignoreCase = true)
                 val result = try {
                     withContext(Dispatchers.IO) {
                         withProbeCipher(cipher) { keepMobile.removeUnreadableShare(groupPubkeyHex) }
@@ -439,7 +439,7 @@ internal class AccountActions(
         coroutineScope.launch {
             val outcome = accountMutex.withLock {
                 try {
-                    withContext(Dispatchers.IO) {
+                    val discarded = withContext(Dispatchers.IO) {
                         val result = withProbeCipher(cipher) { keepMobile.discardLostShare(groupPubkeyHex) }
                         when (result) {
                             is QuarantineDiscard.Discarded -> {
@@ -452,13 +452,21 @@ internal class AccountActions(
                         }
                         result
                     }
+                    // A pointer still naming the share, left by a set-aside that failed
+                    // after the quarantine, goes as a delete of the active account does.
+                    if (discarded is QuarantineDiscard.Discarded && discarded.clearedActivePointer) {
+                        afterShareTakenOut(true)
+                    }
+                    discarded
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // An error can follow a partial delete, which tears the node down
-                    // and which a retry finishes.
+                    // An error can follow a partial delete, which tears the node down,
+                    // may clear the active pointer, and which a retry finishes.
                     onLiveNodeDropped()
                     logAndToast("Discard failed", appContext.getString(R.string.share_set_aside_discard_failed), e)
+                    runCatching { refreshAccountState() }
+                        .onFailure { if (it is CancellationException) throw it }
                     null
                 }
             }

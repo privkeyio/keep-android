@@ -221,6 +221,23 @@ class UnreadableShareRemovalTest {
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
     }
 
+    // Whether a set-aside share whose file will not open is lost cannot be told, so the
+    // discard keeps it, leaves the node alone and reports that.
+    @Test
+    fun aSetAsideShareThatCannotBeCheckedIsNotDiscarded() {
+        val group = import(share())
+        val fileKey = "keep_prefs_${storage.sharePrefsNameFor(group)}"
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(fileKey)
+        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+            initialize(KeyGenParameterSpec.Builder(fileKey, KeyProperties.PURPOSE_SIGN).setDigests(KeyProperties.DIGEST_SHA256).build())
+        }.generateKeyPair()
+        storage.quarantineShareByKey(group)
+
+        assertEquals(QuarantineDiscard.Unverified, discard(group))
+        assertEquals(0, nodeDrops)
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
     @Test
     fun discardingAShareThatIsNotSetAsideChangesNothing() {
         val group = import(share())
