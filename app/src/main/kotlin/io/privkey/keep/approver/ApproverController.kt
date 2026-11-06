@@ -142,6 +142,7 @@ class ApproverController(private val context: Context, mobile: KeepMobile) {
     suspend fun beginPairing(uri: String, label: String): PairingStart = io {
         val status = handler.status()
         check(!status.paired && !status.pairing) { "already paired" }
+        _state.update { it.copy(startError = null) }
         val challenge = handler.pairingAttestationChallenge(uri)
         ApproverKey.generate(context, challenge)
         handler.beginPairing(uri, ApproverKey.publicKey(), label)

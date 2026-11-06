@@ -177,7 +177,7 @@ class DkgRecoveryOverStoredShareTest {
 
     private fun productionDkgKeyPresent(): Boolean {
         if (!keyStore.containsAlias(DKG_ALIAS)) return false
-        val key = keyStore.getKey(DKG_ALIAS, null) as? PrivateKey ?: return false
+        val key = keyStore.getKey(DKG_ALIAS, null) as? PrivateKey ?: return true
         val info = runCatching {
             KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
         }.getOrNull() ?: return true
