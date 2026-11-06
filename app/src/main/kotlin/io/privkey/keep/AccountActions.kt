@@ -389,9 +389,14 @@ internal class AccountActions(
                     throw e
                 } catch (e: Exception) {
                     // The core tears the node down once it starts setting a share aside,
-                    // even when that then fails.
+                    // even when that then fails. A failure after the share was set aside,
+                    // clearing the active pointer, still took the account out.
                     onLiveNodeDropped()
                     logAndToast("Set aside failed", appContext.getString(R.string.share_unreadable_remove_failed), e)
+                    val setAside = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.listQuarantinedShares() }.getOrNull()
+                    }?.any { it.equals(groupPubkeyHex, ignoreCase = true) } == true
+                    if (setAside) afterShareTakenOut(wasActive)
                     null
                 }
                 if (result == UnreadableShareRemoval.REMOVED) {
