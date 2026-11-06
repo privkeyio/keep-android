@@ -569,7 +569,13 @@ class Nip55ContentProvider : ContentProvider() {
      */
     private fun takeHandlerSlot(callerPackage: String): Boolean {
         if (!handlerCallers.add(callerPackage)) return false
-        if (handlerPermits.tryAcquire(HANDLER_PERMIT_WAIT_MS, TimeUnit.MILLISECONDS)) return true
+        val acquired = try {
+            handlerPermits.tryAcquire(HANDLER_PERMIT_WAIT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: InterruptedException) {
+            handlerCallers.remove(callerPackage)
+            throw e
+        }
+        if (acquired) return true
         handlerCallers.remove(callerPackage)
         return false
     }
