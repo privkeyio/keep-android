@@ -144,4 +144,11 @@
     <string name="account_confirm_backup_title">Confirm Backup</string>
     <string name="account_confirm_backup_subtitle">Authenticate to confirm backup</string>
     <string name="account_confirm_backup_save_subtitle">Authenticate again to save</string>
+    <string name="cosign_spend_auth_title">Approve this spend</string>
+    <string name="cosign_spend_auth_subtitle">Confirm it is you before co-signing</string>
+    <string name="cosign_spend_needs_screen_lock">Set a screen lock to approve spends.</string>
+    <string name="cosign_strict_auth_title">Approve this signature</string>
+    <string name="cosign_strict_needs_screen_lock">Set a screen lock to approve requests this phone cannot verify.</string>
+    <string name="cosign_unverifiable_warning">This phone cannot verify what it is signing. It may be a Bitcoin spend.</string>
+    <string name="cosign_open_to_approve">Open Keep to review and approve.</string>
 </resources>

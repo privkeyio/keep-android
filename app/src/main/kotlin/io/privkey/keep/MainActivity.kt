@@ -23,6 +23,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
@@ -338,6 +339,12 @@ class MainActivity : FragmentActivity() {
                                     title,
                                     getString(R.string.connections_relays_reset_auth_subtitle)
                                 ) != null
+                            },
+                            confirmOwnerFresh = { title ->
+                                biometricHelper?.authenticateStrongOrDeviceCredential(
+                                    title,
+                                    getString(R.string.cosign_spend_auth_subtitle)
+                                ) != null
                             }
                         )
                     } else {
@@ -412,7 +419,8 @@ fun MainScreen(
     onApproverRequestHandled: () -> Unit = {},
     authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
     confirmApproverOwner: OwnerConfirmation = { false },
-    confirmRelayResetOwner: OwnerConfirmation = { false }
+    confirmRelayResetOwner: OwnerConfirmation = { false },
+    confirmOwnerFresh: OwnerConfirmation = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -1548,22 +1556,42 @@ fun MainScreen(
                     pendingRequests = appLiveState?.pendingRequests ?: emptyList(),
                     onApproveRequest = { id ->
                         coroutineScope.launch {
-                            val authed = if (biometricAvailable && onBiometricAuth != null) {
-                                // Signing approval, not a downgrade: respect the biometric-
-                                // timeout window (forcePrompt=false) so batch approvals work
-                                // as configured.
-                                onBiometricAuth.invoke(
-                                    appContext.getString(R.string.cosign_request_label),
-                                    appContext.getString(R.string.cosign_approve),
-                                    false,
-                                )
-                            } else {
-                                true
-                            }
-                            if (authed) {
-                                withContext(Dispatchers.IO) {
+                            val request = appLiveState?.pendingRequests?.find { it.id == id } ?: return@launch
+                            val approval = authorizeCosign(
+                                request,
+                                deviceSecure = { appContext.getSystemService(KeyguardManager::class.java)?.isDeviceSecure },
+                                strongOrCredential = {
+                                    confirmOwnerFresh(
+                                        appContext.getString(
+                                            if (request.metadata?.spend != null) R.string.cosign_spend_auth_title else R.string.cosign_strict_auth_title,
+                                        ),
+                                    )
+                                },
+                                usual = {
+                                    if (biometricAvailable && onBiometricAuth != null) {
+                                        // Signing approval, not a downgrade: respect the biometric-
+                                        // timeout window (forcePrompt=false) so batch approvals work
+                                        // as configured.
+                                        onBiometricAuth.invoke(
+                                            appContext.getString(R.string.cosign_request_label),
+                                            appContext.getString(R.string.cosign_approve),
+                                            false,
+                                        )
+                                    } else {
+                                        true
+                                    }
+                                },
+                            )
+                            when (approval) {
+                                CosignApproval.APPROVED -> withContext(Dispatchers.IO) {
                                     runCatching { keepMobile.approveRequest(id) }
                                 }
+                                CosignApproval.NO_SCREEN_LOCK -> Toast.makeText(
+                                    appContext,
+                                    if (request.metadata?.spend != null) R.string.cosign_spend_needs_screen_lock else R.string.cosign_strict_needs_screen_lock,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                CosignApproval.NOT_AUTHENTICATED -> Unit
                             }
                         }
                     },
@@ -1900,6 +1928,14 @@ private fun HomeTab(
                             stringResource(R.string.cosign_request_label),
                             style = MaterialTheme.typography.titleMedium
                         )
+                        if (req.unverifiable()) {
+                            Text(
+                                stringResource(R.string.cosign_unverifiable_warning),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                         Text(
                             req.describe(),
                             style = MaterialTheme.typography.bodyMedium
