@@ -94,6 +94,9 @@ private fun classify(
         0 -> Unit
         1 -> {
             val cipher = keystore.authenticatedCipher() ?: return ShareProbe.Unknown
+            // The cipher was opened before the owner's prompt. One opened on another IV
+            // would fail the tag on data that still decrypts.
+            if (!cipher.iv.contentEquals(iv)) return ShareProbe.Unknown
             when (val plain = decrypt(cipher, ciphertext)) {
                 null -> lost++
                 else -> return ShareProbe.Loads(plain)

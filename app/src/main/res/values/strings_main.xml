@@ -86,7 +86,7 @@
     <string name="share_unreadable_remove">Set aside</string>
     <string name="share_unreadable_keep">Keep it</string>
     <string name="share_unreadable_remove_title">Set this account aside?</string>
-    <string name="share_unreadable_remove_text">Keep will stop using %1$s on this device. Nothing is deleted: its encrypted share stays here and you can put it back later. Keep sets it aside only after checking that its key really can\'t be decrypted.</string>
+    <string name="share_unreadable_remove_text">Keep will stop using %1$s on this device. Nothing is deleted: its encrypted share stays here and you can put it back later. Keep sets it aside only after checking that its key can\'t be decrypted into a usable share.</string>
     <string name="share_unreadable_remove_auth_title">Set aside an unreadable account</string>
     <string name="share_unreadable_remove_auth_subtitle">Confirm it is you before changing this account</string>
     <string name="share_unreadable_removed_title">Account discarded</string>
@@ -111,8 +111,7 @@
     <string name="share_set_aside_discard_confirm">Discard for good</string>
     <string name="share_set_aside_discard_auth_title">Discard an account\'s key</string>
     <string name="share_set_aside_discard_readable">This account\'s key decrypts again, so it was not discarded. Put it back instead.</string>
-    <string name="share_set_aside_discard_unconfirmed">Couldn\'t confirm that the key is lost, so nothing was discarded. Authenticate and try again.</string>
-    <string name="share_set_aside_discard_failed">Could not discard the account.</string>
+    <string name="share_set_aside_discard_failed">Could not discard the account. Authenticate and try again.</string>
     <string name="share_set_aside_unreadable">The set-aside accounts can\'t be read right now.</string>
     <string name="share_store_unavailable_title">Your accounts can\'t be read</string>
     <string name="share_store_unavailable_text">This device\'s secure storage could not read the list of stored accounts, so Keep can\'t show or change your accounts until it can. Nothing has been deleted. Try again, or restart the device. A system update can sometimes fix this, so keep the app installed.</string>

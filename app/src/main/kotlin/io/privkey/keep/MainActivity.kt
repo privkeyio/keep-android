@@ -755,6 +755,7 @@ fun MainScreen(
                 if (!shareStoreRetrying && !shareRemovalInFlight && shareStoreEpoch == shareEpochAtRead) {
                     shareStoreStatus = pollResult.shareStoreStatus
                     setAsideShares = pollResult.setAside
+                    retryFailedShares = retryFailedShares.filterTo(mutableSetOf()) { it in unreadableGroups(pollResult.shareStoreStatus) }
                 }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
@@ -1003,13 +1004,14 @@ fun MainScreen(
     }
 
     fun retryShareStore() {
-        if (shareStoreRetrying) return
+        if (shareStoreRetrying || shareRemovalInFlight) return
         shareStoreRetrying = true
-        shareStoreEpoch++
+        val epoch = ++shareStoreEpoch
         val retried = unreadableGroups(shareStoreStatus)
         coroutineScope.launch {
             try {
                 val now = withContext(Dispatchers.IO) { keepMobile.shareStoreStatus() }
+                if (shareStoreEpoch != epoch) return@launch
                 retryFailedShares = afterRetry(retryFailedShares, retried, now)
                 val wasUnavailable = shareStoreStatus is ShareStoreStatus.Unavailable
                 shareStoreStatus = now
@@ -1709,7 +1711,7 @@ fun MainScreen(
                     unreadableShares = unreadableGroups(shareStoreStatus),
                     shareStoreUnavailable = shareStoreStatus is ShareStoreStatus.Unavailable,
                     retryFailedShares = retryFailedShares,
-                    shareStoreRetrying = shareStoreRetrying,
+                    shareStoreRetrying = shareStoreRetrying || shareRemovalInFlight,
                     onRetryShareStore = ::retryShareStore,
                     onRemoveUnreadableShare = { unreadableShareToRemove = it },
                     setAsideShares = setAsideShares,

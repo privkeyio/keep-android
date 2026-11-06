@@ -143,6 +143,15 @@ class ShareProbeClassifierTest {
     }
 
     @Test
+    fun anAuthenticatedCipherOnAnotherIvIsUnknown() {
+        val key = aesKey()
+        val (staleIv, _) = seal(key)
+        val (iv, ct) = seal(key)
+        val keystore = FakeKeystore(keys = mapOf("per-key" to key), authKeys = setOf(key), authenticated = decryptCipher(key, staleIv))
+        assertEquals(ShareProbe.Unknown, classifyShare(aliases, iv, ct, keystore))
+    }
+
+    @Test
     fun moreThanOneAuthKeyIsUnknown() {
         val a = aesKey()
         val b = aesKey()

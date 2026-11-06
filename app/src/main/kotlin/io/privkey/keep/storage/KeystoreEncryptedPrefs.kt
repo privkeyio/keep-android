@@ -68,6 +68,18 @@ object KeystoreEncryptedPrefs {
         return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
     }
 
+    /**
+     * [prefsName] opened with the key it already has, or null when the Keystore reports
+     * that key absent. Never creates a key, unlike [create], so a read that must not
+     * change anything cannot replace a key a Keystore fault hid. Any other fault throws.
+     */
+    fun openExisting(context: Context, prefsName: String): ReadablePrefs? {
+        val key = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(KEY_ALIAS_PREFIX + prefsName, null)
+            ?: return null
+        val secretKey = key as? SecretKey ?: throw IllegalStateException("Key for $prefsName is not a SecretKey")
+        return EncryptingSharedPreferences(context.getSharedPreferences(prefsName, Context.MODE_PRIVATE), secretKey, prefsName)
+    }
+
     /** The Keystore alias of [prefsName]'s own key. */
     internal fun keyAliasFor(prefsName: String): String = KEY_ALIAS_PREFIX + prefsName
 

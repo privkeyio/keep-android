@@ -145,6 +145,7 @@ class UnreadableShareRemovalTest {
 
         assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
         assertTrue(discard(group))
+        assertEquals("each set-aside and the discard drop the live node", 3, nodeDrops)
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
         assertEquals(group, import(export))

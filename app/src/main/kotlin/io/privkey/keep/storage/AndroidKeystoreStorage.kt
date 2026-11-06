@@ -1130,7 +1130,7 @@ class AndroidKeystoreStorage(
         if (key.isBlank() || isDkgSecretKey(key) || key == APPROVER_STATE_KEY || isMetadataKey(key)) {
             ShareProbe.Unknown
         } else {
-            val sharePrefs = runCatching { getSharePrefs(key) }.getOrNull()
+            val sharePrefs = runCatching { KeystoreEncryptedPrefs.openExisting(context, sharePrefsNameFor(key)) }.getOrNull()
             fun read(name: String) = (sharePrefs?.readString(name) as? PrefRead.Found)?.value
                 ?.let { Base64.decode(it, Base64.NO_WRAP) }
             classifyShare(shareKeyAliases(key), read(KEY_SHARE_IV), read(KEY_SHARE_DATA), KeystoreProbe())
@@ -1148,7 +1148,8 @@ class AndroidKeystoreStorage(
      * cannot use one.
      */
     fun cipherForShareProbe(key: String): Cipher? = runCatching {
-        val iv = (getSharePrefs(key).readString(KEY_SHARE_IV) as? PrefRead.Found)?.value ?: return null
+        val sharePrefs = KeystoreEncryptedPrefs.openExisting(context, sharePrefsNameFor(key)) ?: return null
+        val iv = (sharePrefs.readString(KEY_SHARE_IV) as? PrefRead.Found)?.value ?: return null
         val probe = KeystoreProbe()
         val only = shareKeyAliases(key).mapNotNull(probe::secretKey).filter(probe::requiresUserAuth).singleOrNull()
             ?: return null

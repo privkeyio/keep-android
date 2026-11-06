@@ -388,6 +388,9 @@ internal class AccountActions(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    // The core tears the node down once it starts setting a share aside,
+                    // even when that then fails.
+                    onLiveNodeDropped()
                     logAndToast("Set aside failed", appContext.getString(R.string.share_unreadable_remove_failed), e)
                     null
                 }
@@ -440,13 +443,19 @@ internal class AccountActions(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    // Only the probe finding the share readable is refused as invalid
+                    // input. Any other error may follow a partial delete, which a retry
+                    // finishes, so it is not reported as nothing having changed.
                     val shown = when (e) {
                         is KeepMobileException.InvalidInput -> R.string.share_set_aside_discard_readable
-                        is KeepMobileException.StorageException -> R.string.share_set_aside_discard_unconfirmed
                         else -> R.string.share_set_aside_discard_failed
                     }
                     logAndToast("Discard failed", appContext.getString(shown), e)
                     false
+                } finally {
+                    // A discard that reaches the delete tears the node down whatever
+                    // its result, as a delete does.
+                    onLiveNodeDropped()
                 }
             }
             onResult(discarded)
