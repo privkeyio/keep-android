@@ -338,6 +338,12 @@ class MainActivity : FragmentActivity() {
                                     title,
                                     getString(R.string.connections_relays_reset_auth_subtitle)
                                 ) != null
+                            },
+                            confirmSpendOwner = { title ->
+                                biometricHelper?.authenticateStrongOrDeviceCredential(
+                                    title,
+                                    getString(R.string.cosign_spend_auth_subtitle)
+                                ) != null
                             }
                         )
                     } else {
@@ -412,7 +418,8 @@ fun MainScreen(
     onApproverRequestHandled: () -> Unit = {},
     authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
     confirmApproverOwner: OwnerConfirmation = { false },
-    confirmRelayResetOwner: OwnerConfirmation = { false }
+    confirmRelayResetOwner: OwnerConfirmation = { false },
+    confirmSpendOwner: OwnerConfirmation = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -1548,22 +1555,38 @@ fun MainScreen(
                     pendingRequests = appLiveState?.pendingRequests ?: emptyList(),
                     onApproveRequest = { id ->
                         coroutineScope.launch {
-                            val authed = if (biometricAvailable && onBiometricAuth != null) {
-                                // Signing approval, not a downgrade: respect the biometric-
-                                // timeout window (forcePrompt=false) so batch approvals work
-                                // as configured.
-                                onBiometricAuth.invoke(
-                                    appContext.getString(R.string.cosign_request_label),
-                                    appContext.getString(R.string.cosign_approve),
-                                    false,
-                                )
-                            } else {
-                                true
-                            }
-                            if (authed) {
-                                withContext(Dispatchers.IO) {
+                            val request = appLiveState?.pendingRequests?.find { it.id == id } ?: return@launch
+                            val approval = authorizeCosign(
+                                request,
+                                deviceSecure = { appContext.getSystemService(KeyguardManager::class.java)?.isDeviceSecure },
+                                strongOrCredential = {
+                                    confirmSpendOwner(appContext.getString(R.string.cosign_spend_auth_title))
+                                },
+                                usual = {
+                                    if (biometricAvailable && onBiometricAuth != null) {
+                                        // Signing approval, not a downgrade: respect the biometric-
+                                        // timeout window (forcePrompt=false) so batch approvals work
+                                        // as configured.
+                                        onBiometricAuth.invoke(
+                                            appContext.getString(R.string.cosign_request_label),
+                                            appContext.getString(R.string.cosign_approve),
+                                            false,
+                                        )
+                                    } else {
+                                        true
+                                    }
+                                },
+                            )
+                            when (approval) {
+                                CosignApproval.APPROVED -> withContext(Dispatchers.IO) {
                                     runCatching { keepMobile.approveRequest(id) }
                                 }
+                                CosignApproval.NO_SCREEN_LOCK -> Toast.makeText(
+                                    appContext,
+                                    R.string.cosign_spend_needs_screen_lock,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                CosignApproval.NOT_AUTHENTICATED -> Unit
                             }
                         }
                     },

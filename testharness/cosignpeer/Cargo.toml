@@ -1,0 +1,16 @@
+[package]
+name = "cosignpeer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bitcoin = { version = "0.32", features = ["serde"] }
+hex = "0.4"
+keep-core = { path = "../../keep/keep-core" }
+keep-frost-net = { path = "../../keep/keep-frost-net" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[workspace]

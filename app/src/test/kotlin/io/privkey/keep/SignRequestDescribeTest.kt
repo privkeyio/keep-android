@@ -1,7 +1,12 @@
 package io.privkey.keep
 
 import io.privkey.keep.uniffi.SignRequest
+import io.privkey.keep.service.CosignNotifier
 import io.privkey.keep.uniffi.SignRequestMetadata
+import io.privkey.keep.uniffi.SpendOutput
+import io.privkey.keep.uniffi.SpendSummary
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,5 +125,114 @@ class SignRequestDescribeTest {
     fun `a request with nothing to show does not produce a stray separator`() {
         val summary = request(messageType = "", messagePreview = "").describe()
         assertEquals("", summary)
+    }
+
+    private val p2wpkh = "0014" + "03".repeat(20)
+    private val opReturn = "6a0401010101"
+
+    private fun spendRequest(spend: SpendSummary, typeVerified: Boolean = true) = request(
+        messageType = "bitcoin-sighash",
+        messagePreview = "ffeeddccbbaa9988",
+        typeVerified = typeVerified,
+        metadata = SignRequestMetadata(
+            eventKind = null,
+            contentPreview = null,
+            amountSats = null,
+            destination = null,
+            spend = spend,
+        ),
+    )
+
+    private val twoOutputs = SpendSummary(
+        outputs = listOf(
+            SpendOutput(amountSats = 90_000uL, address = "tb1qexample", scriptHex = p2wpkh),
+            SpendOutput(amountSats = 8_500uL, address = null, scriptHex = opReturn),
+        ),
+        consumedSats = 100_000uL,
+        feeSats = 1_500uL,
+    )
+
+    @Test
+    fun `a spend lists every output, then the fee and the total`() {
+        assertEquals(
+            listOf(
+                "bitcoin-sighash",
+                "90,000 sats to tb1qexample",
+                "8,500 sats to unrecognized script $opReturn",
+                "Fee: 1,500 sats",
+                "Total spent: 100,000 sats",
+            ).joinToString("\n"),
+            spendRequest(twoOutputs).describe(),
+        )
+    }
+
+    @Test
+    fun `an output with no address shows its whole script, marked unrecognized`() {
+        val long = "51" + "ab".repeat(200)
+        val spend = SpendSummary(listOf(SpendOutput(1uL, null, long)), 2uL, 1uL)
+        assertTrue(spendRequest(spend).describe().contains("1 sats to unrecognized script $long\n"))
+    }
+
+    @Test
+    fun `a spend with many outputs is never shortened`() {
+        val outputs = (1..60).map { SpendOutput(it.toULong(), "tb1qout$it", p2wpkh) }
+        val summary = spendRequest(SpendSummary(outputs, 2_000uL, 170uL)).describe()
+        (1..60).forEach { assertTrue("output $it missing", summary.contains("\n$it sats to tb1qout$it\n")) }
+        assertTrue(summary.endsWith("Fee: 170 sats\nTotal spent: 2,000 sats"))
+    }
+
+    @Test
+    fun `no output is labeled as change`() {
+        assertFalse(spendRequest(twoOutputs).describe().contains("change", ignoreCase = true))
+        assertFalse(spendRequest(twoOutputs).spendOverview()!!.contains("change", ignoreCase = true))
+    }
+
+    @Test
+    fun `a spend shows its fee even when a single amount is also set`() {
+        val req = request(
+            messageType = "bitcoin-sighash",
+            metadata = SignRequestMetadata(null, null, 98_500uL, "tb1qexample", twoOutputs),
+        )
+        assertTrue(req.describe().contains("Fee: 1,500 sats"))
+    }
+
+    @Test
+    fun `an unverified label on a spend still reads as claimed`() {
+        assertTrue(spendRequest(twoOutputs, typeVerified = false).describe().startsWith("claimed: bitcoin-sighash\n"))
+    }
+
+    @Test
+    fun `a bitcoin request with no spend renders as before`() {
+        val summary = request(messageType = "bitcoin-sighash", typeVerified = true).describe()
+        assertEquals("bitcoin-sighash · abcd1234abcd1234", summary)
+        assertNull(request(messageType = "bitcoin-sighash").spendOverview())
+    }
+
+    @Test
+    fun `the notification overview counts the outputs and never lists them`() {
+        val overview = spendRequest(twoOutputs).spendOverview()!!
+        assertEquals(
+            "bitcoin-sighash\n2 outputs · fee 1,500 sats · total 100,000 sats\nOpen Keep to review every output and approve.",
+            overview,
+        )
+        assertFalse(overview.contains("tb1qexample"))
+        val one = SpendSummary(listOf(SpendOutput(99_000uL, "tb1qexample", p2wpkh)), 100_000uL, 1_000uL)
+        assertTrue(spendRequest(one).spendOverview()!!.contains("1 output · fee 1,000 sats"))
+    }
+
+    @Test
+    fun `a spend is never approvable from the notification`() {
+        assertFalse(CosignNotifier.approvableFromNotification(spendRequest(twoOutputs)))
+        assertTrue(CosignNotifier.approvableFromNotification(request(messageType = "bitcoin-sighash")))
+        assertTrue(CosignNotifier.approvableFromNotification(request()))
+    }
+
+    @Test
+    fun `sats are grouped in threes`() {
+        assertEquals("0 sats", formatSats(0uL))
+        assertEquals("999 sats", formatSats(999uL))
+        assertEquals("1,000 sats", formatSats(1_000uL))
+        assertEquals("2,100,000,000,000,000 sats", formatSats(2_100_000_000_000_000uL))
+        assertEquals("18,446,744,073,709,551,615 sats", formatSats(ULong.MAX_VALUE))
     }
 }

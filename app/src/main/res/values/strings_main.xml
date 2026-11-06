@@ -144,4 +144,7 @@
     <string name="account_confirm_backup_title">Confirm Backup</string>
     <string name="account_confirm_backup_subtitle">Authenticate to confirm backup</string>
     <string name="account_confirm_backup_save_subtitle">Authenticate again to save</string>
+    <string name="cosign_spend_auth_title">Approve this spend</string>
+    <string name="cosign_spend_auth_subtitle">Confirm it is you before co-signing this transaction</string>
+    <string name="cosign_spend_needs_screen_lock">Set a screen lock to approve spends.</string>
 </resources>
