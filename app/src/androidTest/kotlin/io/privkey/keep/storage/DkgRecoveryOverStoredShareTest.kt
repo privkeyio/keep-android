@@ -2,7 +2,6 @@ package io.privkey.keep.storage
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -27,10 +26,8 @@ import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
-import java.security.PrivateKey
 import java.util.UUID
 
 /**
@@ -41,7 +38,7 @@ import java.util.UUID
  *
  * The stash secret is wrapped under the fixed production DKG alias, so, as in
  * [DkgSecretStashRoundTripTest], the alias is seeded with a twin that needs no biometric,
- * and the test skips on a device that holds a real, auth-gated one.
+ * and the test skips on a device that already holds any key under that alias.
  */
 @RunWith(AndroidJUnit4::class)
 class DkgRecoveryOverStoredShareTest {
@@ -57,8 +54,7 @@ class DkgRecoveryOverStoredShareTest {
 
     @Before
     fun setup() {
-        assumeTrue("refusing to run: a real auth-gated DKG key is present on this device", !productionDkgKeyPresent())
-        if (keyStore.containsAlias(DKG_ALIAS)) keyStore.deleteEntry(DKG_ALIAS)
+        assumeTrue("refusing to run: a DKG key is already present on this device", !keyStore.containsAlias(DKG_ALIAS))
         seedNonAuthTwinAlias()
         ownsAlias = true
         storage = AndroidKeystoreStorage(context, requireUserAuth = false, keystoreAlias = ALIAS, prefsSuffix = SUFFIX)
@@ -173,15 +169,6 @@ class DkgRecoveryOverStoredShareTest {
         val secret = JSONObject().put("share_export", exportData).put("vault_passphrase", PASSPHRASE)
         storage.storeShareByKey(SECRET_KEY, secret.toString().toByteArray(), META)
         assertNotNull("the planted stash reads as pending", mobile.pendingDkgShare())
-    }
-
-    private fun productionDkgKeyPresent(): Boolean {
-        if (!keyStore.containsAlias(DKG_ALIAS)) return false
-        val key = keyStore.getKey(DKG_ALIAS, null) as? PrivateKey ?: return true
-        val info = runCatching {
-            KeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
-        }.getOrNull() ?: return true
-        return info.isUserAuthenticationRequired
     }
 
     private fun seedNonAuthTwinAlias() {
