@@ -1130,10 +1130,14 @@ class AndroidKeystoreStorage(
         if (key.isBlank() || isDkgSecretKey(key) || key == APPROVER_STATE_KEY || isMetadataKey(key)) {
             ShareProbe.Unknown
         } else {
-            val sharePrefs = runCatching { KeystoreEncryptedPrefs.openExisting(context, sharePrefsNameFor(key)) }.getOrNull()
+            // Checked on disk before the file is opened: a read can write the file's own
+            // key, and over a file that failed to load that write would replace it.
+            val prefsName = sharePrefsNameFor(key)
+            val empty = KeystoreEncryptedPrefs.holdsNoEntries(context, prefsName)
+            val sharePrefs = if (empty) null else runCatching { KeystoreEncryptedPrefs.openExisting(context, prefsName) }.getOrNull()
             fun read(name: String) = (sharePrefs?.readString(name) as? PrefRead.Found)?.value
                 ?.let { Base64.decode(it, Base64.NO_WRAP) }
-            classifyShare(shareKeyAliases(key), read(KEY_SHARE_IV), read(KEY_SHARE_DATA), KeystoreProbe())
+            classifyShare(shareKeyAliases(key), read(KEY_SHARE_IV), read(KEY_SHARE_DATA), KeystoreProbe(), recordEmpty = empty)
         }
     } catch (e: Exception) {
         Log.w(TAG, "share probe could not complete: ${e::class.simpleName}")

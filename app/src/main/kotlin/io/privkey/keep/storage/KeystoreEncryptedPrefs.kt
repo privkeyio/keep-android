@@ -8,7 +8,13 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import android.util.Xml
 import io.privkey.keep.BuildConfig
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -19,6 +25,7 @@ import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import org.xmlpull.v1.XmlPullParser
 
 object KeystoreEncryptedPrefs {
 
@@ -65,7 +72,7 @@ object KeystoreEncryptedPrefs {
         val keyAlias = KEY_ALIAS_PREFIX + prefsName
         val secretKey = getOrCreateKey(context, keyAlias)
         val basePrefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
+        return EncryptingSharedPreferences(basePrefs, secretKey, prefsName, prefsFile(context, prefsName))
     }
 
     /**
@@ -77,7 +84,9 @@ object KeystoreEncryptedPrefs {
         val key = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(KEY_ALIAS_PREFIX + prefsName, null)
             ?: return null
         val secretKey = key as? SecretKey ?: throw IllegalStateException("Key for $prefsName is not a SecretKey")
-        return EncryptingSharedPreferences(context.getSharedPreferences(prefsName, Context.MODE_PRIVATE), secretKey, prefsName)
+        return EncryptingSharedPreferences(
+            context.getSharedPreferences(prefsName, Context.MODE_PRIVATE), secretKey, prefsName, prefsFile(context, prefsName)
+        )
     }
 
     /** The Keystore alias of [prefsName]'s own key. */
@@ -94,6 +103,67 @@ object KeystoreEncryptedPrefs {
             KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS_PREFIX + prefsName)
         }.isSuccess
         return cleared && keyGone
+    }
+
+    /**
+     * Whether [prefsName] holds no entries beyond this file's own key and epoch marker,
+     * read from disk rather than through SharedPreferences, which loads a file it cannot
+     * parse as an empty map. True only when the file is missing or parses that way with no
+     * backup copy pending, a backup being a write SharedPreferences would restore, and
+     * SharedPreferences agrees, so a path that is not where it writes cannot pass. A file
+     * that will not parse throws.
+     */
+    fun holdsNoEntries(context: Context, prefsName: String): Boolean {
+        val file = prefsFile(context, prefsName)
+        val backup = File(file.path + ".bak")
+        if (!confirmedAbsent(backup)) return false
+        // A write moves the file to its backup before writing it again, so an answer counts
+        // only if no backup appeared while it was read, and a missing file only if it is
+        // still missing after that.
+        val onDisk = if (confirmedAbsent(file)) {
+            confirmedAbsent(backup) && confirmedAbsent(file)
+        } else {
+            recordEntries(file) == 0 && confirmedAbsent(backup)
+        }
+        return onDisk && context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).all.keys
+            .all { it == HMAC_KEY_PREF || it == STRANDED_EPOCH_PREF }
+    }
+
+    private fun prefsFile(context: Context, prefsName: String) = File(context.dataDir, "shared_prefs/$prefsName.xml")
+
+    /** True only when [file] is reported missing. Any other failure to look throws, unlike [File.exists]. */
+    private fun confirmedAbsent(file: File): Boolean = try {
+        Files.readAttributes(file.toPath(), BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+        false
+    } catch (e: NoSuchFileException) {
+        true
+    }
+
+    /**
+     * The entries in [file] beyond this file's own key and epoch marker. Throws when it is
+     * not one map SharedPreferences could load. An empty file holds none: one left empty
+     * mid-write has its record in the backup, which callers check for.
+     */
+    private fun recordEntries(file: File): Int = file.inputStream().use { input ->
+        if (Files.size(file.toPath()) == 0L) return@use 0
+        val parser = Xml.newPullParser().apply { setInput(input, null) }
+        var depth = 0
+        var roots = 0
+        var entries = 0
+        while (true) {
+            when (parser.next()) {
+                XmlPullParser.START_TAG -> when (++depth) {
+                    1 -> check(++roots == 1 && parser.name == "map") { "${file.name} is not one map" }
+                    2 -> parser.getAttributeValue(null, "name").let {
+                        if (it != HMAC_KEY_PREF && it != STRANDED_EPOCH_PREF) entries++
+                    }
+                }
+                XmlPullParser.END_TAG -> depth--
+                XmlPullParser.END_DOCUMENT -> break
+            }
+        }
+        check(depth == 0 && roots == 1) { "${file.name} ended early" }
+        entries
     }
 
     private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {
@@ -204,7 +274,8 @@ object KeystoreEncryptedPrefs {
     private class EncryptingSharedPreferences(
         private val basePrefs: SharedPreferences,
         private val secretKey: SecretKey,
-        private val prefsName: String
+        private val prefsName: String,
+        private val file: File,
     ) : ReadablePrefs {
 
         private val keyCache = ConcurrentHashMap<String, String>()
@@ -357,6 +428,10 @@ object KeystoreEncryptedPrefs {
                 check(key.size == HMAC_KEY_LENGTH) { "Decoded HMAC key has wrong length: ${key.size}" }
                 return if (key.contentEquals(legacyGlobalKey)) rotateOffPublishedKey(key) else key
             }
+            // SharedPreferences loads a file it cannot parse as empty, and a key committed
+            // over that would replace the file and whatever it held. A backup means a write
+            // of ours is under way, and a load would have restored it, so the file is ours.
+            if (!confirmedAbsent(file) && confirmedAbsent(File(file.path + ".bak"))) recordEntries(file)
             val key = ByteArray(HMAC_KEY_LENGTH).also { SecureRandom().nextBytes(it) }
             val encoded = Base64.encodeToString(key, Base64.NO_WRAP)
             val encryptedHmacKey = encrypt(secretKey, encoded, HMAC_KEY_PREF)
