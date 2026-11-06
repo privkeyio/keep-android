@@ -44,7 +44,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -99,8 +101,10 @@ class Nip55ContentProvider : ContentProvider() {
 
         // Handler calls that may run at once, counting ones whose caller stopped
         // waiting, so calls stuck on absent co-signers cannot take every binder
-        // thread. A request beyond them is refused.
+        // thread. A request waits this long for one to free up, so a burst of quick
+        // requests is served, and is refused after that.
         private const val HANDLER_PERMITS = 2
+        private const val HANDLER_PERMIT_WAIT_MS = 2_000L
 
 
         private val SIGN_COLUMNS = arrayOf("signature", "event", "result")
@@ -123,6 +127,7 @@ class Nip55ContentProvider : ContentProvider() {
     private val backgroundNotificationId = AtomicInteger(0)
     private val concurrentRequestSemaphore = Semaphore(REQUEST_PERMITS)
     internal val handlerPermits = Semaphore(HANDLER_PERMITS)
+    private val handlerCallers: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val handlerScope = CoroutineScope(
         Dispatchers.IO.limitedParallelism(HANDLER_PERMITS) + SupervisorJob(),
     )
@@ -467,84 +472,117 @@ class Nip55ContentProvider : ContentProvider() {
             scope = v3Scope
         )
 
-        // Taken before the pre-approval, so a request refused here leaves none behind.
-        if (!handlerPermits.tryAcquire()) {
+        // Reading the public key is local and quick, so only the calls that can wait on
+        // co-signers take a handler slot. One is taken before the pre-approval, so a
+        // request refused here leaves none behind.
+        val bounded = requestType != Nip55RequestType.GET_PUBLIC_KEY
+        if (bounded && !takeHandlerSlot(callerPackage)) {
             Log.w(TAG, "Background request refused: handler calls at capacity")
-            recordAutoDecision(store, callerPackage, requestType, eventKind, "deny_busy")
+            recordAutoDecision(store, callerPackage, requestType, eventKind, "handler_busy")
             return errorCursor("Request failed", id)
         }
-        val km = app.getKeepMobile()
-        if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
-            val preApprove = runWithTimeout {
-                try {
-                    Result.success(km.preApproveNostrEvent(content))
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    Result.failure<Unit>(e)
-                }
-            }
-            if (preApprove == null || preApprove.isFailure) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove?.exceptionOrNull()?.message ?: "timeout"}")
-                handlerPermits.release()
-                runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
-                return errorCursor("Request failed", id)
-            }
-        }
-
-        return runCatching { handleBounded(store, callerPackage, requestType, eventKind) { h.handleRequest(request, callerPackage) } }
-            .mapCatching { response ->
-                // Same self-verification as the foreground path: compare the handler's
-                // returned pubkey against the independently-read stored group pubkey
-                // (keystore share metadata) through the single shared checkPubkey helper.
-                checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
-                    throw IllegalStateException("Pubkey verification failed")
-                }
-                // The row is the operation's only record: the user sees nothing
-                // else for a request answered in the background, and the velocity
-                // and frequency inputs of later decisions are counted from these
-                // rows, so an unrecorded auto-sign also lowers the bar for the
-                // next one. An operation that cannot be recorded is refused, which
-                // is a real refusal here because the signature has not left the
-                // process, and it matches what the foreground path now does with
-                // a request it cannot record.
-                if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
-                    throw AuditAppendIncomplete()
-                }
-                // The notification is not the record and stays best effort.
-                runCatching { showBackgroundSigningNotification(callerPackage, requestType, eventKind) }
-                    .onFailure { e ->
-                        if (BuildConfig.DEBUG) Log.e(TAG, "Background signing notification failed: ${e::class.simpleName}")
+        var slotHandedOff = !bounded
+        try {
+            val km = app.getKeepMobile()
+            if (requestType == Nip55RequestType.SIGN_EVENT && km != null) {
+                val preApprove = runWithTimeout {
+                    try {
+                        Result.success(km.preApproveNostrEvent(content))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        Result.failure<Unit>(e)
                     }
-                when (requestType) {
-                    Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
-                        MatrixCursor(SIGN_COLUMNS).apply {
-                            addRow(arrayOf(response.result, response.event, response.result))
-                        }
-                    else ->
-                        MatrixCursor(ENCRYPT_COLUMNS).apply {
-                            addRow(arrayOf(response.result, response.result))
-                        }
+                }
+                if (preApprove == null || preApprove.isFailure) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "preApprove failed: ${preApprove?.exceptionOrNull()?.message ?: "timeout"}")
+                    runWithTimeout { store.logOperation(callerPackage, requestType, eventKind, "preapprove_failed", wasAutomatic = true) }
+                    return errorCursor("Request failed", id)
                 }
             }
-            .getOrElse { e ->
-                // Logged in every build for this one: it is the case whose record
-                // is the thing that failed, so nothing else would carry it.
-                if (e is AuditAppendIncomplete) Log.w(TAG, "Auto-signed request refused: audit append did not complete")
-                if (e is HandlerTimedOut) Log.w(TAG, "Background request refused: handler did not answer in time")
-                if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
-                if (e is BiometricHelper.BiometricNotReadyException) {
-                    errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+
+            return runCatching {
+                if (requestType == Nip55RequestType.GET_PUBLIC_KEY) {
+                    h.handleRequest(request, callerPackage)
                 } else {
-                    errorCursor("Request failed", id)
+                    slotHandedOff = true
+                    handleBounded(store, callerPackage, requestType, eventKind) { h.handleRequest(request, callerPackage) }
                 }
             }
+                .mapCatching { response ->
+                    // Same self-verification as the foreground path: compare the handler's
+                    // returned pubkey against the independently-read stored group pubkey
+                    // (keystore share metadata) through the single shared checkPubkey helper.
+                    checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
+                        throw IllegalStateException("Pubkey verification failed")
+                    }
+                    // The row is the operation's only record: the user sees nothing
+                    // else for a request answered in the background, and the velocity
+                    // and frequency inputs of later decisions are counted from these
+                    // rows, so an unrecorded auto-sign also lowers the bar for the
+                    // next one. An operation that cannot be recorded is refused, which
+                    // is a real refusal here because the signature has not left the
+                    // process, and it matches what the foreground path now does with
+                    // a request it cannot record.
+                    if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
+                        throw AuditAppendIncomplete()
+                    }
+                    // The notification is not the record and stays best effort.
+                    runCatching { showBackgroundSigningNotification(callerPackage, requestType, eventKind) }
+                        .onFailure { e ->
+                            if (BuildConfig.DEBUG) Log.e(TAG, "Background signing notification failed: ${e::class.simpleName}")
+                        }
+                    when (requestType) {
+                        Nip55RequestType.SIGN_EVENT, Nip55RequestType.GET_PUBLIC_KEY ->
+                            MatrixCursor(SIGN_COLUMNS).apply {
+                                addRow(arrayOf(response.result, response.event, response.result))
+                            }
+                        else ->
+                            MatrixCursor(ENCRYPT_COLUMNS).apply {
+                                addRow(arrayOf(response.result, response.result))
+                            }
+                    }
+                }
+                .getOrElse { e ->
+                    // Logged in every build for this one: it is the case whose record
+                    // is the thing that failed, so nothing else would carry it.
+                    if (e is AuditAppendIncomplete) Log.w(TAG, "Auto-signed request refused: audit append did not complete")
+                    if (e is HandlerTimedOut) {
+                        Log.w(TAG, "Background request refused: handler did not answer in time")
+                        recordAutoDecision(store, callerPackage, requestType, eventKind, "handler_timeout")
+                    }
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
+                    if (e is BiometricHelper.BiometricNotReadyException) {
+                        errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+                    } else {
+                        errorCursor("Request failed", id)
+                    }
+                }
+        } finally {
+            if (!slotHandedOff) releaseHandlerSlot(callerPackage)
+        }
     }
 
     /**
-     * The handler's response, holding one of [handlerPermits], which the caller has
-     * taken and which is given back when the call ends rather than when the caller
-     * stops waiting. Throws [HandlerTimedOut] once [HANDLER_BUDGET_MS] passes.
+     * One of [handlerPermits], and the one place [callerPackage] may have in flight, so
+     * a single app cannot hold every slot while the others are refused.
+     */
+    private fun takeHandlerSlot(callerPackage: String): Boolean {
+        if (!handlerCallers.add(callerPackage)) return false
+        if (handlerPermits.tryAcquire(HANDLER_PERMIT_WAIT_MS, TimeUnit.MILLISECONDS)) return true
+        handlerCallers.remove(callerPackage)
+        return false
+    }
+
+    private fun releaseHandlerSlot(callerPackage: String) {
+        handlerCallers.remove(callerPackage)
+        handlerPermits.release()
+    }
+
+    /**
+     * The handler's response, holding the handler slot of [callerPackage], which the
+     * caller has taken and which is given back when the call ends rather than when the
+     * caller stops waiting. Throws [HandlerTimedOut] once [HANDLER_BUDGET_MS] passes.
      *
      * A response that arrives after that was produced, a signature included, and is
      * never returned, so it is recorded as an approval and then as abandoned under
@@ -577,7 +615,7 @@ class Nip55ContentProvider : ContentProvider() {
             try {
                 call()
             } finally {
-                handlerPermits.release()
+                releaseHandlerSlot(callerPackage)
             }
         } ?: throw HandlerTimedOut()
     }
