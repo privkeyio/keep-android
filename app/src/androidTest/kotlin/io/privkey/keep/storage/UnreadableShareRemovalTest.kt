@@ -25,6 +25,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.io.File
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import android.util.Base64
@@ -236,6 +237,81 @@ class UnreadableShareRemovalTest {
         assertEquals(QuarantineDiscard.Unverified, discard(group))
         assertEquals(0, nodeDrops)
         assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
+    private fun setAsideWithEmptiedRecord(): String {
+        val group = import(share())
+        storage.quarantineShareByKey(group)
+        assertTrue(rawPrefs(context, storage.sharePrefsNameFor(group)).edit().clear().commit())
+        return group
+    }
+
+    private fun recordFile(group: String) = File(context.dataDir, "shared_prefs/${storage.sharePrefsNameFor(group)}.xml")
+
+    private fun assertKeptUnverified(group: String) {
+        assertEquals(ShareProbe.Unknown, storage.probeShareByKey(group))
+        assertEquals(QuarantineDiscard.Unverified, discard(group))
+        assertEquals(0, nodeDrops)
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
+    // A discard that emptied the record but failed before deregistering it leaves the
+    // share's key behind with nothing to open. A retry finishes the discard.
+    @Test
+    fun aSetAsideShareWhoseRecordWasEmptiedIsDiscarded() {
+        val group = setAsideWithEmptiedRecord()
+        assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
+
+        assertTrue(discard(group) is QuarantineDiscard.Discarded)
+        assertEquals(1, nodeDrops)
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+        assertEquals(0, registered())
+    }
+
+    @Test
+    fun aSetAsideShareWhoseRecordFileIsGoneIsDiscarded() {
+        val group = import(share())
+        storage.quarantineShareByKey(group)
+        assertTrue(context.deleteSharedPreferences(storage.sharePrefsNameFor(group)))
+        assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
+
+        assertTrue(discard(group) is QuarantineDiscard.Discarded)
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+    }
+
+    @Test
+    fun aSetAsideShareWithOnlyItsIvLeftIsNotDiscarded() {
+        val group = import(share())
+        storage.quarantineShareByKey(group)
+        assertTrue(KeystoreEncryptedPrefs.create(context, storage.sharePrefsNameFor(group)).edit().remove(SHARE_DATA).commit())
+
+        assertKeptUnverified(group)
+    }
+
+    // SharedPreferences reads a file it cannot parse as empty, so the probe has to read
+    // the file itself before calling the record gone.
+    @Test
+    fun aSetAsideShareWhoseRecordFileWillNotParseIsNotDiscarded() {
+        val group = setAsideWithEmptiedRecord()
+        recordFile(group).writeText("<map><string name=")
+
+        assertKeptUnverified(group)
+        assertEquals("<map><string name=", recordFile(group).readText())
+    }
+
+    // A backup is the write SharedPreferences restores when it next loads the file, so
+    // the empty file beside it says nothing about the record.
+    @Test
+    fun aRecordWithAPendingBackupIsNotCalledEmpty() {
+        val group = setAsideWithEmptiedRecord()
+        val backup = File(recordFile(group).path + ".bak")
+        backup.writeText("<map><string name=\"k\">v</string></map>")
+
+        try {
+            assertEquals(ShareProbe.Unknown, storage.probeShareByKey(group))
+        } finally {
+            backup.delete()
+        }
     }
 
     @Test

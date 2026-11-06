@@ -8,7 +8,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import android.util.Xml
 import io.privkey.keep.BuildConfig
+import java.io.File
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -19,6 +21,7 @@ import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import org.xmlpull.v1.XmlPullParser
 
 object KeystoreEncryptedPrefs {
 
@@ -94,6 +97,39 @@ object KeystoreEncryptedPrefs {
             KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS_PREFIX + prefsName)
         }.isSuccess
         return cleared && keyGone
+    }
+
+    /**
+     * Whether [prefsName] holds no entries beyond this file's own key and epoch marker,
+     * read from disk rather than through SharedPreferences, which loads a file it cannot
+     * parse as an empty map. True only when the file is missing or parses that way with no
+     * backup copy pending, a backup being a write SharedPreferences would restore. A file
+     * that will not parse throws.
+     */
+    fun holdsNoEntries(context: Context, prefsName: String): Boolean {
+        val file = File(context.dataDir, "shared_prefs/$prefsName.xml")
+        val backup = File(file.path + ".bak")
+        if (backup.exists()) return false
+        // A write moves the file to its backup before writing it again, so a missing file
+        // counts only if neither has appeared since.
+        if (!file.exists()) return !backup.exists() && !file.exists()
+        return file.inputStream().use { input ->
+            val parser = Xml.newPullParser().apply { setInput(input, null) }
+            var depth = 0
+            var entries = 0
+            while (true) {
+                when (parser.next()) {
+                    XmlPullParser.START_TAG -> {
+                        val name = parser.getAttributeValue(null, "name")
+                        if (++depth == 2 && name != HMAC_KEY_PREF && name != STRANDED_EPOCH_PREF) entries++
+                    }
+                    XmlPullParser.END_TAG -> depth--
+                    XmlPullParser.END_DOCUMENT -> break
+                }
+            }
+            check(depth == 0) { "$prefsName ended early" }
+            entries == 0
+        }
     }
 
     private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {

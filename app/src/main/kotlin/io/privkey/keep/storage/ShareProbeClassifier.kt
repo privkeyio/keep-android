@@ -38,20 +38,21 @@ internal interface ShareProbeKeystore {
  * Whether a share's secret still decrypts, is provably lost, or cannot be told.
  *
  * [ShareProbe.Lost] needs positive evidence: every alias the share could use reported
- * absent while the canary answered before and after, or every existing key either
- * permanently invalidated or failing GCM authentication on a cleanly read IV and
- * ciphertext. A key that needs the owner's authentication is tried only with the
- * request's authenticated cipher, and only when it is the one such key, since an
- * unauthorized decrypt says nothing about the ciphertext. Everything else is
- * [ShareProbe.Unknown].
+ * absent while the canary answered before and after, a record [recordEmpty] confirms
+ * holds nothing, or every existing key either permanently invalidated or failing GCM
+ * authentication on a cleanly read IV and ciphertext. A key that needs the owner's
+ * authentication is tried only with the request's authenticated cipher, and only when
+ * it is the one such key, since an unauthorized decrypt says nothing about the
+ * ciphertext. Everything else is [ShareProbe.Unknown].
  */
 internal fun classifyShare(
     aliases: List<String>,
     iv: ByteArray?,
     ciphertext: ByteArray?,
     keystore: ShareProbeKeystore,
+    recordEmpty: Boolean = false,
 ): ShareProbe = try {
-    classify(aliases.distinct(), iv, ciphertext, keystore)
+    classify(aliases.distinct(), iv, ciphertext, keystore, recordEmpty)
 } catch (e: Exception) {
     ShareProbe.Unknown
 }
@@ -61,11 +62,15 @@ private fun classify(
     iv: ByteArray?,
     ciphertext: ByteArray?,
     keystore: ShareProbeKeystore,
+    recordEmpty: Boolean,
 ): ShareProbe {
     if (!keystore.canaryPresent()) return ShareProbe.Unknown
     val keys = aliases.mapNotNull(keystore::secretKey)
     if (!keystore.canaryPresent()) return ShareProbe.Unknown
     if (keys.isEmpty()) return ShareProbe.Lost
+    // A key with no ciphertext left to open, as after a delete that cleared the record
+    // but failed before deregistering it. Half a record could be an interrupted write.
+    if (iv == null && ciphertext == null && recordEmpty) return ShareProbe.Lost
     if (iv == null || ciphertext == null) return ShareProbe.Unknown
     if (ciphertext.size < GCM_TAG_BYTES) return ShareProbe.Lost
 

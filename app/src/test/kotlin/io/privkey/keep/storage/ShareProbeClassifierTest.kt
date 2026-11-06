@@ -63,6 +63,26 @@ class ShareProbeClassifierTest {
     }
 
     @Test
+    fun aKeyWhoseRecordIsConfirmedEmptyIsLost() {
+        val keystore = FakeKeystore(keys = mapOf("global" to aesKey()))
+        assertEquals(ShareProbe.Lost, classifyShare(aliases, null, null, keystore, recordEmpty = true))
+    }
+
+    @Test
+    fun aKeyWithNoRecordReadIsUnknownUnlessTheRecordIsConfirmedEmpty() {
+        val keystore = FakeKeystore(keys = mapOf("global" to aesKey()))
+        assertEquals(ShareProbe.Unknown, classifyShare(aliases, null, null, keystore, recordEmpty = false))
+    }
+
+    @Test
+    fun halfARecordIsUnknownEvenWhenTheFileLooksEmpty() {
+        val key = aesKey()
+        val (iv, ct) = seal(key)
+        assertEquals(ShareProbe.Unknown, classifyShare(aliases, iv, null, FakeKeystore(keys = mapOf("per-key" to key)), recordEmpty = true))
+        assertEquals(ShareProbe.Unknown, classifyShare(aliases, null, ct, FakeKeystore(keys = mapOf("per-key" to key)), recordEmpty = true))
+    }
+
+    @Test
     fun aMissingCanaryBeforeOrAfterIsUnknown() {
         assertEquals(ShareProbe.Unknown, classifyShare(aliases, null, null, FakeKeystore(canary = listOf(false, true))))
         assertEquals(ShareProbe.Unknown, classifyShare(aliases, null, null, FakeKeystore(canary = listOf(true, false))))
