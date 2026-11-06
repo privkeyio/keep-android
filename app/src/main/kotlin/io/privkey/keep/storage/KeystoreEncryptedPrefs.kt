@@ -68,6 +68,19 @@ object KeystoreEncryptedPrefs {
         return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
     }
 
+    /**
+     * Empties [prefsName] and drops its key without opening it, for a file whose key no
+     * longer loads, so [create] would throw. Clearing needs no key. Reports whether both
+     * the clear and the key removal held.
+     */
+    fun discard(context: Context, prefsName: String): Boolean {
+        val cleared = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().clear().commit()
+        val keyGone = runCatching {
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS_PREFIX + prefsName)
+        }.isSuccess
+        return cleared && keyGone
+    }
+
     private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)

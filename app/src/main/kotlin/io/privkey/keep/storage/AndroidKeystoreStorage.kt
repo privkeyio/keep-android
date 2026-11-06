@@ -1011,8 +1011,11 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
         }
 
-        val sharePrefs = getSharePrefs(key)
-        val cleared = sharePrefs.edit().clear().commit()
+        // A file whose own key will not load cannot be opened, and is the very share an
+        // owner removes as unreadable, so it is emptied without opening it.
+        val sharePrefs = runCatching { getSharePrefs(key) }.getOrNull()
+        val cleared = sharePrefs?.edit()?.clear()?.commit()
+            ?: KeystoreEncryptedPrefs.discard(context, sharePrefsNameFor(key))
         if (!cleared) {
             throw KeepMobileException.StorageException("Failed to clear share metadata")
         }

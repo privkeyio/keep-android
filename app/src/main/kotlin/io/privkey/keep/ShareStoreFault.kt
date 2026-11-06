@@ -3,12 +3,7 @@ package io.privkey.keep
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -19,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.ui.components.KeepCard
 import io.privkey.keep.uniffi.ShareStoreStatus
@@ -37,6 +31,8 @@ internal fun afterRetry(failedBefore: Set<String>, retried: Collection<String>, 
     val stillUnreadable = unreadableGroups(now).toSet()
     return (failedBefore + retried).filterTo(mutableSetOf()) { it in stillUnreadable }
 }
+
+internal enum class ShareRemoval { REMOVED, NO_LONGER_UNREADABLE, FAILED }
 
 internal fun shortGroup(group: String): String =
     if (group.length > 16) "${group.take(8)}…${group.takeLast(8)}" else group
@@ -117,32 +113,21 @@ internal fun UnreadableShareRemovedDialog(onRestore: () -> Unit, onImport: () ->
     )
 }
 
-/** Shown instead of the app while the list of stored shares itself cannot be read. */
+/** Shown on Home while the list of stored shares itself cannot be read. */
 @Composable
-internal fun ShareStoreUnavailableScreen(retrying: Boolean, onRetry: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            stringResource(R.string.share_store_unavailable_title),
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            stringResource(R.string.share_store_unavailable_text),
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onRetry, enabled = !retrying) {
-            Text(stringResource(R.string.share_unreadable_retry))
+internal fun ShareStoreUnavailableCard(retrying: Boolean, onRetry: () -> Unit) {
+    KeepCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                stringResource(R.string.share_store_unavailable_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(stringResource(R.string.share_store_unavailable_text), style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onRetry, enabled = !retrying) {
+                Text(stringResource(R.string.share_unreadable_retry))
+            }
         }
     }
 }

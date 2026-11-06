@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.AccountActions
+import io.privkey.keep.ShareRemoval
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.ShareStoreStatus
@@ -16,11 +17,13 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.security.KeyPairGenerator
 import java.security.KeyStore
 import javax.crypto.Cipher
 
@@ -82,8 +85,8 @@ class UnreadableShareRemovalTest {
         raw.edit().putString(groupName, "not-a-stored-value").commit()
     }
 
-    private fun remove(group: String): Boolean {
-        val done = CompletableDeferred<Boolean>()
+    private fun remove(group: String): ShareRemoval {
+        val done = CompletableDeferred<ShareRemoval>()
         AccountActions(
             keepMobile = mobile,
             storage = storage,
@@ -107,7 +110,7 @@ class UnreadableShareRemovalTest {
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
         assertTrue("the core refuses to write over it while it is stored", runCatching { import(export) }.isFailure)
 
-        assertTrue(remove(group))
+        assertEquals(ShareRemoval.REMOVED, remove(group))
 
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
         assertEquals(1, nodeDrops)
@@ -120,12 +123,34 @@ class UnreadableShareRemovalTest {
     fun aShareThatReadsIsNotRemoved() {
         val group = import(share())
 
-        assertFalse(remove(group))
+        assertEquals(ShareRemoval.NO_LONGER_UNREADABLE, remove(group))
 
         val read = storage.readShareRegistry() as ShareRegistryRead.Readable
         assertEquals(1, read.shares.size)
         assertEquals(0, nodeDrops)
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
+    }
+
+    // The share file's own key no longer loads, so the file cannot be opened at all. The
+    // delete has removed the share's Keystore aliases by the time it reaches the file, so
+    // it has to empty it without opening it, or the share could never be removed.
+    @Test
+    fun aShareWhoseFileKeyWillNotLoadIsStillRemoved() {
+        val export = share()
+        val group = import(export)
+        val prefsName = storage.sharePrefsNameFor(group)
+        val fileKey = "keep_prefs_$prefsName"
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(fileKey)
+        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+            initialize(KeyGenParameterSpec.Builder(fileKey, KeyProperties.PURPOSE_SIGN).setDigests(KeyProperties.DIGEST_SHA256).build())
+        }.generateKeyPair()
+        assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
+
+        assertEquals(ShareRemoval.REMOVED, remove(group))
+
+        assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
+        assertTrue(rawPrefs(context, prefsName).all.isEmpty())
+        assertEquals(group, import(export))
     }
 
     private companion object {

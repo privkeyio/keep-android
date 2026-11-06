@@ -441,6 +441,10 @@ fun MainScreen(
     var retryFailedShares by remember { mutableStateOf<Set<String>>(emptySet()) }
     var shareStoreRetrying by remember { mutableStateOf(false) }
     var unreadableShareToRemove by remember { mutableStateOf<String?>(null) }
+    var shareRemovalInFlight by remember { mutableStateOf(false) }
+    // Bumped by a retry or a removal, so a poll read that started before either cannot
+    // write its older status over theirs.
+    var shareStoreEpoch by remember { mutableStateOf(0) }
     var showUnreadableShareRemoved by remember { mutableStateOf(false) }
     var showAccountSwitcher by remember { mutableStateOf(false) }
     var showImportScreen by remember { mutableStateOf(false) }
@@ -668,6 +672,7 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         val dkgEpochAtRead = pendingDkgEpoch
+        val shareEpochAtRead = shareStoreEpoch
         // listAllShares/getActiveShareKey read Keystore-encrypted prefs; a transient
         // decrypt fault must not crash launch. On failure treat the pending-DKG slot as
         // unreadable so the group-creation gate fails closed rather than open.
@@ -679,7 +684,7 @@ fun MainScreen(
                 val pdkg = runCatching { keepMobile.pendingDkgShare() }
                 AccountInitial(a, k, config.config.frostRelays, config.config.profileRelays, config.unreadable, pdkg, keepMobile.shareStoreStatus())
             }
-            shareStoreStatus = initial.shareStoreStatus
+            if (shareStoreEpoch == shareEpochAtRead) shareStoreStatus = initial.shareStoreStatus
             allAccounts = initial.accounts
             activeAccountKey = initial.activeKey
             relays = initial.relays
@@ -720,6 +725,7 @@ fun MainScreen(
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             repeat(Int.MAX_VALUE) {
                 val dkgEpochAtRead = pendingDkgEpoch
+                val shareEpochAtRead = shareStoreEpoch
                 val pollResult = withContext(Dispatchers.IO) {
                     val h = keepMobile.hasShare()
                     val s = keepMobile.getShareInfo()
@@ -738,7 +744,9 @@ fun MainScreen(
                         .onFailure { if (it is CancellationException) throw it }
                     PollResult(h, s, a, k, dc, db, pdkg, keepMobile.shareStoreStatus())
                 }
-                if (!shareStoreRetrying) shareStoreStatus = pollResult.shareStoreStatus
+                if (!shareStoreRetrying && shareStoreEpoch == shareEpochAtRead) {
+                    shareStoreStatus = pollResult.shareStoreStatus
+                }
                 hasShare = pollResult.hasShare
                 shareInfo = pollResult.shareInfo
                 allAccounts = pollResult.allAccounts
@@ -988,6 +996,7 @@ fun MainScreen(
     fun retryShareStore() {
         if (shareStoreRetrying) return
         shareStoreRetrying = true
+        shareStoreEpoch++
         val retried = unreadableGroups(shareStoreStatus)
         coroutineScope.launch {
             try {
@@ -1011,27 +1020,33 @@ fun MainScreen(
         }
     }
 
-    if (shareStoreStatus is ShareStoreStatus.Unavailable) {
-        ShareStoreUnavailableScreen(retrying = shareStoreRetrying, onRetry = ::retryShareStore)
-        return
-    }
-
     unreadableShareToRemove?.let { group ->
         RemoveUnreadableShareDialog(
             group = group,
             onConfirm = {
                 unreadableShareToRemove = null
+                if (shareRemovalInFlight) return@RemoveUnreadableShareDialog
+                shareRemovalInFlight = true
                 coroutineScope.launch {
-                    if (!confirmShareRemovalOwner(appContext.getString(R.string.share_unreadable_remove_auth_title))) return@launch
-                    accountActions.removeUnreadableShare(group) { removed ->
+                    if (!confirmShareRemovalOwner(appContext.getString(R.string.share_unreadable_remove_auth_title))) {
+                        shareRemovalInFlight = false
+                        return@launch
+                    }
+                    accountActions.removeUnreadableShare(group) { outcome ->
                         coroutineScope.launch {
-                            val now = withContext(Dispatchers.IO) { keepMobile.shareStoreStatus() }
-                            shareStoreStatus = now
-                            retryFailedShares = retryFailedShares.filterTo(mutableSetOf()) { it in unreadableGroups(now) }
-                            if (removed) {
-                                showUnreadableShareRemoved = true
-                            } else if (group !in unreadableGroups(now)) {
-                                Toast.makeText(appContext, R.string.share_unreadable_readable_again, Toast.LENGTH_SHORT).show()
+                            try {
+                                shareStoreEpoch++
+                                val now = withContext(Dispatchers.IO) { keepMobile.shareStoreStatus() }
+                                shareStoreStatus = now
+                                retryFailedShares = retryFailedShares.filterTo(mutableSetOf()) { it in unreadableGroups(now) }
+                                when (outcome) {
+                                    ShareRemoval.REMOVED -> showUnreadableShareRemoved = true
+                                    ShareRemoval.NO_LONGER_UNREADABLE ->
+                                        Toast.makeText(appContext, R.string.share_unreadable_readable_again, Toast.LENGTH_SHORT).show()
+                                    ShareRemoval.FAILED -> Unit
+                                }
+                            } finally {
+                                shareRemovalInFlight = false
                             }
                         }
                     }
@@ -1628,6 +1643,7 @@ fun MainScreen(
             composable(Route.Home.route) {
                 HomeTab(
                     unreadableShares = unreadableGroups(shareStoreStatus),
+                    shareStoreUnavailable = shareStoreStatus is ShareStoreStatus.Unavailable,
                     retryFailedShares = retryFailedShares,
                     shareStoreRetrying = shareStoreRetrying,
                     onRetryShareStore = ::retryShareStore,
@@ -1953,6 +1969,7 @@ fun MainScreen(
 @Composable
 private fun HomeTab(
     unreadableShares: List<String>,
+    shareStoreUnavailable: Boolean,
     retryFailedShares: Set<String>,
     shareStoreRetrying: Boolean,
     onRetryShareStore: () -> Unit,
@@ -2042,6 +2059,11 @@ private fun HomeTab(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+
+        if (shareStoreUnavailable) {
+            ShareStoreUnavailableCard(retrying = shareStoreRetrying, onRetry = onRetryShareStore)
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         if (unreadableShares.isNotEmpty()) {

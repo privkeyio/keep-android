@@ -323,9 +323,9 @@ internal class AccountActions(
     /**
      * Removes the share of [groupPubkeyHex], which the core reports as stored but
      * unreadable, after the owner confirmed it. Read again under the account lock, so a
-     * share that reads again by then is kept. Reports whether it was removed.
+     * share that reads again by then is kept.
      */
-    fun removeUnreadableShare(groupPubkeyHex: String, onResult: (Boolean) -> Unit) {
+    fun removeUnreadableShare(groupPubkeyHex: String, onResult: (ShareRemoval) -> Unit) {
         coroutineScope.launch {
             val removed = deleteGroup(groupPubkeyHex, onDismiss = {}) {
                 groupPubkeyHex in unreadableGroups(keepMobile.shareStoreStatus())
@@ -338,11 +338,11 @@ internal class AccountActions(
         groupPubkeyHex: String,
         onDismiss: () -> Unit,
         stillWanted: () -> Boolean = { true },
-    ): Boolean {
+    ): ShareRemoval {
         return accountMutex.withLock {
             if (!withContext(Dispatchers.IO) { stillWanted() }) {
                 onDismiss()
-                return@withLock false
+                return@withLock ShareRemoval.NO_LONGER_UNREADABLE
             }
             val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
             // No pointer is treated as this account: the core builds its node from a
@@ -357,7 +357,7 @@ internal class AccountActions(
                 if (!onAccountSwitched(true)) {
                     logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), IllegalStateException("bunker reset failed"))
                     onDismiss()
-                    return@withLock false
+                    return@withLock ShareRemoval.FAILED
                 }
             }
             try {
@@ -383,7 +383,7 @@ internal class AccountActions(
                 runCatching { refreshAccountState() }
                     .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Refresh after failed delete failed: ${it::class.simpleName}") }
                 onDismiss()
-                return@withLock false
+                return@withLock ShareRemoval.FAILED
             }
             try {
                 postDeleteCleanup(wasActive, onDismiss)
@@ -391,7 +391,7 @@ internal class AccountActions(
                 logAndToast("Post-delete refresh failed", appContext.getString(R.string.account_delete_refresh_failed), e)
                 onDismiss()
             }
-            true
+            ShareRemoval.REMOVED
         }
     }
 
