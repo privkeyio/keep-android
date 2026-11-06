@@ -17,6 +17,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.PendingShareInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
+import io.privkey.keep.uniffi.UnreadableShareRemoval
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -219,7 +220,7 @@ internal class AccountActions(
         }
     }
 
-    private suspend fun refreshAccountState() {
+    suspend fun refreshAccountState() {
         val result = withContext(Dispatchers.IO) {
             val hasShare = keepMobile.hasShare()
             val shareInfo = keepMobile.getShareInfo()
@@ -365,6 +366,134 @@ internal class AccountActions(
                     onDismiss()
                 }
             }
+        }
+    }
+
+    /**
+     * Sets aside the share of [groupPubkeyHex], which the core lists as unreadable. The
+     * core keeps it unless the platform confirms its secret is lost, so the outcome is
+     * the core's to report. [cipher], when given, is the owner-authenticated decrypt
+     * cipher the core's probe needs for a key that requires authentication. Null on a
+     * failure, which is reported here.
+     */
+    fun removeUnreadableShare(groupPubkeyHex: String, cipher: Cipher?, onResult: (UnreadableShareRemoval?) -> Unit) {
+        coroutineScope.launch {
+            val outcome = accountMutex.withLock {
+                val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+                val wasActive = activeAccountKey == null || groupPubkeyHex == activeAccountKey
+                val result = try {
+                    withContext(Dispatchers.IO) {
+                        withProbeCipher(cipher) { keepMobile.removeUnreadableShare(groupPubkeyHex) }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // The core tears the node down once it starts setting a share aside,
+                    // even when that then fails. A failure after the share was set aside,
+                    // clearing the active pointer, still took the account out.
+                    onLiveNodeDropped()
+                    logAndToast("Set aside failed", appContext.getString(R.string.share_unreadable_remove_failed), e)
+                    val setAside = withContext(Dispatchers.IO) {
+                        runCatching { keepMobile.listQuarantinedShares() }.getOrNull()
+                    }?.any { it.equals(groupPubkeyHex, ignoreCase = true) } == true
+                    if (setAside) afterShareTakenOut(wasActive)
+                    null
+                }
+                if (result == UnreadableShareRemoval.REMOVED) {
+                    onLiveNodeDropped()
+                    afterShareTakenOut(wasActive)
+                }
+                result
+            }
+            onResult(outcome)
+        }
+    }
+
+    /** Lists a set-aside share again. Reports whether it was restored. */
+    fun restoreQuarantinedShare(groupPubkeyHex: String, onResult: (Boolean) -> Unit) {
+        coroutineScope.launch {
+            val restored = accountMutex.withLock {
+                try {
+                    withContext(Dispatchers.IO) { keepMobile.restoreQuarantinedShare(groupPubkeyHex) }
+                    runCatching { refreshAccountState() }
+                        .onFailure { if (it is CancellationException) throw it }
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logAndToast("Restore failed", appContext.getString(R.string.share_set_aside_restore_failed), e)
+                    false
+                }
+            }
+            onResult(restored)
+        }
+    }
+
+    /**
+     * Destroys a set-aside share, which the core allows only once the platform confirms
+     * it is lost. The caller has the owner confirm it first. [cipher] is as for
+     * [removeUnreadableShare]. Reports whether it was destroyed.
+     */
+    fun discardQuarantinedShare(groupPubkeyHex: String, cipher: Cipher?, onResult: (Boolean) -> Unit) {
+        coroutineScope.launch {
+            val discarded = accountMutex.withLock {
+                try {
+                    withContext(Dispatchers.IO) {
+                        withProbeCipher(cipher) { keepMobile.discardQuarantinedShare(groupPubkeyHex) }
+                        runCatching { keepMobile.deleteRelayConfig(groupPubkeyHex) }
+                            .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
+                        onAccountDeleted()
+                    }
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Only the probe finding the share readable is refused as invalid
+                    // input. Any other error may follow a partial delete, which a retry
+                    // finishes, so it is not reported as nothing having changed.
+                    val shown = when (e) {
+                        is KeepMobileException.InvalidInput -> R.string.share_set_aside_discard_readable
+                        else -> R.string.share_set_aside_discard_failed
+                    }
+                    logAndToast("Discard failed", appContext.getString(shown), e)
+                    false
+                } finally {
+                    // A discard that reaches the delete tears the node down whatever
+                    // its result, as a delete does.
+                    onLiveNodeDropped()
+                }
+            }
+            onResult(discarded)
+        }
+    }
+
+    private fun <T> withProbeCipher(cipher: Cipher?, block: () -> T): T {
+        if (cipher == null) return block()
+        val requestId = "share-probe-${System.nanoTime()}"
+        storage.setPendingCipher(requestId, cipher, AndroidKeystoreStorage.CipherRole.DECRYPT)
+        storage.setRequestIdContext(requestId)
+        try {
+            return block()
+        } finally {
+            storage.clearRequestIdContext()
+            storage.clearPendingCipher(requestId)
+        }
+    }
+
+    /**
+     * After the core took a share out of use. Its bunker clients go with it when it was
+     * the active account, and the next account is picked as after a delete.
+     */
+    private suspend fun afterShareTakenOut(wasActive: Boolean) {
+        try {
+            if (wasActive && !onAccountSwitched(true)) {
+                logAndToast("Bunker reset failed", appContext.getString(R.string.account_delete_failed), IllegalStateException("bunker reset failed"))
+            }
+            postDeleteCleanup(wasActive) {}
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logAndToast("Post-removal refresh failed", appContext.getString(R.string.account_delete_refresh_failed), e)
         }
     }
 

@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.uniffi.KeepMobileException
+import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.StorageRead
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -360,7 +361,7 @@ class InfallibleStorageReadTest {
 
     @Test
     fun an_unreadable_share_makes_the_store_report_itself_as_not_fully_readable() {
-        // What the backup path gates on. The share list silently drops the unreadable
+        // What the core backup gates on. The share list silently drops the unreadable
         // share, so a backup built from it would hold one share for a device that
         // owns two, encrypt, save and report success.
         seedTwoSharesWithTheFirstUnreadable(activeKey = GROUP_HEX)
@@ -369,7 +370,7 @@ class InfallibleStorageReadTest {
         assertEquals("precondition: the list is short, not empty", 1, storage.listAllShares().size)
         assertFalse(
             "a store with an unreadable share must not report itself fully readable",
-            storage.shareStorageIsFullyReadable()
+            fullyReadable(storage)
         )
     }
 
@@ -378,14 +379,14 @@ class InfallibleStorageReadTest {
         seedReadableStore()
         breakNameResolution(MULTI_PREFS + SUFFIX)
 
-        assertFalse(storage().shareStorageIsFullyReadable())
+        assertFalse(fullyReadable(storage()))
     }
 
     @Test
     fun a_healthy_store_reports_itself_fully_readable() {
         seedReadableStore()
 
-        assertTrue(storage().shareStorageIsFullyReadable())
+        assertTrue(fullyReadable(storage()))
     }
 
     @Test
@@ -397,7 +398,7 @@ class InfallibleStorageReadTest {
             .putStringSet("all_share_keys", setOf(GROUP_HEX))
             .commit()
 
-        assertTrue(storage().shareStorageIsFullyReadable())
+        assertTrue(fullyReadable(storage()))
     }
 
     @Test
@@ -423,8 +424,11 @@ class InfallibleStorageReadTest {
             1,
             storage.listAllShares().size
         )
-        assertFalse(storage.shareStorageIsFullyReadable())
+        assertFalse(fullyReadable(storage))
     }
+
+    private fun fullyReadable(storage: AndroidKeystoreStorage): Boolean =
+        (storage.readShareRegistry() as? ShareRegistryRead.Readable)?.unreadable?.isEmpty() == true
 
     private companion object {
         const val SINGLE_PREFS = "keep_secure_prefs"

@@ -7,12 +7,14 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
+import android.security.keystore.UserNotAuthenticatedException
 import android.util.Base64
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import io.privkey.keep.BuildConfig
 import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.SecureStorage
+import io.privkey.keep.uniffi.ShareProbe
 import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.ShareMetadataInfo
 import io.privkey.keep.uniffi.StorageRead
@@ -85,6 +87,9 @@ class AndroidKeystoreStorage(
         private const val KEY_SHARE_DID_BACKUP = "share_did_backup"
         private const val KEY_ACTIVE_SHARE = "active_share_key"
         private const val KEY_ALL_SHARE_KEYS = "all_share_keys"
+        // Shares set aside by quarantineShareByKey: moved out of KEY_ALL_SHARE_KEYS in
+        // the same commit, with their files and Keystore aliases left in place.
+        private const val KEY_QUARANTINED_SHARE_KEYS = "quarantined_share_keys"
         private const val PENDING_CIPHER_TIMEOUT_MS = 60_000L
         private const val METADATA_KEY_ALIAS = "keep_metadata"
         private const val METADATA_KEY_PREFIX = "__keep_"
@@ -786,6 +791,9 @@ class AndroidKeystoreStorage(
     }
 
     private fun saveShareDataByKey(key: String, encrypted: ByteArray, iv: ByteArray, metadata: ShareMetadataInfo) {
+        if (key in quarantinedKeys()) {
+            throw KeepMobileException.StorageException("This share is set aside. Restore or discard it first")
+        }
         requireWritableShareSlot(key, metadata)
         writeShareToPrefs(getSharePrefs(key), encrypted, iv, metadata)
         addKeyToRegistry(key)
@@ -956,35 +964,6 @@ class AndroidKeystoreStorage(
             }
         }
 
-    /**
-     * Whether every share the registry lists can be read right now.
-     *
-     * [listAllShares] has to answer the core with a list and has no way to say
-     * "incomplete", so a share whose file will not decrypt is simply missing from it.
-     * That is right for showing accounts and wrong for anything that treats the list
-     * as the whole set, a backup above all: it would be built, encrypted and reported
-     * as saved while holding fewer shares than the device owns. Kotlin-only on
-     * purpose, since it answers a question the FFI trait cannot express.
-     *
-     * Checked per share against both faults that drop one from the list: a name
-     * resolution that raises, and metadata that will not parse. [readMetadataFromPrefs]
-     * answers null for either an unreadable value or an out-of-range one, and
-     * [listAllShares] drops that share, so a check on the stored share data alone would
-     * pass a share the backup then silently omits. A share listed but never stored reads
-     * as absent, not unreadable, and does not count: it would otherwise block backups
-     * forever.
-     */
-    fun shareStorageIsFullyReadable(): Boolean =
-        infallibleRead("share readability check", onFault = false) {
-            val keys = multiSharePrefs.getStringSet(KEY_ALL_SHARE_KEYS, emptySet()) ?: emptySet()
-            keys.all { key ->
-                runCatching {
-                    val sharePrefs = getSharePrefs(key)
-                    !sharePrefs.contains(KEY_SHARE_DATA) || readMetadataFromPrefs(sharePrefs) != null
-                }.getOrDefault(false)
-            }
-        }
-
     private fun getShareMetadataByKey(key: String): ShareMetadataInfo? {
         val sharePrefs = getSharePrefs(key)
         if (!sharePrefs.contains(KEY_SHARE_DATA)) return null
@@ -1023,6 +1002,7 @@ class AndroidKeystoreStorage(
             PrefRead.Unreadable ->
                 throw KeepMobileException.StorageException("Share registry could not be read")
         }
+        val quarantined = quarantinedKeys()
 
         // The key goes before the data. A share whose data was cleared while its key
         // stayed looks absent, so a restore or import writes it under the default key
@@ -1040,8 +1020,11 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to delete keystore entry")
         }
 
-        val sharePrefs = getSharePrefs(key)
-        val cleared = sharePrefs.edit().clear().commit()
+        // A file whose own key will not load cannot be opened, and is the very share an
+        // owner removes as unreadable, so it is emptied without opening it.
+        val sharePrefs = runCatching { getSharePrefs(key) }.getOrNull()
+        val cleared = sharePrefs?.edit()?.clear()?.commit()
+            ?: KeystoreEncryptedPrefs.discard(context, sharePrefsNameFor(key))
         if (!cleared) {
             throw KeepMobileException.StorageException("Failed to clear share metadata")
         }
@@ -1049,6 +1032,9 @@ class AndroidKeystoreStorage(
         val updatedKeys = existingKeys - key
         val activeKey = multiSharePrefs.getString(KEY_ACTIVE_SHARE, null)
         val editor = multiSharePrefs.edit().putStringSet(KEY_ALL_SHARE_KEYS, updatedKeys)
+        if (key in quarantined) {
+            editor.putStringSet(KEY_QUARANTINED_SHARE_KEYS, quarantined - key)
+        }
         if (activeKey == key) {
             editor.remove(KEY_ACTIVE_SHARE)
         }
@@ -1057,6 +1043,118 @@ class AndroidKeystoreStorage(
             throw KeepMobileException.StorageException("Failed to update share registry")
         }
     }
+
+    /** The keys set aside, or a StorageException when the set cannot be read. */
+    private fun quarantinedKeys(): Set<String> =
+        when (val read = multiSharePrefs.readStringSet(KEY_QUARANTINED_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable ->
+                throw KeepMobileException.StorageException("The set-aside shares could not be read")
+        }
+
+    private fun registryKeys(): Set<String> =
+        when (val read = multiSharePrefs.readStringSet(KEY_ALL_SHARE_KEYS)) {
+            is PrefRead.Found -> read.value
+            PrefRead.Absent -> emptySet()
+            PrefRead.Unreadable -> throw KeepMobileException.StorageException("Share registry could not be read")
+        }
+
+    @Synchronized
+    override fun quarantineShareByKey(key: String) = fallibleStorage("quarantineShareByKey") {
+        require(key.isNotBlank()) { "Share key must not be blank" }
+        val registry = registryKeys()
+        val quarantined = quarantinedKeys()
+        if (key in quarantined && key !in registry) return@fallibleStorage
+        if (key !in registry) throw KeepMobileException.StorageException("No listed share to set aside")
+        val moved = multiSharePrefs.edit()
+            .putStringSet(KEY_ALL_SHARE_KEYS, registry - key)
+            .putStringSet(KEY_QUARANTINED_SHARE_KEYS, quarantined + key)
+            .commit()
+        if (!moved) throw KeepMobileException.StorageException("Failed to set the share aside")
+    }
+
+    @Synchronized
+    override fun restoreQuarantinedShare(key: String) = fallibleStorage("restoreQuarantinedShare") {
+        val registry = registryKeys()
+        val quarantined = quarantinedKeys()
+        if (key !in quarantined) throw KeepMobileException.StorageException("No set-aside share for this group")
+        if (key in registry) throw KeepMobileException.StorageException("A share of this group is already listed")
+        val moved = multiSharePrefs.edit()
+            .putStringSet(KEY_ALL_SHARE_KEYS, registry + key)
+            .putStringSet(KEY_QUARANTINED_SHARE_KEYS, quarantined - key)
+            .commit()
+        if (!moved) throw KeepMobileException.StorageException("Failed to restore the share")
+    }
+
+    @Synchronized
+    override fun listQuarantinedShareKeys(): List<String> =
+        fallibleStorage("listQuarantinedShareKeys") { quarantinedKeys().sorted() }
+
+    /** Every alias a share's key could live under, as [getOrCreateKeyForShare] looks. */
+    internal fun shareKeyAliases(key: String): List<String> =
+        listOf(getKeystoreAlias(key), getLegacyKeystoreAlias(key), keystoreAlias).distinct()
+
+    private inner class KeystoreProbe : ShareProbeKeystore {
+        private val canary = KeystoreEncryptedPrefs.keyAliasFor("$MULTI_PREFS_NAME$prefsSuffix")
+
+        override fun canaryPresent(): Boolean = keyStore.getKey(canary, null) != null
+
+        // getKey answers null only for a key the Keystore reports absent and throws on
+        // any service fault, unlike containsAlias, which reads every fault as absent.
+        override fun secretKey(alias: String): SecretKey? = when (val k = keyStore.getKey(alias, null)) {
+            null -> null
+            is SecretKey -> k
+            else -> throw IllegalStateException("not a secret key")
+        }
+
+        override fun requiresUserAuth(key: SecretKey): Boolean =
+            (SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
+                .getKeySpec(key, KeyInfo::class.java) as KeyInfo).isUserAuthenticationRequired
+
+        override fun open(key: SecretKey, iv: ByteArray): OpenedKey = try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+            OpenedKey.Ready(cipher)
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            OpenedKey.Invalidated
+        } catch (e: UserNotAuthenticatedException) {
+            OpenedKey.NeedsAuth
+        }
+
+        override fun authenticatedCipher(): Cipher? =
+            requestIdContext.get()?.let { consumePendingCipher(it, CipherRole.DECRYPT) }
+    }
+
+    override fun probeShareByKey(key: String): ShareProbe = try {
+        if (key.isBlank() || isDkgSecretKey(key) || key == APPROVER_STATE_KEY || isMetadataKey(key)) {
+            ShareProbe.Unknown
+        } else {
+            val sharePrefs = runCatching { KeystoreEncryptedPrefs.openExisting(context, sharePrefsNameFor(key)) }.getOrNull()
+            fun read(name: String) = (sharePrefs?.readString(name) as? PrefRead.Found)?.value
+                ?.let { Base64.decode(it, Base64.NO_WRAP) }
+            classifyShare(shareKeyAliases(key), read(KEY_SHARE_IV), read(KEY_SHARE_DATA), KeystoreProbe())
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "share probe could not complete: ${e::class.simpleName}")
+        ShareProbe.Unknown
+    }
+
+    /**
+     * A decrypt cipher on the one existing key of [key] that needs the owner's
+     * authentication, for the owner to authenticate before a probe. Never creates a key,
+     * unlike [getCipherForShareDecryption]. Null when no such key exists, when more than
+     * one does, or when it will not open, in which case the probe needs no cipher or
+     * cannot use one.
+     */
+    fun cipherForShareProbe(key: String): Cipher? = runCatching {
+        val sharePrefs = KeystoreEncryptedPrefs.openExisting(context, sharePrefsNameFor(key)) ?: return null
+        val iv = (sharePrefs.readString(KEY_SHARE_IV) as? PrefRead.Found)?.value ?: return null
+        val probe = KeystoreProbe()
+        val only = shareKeyAliases(key).mapNotNull(probe::secretKey).filter(probe::requiresUserAuth).singleOrNull()
+            ?: return null
+        (probe.open(only, Base64.decode(iv, Base64.NO_WRAP)) as? OpenedKey.Ready)?.cipher
+    }.getOrNull()
 
     @Synchronized
     override fun getActiveShareKey(): String? =
@@ -1105,7 +1203,12 @@ class AndroidKeystoreStorage(
             // under the same fault rule the membership path below uses.
             PrefRead.Unreadable -> {
                 val stored = multiSharePrefs.readString(KEY_ACTIVE_SHARE)
-                return if (stored is PrefRead.Found && storesShareData(stored.value)) {
+                val setAside = when (val read = multiSharePrefs.readStringSet(KEY_QUARANTINED_SHARE_KEYS)) {
+                    is PrefRead.Found -> stored is PrefRead.Found && stored.value in read.value
+                    PrefRead.Absent -> false
+                    PrefRead.Unreadable -> true
+                }
+                return if (!setAside && stored is PrefRead.Found && storesShareData(stored.value)) {
                     stored.value
                 } else {
                     null

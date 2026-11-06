@@ -68,6 +68,34 @@ object KeystoreEncryptedPrefs {
         return EncryptingSharedPreferences(basePrefs, secretKey, prefsName)
     }
 
+    /**
+     * [prefsName] opened with the key it already has, or null when the Keystore reports
+     * that key absent. Never creates a key, unlike [create], so a read that must not
+     * change anything cannot replace a key a Keystore fault hid. Any other fault throws.
+     */
+    fun openExisting(context: Context, prefsName: String): ReadablePrefs? {
+        val key = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.getKey(KEY_ALIAS_PREFIX + prefsName, null)
+            ?: return null
+        val secretKey = key as? SecretKey ?: throw IllegalStateException("Key for $prefsName is not a SecretKey")
+        return EncryptingSharedPreferences(context.getSharedPreferences(prefsName, Context.MODE_PRIVATE), secretKey, prefsName)
+    }
+
+    /** The Keystore alias of [prefsName]'s own key. */
+    internal fun keyAliasFor(prefsName: String): String = KEY_ALIAS_PREFIX + prefsName
+
+    /**
+     * Empties [prefsName] and drops its key without opening it, for a file whose key no
+     * longer loads, so [create] would throw. Clearing needs no key. Reports whether both
+     * the clear and the key removal held.
+     */
+    fun discard(context: Context, prefsName: String): Boolean {
+        val cleared = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit().clear().commit()
+        val keyGone = runCatching {
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS_PREFIX + prefsName)
+        }.isSuccess
+        return cleared && keyGone
+    }
+
     private fun isStrongBoxAvailable(context: Context): Boolean = runCatching {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
