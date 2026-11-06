@@ -269,6 +269,18 @@ class UnreadableShareRemovalTest {
         assertEquals(0, registered())
     }
 
+    // An empty file is what a write leaves only with its backup beside it, and without
+    // one it holds nothing.
+    @Test
+    fun aSetAsideShareWhoseRecordFileIsEmptyIsDiscarded() {
+        val group = setAsideWithEmptiedRecord()
+        recordFile(group).writeText("")
+        assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
+
+        assertTrue(discard(group) is QuarantineDiscard.Discarded)
+        assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
+    }
+
     @Test
     fun aSetAsideShareWhoseRecordFileIsGoneIsDiscarded() {
         val group = import(share())
@@ -324,7 +336,6 @@ class UnreadableShareRemovalTest {
         val unloadables = listOf(
             "<map><string name=",
             "<record><string name=\"k\">v</string></record>",
-            "",
             "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>",
         )
         for (unloadable in unloadables) {

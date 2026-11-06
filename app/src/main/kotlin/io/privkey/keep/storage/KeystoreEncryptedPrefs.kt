@@ -141,10 +141,11 @@ object KeystoreEncryptedPrefs {
 
     /**
      * The entries in [file] beyond this file's own key and epoch marker. Throws when it is
-     * not one map SharedPreferences could load, an empty file included: SharedPreferences
-     * always writes a map, and a file that is empty mid-write has its record in the backup.
+     * not one map SharedPreferences could load. An empty file holds none: one left empty
+     * mid-write has its record in the backup, which callers check for.
      */
     private fun recordEntries(file: File): Int = file.inputStream().use { input ->
+        if (Files.size(file.toPath()) == 0L) return@use 0
         val parser = Xml.newPullParser().apply { setInput(input, null) }
         var depth = 0
         var roots = 0
