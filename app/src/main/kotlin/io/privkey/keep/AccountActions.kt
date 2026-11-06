@@ -89,11 +89,22 @@ sealed class CreateGroupState {
 internal fun storeSwitchedAccount(hadShare: Boolean, activeBefore: String?, activeAfter: String?): Boolean =
     hadShare && (activeAfter == null || activeAfter != activeBefore)
 
-// Matches the core's refusal text until it has a typed variant for a stored key.
-internal fun importFailureMessage(e: Exception): Int = when ((e as? KeepMobileException.InvalidShare)?.msg) {
-    "This key is already stored" -> R.string.account_import_already_stored
-    "Another share of this group is already stored" -> R.string.account_import_other_share_stored
+internal fun importFailureMessage(e: Exception): Int = when (e) {
+    is KeepMobileException.KeyAlreadyStored -> R.string.account_import_already_stored
+    is KeepMobileException.ShareAlreadyStored -> R.string.account_import_share_stored
+    is KeepMobileException.GroupShareAlreadyStored -> R.string.account_import_other_share_stored
     else -> R.string.account_import_failed
+}
+
+/**
+ * Why a pending DKG share was not recovered, when the core refused it over a stored share.
+ * The pending share is kept, so a retry would only be refused again.
+ */
+internal fun dkgRecoveryRefusal(e: Exception): Int? = when (e) {
+    is KeepMobileException.ShareAlreadyStored -> R.string.main_pending_dkg_recover_share_stored
+    is KeepMobileException.GroupShareAlreadyStored -> R.string.account_import_other_share_stored
+    is KeepMobileException.KeyAlreadyStored -> R.string.account_import_already_stored
+    else -> null
 }
 
 internal class AccountActions(
@@ -189,14 +200,15 @@ internal class AccountActions(
             return withContext(Dispatchers.IO) { store().also { stored = true } }
         } finally {
             withContext(NonCancellable) {
-                // Here rather than at the caller: a cancellation that lands once the store
-                // has returned would skip the caller's code, and the core has already
-                // dropped the node.
-                if (stored) onLiveNodeDropped()
                 val (hadShare, activeBefore) = before
                 val activeAfter = withContext(Dispatchers.IO) {
                     runCatching { storage.getActiveShareKey() }.getOrNull()
                 }
+                // Here rather than at the caller: a cancellation that lands once the store
+                // has returned would skip the caller's code. The core drops the node when it
+                // moves the active pointer, and a store that found its share already there
+                // moves nothing. A pointer that cannot be read counts as moved.
+                if (stored && (activeAfter == null || activeAfter != activeBefore)) onLiveNodeDropped()
                 val switched = storeSwitchedAccount(hadShare, activeBefore, activeAfter)
                 if (finishMark != null) {
                     withContext(Dispatchers.IO) { runCatching { finishMark(switched) } }
@@ -748,8 +760,9 @@ internal class AccountActions(
     /**
      * Finish importing a vault-protected pending DKG share. Two authorized ciphers
      * are needed and gathered in one biometric chain (like [renameShare]): an RSA
-     * decrypt cipher to unwrap the auth-gated secret, then an AES encrypt cipher to
-     * store the recovered share. The ephemeral ceremony passphrase rides inside the
+     * decrypt cipher to unwrap the auth-gated secret, then the share's AES cipher: a
+     * decrypt cipher when its group is already stored, since the core then reads that
+     * share to compare it, or else an encrypt cipher to store it. The ephemeral ceremony passphrase rides inside the
      * secret, so no passphrase is asked of the user. [onResult] receives the stored
      * share, or null on any failure/cancel.
      */
@@ -793,12 +806,12 @@ internal class AccountActions(
                     onDismiss(null)
                     return@onBiometricRequest
                 }
-                requestEncryptCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
+                requestShareCipherAndRecover(pending.groupPubkey, title, subtitle, authedDecrypt, onResult, onDismiss)
             }
         }
     }
 
-    private fun requestEncryptCipherAndRecover(
+    private fun requestShareCipherAndRecover(
         groupPubkeyHex: String,
         title: String,
         subtitle: String,
@@ -807,40 +820,50 @@ internal class AccountActions(
         onDismiss: (String?) -> Unit
     ) {
         coroutineScope.launch {
-            val encryptAttempt = withContext(Dispatchers.IO) {
-                runCatching { storage.getCipherForShareEncryption(groupPubkeyHex) }
+            // A share already listed under the group is not written again: the core reads it
+            // to check it holds the same key, so that read's cipher is what it needs.
+            val shareAttempt = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (shareExists(groupPubkeyHex)) {
+                        storage.getCipherForShareDecryption(groupPubkeyHex)?.let { it to AndroidKeystoreStorage.CipherRole.DECRYPT }
+                    } else {
+                        storage.getCipherForShareEncryption(groupPubkeyHex) to AndroidKeystoreStorage.CipherRole.ENCRYPT
+                    }
+                }
             }
-            val encryptCipher = encryptAttempt.getOrNull()
-            if (encryptCipher == null) {
+            val (shareCipher, shareRole) = shareAttempt.getOrNull() ?: run {
                 onDismiss(
-                    encryptAttempt.exceptionOrNull()?.message
+                    shareAttempt.exceptionOrNull()?.message
                         ?: appContext.getString(R.string.main_pending_dkg_recover_unavailable)
                 )
                 return@launch
             }
-            onBiometricRequest(title, subtitle, encryptCipher) { authedEncrypt ->
-                if (authedEncrypt == null) {
+            onBiometricRequest(title, subtitle, shareCipher) { authedShare ->
+                if (authedShare == null) {
                     onDismiss(null)
                     return@onBiometricRequest
                 }
-                finishRecoverDkgShare(authedDecrypt, authedEncrypt, onResult)
+                finishRecoverDkgShare(authedDecrypt, authedShare, shareRole, onResult, onDismiss)
             }
         }
     }
 
     private fun finishRecoverDkgShare(
         authedDecrypt: Cipher,
-        authedEncrypt: Cipher,
-        onResult: (ShareInfo?) -> Unit
+        authedShare: Cipher,
+        shareRole: AndroidKeystoreStorage.CipherRole,
+        onResult: (ShareInfo?) -> Unit,
+        onDismiss: (String?) -> Unit
     ) {
         coroutineScope.launch {
             accountMutex.withLock {
                 val requestId = UUID.randomUUID().toString()
                 var pendingSet = false
                 try {
+                    // The stash's cipher first: the core reads the stash before the share.
                     storage.setPendingCipher(requestId, authedDecrypt, AndroidKeystoreStorage.CipherRole.DECRYPT)
                     pendingSet = true
-                    storage.setPendingCipher(requestId, authedEncrypt, AndroidKeystoreStorage.CipherRole.ENCRYPT)
+                    storage.setPendingCipher(requestId, authedShare, shareRole)
                     val info = storingNewActiveShare {
                         storage.setRequestIdContext(requestId)
                         try {
@@ -854,7 +877,8 @@ internal class AccountActions(
                     onResult(info)
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.e("AccountActions", "DKG recovery failed: ${e::class.simpleName}")
-                    onResult(null)
+                    val refusal = dkgRecoveryRefusal(e)
+                    if (refusal != null) onDismiss(appContext.getString(refusal)) else onResult(null)
                 } finally {
                     if (pendingSet) storage.clearPendingCipher(requestId)
                 }
