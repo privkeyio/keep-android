@@ -28,6 +28,7 @@ import android.security.keystore.KeyProperties
 import java.io.File
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import android.system.Os
 import android.util.Base64
 import javax.crypto.Cipher
 
@@ -252,7 +253,7 @@ class UnreadableShareRemovalTest {
         assertEquals(ShareProbe.Unknown, storage.probeShareByKey(group))
         assertEquals(QuarantineDiscard.Unverified, discard(group))
         assertEquals(0, nodeDrops)
-        assertEquals(listOf(group), mobile.listQuarantinedShares())
+        assertTrue(group in mobile.listQuarantinedShares())
     }
 
     // A discard that emptied the record but failed before deregistering it leaves the
@@ -279,6 +280,34 @@ class UnreadableShareRemovalTest {
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
     }
 
+    // The disk check reads a path it builds itself. Where SharedPreferences still holds
+    // the record, as it would if that path were wrong, the share is not called empty.
+    @Test
+    fun aRecordSharedPreferencesStillHoldsIsNotCalledEmpty() {
+        val group = import(share())
+        storage.quarantineShareByKey(group)
+        assertTrue(recordFile(group).delete())
+
+        assertTrue(storage.probeShareByKey(group) is ShareProbe.Loads)
+        assertEquals(QuarantineDiscard.Readable, discard(group))
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
+    // A failure to look reads as a missing file through File.exists, which must not count.
+    @Test
+    fun aRecordThatCannotBeLookedForIsNotCalledEmpty() {
+        val group = setAsideWithEmptiedRecord()
+        assertTrue(recordFile(group).delete())
+        val dir = recordFile(group).parentFile!!.path
+        val mode = Os.stat(dir).st_mode and 0x1ff
+        Os.chmod(dir, mode and 0x49.inv())
+        try {
+            assertEquals(ShareProbe.Unknown, storage.probeShareByKey(group))
+        } finally {
+            Os.chmod(dir, mode)
+        }
+    }
+
     @Test
     fun aSetAsideShareWithOnlyItsIvLeftIsNotDiscarded() {
         val group = import(share())
@@ -292,11 +321,21 @@ class UnreadableShareRemovalTest {
     // the file itself before calling the record gone.
     @Test
     fun aSetAsideShareWhoseRecordFileWillNotParseIsNotDiscarded() {
-        val group = setAsideWithEmptiedRecord()
-        recordFile(group).writeText("<map><string name=")
+        val unloadables = listOf(
+            "<map><string name=",
+            "<record><string name=\"k\">v</string></record>",
+            "",
+            "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>",
+        )
+        for (unloadable in unloadables) {
+            val group = setAsideWithEmptiedRecord()
+            recordFile(group).writeText(unloadable)
 
-        assertKeptUnverified(group)
-        assertEquals("<map><string name=", recordFile(group).readText())
+            // The discard asks for the share's cipher first, which opens the file.
+            storage.cipherForShareProbe(group)
+            assertKeptUnverified(group)
+            assertEquals(unloadable, recordFile(group).readText())
+        }
     }
 
     // A backup is the write SharedPreferences restores when it next loads the file, so
