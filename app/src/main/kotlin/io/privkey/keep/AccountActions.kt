@@ -219,7 +219,7 @@ internal class AccountActions(
         }
     }
 
-    private suspend fun refreshAccountState() {
+    suspend fun refreshAccountState() {
         val result = withContext(Dispatchers.IO) {
             val hasShare = keepMobile.hasShare()
             val shareInfo = keepMobile.getShareInfo()
@@ -316,55 +316,82 @@ internal class AccountActions(
             appContext.getString(R.string.account_delete_subtitle),
             onDismiss
         ) {
-            accountMutex.withLock {
-                val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
-                // No pointer is treated as this account: the core builds its node from a
-                // share it resolves when none is set, so it may be this one.
-                val wasActive = activeAccountKey == null || account.groupPubkeyHex == activeAccountKey
-                if (wasActive) {
-                    // Before the delete, not after the follow-up switch prompt: this account's
-                    // grants and bunker clients would otherwise stand until that prompt is
-                    // answered, which it may never be if the activity goes away first. Stops
-                    // the delete when the bunker cannot be reset: the next account would
-                    // otherwise take over its clients, with one left even without a switch.
-                    if (!onAccountSwitched(true)) {
-                        logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), IllegalStateException("bunker reset failed"))
-                        onDismiss()
-                        return@withLock
-                    }
-                }
-                try {
-                    withContext(Dispatchers.IO) {
-                        // The core drops its node whatever the delete returns.
-                        try {
-                            keepMobile.deleteShareByKey(account.groupPubkeyHex)
-                        } finally {
-                            onLiveNodeDropped()
-                        }
-                        runCatching { keepMobile.deleteRelayConfig(account.groupPubkeyHex) }
-                            .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
-                        // Audit the deletion in the current chain. Deleting the active
-                        // account then switches to another (whose fresh chain records the
-                        // switch), so this entry persists for non-active deletes.
-                        onAccountDeleted()
-                    }
-                } catch (e: Exception) {
-                    logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)
-                    // A failed delete may still have removed the share's data, and for the
-                    // active account it cleared the active pointer first, so the screen has
-                    // to be re-read rather than left showing the account as it was.
-                    runCatching { refreshAccountState() }
-                        .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Refresh after failed delete failed: ${it::class.simpleName}") }
+            deleteGroup(account.groupPubkeyHex, onDismiss)
+        }
+    }
+
+    /**
+     * Removes the share of [groupPubkeyHex], which the core reports as stored but
+     * unreadable, after the owner confirmed it. Read again under the account lock, so a
+     * share that reads again by then is kept. Reports whether it was removed.
+     */
+    fun removeUnreadableShare(groupPubkeyHex: String, onResult: (Boolean) -> Unit) {
+        coroutineScope.launch {
+            val removed = deleteGroup(groupPubkeyHex, onDismiss = {}) {
+                groupPubkeyHex in unreadableGroups(keepMobile.shareStoreStatus())
+            }
+            onResult(removed)
+        }
+    }
+
+    private suspend fun deleteGroup(
+        groupPubkeyHex: String,
+        onDismiss: () -> Unit,
+        stillWanted: () -> Boolean = { true },
+    ): Boolean {
+        return accountMutex.withLock {
+            if (!withContext(Dispatchers.IO) { stillWanted() }) {
+                onDismiss()
+                return@withLock false
+            }
+            val activeAccountKey = withContext(Dispatchers.IO) { storage.getActiveShareKey() }
+            // No pointer is treated as this account: the core builds its node from a
+            // share it resolves when none is set, so it may be this one.
+            val wasActive = activeAccountKey == null || groupPubkeyHex == activeAccountKey
+            if (wasActive) {
+                // Before the delete, not after the follow-up switch prompt: this account's
+                // grants and bunker clients would otherwise stand until that prompt is
+                // answered, which it may never be if the activity goes away first. Stops
+                // the delete when the bunker cannot be reset: the next account would
+                // otherwise take over its clients, with one left even without a switch.
+                if (!onAccountSwitched(true)) {
+                    logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), IllegalStateException("bunker reset failed"))
                     onDismiss()
-                    return@withLock
-                }
-                try {
-                    postDeleteCleanup(wasActive, onDismiss)
-                } catch (e: Exception) {
-                    logAndToast("Post-delete refresh failed", appContext.getString(R.string.account_delete_refresh_failed), e)
-                    onDismiss()
+                    return@withLock false
                 }
             }
+            try {
+                withContext(Dispatchers.IO) {
+                    // The core drops its node whatever the delete returns.
+                    try {
+                        keepMobile.deleteShareByKey(groupPubkeyHex)
+                    } finally {
+                        onLiveNodeDropped()
+                    }
+                    runCatching { keepMobile.deleteRelayConfig(groupPubkeyHex) }
+                        .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
+                    // Audit the deletion in the current chain. Deleting the active
+                    // account then switches to another (whose fresh chain records the
+                    // switch), so this entry persists for non-active deletes.
+                    onAccountDeleted()
+                }
+            } catch (e: Exception) {
+                logAndToast("Delete failed", appContext.getString(R.string.account_delete_failed), e)
+                // A failed delete may still have removed the share's data, and for the
+                // active account it cleared the active pointer first, so the screen has
+                // to be re-read rather than left showing the account as it was.
+                runCatching { refreshAccountState() }
+                    .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Refresh after failed delete failed: ${it::class.simpleName}") }
+                onDismiss()
+                return@withLock false
+            }
+            try {
+                postDeleteCleanup(wasActive, onDismiss)
+            } catch (e: Exception) {
+                logAndToast("Post-delete refresh failed", appContext.getString(R.string.account_delete_refresh_failed), e)
+                onDismiss()
+            }
+            true
         }
     }
 
