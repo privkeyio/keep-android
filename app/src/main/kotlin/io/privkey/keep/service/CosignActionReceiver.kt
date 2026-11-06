@@ -9,8 +9,9 @@ import io.privkey.keep.uniffi.SignRequest
 
 /**
  * Approves [requestId] from a notification action only if it is still among [pending] and
- * is not a spend, so an intent left over from an earlier notification cannot approve a
- * spend or a request that has since changed. Returns whether it approved.
+ * is a verified Nostr event, so an intent left over from an earlier notification cannot
+ * approve a spend, an unverified request, or one that has since changed. Returns whether
+ * it approved.
  */
 internal fun approveFromNotification(
     pending: List<SignRequest>?,
