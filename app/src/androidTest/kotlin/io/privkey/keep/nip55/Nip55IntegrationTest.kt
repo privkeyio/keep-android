@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -21,6 +22,9 @@ class Nip55IntegrationTest {
     private lateinit var database: Nip55Database
     private lateinit var store: PermissionStore
     private lateinit var callerVerificationStore: CallerVerificationStore
+
+    @get:Rule
+    val auditAnchor = AuditAnchorIsolation()
 
     @Before
     fun setup() {
@@ -365,8 +369,19 @@ class Nip55IntegrationTest {
             store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         }
 
-        val result = store.riskAssessor.assess("com.test.app", 1)
-        assertEquals("Normal kind 1 with history should have low risk", AuthLevel.NONE, result.requiredAuth)
+        // Night and day: the night hour adds UnusualTime, which must stay under the PIN
+        // threshold once the logged history counts.
+        for (hour in listOf(3, 12)) {
+            val assessor = RiskAssessor(
+                database.auditLogDao(),
+                appSettingsDao,
+                store::hasSignedKindBefore,
+                currentHourProvider = { hour }
+            )
+            val result = assessor.assess("com.test.app", 1)
+            assertEquals("hour $hour", hour == 3, RiskFactor.UNUSUAL_TIME in result.factors)
+            assertEquals("Normal kind 1 with history should have low risk at hour $hour", AuthLevel.NONE, result.requiredAuth)
+        }
     }
 
 }
