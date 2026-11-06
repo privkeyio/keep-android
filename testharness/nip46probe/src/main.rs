@@ -5,6 +5,7 @@
 //!   nsec    <secret_hex>        (bech32 form, for importing a test account)
 //!   connect <client_secret_hex> <bunker_url> [timeout_secs]
 //!   sign    <client_secret_hex> <bunker_url> <kind> [timeout_secs]
+//!   pubkeys <count>             (fresh client keys, space separated, to fill the client list)
 //!
 //! `sign` sends sign_event without connecting first, so it can exercise a grant the
 //! bunker restored from disk. Prints one line: `OK <result>`, `ERR <error>`, `TIMEOUT`,
@@ -21,6 +22,12 @@ async fn main() {
     let mut line = String::new();
     std::io::stdin().read_line(&mut line).expect("request on stdin");
     let args: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
+    if args[0] == "pubkeys" {
+        let count: usize = args[1].parse().expect("count");
+        let keys: Vec<String> = (0..count).map(|_| Keys::generate().public_key().to_hex()).collect();
+        println!("{}", keys.join(" "));
+        return;
+    }
     let keys = Keys::parse(&args[1]).expect("client secret key");
     let timeout = |i: usize| args.get(i).map(|s| s.parse().expect("timeout")).unwrap_or(25);
     match args[0].as_str() {
