@@ -35,7 +35,9 @@ import kotlin.random.Random
  * asks this device to sign a taproot spend, and the request the device is shown is checked
  * against the transaction the peer built. The prompt lists every output with its exact
  * amount, the fee and the total. The notification counts the outputs, says the rest is in
- * the app, and offers no Approve, and an approve sent from a notification is refused.
+ * the app, and offers no Approve, and an approve sent from a notification is refused. A
+ * key-path spend of the group's own taproot output is shown the same way and signs under
+ * the tweaked output key.
  *
  * Manual only: run testharness/cosignpeer/run-spend-e2e.sh, which serves the peer.
  */
@@ -145,6 +147,15 @@ class CosignSpendE2ETest {
         val signed = answerUntilPeerReplies(mobile, since2, one, expectedOne, mobile::approveRequest)
         assertTrue("the approved spend is signed: $signed", signed.startsWith("SIGNED "))
         assertNull(mobile.getPendingRequests().firstOrNull { it.id == addressed.id })
+
+        // The same payment spending the group's own BIP-86 output on the key path. The device
+        // is shown the same spend, and the peer checks the signature under the tweaked key.
+        val since3 = System.currentTimeMillis() / 1000
+        val keyPath = askPeer("keypath")
+        val keyPathShown = awaitSpend(mobile, since3, expectedOne)
+        assertEquals(addressed.describe(), keyPathShown.describe())
+        val keyPathSigned = answerUntilPeerReplies(mobile, since3, keyPath, expectedOne, mobile::approveRequest)
+        assertTrue("the approved key-path spend is signed: $keyPathSigned", keyPathSigned.startsWith("SIGNED "))
     }
 
     // The record the core reads the account's network from, as a descriptor session stores it.
