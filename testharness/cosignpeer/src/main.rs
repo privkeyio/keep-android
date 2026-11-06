@@ -6,9 +6,9 @@
 //!
 //! Cases: `one` pays 99,000 - salt sats to a P2WPKH output from a 100,000 sat input,
 //! and `two` pays 90,000 - salt sats to a P2WPKH output and 8,500 sats to an OP_RETURN,
-//! which has no address form. Both spend with SIGHASH_DEFAULT. `keypath` pays like `one`
-//! but spends the group's own BIP-86 output on the key path, so the phone signs under
-//! the tweaked output key. The salt, under 1,000, lets the phone tell this run's spend
+//! which has no address form. Both spend with SIGHASH_DEFAULT. `keypath` pays 98,000 -
+//! salt sats to the same output but spends the group's own BIP-86 output on the key
+//! path, so the phone signs under the tweaked output key. The salt, under 1,000, lets the phone tell this run's spend
 //! from a relay's replay of an earlier run's.
 
 use std::io::BufRead;
@@ -95,7 +95,8 @@ async fn run(line: &str) -> Result<String, String> {
         _ => return Err(format!("bad salt {salt}")),
     };
     let outputs = match case {
-        "one" | "keypath" => vec![p2wpkh(99_000 - salt)],
+        "one" => vec![p2wpkh(99_000 - salt)],
+        "keypath" => vec![p2wpkh(98_000 - salt)],
         "two" => vec![
             p2wpkh(90_000 - salt),
             TxOut {
@@ -166,19 +167,27 @@ async fn run(line: &str) -> Result<String, String> {
         let _ = node.announce().await;
         tokio::time::sleep(Duration::from_secs(3)).await;
     };
-    if key_path {
-        keep_core::frost::taproot::verify_key_path_signature(&signature, &sighash, &spent)
-            .map_err(|e| format!("the signature does not verify under the output key: {e}"))?;
-        return Ok(format!("SIGNED {}", hex::encode(signature)));
-    }
+    use bitcoin::key::TapTweak;
     use bitcoin::secp256k1::{schnorr::Signature, Message, Secp256k1, XOnlyPublicKey};
-    Secp256k1::verification_only()
-        .verify_schnorr(
-            &Signature::from_slice(&signature).map_err(|e| e.to_string())?,
-            &Message::from_digest(sighash),
-            &XOnlyPublicKey::from_slice(&group_pubkey).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| format!("the signature does not verify: {e}"))?;
+    let secp = Secp256k1::verification_only();
+    let internal = XOnlyPublicKey::from_slice(&group_pubkey).map_err(|e| e.to_string())?;
+    // The key-path output key is tweaked here with the bitcoin crate rather than the
+    // core's own tweak, so the check does not share a bug with the signer.
+    let signer = if key_path {
+        let (tweaked, _) = internal.tap_tweak(&secp, None);
+        if ScriptBuf::new_p2tr_tweaked(tweaked) != spent {
+            return Err("the spent output is not the group's BIP-86 output".into());
+        }
+        tweaked.to_x_only_public_key()
+    } else {
+        internal
+    };
+    secp.verify_schnorr(
+        &Signature::from_slice(&signature).map_err(|e| e.to_string())?,
+        &Message::from_digest(sighash),
+        &signer,
+    )
+    .map_err(|e| format!("the signature does not verify: {e}"))?;
     Ok(format!("SIGNED {}", hex::encode(signature)))
 }
 

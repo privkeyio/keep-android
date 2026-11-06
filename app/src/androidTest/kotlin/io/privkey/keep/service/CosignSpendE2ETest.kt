@@ -148,13 +148,22 @@ class CosignSpendE2ETest {
         assertTrue("the approved spend is signed: $signed", signed.startsWith("SIGNED "))
         assertNull(mobile.getPendingRequests().firstOrNull { it.id == addressed.id })
 
-        // The same payment spending the group's own BIP-86 output on the key path. The device
-        // is shown the same spend, and the peer checks the signature under the tweaked key.
+        // A payment spending the group's own BIP-86 output on the key path, with its own
+        // amount so a redelivered request of the previous case cannot stand in for it. The
+        // peer checks the signature under the tweaked key.
         val since3 = System.currentTimeMillis() / 1000
         val keyPath = askPeer("keypath")
-        val keyPathShown = awaitSpend(mobile, since3, expectedOne)
-        assertEquals(addressed.describe(), keyPathShown.describe())
-        val keyPathSigned = answerUntilPeerReplies(mobile, since3, keyPath, expectedOne, mobile::approveRequest)
+        val expectedKeyPath = SpendSummary(
+            listOf(SpendOutput(98_000uL - salt.toULong(), TESTNET_ADDRESS, P2WPKH_SCRIPT)),
+            100_000uL,
+            2_000uL + salt.toULong(),
+        )
+        val keyPathShown = awaitSpend(mobile, since3, expectedKeyPath)
+        assertEquals(
+            "bitcoin-sighash\n${sats(98_000 - salt)} to $TESTNET_ADDRESS\nFee: ${sats(2_000 + salt)}\nTotal from inputs: 100,000 sats",
+            keyPathShown.describe(),
+        )
+        val keyPathSigned = answerUntilPeerReplies(mobile, since3, keyPath, expectedKeyPath, mobile::approveRequest)
         assertTrue("the approved key-path spend is signed: $keyPathSigned", keyPathSigned.startsWith("SIGNED "))
     }
 
