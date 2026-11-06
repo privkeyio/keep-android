@@ -17,6 +17,7 @@ import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.PendingShareInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.ShareInfo
+import io.privkey.keep.uniffi.QuarantineDiscard
 import io.privkey.keep.uniffi.UnreadableShareRemoval
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -399,7 +400,7 @@ internal class AccountActions(
                     if (setAside) afterShareTakenOut(wasActive)
                     null
                 }
-                if (result == UnreadableShareRemoval.REMOVED) {
+                if (result is UnreadableShareRemoval.Removed) {
                     onLiveNodeDropped()
                     afterShareTakenOut(wasActive)
                 }
@@ -430,40 +431,38 @@ internal class AccountActions(
     }
 
     /**
-     * Destroys a set-aside share, which the core allows only once the platform confirms
+     * Destroys a set-aside share, which the core does only once the platform confirms
      * it is lost. The caller has the owner confirm it first. [cipher] is as for
-     * [removeUnreadableShare]. Reports whether it was destroyed.
+     * [removeUnreadableShare]. Null on a failure, which is reported here.
      */
-    fun discardQuarantinedShare(groupPubkeyHex: String, cipher: Cipher?, onResult: (Boolean) -> Unit) {
+    fun discardLostShare(groupPubkeyHex: String, cipher: Cipher?, onResult: (QuarantineDiscard?) -> Unit) {
         coroutineScope.launch {
-            val discarded = accountMutex.withLock {
+            val outcome = accountMutex.withLock {
                 try {
                     withContext(Dispatchers.IO) {
-                        withProbeCipher(cipher) { keepMobile.discardQuarantinedShare(groupPubkeyHex) }
-                        runCatching { keepMobile.deleteRelayConfig(groupPubkeyHex) }
-                            .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
-                        onAccountDeleted()
+                        val result = withProbeCipher(cipher) { keepMobile.discardLostShare(groupPubkeyHex) }
+                        when (result) {
+                            is QuarantineDiscard.Discarded -> {
+                                onLiveNodeDropped()
+                                runCatching { keepMobile.deleteRelayConfig(groupPubkeyHex) }
+                                    .onFailure { if (BuildConfig.DEBUG) Log.e("AccountActions", "Relay config cleanup failed: ${it::class.simpleName}") }
+                                onAccountDeleted()
+                            }
+                            QuarantineDiscard.Readable, QuarantineDiscard.Unverified, QuarantineDiscard.NotSetAside -> Unit
+                        }
+                        result
                     }
-                    true
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // Only the probe finding the share readable is refused as invalid
-                    // input. Any other error may follow a partial delete, which a retry
-                    // finishes, so it is not reported as nothing having changed.
-                    val shown = when (e) {
-                        is KeepMobileException.InvalidInput -> R.string.share_set_aside_discard_readable
-                        else -> R.string.share_set_aside_discard_failed
-                    }
-                    logAndToast("Discard failed", appContext.getString(shown), e)
-                    false
-                } finally {
-                    // A discard that reaches the delete tears the node down whatever
-                    // its result, as a delete does.
+                    // An error can follow a partial delete, which tears the node down
+                    // and which a retry finishes.
                     onLiveNodeDropped()
+                    logAndToast("Discard failed", appContext.getString(R.string.share_set_aside_discard_failed), e)
+                    null
                 }
             }
-            onResult(discarded)
+            onResult(outcome)
         }
     }
 
