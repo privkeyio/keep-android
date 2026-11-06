@@ -8,11 +8,6 @@ import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.uniffi.SignRequest
 
 /**
- * Handles Approve/Reject taps on the co-sign heads-up notification, so the
- * operator can act without opening the app. Calling `approveRequest` /
- * `rejectRequest` unblocks the waiting `pre_sign` on the FROST node.
- */
-/**
  * Approves [requestId] from a notification action only if it is still among [pending] and
  * is not a spend, so an intent left over from an earlier notification cannot approve a
  * spend or a request that has since changed. Returns whether it approved.
@@ -28,6 +23,11 @@ internal fun approveFromNotification(
     return true
 }
 
+/**
+ * Handles Approve/Reject taps on the co-sign heads-up notification, so the
+ * operator can act without opening the app. Calling `approveRequest` /
+ * `rejectRequest` unblocks the waiting `pre_sign` on the FROST node.
+ */
 class CosignActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return

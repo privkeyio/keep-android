@@ -160,7 +160,7 @@ class SignRequestDescribeTest {
                 "90,000 sats to tb1qexample",
                 "8,500 sats to unrecognized script $opReturn",
                 "Fee: 1,500 sats",
-                "Total spent: 100,000 sats",
+                "Total from inputs: 100,000 sats",
             ).joinToString("\n"),
             spendRequest(twoOutputs).describe(),
         )
@@ -178,7 +178,7 @@ class SignRequestDescribeTest {
         val outputs = (1..60).map { SpendOutput(it.toULong(), "tb1qout$it", p2wpkh) }
         val summary = spendRequest(SpendSummary(outputs, 2_000uL, 170uL)).describe()
         (1..60).forEach { assertTrue("output $it missing", summary.contains("\n$it sats to tb1qout$it\n")) }
-        assertTrue(summary.endsWith("Fee: 170 sats\nTotal spent: 2,000 sats"))
+        assertTrue(summary.endsWith("Fee: 170 sats\nTotal from inputs: 2,000 sats"))
     }
 
     @Test
@@ -212,7 +212,7 @@ class SignRequestDescribeTest {
     fun `the notification overview counts the outputs and never lists them`() {
         val overview = spendRequest(twoOutputs).spendOverview()!!
         assertEquals(
-            "bitcoin-sighash\n2 outputs · fee 1,500 sats · total 100,000 sats\nOpen Keep to review every output and approve.",
+            "bitcoin-sighash\n2 outputs · fee 1,500 sats · total from inputs 100,000 sats\nOpen Keep to review every output and approve.",
             overview,
         )
         assertFalse(overview.contains("tb1qexample"))
@@ -221,10 +221,24 @@ class SignRequestDescribeTest {
     }
 
     @Test
-    fun `a spend is never approvable from the notification`() {
+    fun `only a verified nostr event is approvable from the notification`() {
+        val event = SignRequestMetadata(1u, "hello", null, null, null)
+        assertTrue(CosignNotifier.approvableFromNotification(request(metadata = event, typeVerified = true)))
         assertFalse(CosignNotifier.approvableFromNotification(spendRequest(twoOutputs)))
-        assertTrue(CosignNotifier.approvableFromNotification(request(messageType = "bitcoin-sighash")))
-        assertTrue(CosignNotifier.approvableFromNotification(request()))
+        assertFalse(
+            "an untweaked sighash sent without its transaction",
+            CosignNotifier.approvableFromNotification(request(messageType = "bitcoin-sighash")),
+        )
+        assertFalse(CosignNotifier.approvableFromNotification(request(metadata = event, typeVerified = false)))
+        assertFalse(CosignNotifier.approvableFromNotification(request()))
+        assertFalse(CosignNotifier.approvableFromNotification(request(messageType = "bitcoin-sighash", typeVerified = true)))
+    }
+
+    @Test
+    fun `a request the core could not check is flagged as unverifiable`() {
+        assertTrue(request(messageType = "bitcoin-sighash").unverifiable())
+        assertFalse(spendRequest(twoOutputs).unverifiable())
+        assertFalse(request(metadata = SignRequestMetadata(1u, "hello", null, null, null), typeVerified = true).unverifiable())
     }
 
     @Test

@@ -23,6 +23,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
@@ -339,7 +340,7 @@ class MainActivity : FragmentActivity() {
                                     getString(R.string.connections_relays_reset_auth_subtitle)
                                 ) != null
                             },
-                            confirmSpendOwner = { title ->
+                            confirmOwnerFresh = { title ->
                                 biometricHelper?.authenticateStrongOrDeviceCredential(
                                     title,
                                     getString(R.string.cosign_spend_auth_subtitle)
@@ -419,7 +420,7 @@ fun MainScreen(
     authenticateApprover: ApproverAuthenticator = { _, _, _ -> null },
     confirmApproverOwner: OwnerConfirmation = { false },
     confirmRelayResetOwner: OwnerConfirmation = { false },
-    confirmSpendOwner: OwnerConfirmation = { false }
+    confirmOwnerFresh: OwnerConfirmation = { false }
 ) {
     val appContext = LocalContext.current.applicationContext
     val biometricAvailable = biometricStatus == BiometricHelper.BiometricStatus.AVAILABLE
@@ -1560,7 +1561,11 @@ fun MainScreen(
                                 request,
                                 deviceSecure = { appContext.getSystemService(KeyguardManager::class.java)?.isDeviceSecure },
                                 strongOrCredential = {
-                                    confirmSpendOwner(appContext.getString(R.string.cosign_spend_auth_title))
+                                    confirmOwnerFresh(
+                                        appContext.getString(
+                                            if (request.metadata?.spend != null) R.string.cosign_spend_auth_title else R.string.cosign_strict_auth_title,
+                                        ),
+                                    )
                                 },
                                 usual = {
                                     if (biometricAvailable && onBiometricAuth != null) {
@@ -1583,7 +1588,7 @@ fun MainScreen(
                                 }
                                 CosignApproval.NO_SCREEN_LOCK -> Toast.makeText(
                                     appContext,
-                                    R.string.cosign_spend_needs_screen_lock,
+                                    if (request.metadata?.spend != null) R.string.cosign_spend_needs_screen_lock else R.string.cosign_strict_needs_screen_lock,
                                     Toast.LENGTH_LONG,
                                 ).show()
                                 CosignApproval.NOT_AUTHENTICATED -> Unit
@@ -1923,6 +1928,14 @@ private fun HomeTab(
                             stringResource(R.string.cosign_request_label),
                             style = MaterialTheme.typography.titleMedium
                         )
+                        if (req.unverifiable()) {
+                            Text(
+                                stringResource(R.string.cosign_unverifiable_warning),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                         Text(
                             req.describe(),
                             style = MaterialTheme.typography.bodyMedium

@@ -91,7 +91,7 @@ class CosignSpendE2ETest {
                 "${sats(90_000 - salt)} to unrecognized script $P2WPKH_SCRIPT",
                 "8,500 sats to unrecognized script $OP_RETURN_SCRIPT",
                 "Fee: ${sats(1_500 + salt)}",
-                "Total spent: 100,000 sats",
+                "Total from inputs: 100,000 sats",
             ).joinToString("\n"),
             unaddressed.describe(),
         )
@@ -117,7 +117,7 @@ class CosignSpendE2ETest {
         }
         val shown = requireNotNull(posted)
         assertEquals(
-            "bitcoin-sighash\n2 outputs · fee ${sats(1_500 + salt)} · total 100,000 sats\nOpen Keep to review every output and approve.",
+            "bitcoin-sighash\n2 outputs · fee ${sats(1_500 + salt)} · total from inputs 100,000 sats\nOpen Keep to review every output and approve.",
             shown.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString(),
         )
         assertEquals(unaddressed.spendOverview(), shown.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
@@ -139,7 +139,7 @@ class CosignSpendE2ETest {
         )
         val addressed = awaitSpend(mobile, since2, expectedOne)
         assertEquals(
-            "bitcoin-sighash\n${sats(99_000 - salt)} to $TESTNET_ADDRESS\nFee: ${sats(1_000 + salt)}\nTotal spent: 100,000 sats",
+            "bitcoin-sighash\n${sats(99_000 - salt)} to $TESTNET_ADDRESS\nFee: ${sats(1_000 + salt)}\nTotal from inputs: 100,000 sats",
             addressed.describe(),
         )
         val signed = answerUntilPeerReplies(mobile, since2, one, expectedOne, mobile::approveRequest)

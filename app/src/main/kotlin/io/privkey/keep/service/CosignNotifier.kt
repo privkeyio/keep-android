@@ -12,6 +12,8 @@ import io.privkey.keep.MainActivity
 import io.privkey.keep.R
 import io.privkey.keep.describe
 import io.privkey.keep.spendOverview
+import io.privkey.keep.unverifiable
+import io.privkey.keep.usualApproval
 import io.privkey.keep.uniffi.SignRequest
 
 /**
@@ -70,7 +72,15 @@ object CosignNotifier {
         )
 
         val first = pending.first()
-        val body = first.spendOverview() ?: first.describe()
+        val body = first.spendOverview() ?: if (approvableFromNotification(first)) {
+            first.describe()
+        } else {
+            listOfNotNull(
+                context.getString(R.string.cosign_unverifiable_warning).takeIf { first.unverifiable() },
+                first.describe(),
+                context.getString(R.string.cosign_open_to_approve),
+            ).joinToString("\n")
+        }
         val title = if (pending.size > 1) {
             context.getString(R.string.cosign_notification_title_multi, pending.size)
         } else {
@@ -98,13 +108,15 @@ object CosignNotifier {
             .setFullScreenIntent(contentIntent, true)
             .setAutoCancel(true)
         // Approve/reject the (most recent) request straight from the notification,
-        // without opening the app. Not a spend: it is approved only in the app, where
-        // every output is shown and approving asks for authentication.
+        // without opening the app, and never from the lock screen. Only a verified Nostr
+        // event: anything else is approved only in the app, with a fresh prompt.
         if (approvableFromNotification(first)) {
             builder.addAction(
-                R.drawable.ic_notification,
-                context.getString(R.string.cosign_approve),
-                actionIntent(context, ACTION_APPROVE, first.id, 1),
+                NotificationCompat.Action.Builder(
+                    R.drawable.ic_notification,
+                    context.getString(R.string.cosign_approve),
+                    actionIntent(context, ACTION_APPROVE, first.id, 1),
+                ).setAuthenticationRequired(true).build(),
             )
         }
         val notification = builder
@@ -118,7 +130,7 @@ object CosignNotifier {
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
     }
 
-    fun approvableFromNotification(request: SignRequest): Boolean = request.metadata?.spend == null
+    fun approvableFromNotification(request: SignRequest): Boolean = request.usualApproval()
 
     /** Brief acknowledgement after the operator acts, so it feels confirmed. */
     @SuppressLint("MissingPermission")
