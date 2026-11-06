@@ -1079,12 +1079,12 @@ fun MainScreen(
                     }
                     reloadShareStore()
                     val message = when (outcome) {
-                        UnreadableShareRemoval.REMOVED -> R.string.share_unreadable_set_aside
-                        UnreadableShareRemoval.READABLE -> R.string.share_unreadable_readable_again
-                        UnreadableShareRemoval.RECOVERABLE -> R.string.share_unreadable_recoverable
-                        UnreadableShareRemoval.UNVERIFIED -> R.string.share_unreadable_unverified
-                        UnreadableShareRemoval.ABSENT -> R.string.share_unreadable_absent
-                        UnreadableShareRemoval.REGISTRY_UNAVAILABLE -> R.string.share_unreadable_registry_unavailable
+                        is UnreadableShareRemoval.Removed -> R.string.share_unreadable_set_aside
+                        UnreadableShareRemoval.Readable -> R.string.share_unreadable_readable_again
+                        UnreadableShareRemoval.Recoverable -> R.string.share_unreadable_recoverable
+                        UnreadableShareRemoval.Unverified -> R.string.share_unreadable_unverified
+                        UnreadableShareRemoval.Absent -> R.string.share_unreadable_absent
+                        UnreadableShareRemoval.RegistryUnavailable -> R.string.share_unreadable_registry_unavailable
                         null -> return@changeShare
                     }
                     Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
@@ -1111,11 +1111,21 @@ fun MainScreen(
                     val title = appContext.getString(R.string.share_set_aside_discard_auth_title)
                     val (authorized, cipher) = authorizeShareChange(group, title)
                     if (!authorized) return@changeShare
-                    val discarded = suspendCancellableCoroutine { cont ->
-                        accountActions.discardQuarantinedShare(group, cipher) { if (cont.isActive) cont.resume(it) }
+                    val outcome = suspendCancellableCoroutine { cont ->
+                        accountActions.discardLostShare(group, cipher) { if (cont.isActive) cont.resume(it) }
                     }
                     reloadShareStore()
-                    if (discarded) showUnreadableShareRemoved = true
+                    val message = when (outcome) {
+                        is QuarantineDiscard.Discarded -> {
+                            showUnreadableShareRemoved = true
+                            return@changeShare
+                        }
+                        QuarantineDiscard.Readable -> R.string.share_set_aside_discard_readable
+                        QuarantineDiscard.Unverified -> R.string.share_set_aside_discard_unconfirmed
+                        QuarantineDiscard.NotSetAside -> R.string.share_set_aside_discard_not_set_aside
+                        null -> return@changeShare
+                    }
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
                 }
             },
             onDismiss = { setAsideToDiscard = null },

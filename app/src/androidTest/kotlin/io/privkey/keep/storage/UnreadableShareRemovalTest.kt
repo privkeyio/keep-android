@@ -5,6 +5,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.AccountActions
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.QuarantineDiscard
 import io.privkey.keep.uniffi.ShareProbe
 import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.ShareStoreStatus
@@ -18,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -113,7 +113,7 @@ class UnreadableShareRemovalTest {
 
     private fun restore(group: String): Boolean = await { actions().restoreQuarantinedShare(group, it) }
 
-    private fun discard(group: String): Boolean = await { actions().discardQuarantinedShare(group, null, it) }
+    private fun discard(group: String): QuarantineDiscard? = await { actions().discardLostShare(group, null, it) }
 
     private fun loseKeys(group: String) {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -131,7 +131,7 @@ class UnreadableShareRemovalTest {
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
         assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
 
-        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
+        assertTrue(remove(group) is UnreadableShareRemoval.Removed)
         assertEquals(1, nodeDrops)
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
         assertEquals(listOf(group), mobile.listQuarantinedShares())
@@ -143,8 +143,8 @@ class UnreadableShareRemovalTest {
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
 
-        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
-        assertTrue(discard(group))
+        assertTrue(remove(group) is UnreadableShareRemoval.Removed)
+        assertTrue(discard(group) is QuarantineDiscard.Discarded)
         assertEquals("each set-aside and the discard drop the live node", 3, nodeDrops)
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
@@ -160,7 +160,7 @@ class UnreadableShareRemovalTest {
         breakShare(group)
         assertEquals(ShareProbe.Lost, storage.probeShareByKey(group))
 
-        assertEquals(UnreadableShareRemoval.REMOVED, remove(group))
+        assertTrue(remove(group) is UnreadableShareRemoval.Removed)
         assertEquals(listOf(group), mobile.listQuarantinedShares())
     }
 
@@ -171,7 +171,7 @@ class UnreadableShareRemovalTest {
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
         assertTrue(storage.probeShareByKey(group) is ShareProbe.Loads)
 
-        assertEquals(UnreadableShareRemoval.RECOVERABLE, remove(group))
+        assertEquals(UnreadableShareRemoval.Recoverable, remove(group))
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
         assertEquals(0, nodeDrops)
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
@@ -181,7 +181,7 @@ class UnreadableShareRemovalTest {
     fun aShareThatReadsIsNotSetAside() {
         val group = import(share())
 
-        assertEquals(UnreadableShareRemoval.READABLE, remove(group))
+        assertEquals(UnreadableShareRemoval.Readable, remove(group))
 
         assertEquals(1, registered())
         assertEquals(0, nodeDrops)
@@ -200,7 +200,7 @@ class UnreadableShareRemovalTest {
         }.generateKeyPair()
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
 
-        assertEquals(UnreadableShareRemoval.UNVERIFIED, remove(group))
+        assertEquals(UnreadableShareRemoval.Unverified, remove(group))
         assertEquals(ShareStoreStatus.SomeUnreadable(listOf(group)), mobile.shareStoreStatus())
         assertEquals(emptyList<String>(), mobile.listQuarantinedShares())
     }
@@ -211,13 +211,40 @@ class UnreadableShareRemovalTest {
         storage.quarantineShareByKey(group)
         assertEquals(listOf(group), mobile.listQuarantinedShares())
 
-        assertFalse(discard(group))
+        assertEquals(QuarantineDiscard.Readable, discard(group))
+        assertEquals(0, nodeDrops)
         assertEquals(listOf(group), mobile.listQuarantinedShares())
         assertTrue(storage.probeShareByKey(group) is ShareProbe.Loads)
 
         assertTrue(restore(group))
         assertEquals(1, registered())
         assertEquals(ShareStoreStatus.Readable, mobile.shareStoreStatus())
+    }
+
+    // Whether a set-aside share whose file will not open is lost cannot be told, so the
+    // discard keeps it, leaves the node alone and reports that.
+    @Test
+    fun aSetAsideShareThatCannotBeCheckedIsNotDiscarded() {
+        val group = import(share())
+        val fileKey = "keep_prefs_${storage.sharePrefsNameFor(group)}"
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(fileKey)
+        KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+            initialize(KeyGenParameterSpec.Builder(fileKey, KeyProperties.PURPOSE_SIGN).setDigests(KeyProperties.DIGEST_SHA256).build())
+        }.generateKeyPair()
+        storage.quarantineShareByKey(group)
+
+        assertEquals(QuarantineDiscard.Unverified, discard(group))
+        assertEquals(0, nodeDrops)
+        assertEquals(listOf(group), mobile.listQuarantinedShares())
+    }
+
+    @Test
+    fun discardingAShareThatIsNotSetAsideChangesNothing() {
+        val group = import(share())
+
+        assertEquals(QuarantineDiscard.NotSetAside, discard(group))
+        assertEquals(1, registered())
+        assertEquals(0, nodeDrops)
     }
 
     @Test

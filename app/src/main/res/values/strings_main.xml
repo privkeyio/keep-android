@@ -111,6 +111,8 @@
     <string name="share_set_aside_discard_confirm">Discard for good</string>
     <string name="share_set_aside_discard_auth_title">Discard an account\'s key</string>
     <string name="share_set_aside_discard_readable">This account\'s key decrypts again, so it was not discarded. Put it back instead.</string>
+    <string name="share_set_aside_discard_unconfirmed">Couldn\'t confirm that the key is lost, so nothing was discarded. Authenticate and try again.</string>
+    <string name="share_set_aside_discard_not_set_aside">This account is no longer set aside, so nothing was discarded.</string>
     <string name="share_set_aside_discard_failed">Could not discard the account. Authenticate and try again.</string>
     <string name="share_set_aside_unreadable">The set-aside accounts can\'t be read right now.</string>
     <string name="share_store_unavailable_title">Your accounts can\'t be read</string>
