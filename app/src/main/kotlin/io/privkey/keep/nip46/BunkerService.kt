@@ -17,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.privkey.keep.BuildConfig
+import io.privkey.keep.filterRelaysForProxy
 import io.privkey.keep.filterRelaysPreConnection
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.MainActivity
@@ -100,6 +101,13 @@ class BunkerService : Service() {
         internal const val APPROVAL_TIMEOUT_MS = 55_000L
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
+
+        internal fun startBunkerThroughProxy(
+            handler: BunkerHandler,
+            relays: List<String>,
+            callbacks: BunkerCallbacks,
+            proxyPort: UShort
+        ) = handler.startBunkerWithProxy(relays, callbacks, "127.0.0.1", proxyPort)
 
         // A full list refuses a new client rather than evicting the oldest, which kept
         // its engine grants and could connect again with the secret. Null when full.
@@ -677,12 +685,27 @@ class BunkerService : Service() {
     private suspend fun startBunkerLocked(keepMobile: io.privkey.keep.uniffi.KeepMobile, relays: List<String>, attempt: Int): Boolean {
         if (!serving) return false
         try {
-            val safeRelays = withContext(Dispatchers.IO) {
-                withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
+            // A config that cannot be read may hold an enabled proxy, so it is not taken
+            // as "no proxy": a direct start would leak the user's IP to the relays.
+            val proxy = runCatching { keepMobile.getProxyConfig() }.getOrElse {
+                if (BuildConfig.DEBUG) Log.e(TAG, "proxy config unreadable; refusing to connect without proxy")
+                _status.value = BunkerStatus.ERROR
+                stopSelf()
+                return false
+            }
+            val safeRelays = if (proxy.enabled) {
+                filterRelaysForProxy(relays)
+            } else {
+                withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(10_000L) { filterRelaysPreConnection(relays) }
+                }
             }
             if (safeRelays.isNullOrEmpty()) {
-                if (attempt < MAX_START_RETRIES) return true
-                if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
+                // The proxied filter does no lookup, so a retry would get the same answer.
+                if (!proxy.enabled && attempt < MAX_START_RETRIES) return true
+                if (BuildConfig.DEBUG) {
+                    Log.e(TAG, if (proxy.enabled) "No relay may be reached through the proxy" else "All relays failed connection-time DNS validation")
+                }
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
                 return false
@@ -741,19 +764,11 @@ class BunkerService : Service() {
                 }
             }
 
-            val proxy = runCatching { keepMobileRef?.getProxyConfig() }.getOrNull()
-            if (proxy != null && proxy.enabled && proxy.port.toInt() in 1..65535) {
-                // A proxy is configured. Fail closed if it cannot be started:
-                // falling back to a direct connection would leak the user's IP to
-                // the relays, defeating the point of the proxy (e.g. Tor).
-                if (!invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)) {
-                    if (BuildConfig.DEBUG) {
-                        Log.e(TAG, "proxy enabled but startBunkerWithProxy failed; refusing to connect without proxy")
-                    }
-                    _status.value = BunkerStatus.ERROR
-                    stopSelf()
-                    return false
-                }
+            if (proxy.enabled) {
+                // A failed proxied start is handled below like a failed direct one and
+                // never falls back to a direct connection, which would leak the user's
+                // IP to the relays, defeating the point of the proxy (e.g. Tor).
+                startBunkerThroughProxy(handler, safeRelays, callbacks, proxy.port)
             } else {
                 handler.startBunker(safeRelays, callbacks)
             }
@@ -815,21 +830,6 @@ class BunkerService : Service() {
             }
             status
         } ?: BunkerStatus.STARTING
-
-    private fun invokeStartBunkerWithProxy(
-        handler: BunkerHandler,
-        relays: List<String>,
-        callbacks: BunkerCallbacks,
-        proxyHost: String,
-        proxyPort: UShort
-    ): Boolean = runCatching {
-        val method = handler.javaClass.methods.firstOrNull { it.name == "startBunkerWithProxy" }
-            ?: return false
-        method.invoke(handler, relays, callbacks, proxyHost, proxyPort)
-        true
-    }.onFailure {
-        if (BuildConfig.DEBUG) Log.w(TAG, "startBunkerWithProxy failed: ${it::class.simpleName}")
-    }.getOrDefault(false)
 
     @Volatile
     private var cachedSendConnectMethod: java.lang.reflect.Method? = null
