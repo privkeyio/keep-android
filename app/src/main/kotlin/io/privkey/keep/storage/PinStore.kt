@@ -20,6 +20,35 @@ import javax.crypto.spec.PBEKeySpec
  */
 enum class PinRecord { NOT_SET, SET, UNREADABLE }
 
+internal data class LockoutDecay(val level: Int, val anchorWall: Long, val anchorRealtime: Long)
+
+/**
+ * The lockout level after the time that has provably passed since its anchors, or null
+ * when nothing changes. Time counts only as the lesser of the wall clock and the
+ * monotonic clock, and after a reboot the monotonic side is the uptime, a lower bound,
+ * so setting the date forward or back never lowers the level faster than real time.
+ * A wall clock behind its anchor, or a missing monotonic anchor, restarts the window.
+ */
+internal fun decayLockoutLevel(
+    level: Int,
+    anchorWall: Long,
+    anchorRealtime: Long,
+    nowWall: Long,
+    nowRealtime: Long,
+    decayMs: Long
+): LockoutDecay? {
+    val wallElapsed = nowWall - anchorWall
+    if (anchorRealtime < 0 || wallElapsed < 0) return LockoutDecay(level, nowWall, nowRealtime)
+    val rebooted = nowRealtime < anchorRealtime
+    val realtimeElapsed = if (rebooted) nowRealtime else nowRealtime - anchorRealtime
+    val elapsed = minOf(wallElapsed, realtimeElapsed)
+    val steps = elapsed / decayMs
+    if (steps == 0L && !rebooted) return null
+    val remainder = elapsed - steps * decayMs
+    val newLevel = (level - steps).coerceAtLeast(0).toInt()
+    return LockoutDecay(newLevel, nowWall - remainder, nowRealtime - remainder)
+}
+
 class PinStore(private val context: Context) {
 
     companion object {
@@ -41,6 +70,7 @@ class PinStore(private val context: Context) {
         private const val KEY_LOCKOUT_WALL_CLOCK = "lockout_wall_clock"
         private const val KEY_LOCKOUT_DURATION = "lockout_duration"
         private const val KEY_LAST_LOCKOUT_CLEARED = "last_lockout_cleared"
+        private const val KEY_LAST_LOCKOUT_CLEARED_REALTIME = "last_lockout_cleared_realtime"
         private const val KEY_LOCKOUT_EPOCH = "lockout_epoch"
         private const val KEY_BIOMETRIC_RESET_REQUIRED = "biometric_reset_required"
 
@@ -198,6 +228,7 @@ class PinStore(private val context: Context) {
                 .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
                 .putLong(KEY_LOCKOUT_DURATION, 0)
                 .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+                .remove(KEY_LAST_LOCKOUT_CLEARED_REALTIME)
                 .putInt(KEY_LOCKOUT_EPOCH, 0)
                 .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
                 .commit()
@@ -296,6 +327,7 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, 0)
+            .remove(KEY_LAST_LOCKOUT_CLEARED_REALTIME)
             .putInt(KEY_LOCKOUT_EPOCH, 0)
             .putBoolean(KEY_BIOMETRIC_RESET_REQUIRED, false)
             .commit()
@@ -466,6 +498,7 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+            .putLong(KEY_LAST_LOCKOUT_CLEARED_REALTIME, SystemClock.elapsedRealtime())
             .commit()
         if (!success && BuildConfig.DEBUG) {
             Log.w("PinStore", "Failed to clear biometric reset requirement")
@@ -483,24 +516,20 @@ class PinStore(private val context: Context) {
         val lastCleared = prefs.readLong(KEY_LAST_LOCKOUT_CLEARED).resolve(ifAbsent = 0, ifUnreadable = 0)
         if (lastCleared == 0L) return
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastCleared
-        if (elapsed < 0 || elapsed > LOCKOUT_LEVEL_DECAY_MS * (LOCKOUT_DURATIONS_MS.size + 1)) {
-            prefs.edit()
-                .putInt(KEY_LOCKOUT_LEVEL, 0)
-                .putLong(KEY_LAST_LOCKOUT_CLEARED, now)
-                .commit()
-            return
-        }
-
-        val decaySteps = (elapsed / LOCKOUT_LEVEL_DECAY_MS).toInt()
-        if (decaySteps == 0) return
-
-        val newLevel = (currentLevel - decaySteps).coerceAtLeast(0)
-        val newLastCleared = lastCleared + decaySteps * LOCKOUT_LEVEL_DECAY_MS
+        // Unreadable or absent restarts the window, which never lowers the level.
+        val lastClearedRealtime = prefs.readLong(KEY_LAST_LOCKOUT_CLEARED_REALTIME).resolve(ifAbsent = -1, ifUnreadable = -1)
+        val decay = decayLockoutLevel(
+            level = currentLevel,
+            anchorWall = lastCleared,
+            anchorRealtime = lastClearedRealtime,
+            nowWall = System.currentTimeMillis(),
+            nowRealtime = SystemClock.elapsedRealtime(),
+            decayMs = LOCKOUT_LEVEL_DECAY_MS
+        ) ?: return
         prefs.edit()
-            .putInt(KEY_LOCKOUT_LEVEL, newLevel)
-            .putLong(KEY_LAST_LOCKOUT_CLEARED, newLastCleared)
+            .putInt(KEY_LOCKOUT_LEVEL, decay.level)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED, decay.anchorWall)
+            .putLong(KEY_LAST_LOCKOUT_CLEARED_REALTIME, decay.anchorRealtime)
             .commit()
     }
 
@@ -510,6 +539,7 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_WALL_CLOCK, 0)
             .putLong(KEY_LOCKOUT_DURATION, 0)
             .putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+            .putLong(KEY_LAST_LOCKOUT_CLEARED_REALTIME, SystemClock.elapsedRealtime())
         // Through the fail-closed read: an unreadable requirement is still owed, so the
         // attempt counter is kept rather than cleared.
         if (!requiresBiometricReset()) {
@@ -577,6 +607,7 @@ class PinStore(private val context: Context) {
             .putLong(KEY_LOCKOUT_DURATION, 0)
         if (currentLevel > 0) {
             editor.putLong(KEY_LAST_LOCKOUT_CLEARED, System.currentTimeMillis())
+            editor.putLong(KEY_LAST_LOCKOUT_CLEARED_REALTIME, SystemClock.elapsedRealtime())
         }
         editor.commit()
     }
