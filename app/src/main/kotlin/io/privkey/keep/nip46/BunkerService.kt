@@ -701,8 +701,11 @@ class BunkerService : Service() {
                 }
             }
             if (safeRelays.isNullOrEmpty()) {
-                if (attempt < MAX_START_RETRIES) return true
-                if (BuildConfig.DEBUG) Log.e(TAG, "All relays failed connection-time DNS validation")
+                // The proxied filter does no lookup, so a retry would get the same answer.
+                if (!proxy.enabled && attempt < MAX_START_RETRIES) return true
+                if (BuildConfig.DEBUG) {
+                    Log.e(TAG, if (proxy.enabled) "No relay may be reached through the proxy" else "All relays failed connection-time DNS validation")
+                }
                 _status.value = BunkerStatus.ERROR
                 stopSelf()
                 return false
