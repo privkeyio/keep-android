@@ -2,8 +2,12 @@ package io.privkey.keep.nip55
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -29,6 +33,8 @@ class AwaitOrHandOffTest {
     @After
     fun stop() = scope.cancel()
 
+    private fun drain() = runBlocking { withTimeout(5_000) { scope.coroutineContext[Job]!!.children.toList().joinAll() } }
+
     @Test
     fun aResultInTimeIsReturnedAndNotHandedOn() {
         assertEquals("sig", awaitOrHandOff(scope, 1_000, onLate) { "sig" })
@@ -42,6 +48,7 @@ class AwaitOrHandOffTest {
 
         release.countDown()
         assertTrue(lateDone.await(5, TimeUnit.SECONDS))
+        drain()
         assertEquals(listOf("sig"), late)
     }
 
@@ -70,7 +77,7 @@ class AwaitOrHandOffTest {
 
         release.countDown()
         assertTrue(finished.await(5, TimeUnit.SECONDS))
-        Thread.sleep(100)
+        drain()
         assertTrue(late.isEmpty())
     }
 
@@ -88,6 +95,7 @@ class AwaitOrHandOffTest {
 
         release.countDown()
         assertTrue(lateDone.await(5, TimeUnit.SECONDS))
+        drain()
         assertEquals(listOf("sig"), late)
     }
 }
