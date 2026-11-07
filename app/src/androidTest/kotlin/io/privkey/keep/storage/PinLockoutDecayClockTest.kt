@@ -43,10 +43,19 @@ class PinLockoutDecayClockTest {
     @Test
     fun aWallClockSetBackKeepsTheLevel() {
         stage(level = 3, anchorWall = System.currentTimeMillis() + 3_600_000L, anchorRealtime = SystemClock.elapsedRealtime())
+        val wallBefore = System.currentTimeMillis()
+        val realtimeBefore = SystemClock.elapsedRealtime()
 
         assertEquals(0L, PinStore(context).getLockoutRemainingMs())
 
-        assertEquals(3, stored().getInt("lockout_level", -1))
+        val wallAfter = System.currentTimeMillis()
+        val realtimeAfter = SystemClock.elapsedRealtime()
+        val prefs = stored()
+        assertEquals(3, prefs.getInt("lockout_level", -1))
+        val wallAnchor = prefs.getLong("last_lockout_cleared", -1)
+        assertTrue("wall anchor $wallAnchor not in [$wallBefore, $wallAfter]", wallAnchor in wallBefore..wallAfter)
+        val realtimeAnchor = prefs.getLong("last_lockout_cleared_realtime", -1)
+        assertTrue("anchor $realtimeAnchor not in [$realtimeBefore, $realtimeAfter]", realtimeAnchor in realtimeBefore..realtimeAfter)
     }
 
     @Test
