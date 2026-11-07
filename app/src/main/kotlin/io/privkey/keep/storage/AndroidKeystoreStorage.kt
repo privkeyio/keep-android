@@ -320,15 +320,18 @@ class AndroidKeystoreStorage(
 
     fun getCipherForEncryption(): Cipher = initCipherForEncryption(getOrCreateKey())
 
+    // The active registry share first: the core signs with it, and a legacy slot kept
+    // beside another share of its group must not hand the core the legacy key and iv.
+    // The core reads the legacy slot only when the registry is empty.
     fun getCipherForDecryption(): Cipher? {
+        getActiveShareKey()?.let { return getCipherForShareDecryption(it) }
+
         val legacyIv = prefs.getString(KEY_SHARE_IV, null)
         val legacyData = prefs.getString(KEY_SHARE_DATA, null)
         if (legacyIv != null && legacyData != null) {
             return initCipherForDecryption(getOrCreateKey(), legacyIv)
         }
-
-        val activeKey = getActiveShareKey() ?: return null
-        return getCipherForShareDecryption(activeKey)
+        return null
     }
 
     // Encryption and decryption are separate entry points on purpose, rather than
@@ -583,11 +586,10 @@ class AndroidKeystoreStorage(
 
     override fun getShareMetadata(): ShareMetadataInfo? =
         infallibleRead("getShareMetadata", onFault = null) {
-            if (prefs.contains(KEY_SHARE_DATA)) {
-                readMetadataFromPrefs(prefs)
-            } else {
-                getActiveShareKey()?.let(::getShareMetadataByKey)
-            }
+            // The active share first, as for the cipher: a legacy slot kept beside it
+            // must not describe a share the core is not signing with.
+            getActiveShareKey()?.let(::getShareMetadataByKey)
+                ?: if (prefs.contains(KEY_SHARE_DATA)) readMetadataFromPrefs(prefs) else null
         }
 
     private fun readMetadataFromPrefs(sharePrefs: SharedPreferences): ShareMetadataInfo? = try {
@@ -1282,9 +1284,14 @@ class AndroidKeystoreStorage(
         // The iv is checked too because a share without it is unusable: the
         // decryption path returns nothing when it is missing, so keeping the
         // data alone would still lose the share.
-        if (sharePrefs.getString(KEY_SHARE_DATA, null) != null &&
-            sharePrefs.getString(KEY_SHARE_IV, null) != null
-        ) {
+        //
+        // A destination value that will not read may be another share hit by a
+        // transient fault, and copying over it would destroy that share, so the
+        // migration waits for a later start with both copies left as they are.
+        val destData = sharePrefs.readString(KEY_SHARE_DATA)
+        val destIv = sharePrefs.readString(KEY_SHARE_IV)
+        if (destData is PrefRead.Unreadable || destIv is PrefRead.Unreadable) return
+        if (destData is PrefRead.Found && destIv is PrefRead.Found) {
             addKeyToRegistry(groupPubkeyHex)
             // The group's store can hold another share of the same group, imported
             // while this one sat unmigrated, so the legacy copy goes only when the
