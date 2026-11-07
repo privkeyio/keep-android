@@ -120,18 +120,6 @@
     <string name="connections_bunker_clients_none">No authorized clients</string>
     <string name="connections_bunker_client_revoke_cd">Revoke</string>
 
-    <!-- NostrConnectApprovalScreen -->
-    <string name="connections_nostrconnect_title">Connection Request</string>
-    <string name="connections_nostrconnect_from">from <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
-    <string name="connections_nostrconnect_description">This app wants to connect via NIP-46. Approving will authorize it to send signing requests.</string>
-    <string name="connections_nostrconnect_client_pubkey">Client Pubkey</string>
-    <string name="connections_nostrconnect_relays">Relays</string>
-    <string name="connections_nostrconnect_requested_permissions">Requested Permissions</string>
-    <string name="connections_nostrconnect_permission_with_kind"><xliff:g id="method" example="sign_event">%1$s</xliff:g> (kind <xliff:g id="kind" example="1">%2$s</xliff:g>)</string>
-    <string name="connections_nostrconnect_remember_permissions">Remember permissions</string>
-    <string name="connections_nostrconnect_reject">Reject</string>
-    <string name="connections_nostrconnect_connect">Connect</string>
-
     <!-- Nip46ApprovalScreen -->
     <string name="connections_nip46_title_connect">New Connection Request</string>
     <string name="connections_nip46_title_request">NIP-46 Request</string>

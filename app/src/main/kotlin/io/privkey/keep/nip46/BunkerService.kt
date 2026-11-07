@@ -53,7 +53,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -87,7 +86,6 @@ class BunkerService : Service() {
         private const val NOTIFICATION_ID = 2
 
         private const val MAX_PENDING_APPROVALS = 10
-        private const val MAX_PENDING_NOSTR_CONNECT_REQUESTS = 10
         private const val MAX_CONCURRENT_PER_CLIENT = 3
         private const val MAX_START_RETRIES = 5
         private const val START_RETRY_DELAY_MS = 2_000L
@@ -184,7 +182,6 @@ class BunkerService : Service() {
         private val revokeGeneration = AtomicLong()
         private val everyClientRevokedAt = AtomicLong()
         private val clientRevokedAt = ConcurrentHashMap<String, Long>()
-        private val pendingNostrConnectRequests = ArrayBlockingQueue<NostrConnectRequest>(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
 
         fun current(): BunkerService? = serviceInstanceRef.get()
 
@@ -341,9 +338,6 @@ class BunkerService : Service() {
             }
             runCatching { Nip46ClientStore.getClients(context).keys.forEach { Nip46ClientStore.removeClient(context, it) } }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not clear the NIP-46 client list: ${it::class.simpleName}") }
-            // A nostrconnect request approved under the previous account must not be answered
-            // under the new one.
-            pendingNostrConnectRequests.clear()
             // Standalone: the service is being stopped for the switch and must not restart.
             step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
             // Now rather than only at the next start, since the core revokes with no bunker
@@ -411,14 +405,6 @@ class BunkerService : Service() {
             if (!runCatching { keepMobile.getBunkerConfig().enabled }.getOrDefault(false)) return
             runCatching { start(context) }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not start the bunker after a node build: ${it::class.simpleName}") }
-        }
-
-        fun queueNostrConnectRequest(request: NostrConnectRequest): Boolean {
-            return pendingNostrConnectRequests.offer(request)
-        }
-
-        fun dequeueNostrConnectRequest(request: NostrConnectRequest): Boolean {
-            return pendingNostrConnectRequests.remove(request)
         }
 
         fun start(context: Context) {
@@ -803,7 +789,6 @@ class BunkerService : Service() {
 
             updateNotification(isActive = true)
 
-            processQueuedNostrConnectRequests()
             return false
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -830,43 +815,6 @@ class BunkerService : Service() {
             }
             status
         } ?: BunkerStatus.STARTING
-
-    @Volatile
-    private var cachedSendConnectMethod: java.lang.reflect.Method? = null
-
-    fun processQueuedNostrConnectRequests() {
-        val handler = bunkerHandler ?: return
-        serviceScope.launch {
-            generateSequence { pendingNostrConnectRequests.poll() }
-                .take(MAX_PENDING_NOSTR_CONNECT_REQUESTS)
-                .forEach { request -> sendConnectResponse(handler, request) }
-        }
-    }
-
-    private fun sendConnectResponse(handler: BunkerHandler, request: NostrConnectRequest) {
-        runCatching {
-            val method = cachedSendConnectMethod ?: handler::class.java.getMethod(
-                "sendConnectResponse",
-                String::class.java,
-                List::class.java,
-                String::class.java
-            ).also { cachedSendConnectMethod = it }
-            method.invoke(handler, request.clientPubkey, request.relays, request.secret)
-            if (BuildConfig.DEBUG) Log.d(TAG, "Sent connect response to ${truncatePubkey(request.clientPubkey)}")
-        }.onFailure { e ->
-            handleSendConnectError(e)
-        }
-    }
-
-    private fun handleSendConnectError(e: Throwable) {
-        val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause else e
-        if (cause is NoSuchMethodException || cause is NoSuchMethodError) {
-            cachedSendConnectMethod = null
-            if (BuildConfig.DEBUG) Log.w(TAG, "sendConnectResponse not available in library")
-        } else {
-            if (BuildConfig.DEBUG) Log.e(TAG, "Failed to send connect response: ${(cause ?: e)::class.simpleName}")
-        }
-    }
 
     private fun logActivity(category: EventLogCategory, level: EventLogLevel, source: String, message: String) {
         val activityLog = eventLogStore ?: return
