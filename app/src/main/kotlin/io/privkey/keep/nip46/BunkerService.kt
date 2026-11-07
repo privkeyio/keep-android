@@ -189,14 +189,6 @@ class BunkerService : Service() {
             current()?.pendingAuthSaves?.remove(pubkey.lowercase())
         }
 
-        internal fun cacheAuthorizedClient(pubkey: String) {
-            current()?.authorizedClientsCache?.add(pubkey.lowercase())
-        }
-
-        internal fun uncacheAuthorizedClient(pubkey: String) {
-            current()?.authorizedClientsCache?.remove(pubkey.lowercase())
-        }
-
         // Through a handler of its own: the core revoke reaches the running engine from any
         // handler, drops persisted grants with no bunker running, and stops whatever bunker
         // is running, which the caller restarts.

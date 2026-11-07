@@ -53,8 +53,6 @@ DEFAULT_TARGETS=(
     "app/src/main/kotlin/io/privkey/keep/nip46/Nip46ApprovalActivity.kt"
     "app/src/main/kotlin/io/privkey/keep/nip46/Nip46ApprovalScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip46/Nip46UiComponents.kt"
-    "app/src/main/kotlin/io/privkey/keep/nip46/NostrConnectActivity.kt"
-    "app/src/main/kotlin/io/privkey/keep/nip46/NostrConnectApprovalScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/AppPermissionsScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/ConnectedAppsScreen.kt"
     "app/src/main/kotlin/io/privkey/keep/nip55/Nip55Activity.kt"
