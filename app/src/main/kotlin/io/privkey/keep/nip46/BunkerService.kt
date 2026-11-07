@@ -101,6 +101,17 @@ class BunkerService : Service() {
         private const val MAX_TRACKED_CLIENTS = 1000
         internal const val MAX_AUTHORIZED_CLIENTS = 100
 
+        internal fun startBunkerThroughProxy(
+            handler: BunkerHandler,
+            relays: List<String>,
+            callbacks: BunkerCallbacks,
+            proxyPort: UShort
+        ): Boolean = runCatching {
+            handler.startBunkerWithProxy(relays, callbacks, "127.0.0.1", proxyPort)
+        }.onFailure {
+            if (BuildConfig.DEBUG) Log.w(TAG, "startBunkerWithProxy failed: ${it::class.simpleName}")
+        }.isSuccess
+
         // A full list refuses a new client rather than evicting the oldest, which kept
         // its engine grants and could connect again with the secret. Null when full.
         internal fun withClientAdded(clients: List<String>, pubkey: String): List<String>? {
@@ -746,7 +757,7 @@ class BunkerService : Service() {
                 // A proxy is configured. Fail closed if it cannot be started:
                 // falling back to a direct connection would leak the user's IP to
                 // the relays, defeating the point of the proxy (e.g. Tor).
-                if (!invokeStartBunkerWithProxy(handler, safeRelays, callbacks, "127.0.0.1", proxy.port)) {
+                if (!startBunkerThroughProxy(handler, safeRelays, callbacks, proxy.port)) {
                     if (BuildConfig.DEBUG) {
                         Log.e(TAG, "proxy enabled but startBunkerWithProxy failed; refusing to connect without proxy")
                     }
@@ -815,21 +826,6 @@ class BunkerService : Service() {
             }
             status
         } ?: BunkerStatus.STARTING
-
-    private fun invokeStartBunkerWithProxy(
-        handler: BunkerHandler,
-        relays: List<String>,
-        callbacks: BunkerCallbacks,
-        proxyHost: String,
-        proxyPort: UShort
-    ): Boolean = runCatching {
-        val method = handler.javaClass.methods.firstOrNull { it.name == "startBunkerWithProxy" }
-            ?: return false
-        method.invoke(handler, relays, callbacks, proxyHost, proxyPort)
-        true
-    }.onFailure {
-        if (BuildConfig.DEBUG) Log.w(TAG, "startBunkerWithProxy failed: ${it::class.simpleName}")
-    }.getOrDefault(false)
 
     @Volatile
     private var cachedSendConnectMethod: java.lang.reflect.Method? = null
