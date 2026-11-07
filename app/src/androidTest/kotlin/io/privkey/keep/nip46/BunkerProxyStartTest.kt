@@ -12,8 +12,10 @@ import io.privkey.keep.uniffi.BunkerLogEvent
 import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.ConnectAuthorization
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.KeepMobileException
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,8 +53,9 @@ class BunkerProxyStartTest {
         ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { proxy ->
             proxy.soTimeout = 30_000
             val handler = BunkerHandler(mobile)
+            var outcome: Result<Unit>? = null
             val start = thread {
-                BunkerService.startBunkerThroughProxy(handler, listOf(RELAY), NoCallbacks, proxy.localPort.toUShort())
+                outcome = runCatching { BunkerService.startBunkerThroughProxy(handler, listOf(RELAY), NoCallbacks, proxy.localPort.toUShort()) }
             }
             try {
                 val greeting = proxy.accept().use { it.getInputStream().read() }
@@ -62,6 +65,12 @@ class BunkerProxyStartTest {
                 start.join(60_000)
                 handler.destroy()
             }
+            // The proxy closed without answering, so the core's error must reach the
+            // service, which retries or fails closed on it rather than reading a bare false.
+            assertTrue(
+                "the core's error is thrown, got $outcome",
+                outcome?.exceptionOrNull() is KeepMobileException
+            )
         }
     }
 
