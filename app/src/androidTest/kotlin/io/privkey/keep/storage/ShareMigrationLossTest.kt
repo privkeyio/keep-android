@@ -182,6 +182,24 @@ class ShareMigrationLossTest {
             .putInt("share_index", 2)
             .commit()
 
+        // Run twice, as on two starts: the kept state is stable and writes nothing more.
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals("legacy-share-bytes", legacy().getString("share_data", null))
+        assertEquals("imported-share-bytes", sharePrefs().getString("share_data", null))
+        assertEquals(setOf(GROUP_HEX), multi().getStringSet("all_share_keys", null))
+    }
+
+    @Test
+    fun a_stored_share_with_no_index_does_not_erase_the_legacy_share() {
+        // Without an index there is no proof the stored share is this one.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "imported-share-bytes")
+            .putString("share_iv", "imported-iv")
+            .commit()
+
         AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
 
         assertEquals("legacy-share-bytes", legacy().getString("share_data", null))
