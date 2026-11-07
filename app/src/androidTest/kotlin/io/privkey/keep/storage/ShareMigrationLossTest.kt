@@ -3,7 +3,9 @@ package io.privkey.keep.storage
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.privkey.keep.uniffi.ShareMetadataInfo
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -133,10 +135,10 @@ class ShareMigrationLossTest {
     }
 
     @Test
-    fun a_destination_entry_that_cannot_be_decrypted_is_overwritten_not_trusted() {
-        // A name resolving at the destination is not the share being there. This
-        // stages an entry that exists and will not open, which a presence check
-        // accepts and a read does not.
+    fun a_destination_entry_that_cannot_be_decrypted_is_neither_trusted_nor_overwritten() {
+        // A name resolving at the destination is not the share being there, and an
+        // entry that will not open may be another share hit by a transient fault.
+        // This stages one that exists and will not open.
         seedLegacyShare()
         val dest = context.getSharedPreferences(shareStoreName(), Context.MODE_PRIVATE)
         // Identify share_data's entry by what writing it adds. Filtering on the
@@ -154,16 +156,95 @@ class ShareMigrationLossTest {
 
         AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
 
-        // The invariant is that the share survives, not that the legacy copy
-        // does. An unreadable destination must not authorise the erase on its
-        // own, and here it does not: the migration falls through, overwrites the
-        // unreadable entry with the real value, and only then clears the source.
-        // Asserting the legacy copy lingers would assert the fix had failed.
+        // Neither copy may be destroyed: the legacy share stays where it is and the
+        // unreadable entry is not overwritten, so a later start can still read it.
         assertEquals(
-            "the share must be readable somewhere after the migration",
+            "the legacy share must survive",
             "legacy-share-bytes",
-            sharePrefs().getString("share_data", null)
+            legacy().getString("share_data", null)
         )
+        assertEquals(
+            "the unreadable entry must not be overwritten",
+            "v2:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            dest.getString(added.first(), null)
+        )
+    }
+
+    @Test
+    fun another_share_of_the_group_in_per_group_storage_does_not_erase_the_legacy_share() {
+        // A legacy share (index 1) that did not migrate, then index 2 of the same group
+        // imported into the group's store. Both are needed to sign, so the legacy one
+        // must survive the next migration rather than be cleared as already moved.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "imported-share-bytes")
+            .putString("share_iv", "imported-iv")
+            .putInt("share_index", 2)
+            .commit()
+
+        // Run twice, as on two starts: the kept state is stable and writes nothing more.
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals("legacy-share-bytes", legacy().getString("share_data", null))
+        assertEquals("imported-share-bytes", sharePrefs().getString("share_data", null))
+        assertEquals(setOf(GROUP_HEX), multi().getStringSet("all_share_keys", null))
+    }
+
+    @Test
+    fun a_stored_share_with_no_index_does_not_erase_the_legacy_share() {
+        // Without an index there is no proof the stored share is this one.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "imported-share-bytes")
+            .putString("share_iv", "imported-iv")
+            .commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals("legacy-share-bytes", legacy().getString("share_data", null))
+        assertEquals("imported-share-bytes", sharePrefs().getString("share_data", null))
+    }
+
+    @Test
+    fun a_kept_legacy_share_does_not_take_the_cipher_from_the_active_share() {
+        // With the legacy share kept beside another share of its group, signing still
+        // decrypts the active share, so the cipher handed to the core must be its own
+        // and not one built from the legacy key and iv.
+        seedLegacyShare()
+        val storage = AndroidKeystoreStorage(context, requireUserAuth = false)
+        storage.storeShareByKeyWithCipher(
+            storage.getCipherForShareEncryption(GROUP_HEX),
+            GROUP_HEX,
+            "imported-share-bytes".toByteArray(),
+            ShareMetadataInfo("other", 2u, 2u, 3u, ByteArray(32), false)
+        )
+        storage.setActiveShareKey(GROUP_HEX)
+        storage.migrateLegacyShareToRegistrySync()
+        assertNotNull("the legacy share must be kept", legacy().getString("share_data", null))
+
+        val cipher = storage.getCipherForDecryption()
+        val active = storage.getCipherForShareDecryption(GROUP_HEX)
+        assertNotNull(cipher)
+        assertNotNull(active)
+        assertArrayEquals(active!!.iv, cipher!!.iv)
+        assertEquals("the active share is described", 2, storage.getShareMetadata()?.identifier?.toInt())
+    }
+
+    @Test
+    fun the_same_share_already_in_per_group_storage_clears_the_legacy_copy() {
+        // A migration that stored the share but stopped before clearing the source.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "legacy-share-bytes")
+            .putString("share_iv", "legacy-iv")
+            .putInt("share_index", 1)
+            .commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals(null, legacy().getString("share_data", null))
+        assertEquals("legacy-share-bytes", sharePrefs().getString("share_data", null))
     }
 
     companion object {
