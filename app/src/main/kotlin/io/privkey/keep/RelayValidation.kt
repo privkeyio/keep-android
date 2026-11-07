@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import android.net.InetAddresses
+import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URI
@@ -57,10 +58,23 @@ internal fun filterRelaysForProxy(relays: List<String>): List<String> =
         val host = parseHost(url) ?: return@filter false
         when {
             host.equals("localhost", ignoreCase = true) -> false
-            InetAddresses.isNumericAddress(host) -> !isInternalAddress(InetAddresses.parseNumericAddress(host))
+            InetAddresses.isNumericAddress(host) -> {
+                val addr = InetAddresses.parseNumericAddress(host)
+                !(addr is Inet4Address && addr.hostAddress != host) && !isInternalAddress(addr)
+            }
+            endsInNumber(host) -> false
             else -> true
         }
     }
+
+// The core's URL parser reads a host whose last label is a number as an IPv4 address,
+// including octal, hex and shortened forms (0177.0.0.1, 0x7f.1, 2130706433 are all
+// 127.0.0.1). Only the canonical dotted-decimal form is checked above, so the rest are
+// refused rather than passed to the proxy as names.
+private fun endsInNumber(host: String): Boolean {
+    val last = host.trimEnd('.').substringAfterLast('.')
+    return last.isNotEmpty() && (last.all { it.isDigit() } || last.startsWith("0x", ignoreCase = true))
+}
 
 internal fun isInternalAddress(addr: InetAddress): Boolean {
     if (addr.isLoopbackAddress ||

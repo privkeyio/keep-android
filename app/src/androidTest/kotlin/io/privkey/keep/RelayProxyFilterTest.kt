@@ -32,4 +32,17 @@ class RelayProxyFilterTest {
         )
         assertEquals(listOf("wss://8.8.8.8"), filterRelaysForProxy(relays))
     }
+
+    @Test
+    fun refusesNumericHostsTheCoreReadsAsAnotherAddress() {
+        val relays = listOf(
+            "wss://0177.0.0.1",
+            "wss://0x7f.0.0.1",
+            "wss://2130706433",
+            "wss://127.1",
+            "wss://010.8.8.8",
+            "wss://relay.example.com"
+        )
+        assertEquals(listOf("wss://relay.example.com"), filterRelaysForProxy(relays))
+    }
 }
