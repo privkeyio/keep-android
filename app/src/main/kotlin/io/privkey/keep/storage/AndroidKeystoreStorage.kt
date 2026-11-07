@@ -1286,7 +1286,13 @@ class AndroidKeystoreStorage(
             sharePrefs.getString(KEY_SHARE_IV, null) != null
         ) {
             addKeyToRegistry(groupPubkeyHex)
-            prefs.edit().clear().apply()
+            // The group's store can hold another share of the same group, imported
+            // while this one sat unmigrated, so the legacy copy goes only when the
+            // stored share is this one. An index that will not read is not proof.
+            val stored = sharePrefs.readInt(KEY_SHARE_INDEX)
+            if (stored is PrefRead.Found && stored.value == metadata.identifier.toInt()) {
+                prefs.edit().clear().apply()
+            }
             return
         }
 

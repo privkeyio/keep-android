@@ -166,6 +166,40 @@ class ShareMigrationLossTest {
         )
     }
 
+    @Test
+    fun another_share_of_the_group_in_per_group_storage_does_not_erase_the_legacy_share() {
+        // A legacy share (index 1) that did not migrate, then index 2 of the same group
+        // imported into the group's store. Both are needed to sign, so the legacy one
+        // must survive the next migration rather than be cleared as already moved.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "imported-share-bytes")
+            .putString("share_iv", "imported-iv")
+            .putInt("share_index", 2)
+            .commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals("legacy-share-bytes", legacy().getString("share_data", null))
+        assertEquals("imported-share-bytes", sharePrefs().getString("share_data", null))
+    }
+
+    @Test
+    fun the_same_share_already_in_per_group_storage_clears_the_legacy_copy() {
+        // A migration that stored the share but stopped before clearing the source.
+        seedLegacyShare()
+        sharePrefs().edit()
+            .putString("share_data", "legacy-share-bytes")
+            .putString("share_iv", "legacy-iv")
+            .putInt("share_index", 1)
+            .commit()
+
+        AndroidKeystoreStorage(context, requireUserAuth = false).migrateLegacyShareToRegistrySync()
+
+        assertEquals(null, legacy().getString("share_data", null))
+        assertEquals("legacy-share-bytes", sharePrefs().getString("share_data", null))
+    }
+
     companion object {
         private const val LEGACY_PREFS = "keep_secure_prefs"
         private const val MULTI_PREFS = "keep_multi_share_prefs"
