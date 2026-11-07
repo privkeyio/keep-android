@@ -574,11 +574,13 @@ class KeepMobileApp : Application() {
 
     private suspend fun initializeConnection(mobile: KeepMobile, relays: List<String>) {
         val startedAt = liveNode.beginInit()
-        val proxyConfig = runCatching { mobile.getProxyConfig() }.getOrNull()
+        // Read without a fallback: a config that cannot be read may hold an enabled proxy,
+        // and connecting directly would leak the user's IP to the relays.
+        val proxyConfig = mobile.getProxyConfig()
         if (BuildConfig.DEBUG) {
-            Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig?.enabled == true}")
+            Log.d(TAG, "Initializing with ${relays.size} relay(s), proxy=${proxyConfig.enabled}")
         }
-        if (proxyConfig != null && proxyConfig.enabled && proxyConfig.port.toInt() in 1..65535) {
+        if (proxyConfig.enabled) {
             mobile.initializeWithProxy(relays, "127.0.0.1", proxyConfig.port)
         } else {
             mobile.initialize(relays)

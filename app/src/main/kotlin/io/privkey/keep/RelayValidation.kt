@@ -1,5 +1,6 @@
 package io.privkey.keep
 
+import android.net.InetAddresses
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URI
@@ -47,6 +48,19 @@ internal fun isInternalHost(url: String): Boolean = checkRelayHost(url) != Relay
 internal fun filterRelaysPreConnection(relays: List<String>): List<String> {
     return relays.filter { url -> checkRelayHost(url) == RelayHostCheck.REACHABLE }
 }
+
+// Through a proxy the relay name is resolved by the proxy (e.g. Tor). A local lookup
+// would tell the network which relays the user talks to and could never resolve an
+// onion address, so only a literal host is checked here.
+internal fun filterRelaysForProxy(relays: List<String>): List<String> =
+    relays.filter { url ->
+        val host = parseHost(url) ?: return@filter false
+        when {
+            host.equals("localhost", ignoreCase = true) -> false
+            InetAddresses.isNumericAddress(host) -> !isInternalAddress(InetAddresses.parseNumericAddress(host))
+            else -> true
+        }
+    }
 
 internal fun isInternalAddress(addr: InetAddress): Boolean {
     if (addr.isLoopbackAddress ||
