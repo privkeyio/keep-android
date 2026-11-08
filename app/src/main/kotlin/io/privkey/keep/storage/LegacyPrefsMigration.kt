@@ -13,6 +13,10 @@ object LegacyPrefsMigration {
 
     private const val MIGRATION_MARKER_SUFFIX = "_migrated_v1"
 
+    // A marker says there is nothing left to carry, so a legacy store that would not
+    // open is never marked: that is how a transient Keystore fault shows here, and
+    // marking it skipped a readable store on every later launch.
+
     fun migrateIfNeeded(
         context: Context,
         prefsName: String,
@@ -26,10 +30,7 @@ object LegacyPrefsMigration {
         }
 
         try {
-            val legacyPrefs = openLegacyPrefs(context, prefsName) ?: run {
-                markerPrefs.edit().putBoolean(migrationMarker, true).apply()
-                return newPrefs
-            }
+            val legacyPrefs = openLegacyPrefs(context, prefsName) ?: return newPrefs
 
             val legacyData = legacyPrefs.all
             if (legacyData.isEmpty()) {
@@ -56,6 +57,8 @@ object LegacyPrefsMigration {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
         } catch (e: Exception) {
+            // The store opened, so this is not the fault above: the legacy getAll refuses
+            // the file once the new store has written to it, and that does not clear.
             if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
             markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
@@ -77,20 +80,19 @@ object LegacyPrefsMigration {
         if (markerPrefs.getBoolean(migrationMarker, false)) return null
 
         try {
-            val legacyPrefs = openLegacyPrefs(context, prefsName)
-            val legacyValue = legacyPrefs?.getString(key, null)
+            val legacyPrefs = openLegacyPrefs(context, prefsName) ?: return null
+            val legacyValue = legacyPrefs.getString(key, null)
 
             if (legacyValue != null) {
                 if (newPrefs.edit().putString(key, legacyValue).commit()) {
                     markerPrefs.edit().putBoolean(migrationMarker, true).apply()
                     return legacyValue
                 }
-            } else {
+            } else if (!legacyPrefs.contains(key)) {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
-            markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
 
         return null
