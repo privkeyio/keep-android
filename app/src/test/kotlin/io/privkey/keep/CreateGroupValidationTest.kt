@@ -163,6 +163,73 @@ class CreateGroupValidationTest {
     fun rosterRejectsBidiOverrideName() = assertFalse(isValidRoster(roster(name = "a\u202Eb")))
 
     @Test
+    fun setupRejectsNamesWithHiddenCharacters() {
+        listOf(
+            "a\u200Bb", // zero-width space
+            "a\u2060b", // word joiner
+            "a\u200Fb", // right-to-left mark
+            "a\u061Cb", // Arabic letter mark
+            "a\u2067b", // right-to-left isolate
+            "a\uFEFFb", // byte order mark
+            "a\u00ADb", // soft hyphen
+            "a\uDB40\uDC41b", // tag character U+E0041
+            "a\u2028b", // line separator
+            "a\uD800b", // unpaired surrogate
+            "a\u00A0b", // no-break space
+            "a\u3000b", // ideographic space
+            "a\u3164b", // Hangul filler
+            "a\u2800b", // braille blank
+            "a\u034Fb", // combining grapheme joiner
+            "a\uE000b", // private use
+            " Vault", // leading space
+            "Vault ", // trailing space
+            " ", // only a space
+        ).forEach { name -> assertFalse(name, isValidSetup(setup(name = name))) }
+    }
+
+    @Test
+    fun rosterRejectsNameWithZeroWidthCharacter() = assertFalse(isValidRoster(roster(name = "a\u200Bb")))
+
+    @Test
+    fun setupAcceptsVisibleNames() {
+        listOf(
+            "Family vault",
+            "Familie Müller",
+            "家族の金庫",
+            "Семья",
+            "🔑 Vault", // emoji outside the BMP
+            "❤\uFE0F Vault", // emoji with a variation selector
+            "👨\u200D👩\u200D👧 Vault", // ZWJ emoji sequence
+            "می\u200Cخواهم", // Persian with ZWNJ
+            "a\u0378b", // unassigned here, possibly assigned on a newer device
+        ).forEach { name -> assertTrue(name, isValidSetup(setup(name = name))) }
+    }
+
+    @Test
+    fun setupRejectsRelaysThatDisplayMisleadingly() {
+        listOf(
+            "wss://evil.example/\nwss://relay.example", // one entry shown as two
+            "wss://evil.example/\u2028wss://relay.example",
+            "wss://relay.example/\u202Eelpmaxe",
+            "wss://relay.example/\u200B",
+            "wss://relay.example/ x",
+            "wss://relay.example@evil.example", // userinfo hides the host
+            "wss://relay.exämple",
+        ).forEach { relay ->
+            val json = org.json.JSONArray(listOf(relay)).toString()
+            assertFalse(relay, isValidSetup(setup(relays = json)))
+        }
+    }
+
+    @Test
+    fun setupRejectsDuplicateRelays() =
+        assertFalse(isValidSetup(setup(relays = """["wss://relay.example","wss://relay.example"]""")))
+
+    @Test
+    fun rosterRejectsRelayWithNewline() =
+        assertFalse(isValidRoster(roster(relays = org.json.JSONArray(listOf("wss://a.example/\nwss://b.example")).toString())))
+
+    @Test
     fun rosterRejectsNonWebsocketRelay() =
         assertFalse(isValidRoster(roster(relays = """["ftp://relay.example"]""")))
 

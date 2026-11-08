@@ -43,12 +43,44 @@ private fun isHex64(s: String): Boolean =
 
 // Group names arrive from scanned QR payloads and become this device's account
 // label (via frost_dkg_begin). Rust's validate_share_name only caps length at
-// MAX_ACCOUNT_NAME_LENGTH, so reject control characters and Unicode bidi
-// overrides/isolates here too: a scanned name must not carry an RTL override
-// that spoofs how the label renders or inject control characters into it.
+// MAX_ACCOUNT_NAME_LENGTH, so reject what changes how the label renders without
+// showing: control and format characters (bidi overrides and isolates, directional
+// marks, zero-width spaces, tags), separators and spaces other than U+0020, leading
+// or trailing space, unpaired surrogates, private-use code points, and characters
+// that render blank. Unassigned code points are allowed: which ones are unassigned
+// depends on the device's Unicode version, and one renders as a visible box. ZWJ and ZWNJ are kept because emoji sequences
+// and several scripts need them and they do not reorder text. A look-alike name is
+// no worse than an exact duplicate, which the account switcher tells apart by key.
+// Stopgap until the core enforces this in validate_share_name.
 private fun isValidGroupName(name: String): Boolean =
-    name.isNotEmpty() && name.length <= MAX_ACCOUNT_NAME_LENGTH &&
-        name.none { it.isISOControl() || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' }
+    name.isNotEmpty() && name.length <= MAX_ACCOUNT_NAME_LENGTH && name == name.trim() &&
+        name.codePoints().noneMatch(::isHiddenInName)
+
+private fun isHiddenInName(cp: Int): Boolean = when {
+    cp == ZWNJ || cp == ZWJ -> false
+    Character.getType(cp).toByte() in HIDDEN_CHAR_TYPES -> true
+    Character.isSpaceChar(cp) -> cp != ' '.code
+    else -> cp in BLANK_RENDERING_CODE_POINTS
+}
+
+private const val ZWNJ = 0x200C
+private const val ZWJ = 0x200D
+
+private val HIDDEN_CHAR_TYPES = setOf(
+    Character.CONTROL,
+    Character.FORMAT,
+    Character.SURROGATE,
+    Character.LINE_SEPARATOR,
+    Character.PARAGRAPH_SEPARATOR,
+    Character.PRIVATE_USE,
+)
+
+// Assigned, non-format code points that draw nothing: Hangul fillers, the braille
+// blank, the combining grapheme joiner, Khmer inherent vowels and Mongolian free
+// variation selectors.
+private val BLANK_RENDERING_CODE_POINTS = setOf(
+    0x115F, 0x1160, 0x3164, 0xFFA0, 0x2800, 0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F,
+)
 
 private data class SetupPayload(
     val name: String,
@@ -57,9 +89,9 @@ private data class SetupPayload(
     val relays: List<String>
 )
 
-private data class RosterEntry(val index: Int, val pubkey: String)
+internal data class RosterEntry(val index: Int, val pubkey: String)
 
-private data class RosterPayload(
+internal data class RosterPayload(
     val name: String,
     val threshold: Int,
     val participants: Int,
@@ -76,10 +108,13 @@ private fun relaysFromJson(obj: JSONObject): List<String> {
 // websocket endpoints, so bound the list and require the encrypted wss:// scheme
 // rather than connecting to arbitrary attacker-supplied strings. Plaintext ws://
 // is rejected in production Rust, so reject it here instead of minting a subkey
-// and walking the whole flow only to die inside frost_run_dkg.
+// and walking the whole flow only to die inside frost_run_dkg. The review screen
+// shows them for comparison across devices, so they must also be printable ASCII
+// with no userinfo, and each listed once: a newline or a hidden character would let
+// one entry display as two, or two different entries display alike.
 private fun relaysValid(relays: List<String>): Boolean =
-    relays.isNotEmpty() && relays.size <= MAX_RELAYS &&
-        relays.all { it.length <= MAX_RELAY_LENGTH && it.startsWith("wss://") }
+    relays.isNotEmpty() && relays.size <= MAX_RELAYS && relays.distinct().size == relays.size &&
+        relays.all { it.length <= MAX_RELAY_LENGTH && it.matches(RELAY_URL_REGEX) }
 
 private fun kind(data: String): String? = try {
     val obj = JSONObject(data.trim())
@@ -402,10 +437,17 @@ private fun StartGroupMode(
 
     when (phase) {
         CoordPhase.Form -> {
+            val nameRejected = name.isNotBlank() && !isValidGroupName(name.trim())
             OutlinedTextField(
                 value = name,
                 onValueChange = { if (it.length <= MAX_ACCOUNT_NAME_LENGTH) name = it },
                 label = { Text(stringResource(R.string.create_group_name_label)) },
+                isError = nameRejected,
+                supportingText = if (nameRejected) {
+                    { Text(stringResource(R.string.create_group_name_invalid)) }
+                } else {
+                    null
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -445,6 +487,7 @@ private fun StartGroupMode(
 
             Button(
                 onClick = {
+                    name = name.trim()
                     try {
                         myPubkey = onDkgBegin(name)
                         collected.clear()
@@ -456,15 +499,19 @@ private fun StartGroupMode(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = relays.isNotEmpty()
+                enabled = relaysValid(relays) && isValidGroupName(name.trim())
             ) {
                 Text(stringResource(R.string.create_group_begin))
             }
 
-            if (relays.isEmpty()) {
+            if (!relaysValid(relays)) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = stringResource(R.string.create_group_no_relays),
+                    text = if (relays.isEmpty()) {
+                        stringResource(R.string.create_group_no_relays)
+                    } else {
+                        stringResource(R.string.create_group_relays_unusable, MAX_RELAYS)
+                    },
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -774,8 +821,9 @@ private fun JoinGroupMode(
     }
 }
 
+@androidx.annotation.VisibleForTesting
 @Composable
-private fun RosterReview(
+internal fun RosterReview(
     roster: RosterPayload,
     ourIndex: Int,
     fingerprint: String,
@@ -804,6 +852,27 @@ private fun RosterReview(
             style = MaterialTheme.typography.titleLarge,
             fontFamily = FontFamily.Monospace
         )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.create_group_name_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(text = roster.name, style = MaterialTheme.typography.bodyLarge)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.create_group_review_relays_label),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        roster.relays.forEach { relay ->
+            Text(
+                text = relay,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            )
+        }
         Spacer(modifier = Modifier.height(16.dp))
         roster.roster.sortedBy { it.index }.forEach { entry ->
             val label = truncateStr(entry.pubkey, 8u, 6u)
