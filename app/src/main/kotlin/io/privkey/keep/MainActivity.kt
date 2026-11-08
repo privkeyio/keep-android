@@ -985,15 +985,19 @@ fun MainScreen(
         BackupRestoreScreen(
             keepMobile = keepMobile,
             storage = storage,
-            onGetCipher = { requireBiometricReady(); getShareAwareCipher(storage) },
+            onGetBackupCipher = { key -> requireBiometricReady(); storage.getCipherForShareDecryption(key) },
             onGetRestoreCipher = {
                 requireBiometricReady()
                 storage.getCipherForEncryption()
             },
-            onBiometricAuth = { cipher, callback ->
+            onBiometricAuth = { cipher, step, total, callback ->
                 onBiometricRequest(
                     appContext.getString(R.string.main_vault_backup_title),
-                    appContext.getString(R.string.main_vault_backup_subtitle),
+                    if (total > 1) {
+                        appContext.getString(R.string.main_vault_backup_subtitle_step, step, total)
+                    } else {
+                        appContext.getString(R.string.main_vault_backup_subtitle)
+                    },
                     cipher,
                     callback
                 )

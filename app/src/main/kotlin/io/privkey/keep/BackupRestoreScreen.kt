@@ -1,6 +1,8 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,6 +23,7 @@ import io.privkey.keep.storage.AndroidKeystoreStorage
 import io.privkey.keep.uniffi.BackupInfo
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.KeepMobileException
+import io.privkey.keep.uniffi.ShareRegistryRead
 import io.privkey.keep.uniffi.backupMinPassphraseLength
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,6 +31,9 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
 private const val MAX_BACKUP_FILE_SIZE = 10L * 1024 * 1024 // 10 MB
@@ -51,14 +57,26 @@ private sealed class RestoreState {
 
 private fun clearByteArray(bytes: ByteArray) = bytes.fill(0)
 
+// Long enough for the core to reach the first share after any it reads before it.
+private const val FIRST_CIPHER_TIMEOUT_MS = 10L * 60 * 1000
+
+private fun hexOf(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+
+// Null when the registry cannot be read, so a fault is never taken for a change.
+private fun heldGroups(storage: AndroidKeystoreStorage): Set<String>? =
+    when (val read = storage.readShareRegistry()) {
+        is ShareRegistryRead.Readable -> (read.shares.map { hexOf(it.groupPubkey) } + read.unreadable).toSet()
+        ShareRegistryRead.Unavailable -> null
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackupRestoreScreen(
     keepMobile: KeepMobile,
     storage: AndroidKeystoreStorage,
-    onGetCipher: () -> Cipher?,
+    onGetBackupCipher: (shareKey: String) -> Cipher?,
     onGetRestoreCipher: () -> Cipher?,
-    onBiometricAuth: (Cipher, (Cipher?) -> Unit) -> Unit,
+    onBiometricAuth: (cipher: Cipher, step: Int, total: Int, (Cipher?) -> Unit) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -73,6 +91,9 @@ fun BackupRestoreScreen(
     var restoreState by remember { mutableStateOf<RestoreState>(RestoreState.Idle) }
     var confirmingRestore by remember { mutableStateOf<RestoreState.Verified?>(null) }
     val activeRequestIds = remember { mutableStateListOf<String>() }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val openPrompts = remember { ConcurrentHashMap.newKeySet<CompletableFuture<Cipher?>>() }
+    val disposed = remember { AtomicBoolean(false) }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -87,8 +108,11 @@ fun BackupRestoreScreen(
                 is RestoreState.Verified -> clearByteArray(rs.data)
                 else -> {}
             }
+            disposed.set(true)
+            openPrompts.forEach { it.complete(null) }
             for (id in activeRequestIds) {
                 storage.clearPendingCipher(id)
+                storage.clearCipherProvider(id)
             }
             activeRequestIds.clear()
         }
@@ -104,30 +128,59 @@ fun BackupRestoreScreen(
     val verifyFailedMsg = stringResource(R.string.backup_restore_verify_failed)
     val restoredToastMsg = stringResource(R.string.backup_restore_restored_toast)
     val restoreFailedMsg = stringResource(R.string.backup_restore_failed)
+    val restorePartialMsg = stringResource(R.string.backup_restore_partial)
     val passphraseMinLengthMsg = stringResource(R.string.backup_restore_passphrase_min_length, minPassphraseLength)
     val passphraseMismatchMsg = stringResource(R.string.backup_restore_passphrase_mismatch)
 
-    fun requireBiometricAuth(
-        getCipher: () -> Cipher? = onGetCipher,
-        onAuthed: (authedCipher: Cipher) -> Unit
-    ) {
+    fun authenticate(getCipher: () -> Cipher?, step: Int, total: Int, onResult: (Cipher?) -> Unit) {
         val cipher = try {
             getCipher()
         } catch (e: BiometricHelper.BiometricNotReadyException) {
             Toast.makeText(context, e.message ?: biometricUnavailableMsg, Toast.LENGTH_LONG).show()
+            onResult(null)
             return
         } catch (e: KeepMobileException) {
             if (BuildConfig.DEBUG) Log.e("BackupRestore", "Cipher init failed: ${e::class.simpleName}")
             val reason = (e as? KeepMobileException.StorageException)?.msg ?: authUnavailableMsg
             Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
+            onResult(null)
             return
         }
         if (cipher == null) {
             Toast.makeText(context, authUnavailableMsg, Toast.LENGTH_SHORT).show()
+            onResult(null)
             return
         }
-        onBiometricAuth(cipher) { authedCipher ->
-            if (authedCipher != null) onAuthed(authedCipher)
+        onBiometricAuth(cipher, step, total, onResult)
+    }
+
+    // Called by the storage from inside the core's call, off the main thread, when it
+    // reaches a share no staged cipher covers. Each prompt is shown only then, so one
+    // Keystore operation is open at a time however many shares the request touches.
+    fun awaitAuthentication(getCipher: () -> Cipher?, step: Int, total: Int): Cipher? {
+        val result = CompletableFuture<Cipher?>()
+        openPrompts.add(result)
+        // Checked after the add: either the dispose sweep sees this request or it sees the flag.
+        if (disposed.get()) result.complete(null)
+        return try {
+            mainHandler.post {
+                if (!result.isDone && !disposed.get()) {
+                    authenticate(getCipher, step, total) { result.complete(it) }
+                } else {
+                    result.complete(null)
+                }
+            }
+            // No timeout: every prompt ends in a result, and closing the screen ends the wait.
+            result.get()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("BackupRestore", "Prompt not answered: ${e::class.simpleName}")
+            null
+        } finally {
+            result.complete(null)
+            openPrompts.remove(result)
         }
     }
 
@@ -248,21 +301,47 @@ fun BackupRestoreScreen(
                         backupState !is BackupState.Creating
 
                     Button(
-                        onClick = {
-                            requireBiometricAuth { authedCipher ->
+                        onClick = { scope.launch {
+                            // In the order the core reads them, from the same registry read it makes.
+                            val shareKeys = withContext(Dispatchers.IO) {
+                                (storage.readShareRegistry() as? ShareRegistryRead.Readable)
+                                    ?.shares?.map { hexOf(it.groupPubkey) }
+                                    .orEmpty()
+                            }
+                            if (shareKeys.isEmpty()) {
+                                backupState = BackupState.Error(backupFailedMsg)
+                                return@launch
+                            }
+                            val total = shareKeys.size
+                            authenticate({ onGetBackupCipher(shareKeys.first()) }, 1, total) { firstCipher ->
+                                if (firstCipher == null) return@authenticate
                                 val requestId = UUID.randomUUID().toString()
                                 backupState = BackupState.Creating
                                 val passphrase = backupPassphrase
+                                var step = 1
                                 scope.launch {
                                     try {
-                                        storage.setPendingCipher(requestId, authedCipher)
                                         activeRequestIds.add(requestId)
+                                        storage.setPendingCipher(
+                                            requestId,
+                                            firstCipher,
+                                            AndroidKeystoreStorage.CipherRole.DECRYPT,
+                                            // Kept until the core reaches its share, after any
+                                            // prompts for shares it reads first.
+                                            timeoutMs = FIRST_CIPHER_TIMEOUT_MS,
+                                            shareKey = shareKeys.first()
+                                        )
+                                        storage.setCipherProvider(requestId) { key, role ->
+                                            if (role != AndroidKeystoreStorage.CipherRole.DECRYPT) {
+                                                null
+                                            } else {
+                                                step = minOf(step + 1, total)
+                                                awaitAuthentication({ onGetBackupCipher(key) }, step, total)
+                                            }
+                                        }
                                         val data = withContext(Dispatchers.IO) {
                                             try {
                                                 storage.setRequestIdContext(requestId)
-                                                check(storage.listAllShares().isNotEmpty()) {
-                                                    "no shares to back up"
-                                                }
                                                 keepMobile.createBackup(passphrase)
                                             } finally {
                                                 storage.clearRequestIdContext()
@@ -276,11 +355,12 @@ fun BackupRestoreScreen(
                                         backupState = BackupState.Error(backupFailedMsg)
                                     } finally {
                                         storage.clearPendingCipher(requestId)
+                                        storage.clearCipherProvider(requestId)
                                         activeRequestIds.remove(requestId)
                                     }
                                 }
                             }
-                        },
+                        } },
                         enabled = canCreate,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -420,14 +500,28 @@ fun BackupRestoreScreen(
                         // A restore writes shares, so it needs a cipher that encrypts,
                         // as an import does. The backup's decrypting cipher could not
                         // write them, and a device with no share has none to offer.
-                        requireBiometricAuth(onGetRestoreCipher) { authedCipher ->
+                        val total = maxOf((verifiedState.info.shareCount + verifiedState.info.keyCount).toInt(), 1)
+                        authenticate(onGetRestoreCipher, 1, total) { firstCipher ->
+                            if (firstCipher == null) return@authenticate
                             val requestId = UUID.randomUUID().toString()
                             restoreState = RestoreState.Restoring
                             val passphrase = restorePassphrase
+                            var step = 1
                             scope.launch {
+                                var heldBefore: Set<String>? = null
+                                var restored = false
                                 try {
-                                    storage.setPendingCipher(requestId, authedCipher)
                                     activeRequestIds.add(requestId)
+                                    heldBefore = withContext(Dispatchers.IO) { heldGroups(storage) }
+                                    storage.setPendingCipher(requestId, firstCipher, AndroidKeystoreStorage.CipherRole.ENCRYPT)
+                                    storage.setCipherProvider(requestId) { _, role ->
+                                        if (role != AndroidKeystoreStorage.CipherRole.ENCRYPT) {
+                                            null
+                                        } else {
+                                            step = minOf(step + 1, total)
+                                            awaitAuthentication(onGetRestoreCipher, step, total)
+                                        }
+                                    }
                                     val info = withContext(Dispatchers.IO) {
                                         try {
                                             storage.setRequestIdContext(requestId)
@@ -439,6 +533,7 @@ fun BackupRestoreScreen(
                                             storage.clearRequestIdContext()
                                         }
                                     }
+                                    restored = true
                                     clearByteArray(verifiedState.data)
                                     restoreState = RestoreState.Restored(info)
                                     restorePassphrase = ""
@@ -446,9 +541,17 @@ fun BackupRestoreScreen(
                                 } catch (e: Exception) {
                                     if (BuildConfig.DEBUG) Log.e("BackupRestore", "Restore failed", e)
                                     clearByteArray(verifiedState.data)
-                                    restoreState = RestoreState.Error(restoreFailedMsg)
+                                    // Only the restore itself failing is a failed restore.
+                                    if (restored) return@launch
+                                    val before = heldBefore
+                                    val after = withContext(Dispatchers.IO) { heldGroups(storage) }
+                                    val restoredSome = before != null && after != null && (after - before).isNotEmpty()
+                                    restoreState = RestoreState.Error(
+                                        if (restoredSome) restorePartialMsg else restoreFailedMsg
+                                    )
                                 } finally {
                                     storage.clearPendingCipher(requestId)
+                                    storage.clearCipherProvider(requestId)
                                     activeRequestIds.remove(requestId)
                                 }
                             }

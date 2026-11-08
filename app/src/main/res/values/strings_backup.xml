@@ -29,6 +29,7 @@
     <string name="backup_restore_cancel">Cancel</string>
     <string name="backup_restore_restored_toast">Backup restored</string>
     <string name="backup_restore_failed">Restore failed</string>
+    <string name="backup_restore_partial">The restore did not finish. The accounts it restored are kept on this device, but the backup\'s relay, proxy and kill switch settings may not have been applied. This backup cannot be restored again while they are here. To restore it in full, remove those accounts and restore the backup again.</string>
     <string name="backup_restore_file_prefix">File: <xliff:g id="name" example="backup.kbak">%1$s</xliff:g></string>
     <string name="backup_restore_backup_passphrase_label">Backup passphrase</string>
     <string name="backup_restore_summary_title">Backup Summary</string>
