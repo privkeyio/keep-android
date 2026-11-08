@@ -72,29 +72,41 @@ object LegacyPrefsMigration {
         val existing = newPrefs.getString(key, null)
         if (existing != null) return existing
 
-        val migrationMarker = "${prefsName}_${key}_migrated"
+        val migrationMarker = stringMarker(prefsName, key)
         val markerPrefs = context.getSharedPreferences("keep_migration_markers", Context.MODE_PRIVATE)
         if (markerPrefs.getBoolean(migrationMarker, false)) return null
 
+        // The marker says the value is not there to carry, so it is set only once that is
+        // known. A legacy store that would not open is how a transient Keystore fault
+        // shows here, and marking it skipped a readable value on every later launch.
         try {
-            val legacyPrefs = openLegacyPrefs(context, prefsName)
-            val legacyValue = legacyPrefs?.getString(key, null)
+            val legacyPrefs = openLegacyPrefs(context, prefsName) ?: return null
+            val legacyValue = legacyPrefs.getString(key, null)
 
             if (legacyValue != null) {
                 if (newPrefs.edit().putString(key, legacyValue).commit()) {
                     markerPrefs.edit().putBoolean(migrationMarker, true).apply()
                     return legacyValue
                 }
-            } else {
+            } else if (!legacyPrefs.contains(key)) {
                 markerPrefs.edit().putBoolean(migrationMarker, true).apply()
             }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) Log.w("LegacyPrefsMigration", "Migration failed for $prefsName", e)
-            markerPrefs.edit().putBoolean(migrationMarker, true).apply()
         }
 
         return null
     }
+
+    /**
+     * Records that [key] no longer has a legacy value to carry, for a caller about to mint
+     * its own. A legacy value adopted after that would replace the minted one.
+     */
+    fun markStringMigrated(context: Context, prefsName: String, key: String): Boolean =
+        context.getSharedPreferences("keep_migration_markers", Context.MODE_PRIVATE)
+            .edit().putBoolean(stringMarker(prefsName, key), true).commit()
+
+    private fun stringMarker(prefsName: String, key: String) = "${prefsName}_${key}_migrated"
 
     /**
      * Reads [key] for a caller that carries legacy state forward, reporting the

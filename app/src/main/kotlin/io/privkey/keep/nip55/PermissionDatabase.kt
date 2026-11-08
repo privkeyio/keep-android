@@ -241,6 +241,14 @@ abstract class Nip55Database : RoomDatabase() {
 
             mintRefusal?.invoke(store)?.let { throw KeepMobileException.StorageException(it) }
 
+            // A legacy copy left unmarked by a fault is older than the key minted here, and
+            // adopting it on a later launch would replace the key the database is created
+            // under. The marker goes first because one left without a key is harmless: this
+            // path runs again behind the refusal above.
+            if (!LegacyPrefsMigration.markStringMigrated(context, prefsName, prefKey)) {
+                throw KeepMobileException.StorageException("$prefKey could not be marked migrated before minting")
+            }
+
             val newKey = ByteArray(32).apply { SecureRandom().nextBytes(this) }
             // Both keys commit rather than apply, and the result is checked: a key handed
             // back without reaching disk is one the database gets created under and then
