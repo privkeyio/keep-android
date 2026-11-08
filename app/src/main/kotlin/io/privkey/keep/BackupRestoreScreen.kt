@@ -33,7 +33,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 
 private const val MAX_BACKUP_FILE_SIZE = 10L * 1024 * 1024 // 10 MB
@@ -57,7 +57,8 @@ private sealed class RestoreState {
 
 private fun clearByteArray(bytes: ByteArray) = bytes.fill(0)
 
-private const val PROMPT_TIMEOUT_SECONDS = 120L
+// Long enough for the core to reach the first share after any it reads before it.
+private const val FIRST_CIPHER_TIMEOUT_MS = 10L * 60 * 1000
 
 private fun hexOf(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
@@ -92,6 +93,7 @@ fun BackupRestoreScreen(
     val activeRequestIds = remember { mutableStateListOf<String>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val openPrompts = remember { ConcurrentHashMap.newKeySet<CompletableFuture<Cipher?>>() }
+    val disposed = remember { AtomicBoolean(false) }
 
     DisposableEffect(context) {
         setSecureScreen(context, true)
@@ -106,6 +108,7 @@ fun BackupRestoreScreen(
                 is RestoreState.Verified -> clearByteArray(rs.data)
                 else -> {}
             }
+            disposed.set(true)
             openPrompts.forEach { it.complete(null) }
             for (id in activeRequestIds) {
                 storage.clearPendingCipher(id)
@@ -157,15 +160,23 @@ fun BackupRestoreScreen(
     fun awaitAuthentication(getCipher: () -> Cipher?, step: Int, total: Int): Cipher? {
         val result = CompletableFuture<Cipher?>()
         openPrompts.add(result)
+        // Checked after the add: either the dispose sweep sees this request or it sees the flag.
+        if (disposed.get()) result.complete(null)
         return try {
             mainHandler.post {
-                if (!result.isDone) authenticate(getCipher, step, total) { result.complete(it) }
+                if (!result.isDone && !disposed.get()) {
+                    authenticate(getCipher, step, total) { result.complete(it) }
+                } else {
+                    result.complete(null)
+                }
             }
-            result.get(PROMPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            // No timeout: every prompt ends in a result, and closing the screen ends the wait.
+            result.get()
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             null
         } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w("BackupRestore", "Prompt not answered: ${e::class.simpleName}")
             null
         } finally {
             result.complete(null)
@@ -290,11 +301,16 @@ fun BackupRestoreScreen(
                         backupState !is BackupState.Creating
 
                     Button(
-                        onClick = {
-                            val shareKeys = storage.listAllShares().map { hexOf(it.groupPubkey) }
+                        onClick = { scope.launch {
+                            // In the order the core reads them, from the same registry read it makes.
+                            val shareKeys = withContext(Dispatchers.IO) {
+                                (storage.readShareRegistry() as? ShareRegistryRead.Readable)
+                                    ?.shares?.map { hexOf(it.groupPubkey) }
+                                    .orEmpty()
+                            }
                             if (shareKeys.isEmpty()) {
                                 backupState = BackupState.Error(backupFailedMsg)
-                                return@Button
+                                return@launch
                             }
                             val total = shareKeys.size
                             authenticate({ onGetBackupCipher(shareKeys.first()) }, 1, total) { firstCipher ->
@@ -310,6 +326,9 @@ fun BackupRestoreScreen(
                                             requestId,
                                             firstCipher,
                                             AndroidKeystoreStorage.CipherRole.DECRYPT,
+                                            // Kept until the core reaches its share, after any
+                                            // prompts for shares it reads first.
+                                            timeoutMs = FIRST_CIPHER_TIMEOUT_MS,
                                             shareKey = shareKeys.first()
                                         )
                                         storage.setCipherProvider(requestId) { key, role ->
@@ -341,7 +360,7 @@ fun BackupRestoreScreen(
                                     }
                                 }
                             }
-                        },
+                        } },
                         enabled = canCreate,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -494,7 +513,7 @@ fun BackupRestoreScreen(
                                 try {
                                     activeRequestIds.add(requestId)
                                     heldBefore = withContext(Dispatchers.IO) { heldGroups(storage) }
-                                    storage.setPendingCipher(requestId, firstCipher)
+                                    storage.setPendingCipher(requestId, firstCipher, AndroidKeystoreStorage.CipherRole.ENCRYPT)
                                     storage.setCipherProvider(requestId) { _, role ->
                                         if (role != AndroidKeystoreStorage.CipherRole.ENCRYPT) {
                                             null

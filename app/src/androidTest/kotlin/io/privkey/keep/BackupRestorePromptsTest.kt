@@ -204,7 +204,7 @@ class BackupRestorePromptsTest {
     }
 
     // The first account is written before the second prompt is refused, so the restore
-    // says it stopped partway rather than that nothing happened.
+    // says it did not finish and what was kept, rather than that nothing happened.
     @Test
     fun aRefusedPromptPartwayThroughARestoreSaysWhatWasKept() {
         backUpAndClear()
