@@ -121,6 +121,7 @@
     <string name="create_group_mode_start">Start new</string>
     <string name="create_group_mode_join">Join</string>
     <string name="create_group_name_label">Group name</string>
+    <string name="create_group_name_invalid">Use visible characters, with no spaces at the start or end.</string>
     <string name="create_group_threshold_label">Threshold: <xliff:g id="threshold" example="2">%1$d</xliff:g></string>
     <string name="create_group_participants_label">Participants: <xliff:g id="participants" example="3">%1$d</xliff:g></string>
     <string name="create_group_begin">Begin</string>
@@ -136,6 +137,7 @@
     <string name="create_group_back">Back</string>
     <string name="create_group_done">Done</string>
     <string name="create_group_no_relays">No FROST relays configured.</string>
+    <string name="create_group_relays_unusable">A FROST relay can\'t go in a setup code. Each must be a plain wss:// host address, listed once, with at most <xliff:g id="max" example="10">%1$d</xliff:g> in all. Edit them in relay settings.</string>
     <string name="create_group_failed">Group creation failed. Please try again.</string>
     <string name="create_group_begin_failed">Could not start the group. Please try again.</string>
     <string name="create_group_in_progress">A group creation is still finishing. Please wait a moment and try again.</string>
@@ -166,11 +168,12 @@
 
     <!-- Roster verification -->
     <string name="create_group_verify_title">Compare before you start</string>
-    <string name="create_group_verify_instructions">Every participant must see the same fingerprint and the same members below. If anything differs on any device, stop and do not start the group.</string>
+    <string name="create_group_verify_instructions">Every participant must see the same fingerprint, group name, relays and members below. If anything differs on any device, stop and do not start the group.</string>
     <string name="create_group_fingerprint_label">Group fingerprint</string>
+    <string name="create_group_review_relays_label">Relays</string>
     <string name="create_group_roster_member"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g></string>
     <string name="create_group_roster_member_you"><xliff:g id="index" example="1">%1$d</xliff:g>. <xliff:g id="pubkey" example="abcd&#x2026;wxyz">%2$s</xliff:g> (you)</string>
-    <string name="create_group_verify_confirm">I compared the fingerprint and members with every participant.</string>
+    <string name="create_group_verify_confirm">I compared the fingerprint, group name, relays and members with every participant.</string>
 
     <string name="create_group_status_connecting">Connecting to relays…</string>
     <string name="create_group_status_round1">Round 1: <xliff:g id="received" example="1">%1$d</xliff:g> of <xliff:g id="total" example="2">%2$d</xliff:g></string>
