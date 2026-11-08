@@ -137,7 +137,7 @@
     <string name="create_group_back">Back</string>
     <string name="create_group_done">Done</string>
     <string name="create_group_no_relays">No FROST relays configured.</string>
-    <string name="create_group_relays_unusable">The FROST relays can\'t go in a setup code. Use at most <xliff:g id="max" example="10">%1$d</xliff:g> wss:// addresses, each listed once.</string>
+    <string name="create_group_relays_unusable">A FROST relay can\'t go in a setup code. Each must be a plain wss:// host address, listed once, with at most <xliff:g id="max" example="10">%1$d</xliff:g> in all. Edit them in relay settings.</string>
     <string name="create_group_failed">Group creation failed. Please try again.</string>
     <string name="create_group_begin_failed">Could not start the group. Please try again.</string>
     <string name="create_group_in_progress">A group creation is still finishing. Please wait a moment and try again.</string>
