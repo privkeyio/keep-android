@@ -9,6 +9,7 @@
     <string name="main_enable_kill_switch_failed">Failed to enable kill switch. Please try again.</string>
     <string name="main_vault_backup_title">Vault Backup</string>
     <string name="main_vault_backup_subtitle">Authenticate to access backup</string>
+    <string name="main_vault_backup_subtitle_step">Authenticate for account <xliff:g id="step" example="2">%1$d</xliff:g> of <xliff:g id="total" example="3">%2$d</xliff:g></string>
     <string name="main_recover_nsec_title">Recover nsec</string>
     <string name="main_recover_nsec_subtitle">Authenticate to export vault share</string>
     <string name="main_export_share_title">Export Share</string>

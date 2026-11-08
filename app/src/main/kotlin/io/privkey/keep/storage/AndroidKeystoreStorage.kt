@@ -123,6 +123,7 @@ class AndroidKeystoreStorage(
     private data class PendingCipherData(
         val cipher: Cipher,
         val role: CipherRole?,
+        val shareKey: String?,
         val creatingThreadId: Long,
         val createdAtMs: Long,
         val timeoutMs: Long,
@@ -397,12 +398,14 @@ class AndroidKeystoreStorage(
         cipher: Cipher,
         role: CipherRole? = null,
         timeoutMs: Long = PENDING_CIPHER_TIMEOUT_MS,
+        shareKey: String? = null,
         onConsumed: (() -> Unit)? = null,
     ) {
         cleanupExpiredCiphers()
         val data = PendingCipherData(
             cipher = cipher,
             role = role,
+            shareKey = shareKey,
             creatingThreadId = Thread.currentThread().id,
             createdAtMs = SystemClock.elapsedRealtime(),
             timeoutMs = timeoutMs,
@@ -450,7 +453,13 @@ class AndroidKeystoreStorage(
     // selected by the operation, not by enqueue order). Untagged ciphers fall back to FIFO,
     // so single-cipher flows are unaffected; this makes the two-cipher flows (decrypt +
     // encrypt under one requestId, e.g. markShareBackedUp/renameShare) order-independent.
-    fun consumePendingCipher(requestId: String, requiredRole: CipherRole? = null): Cipher? {
+    // A cipher staged for a [shareKey] opens only that share, so it is taken only by a
+    // call for that key, before any untagged one.
+    fun consumePendingCipher(
+        requestId: String,
+        requiredRole: CipherRole? = null,
+        shareKey: String? = null,
+    ): Cipher? {
         val queue = pendingCiphers[requestId] ?: return null
         var poppedCipher: Cipher? = null
         var callbackToFire: (() -> Unit)? = null
@@ -463,8 +472,12 @@ class AndroidKeystoreStorage(
                 pendingCiphers.remove(requestId, queue)
                 return null
             }
-            val roleIdx = if (requiredRole != null) queue.indexOfFirst { it.role == requiredRole } else -1
-            val popped = if (roleIdx >= 0) queue.removeAt(roleIdx) else queue.removeFirst()
+            fun matches(entry: PendingCipherData) = requiredRole == null || entry.role == requiredRole
+            val keyed = if (shareKey != null) queue.indexOfFirst { it.shareKey == shareKey && matches(it) } else -1
+            val untagged = queue.indexOfFirst { it.shareKey == null && matches(it) }
+            val fallback = if (requiredRole != null) queue.indexOfFirst { it.shareKey == null } else -1
+            val idx = listOf(keyed, untagged, fallback).firstOrNull { it >= 0 } ?: return null
+            val popped = queue.removeAt(idx)
             poppedCipher = popped.cipher
             callbackToFire = popped.onConsumed
             if (queue.isEmpty()) {
@@ -476,6 +489,28 @@ class AndroidKeystoreStorage(
     }
 
     private val requestIdContext = ThreadLocal<String>()
+
+    /** Supplies an authenticated cipher for a share no staged cipher covers, or null to refuse. */
+    fun interface CipherProvider {
+        fun authenticate(shareKey: String, role: CipherRole): Cipher?
+    }
+
+    private val cipherProviders = ConcurrentHashMap<String, CipherProvider>()
+
+    // A share key authorizes one operation per authentication, and every open operation
+    // holds one of the Keystore's few slots, so a request touching several shares asks for
+    // each cipher when it is needed instead of holding them all.
+    fun setCipherProvider(requestId: String, provider: CipherProvider) {
+        cipherProviders[requestId] = provider
+    }
+
+    fun clearCipherProvider(requestId: String) {
+        cipherProviders.remove(requestId)
+    }
+
+    private fun takeCipher(requestId: String, role: CipherRole, shareKey: String): Cipher? =
+        consumePendingCipher(requestId, role, shareKey)
+            ?: cipherProviders[requestId]?.authenticate(shareKey, role)
 
     fun setRequestIdContext(requestId: String) {
         requestIdContext.set(requestId)
@@ -919,7 +954,7 @@ class AndroidKeystoreStorage(
         }
         val requestId = requestIdContext.get()
             ?: throw KeepMobileException.StorageException("No request context - call setRequestIdContext first")
-        val cipher = consumePendingCipher(requestId, CipherRole.ENCRYPT)
+        val cipher = takeCipher(requestId, CipherRole.ENCRYPT, key)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         storeShareByKeyWithCipher(cipher, key, data, metadata)
     }
@@ -948,7 +983,7 @@ class AndroidKeystoreStorage(
         if (getSharePrefs(key).readString(KEY_SHARE_DATA) == PrefRead.Absent) {
             throw KeepMobileException.StorageException("No share stored for key: $key")
         }
-        val cipher = consumePendingCipher(requestId, CipherRole.DECRYPT)
+        val cipher = takeCipher(requestId, CipherRole.DECRYPT, key)
             ?: throw KeepMobileException.StorageException("No authenticated cipher available for this request")
         return loadShareByKeyWithCipher(cipher, key)
     }
