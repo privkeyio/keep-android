@@ -500,6 +500,8 @@ class Nip55Activity : FragmentActivity() {
 
         val needsBiometric = req.requestType != Nip55RequestType.GET_PUBLIC_KEY ||
             (riskAssessment?.requiredAuth ?: AuthLevel.NONE).atLeast(AuthLevel.PIN)
+        // The caller picks its own id, so it never keys the shared pending-cipher queue.
+        val cipherKey = UUID.randomUUID().toString()
 
         lifecycleScope.launch {
             val currentApp = application as? KeepMobileApp
@@ -517,10 +519,10 @@ class Nip55Activity : FragmentActivity() {
                 }
             }
 
-            if (needsBiometric && !authenticateForRequest(keystoreStorage, req)) return@launch
+            if (needsBiometric && !authenticateForRequest(keystoreStorage, req, cipherKey)) return@launch
 
             try {
-                val signResult = signOneRequest(req, requestId, nip55Handler, callerId, keystoreStorage, currentApp)
+                val signResult = signOneRequest(req, cipherKey, nip55Handler, callerId, keystoreStorage, currentApp)
                 signResult
                     .onSuccess { response ->
                         // Verify a get_public_key response BEFORE persisting any grant
@@ -552,7 +554,7 @@ class Nip55Activity : FragmentActivity() {
                         finishWithError(mapExceptionToError(e))
                     }
             } finally {
-                requestId?.let { keystoreStorage?.clearPendingCipher(it) }
+                keystoreStorage?.clearPendingCipher(cipherKey)
             }
         }
     }
@@ -600,7 +602,7 @@ class Nip55Activity : FragmentActivity() {
                         responses.add(Nip55Response(result = "", event = null, error = "relay_not_whitelisted", id = item.requestId, rejected = true))
                         continue
                     }
-                    val result = signOneRequest(req, item.requestId, nip55Handler, callerId, keystoreStorage, currentApp)
+                    val result = signOneRequest(req, null, nip55Handler, callerId, keystoreStorage, currentApp)
                     result
                         .onSuccess { response ->
                             // Batch has no per-event scope toggle; relay-auth events grant
@@ -626,13 +628,13 @@ class Nip55Activity : FragmentActivity() {
     // request on the single-threaded signing dispatcher.
     private suspend fun signOneRequest(
         req: Nip55Request,
-        reqId: String?,
+        cipherKey: String?,
         nip55Handler: Nip55Handler,
         callerId: String,
         keystoreStorage: AndroidKeystoreStorage?,
         currentApp: KeepMobileApp?
     ): Result<Nip55Response> = withContext(signingDispatcher) {
-        reqId?.let { keystoreStorage?.setRequestIdContext(it) }
+        cipherKey?.let { keystoreStorage?.setRequestIdContext(it) }
         try {
             val km = currentApp?.getKeepMobile()
             if (req.requestType == Nip55RequestType.SIGN_EVENT && km != null) {
@@ -721,10 +723,9 @@ class Nip55Activity : FragmentActivity() {
         }
     }
 
-    private suspend fun authenticateForRequest(keystoreStorage: AndroidKeystoreStorage?, req: Nip55Request): Boolean {
+    private suspend fun authenticateForRequest(keystoreStorage: AndroidKeystoreStorage?, req: Nip55Request, cipherKey: String): Boolean {
         val authedCipher = obtainAuthedCipher(keystoreStorage, req.requestType.displayName(this)) ?: return false
-        val reqId = requestId ?: UUID.randomUUID().toString().also { requestId = it }
-        keystoreStorage?.setPendingCipher(reqId, authedCipher)
+        keystoreStorage?.setPendingCipher(cipherKey, authedCipher)
         return true
     }
 
