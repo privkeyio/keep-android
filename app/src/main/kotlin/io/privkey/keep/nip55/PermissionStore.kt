@@ -520,10 +520,25 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun getAppSettings(callerPackage: String): Nip55AppSettings? =
         appSettingsDao.getSettings(callerPackage)
 
-    suspend fun setAppExpiry(callerPackage: String, duration: AppExpiryDuration) {
+    /**
+     * Sets [callerPackage]'s auto-disconnect window, returning false if it was refused.
+     *
+     * A window that already lapsed is retired first, as a refused request would retire it.
+     * Renewing it in place would carry its grants, core override and opt-in into the live
+     * row, and the app would auto-sign again without being re-approved. If the retirement
+     * cannot be confirmed the renewal is refused, leaving the row expired.
+     */
+    suspend fun setAppExpiry(
+        callerPackage: String,
+        duration: AppExpiryDuration,
+        signPolicyStore: SignPolicyStore? = null,
+        autoSigning: AutoSigningSafeguards? = null
+    ): Boolean {
+        retireExpiredApp(callerPackage, signPolicyStore, autoSigning)
         @Suppress("DEPRECATION")
         val expiresAt = duration.expiresAt()
         val existing = appSettingsDao.getSettings(callerPackage)
+        if (existing?.isExpired() == true) return false
         if (expiresAt == null && existing?.signPolicyOverride == null) {
             appSettingsDao.delete(callerPackage)
         } else {
@@ -540,6 +555,7 @@ class PermissionStore(private val database: Nip55Database) {
                 )
             )
         }
+        return true
     }
 
     suspend fun isAppExpired(callerPackage: String): Boolean {

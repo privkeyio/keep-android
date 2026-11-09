@@ -280,11 +280,11 @@ object AppSignPolicyOverrides {
                 // permanent one. It already resolves to nothing.
                 //
                 // Not an attempt, so it must not count as one: the sweep keeps an expired
-                // row whose core clear it could not confirm, and `setAppExpiry` can later
-                // refresh that row's window while preserving its tier. Claiming the
-                // run-wide marker here would leave that live row's tier uncopyable. A row
-                // that went away entirely drops out of the next snapshot, so it cannot
-                // withhold the marker for good.
+                // row whose core clear it could not confirm, and if that row's window is
+                // ever refreshed with its tier intact, claiming the run-wide marker here
+                // would leave the live row's tier uncopyable. A row that went away
+                // entirely drops out of the next snapshot, so it cannot withhold the
+                // marker for good.
                 if (current == null || ordinal == null || current.isExpired()) {
                     complete = false
                     continue
