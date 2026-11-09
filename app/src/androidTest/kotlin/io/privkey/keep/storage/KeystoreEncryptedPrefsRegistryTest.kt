@@ -70,6 +70,27 @@ class KeystoreEncryptedPrefsRegistryTest {
     }
 
     @Test
+    fun aPutInTheSameEditorAsAClearSurvivesARestart() {
+        val prefs = reopen()
+        prefs.edit().putString("alpha", "1").commit()
+        assertTrue(prefs.edit().clear().putString("beta", "2").commit())
+
+        val reopened = reopen()
+        assertEquals("2", reopened.getString("beta", null))
+        assertEquals(null, reopened.getString("alpha", null))
+        assertEquals(setOf("beta"), reopened.all.keys)
+    }
+
+    @Test
+    fun aClearAndPutOnAFreshStoreSurvivesARestart() {
+        assertTrue(reopen().edit().clear().putString("beta", "2").commit())
+
+        val reopened = reopen()
+        assertEquals("2", reopened.getString("beta", null))
+        assertEquals(setOf("beta"), reopened.all.keys)
+    }
+
+    @Test
     fun clearStillEmptiesTheRegistry() {
         val prefs = reopen()
         prefs.edit().putString("alpha", "1").commit()

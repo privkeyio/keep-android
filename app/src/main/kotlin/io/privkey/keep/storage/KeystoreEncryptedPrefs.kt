@@ -1393,6 +1393,13 @@ object KeystoreEncryptedPrefs {
                     dropFallbackCopy(plainKey, encKey)
                 }
 
+                // The clear drops the key record with everything else, and these
+                // puts were named with that key. Without it the next process mints
+                // a fresh key and no name it can derive reaches them.
+                if (clearRequested && pendingPuts.isNotEmpty()) {
+                    hmacKey?.record?.let { baseEditor.putString(HMAC_KEY_PREF, it) }
+                }
+
                 updateKeyRegistry()
                 return certified
             }
