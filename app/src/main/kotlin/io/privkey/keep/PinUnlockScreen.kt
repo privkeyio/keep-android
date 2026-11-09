@@ -18,8 +18,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.storage.PinRecord
 import io.privkey.keep.storage.PinStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun PinUnlockScreen(
@@ -42,6 +44,7 @@ fun PinUnlockScreen(
     var biometricResetRequired by remember { mutableStateOf(pinStore.requiresBiometricReset()) }
     var pinRecord by remember { mutableStateOf(pinStore.pinRecord()) }
     var removeFailed by remember { mutableStateOf(false) }
+    var verifying by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -80,22 +83,31 @@ fun PinUnlockScreen(
         }
     }
 
+    // Off the main thread: a check is PBKDF2 at 120k iterations, and a wrong PIN against
+    // a record that predates the length change runs it up to three times. One at a time,
+    // so a second tap or Done before the first returns cannot spend a second attempt.
     fun verifyAndUnlock() {
-        if (pinInput.isEmpty()) return
-
-        val verified = pinStore.verifyPin(pinInput)
+        if (pinInput.isEmpty() || verifying) return
+        verifying = true
+        val pin = pinInput
         pinInput = ""
-
-        if (verified) {
-            onUnlocked()
-            return
-        }
-
-        if (pinStore.isLockedOut()) {
-            isLockedOut = true
-            error = errTooMany
-        } else {
-            error = String.format(errIncorrectFormat, pinStore.getRemainingAttempts())
+        coroutineScope.launch {
+            try {
+                val (verified, lockedOut, remaining) = withContext(Dispatchers.IO) {
+                    val ok = pinStore.verifyPin(pin)
+                    Triple(ok, !ok && pinStore.isLockedOut(), if (ok) 0 else pinStore.getRemainingAttempts())
+                }
+                when {
+                    verified -> onUnlocked()
+                    lockedOut -> {
+                        isLockedOut = true
+                        error = errTooMany
+                    }
+                    else -> error = String.format(errIncorrectFormat, remaining)
+                }
+            } finally {
+                verifying = false
+            }
         }
     }
 
@@ -276,7 +288,7 @@ fun PinUnlockScreen(
 
                 Button(
                     onClick = { verifyAndUnlock() },
-                    enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH,
+                    enabled = !verifying && pinInput.length >= PinStore.MIN_PIN_LENGTH,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(stringResource(R.string.pin_unlock_button))
@@ -284,7 +296,7 @@ fun PinUnlockScreen(
 
                 onBiometricAuth?.let { auth ->
                     Spacer(modifier = Modifier.height(16.dp))
-                    TextButton(onClick = {
+                    TextButton(enabled = !verifying, onClick = {
                         coroutineScope.launch {
                             if (auth()) {
                                 pinStore.refreshSession()
