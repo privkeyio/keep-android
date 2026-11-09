@@ -379,6 +379,31 @@ private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
 /** Outcome of the pending-DKG gate that guards entry into the group-creation ceremony. */
 enum class GroupCreationGate { WAIT, BLOCK, ALLOW }
 
+internal enum class PendingDkgDialog { DISCARD_CONFIRM, RECOVER, UNREADABLE }
+
+private const val UNREADABLE_DKG_SUBJECT = "unreadable"
+
+// What a Later applies to: the share by its group key, or the unreadable stash. A
+// different share, or one that becomes readable, is shown again.
+internal fun pendingDkgSubject(share: PendingShareInfo?, unreadable: Boolean): String? =
+    share?.groupPubkey ?: UNREADABLE_DKG_SUBJECT.takeIf { unreadable }
+
+internal fun pendingDkgDialogFor(
+    share: PendingShareInfo?,
+    unreadable: Boolean,
+    recovering: Boolean,
+    confirmingDiscard: Boolean,
+    deferredSubject: String?,
+): PendingDkgDialog? {
+    val deferred = deferredSubject != null && deferredSubject == pendingDkgSubject(share, unreadable)
+    return when {
+        confirmingDiscard && (share != null || unreadable) -> PendingDkgDialog.DISCARD_CONFIRM
+        share != null && !recovering && !deferred -> PendingDkgDialog.RECOVER
+        unreadable && !deferred -> PendingDkgDialog.UNREADABLE
+        else -> null
+    }
+}
+
 /**
  * Decide whether a Create Group request may proceed. Fail-closed: while the initial
  * marker read is still outstanding ([pendingCheckComplete] false) we cannot rule out a
@@ -480,7 +505,7 @@ fun MainScreen(
     // in-progress flag can't cover this: the flag is already false by the time the
     // stale result applies.
     var pendingDkgEpoch by remember { mutableIntStateOf(0) }
-    var pendingDkgDeferred by remember { mutableStateOf(false) }
+    var pendingDkgDeferredFor by remember { mutableStateOf<String?>(null) }
     var showDiscardDkgConfirm by remember { mutableStateOf(false) }
     var dkgDiscardInProgress by remember { mutableStateOf(false) }
     var dkgRecoveryInProgress by remember { mutableStateOf(false) }
@@ -1389,7 +1414,7 @@ fun MainScreen(
                 val blockedMessage = stringResource(R.string.main_pending_dkg_blocks_create_group)
                 LaunchedEffect(Unit) {
                     showCreateGroupScreen = false
-                    pendingDkgDeferred = false
+                    pendingDkgDeferredFor = null
                     Toast.makeText(appContext, blockedMessage, Toast.LENGTH_LONG).show()
                 }
                 return
@@ -1625,8 +1650,9 @@ fun MainScreen(
     }
 
     val pendingDkg = pendingDkgShare
-    when {
-        showDiscardDkgConfirm && (pendingDkg != null || pendingDkgUnreadable) -> {
+    val deferPendingDkg = { pendingDkgDeferredFor = pendingDkgSubject(pendingDkgShare, pendingDkgUnreadable) }
+    when (pendingDkgDialogFor(pendingDkg, pendingDkgUnreadable, dkgRecoveryInProgress, showDiscardDkgConfirm, pendingDkgDeferredFor)) {
+        PendingDkgDialog.DISCARD_CONFIRM -> {
             DiscardPendingDkgDialog(
                 onConfirm = { startPendingDkgDiscard() },
                 onDismiss = {
@@ -1637,10 +1663,10 @@ fun MainScreen(
                 }
             )
         }
-        pendingDkg != null && !dkgRecoveryInProgress && !pendingDkgDeferred -> {
+        PendingDkgDialog.RECOVER -> if (pendingDkg != null) {
             PendingDkgShareDialog(
                 groupName = pendingDkg.name,
-                onLater = { pendingDkgDeferred = true },
+                onLater = deferPendingDkg,
                 onRecover = {
                     // Single-flight: a same-frame double-tap must not start two recoveries.
                     if (!dkgRecoveryInProgress) try {
@@ -1675,9 +1701,9 @@ fun MainScreen(
                 onDiscard = { showDiscardDkgConfirm = true }
             )
         }
-        pendingDkgUnreadable && !pendingDkgDeferred -> {
+        PendingDkgDialog.UNREADABLE -> {
             PendingDkgUnreadableDialog(
-                onLater = { pendingDkgDeferred = true },
+                onLater = deferPendingDkg,
                 onRetry = {
                     coroutineScope.launch {
                         withContext(Dispatchers.IO) { runCatching { keepMobile.pendingDkgShare() } }
@@ -1690,6 +1716,7 @@ fun MainScreen(
                 onDiscard = { showDiscardDkgConfirm = true }
             )
         }
+        null -> Unit
     }
 
     val navController = rememberNavController()
@@ -2662,7 +2689,7 @@ internal fun PendingDkgShareDialog(
     // launch, and starting a new group re-shows it, since the stash blocks that.
     AlertDialog(
         onDismissRequest = onLater,
-        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+        properties = DialogProperties(dismissOnClickOutside = false, securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.main_pending_dkg_title)) },
         text = { Text(stringResource(R.string.main_pending_dkg_text, groupName)) },
         confirmButton = {
