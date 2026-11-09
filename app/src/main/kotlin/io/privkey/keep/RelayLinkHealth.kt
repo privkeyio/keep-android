@@ -25,6 +25,9 @@ internal data class RelayLinkHealth(
  * ws/wss port omitted, any other port in decimal, a dotted IPv4 host in
  * canonical decimal (a leading-zero octet is octal), `.` / `..` path segments
  * removed, and a raw apostrophe percent-encoded in the query.
+ *
+ * TODO: remove this matcher, with [relayLinkFor], once the keep core emits one
+ * health row per configured relay keyed by the configured string.
  */
 internal fun normalizeRelayUrl(raw: String): String {
     val trimmed = raw.trim()
