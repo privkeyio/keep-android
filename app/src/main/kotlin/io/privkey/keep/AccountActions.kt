@@ -907,8 +907,8 @@ internal class AccountActions(
         subtitle: String,
         onResult: (ShareInfo?) -> Unit,
         // Null reason means the user cancelled and needs no message. Any other stop
-        // must carry one: Recover sits in an undismissable dialog whose only other
-        // button destroys the share, so a silent no-op reads as a dead button.
+        // must carry one: the dialog stays up after a failed Recover, so a silent
+        // no-op reads as a dead button.
         onDismiss: (String?) -> Unit
     ) {
         coroutineScope.launch {
