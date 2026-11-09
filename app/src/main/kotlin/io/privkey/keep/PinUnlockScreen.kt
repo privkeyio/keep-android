@@ -296,7 +296,7 @@ fun PinUnlockScreen(
 
                 onBiometricAuth?.let { auth ->
                     Spacer(modifier = Modifier.height(16.dp))
-                    TextButton(onClick = {
+                    TextButton(enabled = !verifying, onClick = {
                         coroutineScope.launch {
                             if (auth()) {
                                 pinStore.refreshSession()

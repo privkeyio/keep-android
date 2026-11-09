@@ -124,6 +124,7 @@ class PinUnlockScreenVerifyTest {
         compose.onNode(hasSetTextAction()).performTextInput(WRONG_PIN)
         val tap = action(SemanticsActions.OnClick, unlockLabel)
         val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsActions.SetText].action!!
+        val started = System.nanoTime()
         compose.runOnUiThread {
             tap()
             field(AnnotatedString(OTHER_WRONG_PIN))
@@ -131,8 +132,13 @@ class PinUnlockScreenVerifyTest {
         }
 
         waitFor { compose.onAllNodesWithText(incorrect(1)).fetchSemanticsNodes().isNotEmpty() }
+        // A queued second check would start only once the first returned, so give it
+        // well over the time the first one took before calling it absent.
+        val firstCheckMs = (System.nanoTime() - started) / 1_000_000
         val secondSpent = runCatching {
-            waitFor(SECOND_CHECK_MS) { store.getRemainingAttempts() < PinStore.MAX_FAILED_ATTEMPTS - 1 }
+            waitFor(maxOf(MIN_SECOND_CHECK_MS, 3 * firstCheckMs)) {
+                store.getRemainingAttempts() < PinStore.MAX_FAILED_ATTEMPTS - 1
+            }
         }.isSuccess
         assertFalse("a second submit must not spend an attempt", secondSpent)
     }
@@ -145,8 +151,7 @@ class PinUnlockScreenVerifyTest {
         const val WRONG_PIN = "1357"
         const val OTHER_WRONG_PIN = "1470"
         const val FAILED_ATTEMPTS = "failed_attempts"
-        // Longer than a check takes on the CI emulator, so a second one would land in it.
-        const val SECOND_CHECK_MS = 5_000L
+        const val MIN_SECOND_CHECK_MS = 2_000L
         const val AWAIT_MS = 15_000L
     }
 }
