@@ -536,25 +536,27 @@ class PermissionStore(private val database: Nip55Database) {
         retireExpiredApp(callerPackage, signPolicyStore, autoSigning)
         @Suppress("DEPRECATION")
         val expiresAt = duration.expiresAt()
-        val existing = appSettingsDao.getSettings(callerPackage)
-        if (existing?.isExpired() == true) return false
-        if (expiresAt == null && existing?.signPolicyOverride == null) {
-            appSettingsDao.delete(callerPackage)
-        } else {
-            val now = System.currentTimeMillis()
-            val nowElapsed = SystemClock.elapsedRealtime()
-            appSettingsDao.insertOrUpdate(
-                Nip55AppSettings(
-                    callerPackage = callerPackage,
-                    expiresAt = expiresAt,
-                    signPolicyOverride = existing?.signPolicyOverride,
-                    createdAt = now,
-                    createdAtElapsed = nowElapsed,
-                    durationMs = duration.millis
+        return database.withTransaction {
+            val existing = appSettingsDao.getSettings(callerPackage)
+            if (existing?.isExpired() == true) return@withTransaction false
+            if (expiresAt == null && existing?.signPolicyOverride == null) {
+                appSettingsDao.delete(callerPackage)
+            } else {
+                val now = System.currentTimeMillis()
+                val nowElapsed = SystemClock.elapsedRealtime()
+                appSettingsDao.insertOrUpdate(
+                    Nip55AppSettings(
+                        callerPackage = callerPackage,
+                        expiresAt = expiresAt,
+                        signPolicyOverride = existing?.signPolicyOverride,
+                        createdAt = now,
+                        createdAtElapsed = nowElapsed,
+                        durationMs = duration.millis
+                    )
                 )
-            )
+            }
+            true
         }
-        return true
     }
 
     suspend fun isAppExpired(callerPackage: String): Boolean {
