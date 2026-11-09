@@ -358,7 +358,7 @@ class PermissionStoreIntegrationTest {
 
     @Test
     fun appExpiryTracking() = runBlocking {
-        store.setAppExpiry("com.test.app", AppExpiryDuration.FIVE_MINUTES)
+        store.setAppExpiry("com.test.app", AppExpiryDuration.FIVE_MINUTES, null, null)
 
         val settings = store.getAppSettings("com.test.app")
         assertNotNull(settings)
@@ -416,7 +416,7 @@ class PermissionStoreIntegrationTest {
     // window the user renewed after the refusal keeps what it granted.
     @Test
     fun retireExpiredAppLeavesACallerWithALiveWindowAlone() = runBlocking {
-        store.setAppExpiry("com.test.app", AppExpiryDuration.ONE_HOUR)
+        store.setAppExpiry("com.test.app", AppExpiryDuration.ONE_HOUR, null, null)
         store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
 
         store.retireExpiredApp("com.test.app", null, null)

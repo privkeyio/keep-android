@@ -119,11 +119,10 @@ class PermissionStore(private val database: Nip55Database) {
         if (!cleared || !optInCleared(autoSigning, pkg)) return
         // Re-read before deleting. Both clears above are blocking keystore and disk
         // commits, so the user can refresh this app's window while they run, and the
-        // isExpired check at the top does not cover the delete. This narrows that
-        // window to a single read rather than closing it; a refresh landing between
-        // this read and the delete still loses the row.
+        // isExpired check at the top does not cover the delete. The delete only matches
+        // the row this read saw, so a refresh landing after it is not lost either.
         val current = appSettingsDao.getSettings(pkg) ?: return
-        if (current.isExpired()) appSettingsDao.delete(pkg)
+        if (current.isExpired()) appSettingsDao.deleteIfUnchanged(pkg, current.createdAt, current.createdAtElapsed)
     }
 
     /**
@@ -531,8 +530,8 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun setAppExpiry(
         callerPackage: String,
         duration: AppExpiryDuration,
-        signPolicyStore: SignPolicyStore? = null,
-        autoSigning: AutoSigningSafeguards? = null
+        signPolicyStore: SignPolicyStore?,
+        autoSigning: AutoSigningSafeguards?
     ): Boolean {
         retireExpiredApp(callerPackage, signPolicyStore, autoSigning)
         @Suppress("DEPRECATION")

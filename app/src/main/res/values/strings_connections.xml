@@ -176,7 +176,7 @@
     <string name="connections_app_cancel">Cancel</string>
     <string name="connections_app_revoke_toast_error">Failed to revoke permissions</string>
     <string name="connections_app_sign_policy_update_error">Failed to update sign policy</string>
-    <string name="connections_app_expiry_update_error">Failed to update auto-disconnect</string>
+    <string name="connections_app_expiry_update_error">Failed to update auto-disconnect. Disconnect the app and approve it again.</string>
     <string name="connections_app_no_active_permissions">No active permissions</string>
     <string name="connections_app_permissions_header">Permissions</string>
     <string name="connections_app_permission_update_error">Failed to update permission</string>

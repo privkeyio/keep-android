@@ -309,7 +309,8 @@ private fun AppPermissionsListContent(
                                                 signPolicyStore,
                                                 permissionStore,
                                                 packageName,
-                                                newOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
+                                                newOverride?.let { SignPolicy.fromOrdinal(it).toSelection() },
+                                                (context.applicationContext as? KeepMobileApp)?.getAutoSigningSafeguards()
                                             )
                                             readOverrideOrdinal(signPolicyStore, permissionStore, packageName)
                                         }

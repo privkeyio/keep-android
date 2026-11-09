@@ -153,13 +153,28 @@ object AppSignPolicyOverrides {
      *
      * The row write is not guarded. It is the index, so a row that cannot be written
      * means the change did not take, and the screen reports that too.
+     *
+     * A lapsed app is retired first, as [PermissionStore.setAppExpiry] does: a choice
+     * written over its row would end the expiry and hand its grants and opt-in back
+     * without re-approval. If that cannot be confirmed the change is refused by throwing.
+     * If the check itself fails, nothing is known about the row, so the row is left alone
+     * and the core is pinned to Manual, which can only tighten.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
         permissions: PermissionStore,
         callerPackage: String,
-        selection: SignPolicySelection?
+        selection: SignPolicySelection?,
+        autoSigning: AutoSigningSafeguards? = null
     ) {
+        val lapsed = runCatching {
+            permissions.retireExpiredApp(callerPackage, core, autoSigning)
+            permissions.isAppExpired(callerPackage)
+        }.getOrElse { failure ->
+            if (selection != null && core != null) wrote(core, callerPackage, SignPolicySelection.MANUAL)
+            throw failure
+        }
+        check(!lapsed) { "Lapsed app could not be retired" }
         if (selection == null) {
             // Drop the row first. A core clear that does not land then leaves a tier
             // known to one side only, which resolves to Manual: the chosen tier is gone,
