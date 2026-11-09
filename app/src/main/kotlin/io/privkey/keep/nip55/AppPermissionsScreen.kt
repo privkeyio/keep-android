@@ -270,6 +270,7 @@ private fun AppPermissionsListContent(
                             }
                         } catch (e: Exception) {
                             if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update expiry", e)
                             false
                         }
                         if (!renewed) Toast.makeText(context, toastExpiryError, Toast.LENGTH_SHORT).show()
