@@ -9,6 +9,7 @@ import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.SignPolicyStore
+import kotlinx.coroutines.CancellationException
 
 private const val TAG = "AppSignPolicyOverrides"
 
@@ -171,6 +172,7 @@ object AppSignPolicyOverrides {
             permissions.retireExpiredApp(callerPackage, core, autoSigning)
             permissions.isAppExpired(callerPackage)
         }.getOrElse { failure ->
+            if (failure is CancellationException) throw failure
             if (selection != null && core != null) wrote(core, callerPackage, SignPolicySelection.MANUAL)
             throw failure
         }

@@ -120,7 +120,7 @@ class PermissionStore(private val database: Nip55Database) {
         // Re-read before deleting. Both clears above are blocking keystore and disk
         // commits, so the user can refresh this app's window while they run, and the
         // isExpired check at the top does not cover the delete. The delete only matches
-        // the row this read saw, so a refresh landing after it is not lost either.
+        // a row created when this one was, so a renewal landing after it is not lost.
         val current = appSettingsDao.getSettings(pkg) ?: return
         if (current.isExpired()) appSettingsDao.deleteIfUnchanged(pkg, current.createdAt, current.createdAtElapsed)
     }
@@ -748,11 +748,11 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun setAppSignPolicyOverride(callerPackage: String, signPolicyOrdinal: Int?) {
         val existing = appSettingsDao.getSettings(callerPackage)
-        // A window that has already lapsed must not retroactively expire a fresh choice:
-        // the override would resolve to nothing the moment it was set, and the next sweep
-        // would drop the app onto the global instead of the tier just picked.
-        val lapsed = existing?.isExpired() == true
-        if (signPolicyOrdinal == null && (existing?.expiresAt == null || lapsed)) {
+        // Writing over a lapsed row would end its expiry without retiring its grants and
+        // opt-in. The caller retires it first, so this only fires on a window that lapsed
+        // since that check.
+        check(existing?.isExpired() != true) { "App window lapsed" }
+        if (signPolicyOrdinal == null && existing?.expiresAt == null) {
             appSettingsDao.delete(callerPackage)
         } else {
             val now = System.currentTimeMillis()
@@ -760,11 +760,11 @@ class PermissionStore(private val database: Nip55Database) {
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
-                    expiresAt = existing?.expiresAt.takeUnless { lapsed },
+                    expiresAt = existing?.expiresAt,
                     signPolicyOverride = signPolicyOrdinal,
                     createdAt = existing?.createdAt ?: now,
                     createdAtElapsed = existing?.createdAtElapsed ?: nowElapsed,
-                    durationMs = existing?.durationMs.takeUnless { lapsed }
+                    durationMs = existing?.durationMs
                 )
             )
         }

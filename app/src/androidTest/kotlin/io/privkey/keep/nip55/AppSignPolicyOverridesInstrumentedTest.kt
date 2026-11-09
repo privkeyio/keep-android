@@ -717,6 +717,20 @@ class AppSignPolicyOverridesInstrumentedTest {
         safeguards.clearOptIn(PKG)
     }
 
+    /** The row write refuses a window that lapsed after [AppSignPolicyOverrides.setOverride] checked it. */
+    @Test
+    fun theRowWriteRefusesALapsedWindow() = runBlocking {
+        val safeguards = AutoSigningSafeguards(context)
+        insertLapsedAutoApp(PKG, safeguards)
+
+        for (ordinal in listOf(SignPolicy.MANUAL.ordinal, null)) {
+            assertTrue(runCatching { store.setAppSignPolicyOverride(PKG, ordinal) }.isFailure)
+            assertTrue(store.isAppExpired(PKG))
+        }
+        safeguards.clearOptIn(PKG)
+        Unit
+    }
+
     private suspend fun insertLapsedAutoApp(
         pkg: String,
         safeguards: AutoSigningSafeguards,
