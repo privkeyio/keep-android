@@ -249,6 +249,7 @@ class RiskAssessorInstrumentedTest {
         }
         override suspend fun insertOrUpdate(settings: Nip55AppSettings) {}
         override suspend fun delete(callerPackage: String) {}
+        override suspend fun deleteIfUnchanged(callerPackage: String, createdAt: Long, createdAtElapsed: Long) {}
         override suspend fun getExpiredPackages(now: Long, nowElapsed: Long): List<String> = emptyList()
         override suspend fun deleteExpired(now: Long, nowElapsed: Long) {}
         override suspend fun getAll(): List<Nip55AppSettings> = emptyList()

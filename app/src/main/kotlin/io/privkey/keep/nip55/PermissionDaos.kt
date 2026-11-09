@@ -207,6 +207,12 @@ interface Nip55AppSettingsDao {
     suspend fun delete(callerPackage: String)
 
     @Query("""
+        DELETE FROM nip55_app_settings WHERE callerPackage = :callerPackage
+        AND createdAt = :createdAt AND createdAtElapsed = :createdAtElapsed
+    """)
+    suspend fun deleteIfUnchanged(callerPackage: String, createdAt: Long, createdAtElapsed: Long)
+
+    @Query("""
         SELECT callerPackage FROM nip55_app_settings WHERE
         (expiresAt IS NOT NULL AND expiresAt <= :now)
         OR (expiresAt IS NOT NULL AND :now < createdAt)

@@ -9,6 +9,7 @@ import io.privkey.keep.storage.toSelection
 import io.privkey.keep.storage.toSignPolicy
 import io.privkey.keep.uniffi.SignPolicySelection
 import io.privkey.keep.uniffi.SignPolicyStore
+import kotlinx.coroutines.CancellationException
 
 private const val TAG = "AppSignPolicyOverrides"
 
@@ -153,13 +154,29 @@ object AppSignPolicyOverrides {
      *
      * The row write is not guarded. It is the index, so a row that cannot be written
      * means the change did not take, and the screen reports that too.
+     *
+     * A lapsed app is retired first, as [PermissionStore.setAppExpiry] does: a choice
+     * written over its row would end the expiry and hand its grants and opt-in back
+     * without re-approval. If that cannot be confirmed the change is refused by throwing.
+     * If the check itself fails, nothing is known about the row, so the row is left alone
+     * and the core is pinned to Manual, which can only tighten.
      */
     suspend fun setOverride(
         core: SignPolicyStore?,
         permissions: PermissionStore,
         callerPackage: String,
-        selection: SignPolicySelection?
+        selection: SignPolicySelection?,
+        autoSigning: AutoSigningSafeguards? = null
     ) {
+        val lapsed = runCatching {
+            permissions.retireExpiredApp(callerPackage, core, autoSigning)
+            permissions.isAppExpired(callerPackage)
+        }.getOrElse { failure ->
+            if (failure is CancellationException) throw failure
+            if (selection != null && core != null) wrote(core, callerPackage, SignPolicySelection.MANUAL)
+            throw failure
+        }
+        check(!lapsed) { "Lapsed app could not be retired" }
         if (selection == null) {
             // Drop the row first. A core clear that does not land then leaves a tier
             // known to one side only, which resolves to Manual: the chosen tier is gone,
@@ -280,11 +297,11 @@ object AppSignPolicyOverrides {
                 // permanent one. It already resolves to nothing.
                 //
                 // Not an attempt, so it must not count as one: the sweep keeps an expired
-                // row whose core clear it could not confirm, and `setAppExpiry` can later
-                // refresh that row's window while preserving its tier. Claiming the
-                // run-wide marker here would leave that live row's tier uncopyable. A row
-                // that went away entirely drops out of the next snapshot, so it cannot
-                // withhold the marker for good.
+                // row whose core clear it could not confirm, and if that row's window is
+                // ever refreshed with its tier intact, claiming the run-wide marker here
+                // would leave the live row's tier uncopyable. A row that went away
+                // entirely drops out of the next snapshot, so it cannot withhold the
+                // marker for good.
                 if (current == null || ordinal == null || current.isExpired()) {
                     complete = false
                     continue

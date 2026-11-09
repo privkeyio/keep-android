@@ -233,6 +233,7 @@ private fun AppPermissionsListContent(
 ) {
     val context = LocalContext.current
     val toastSignPolicyError = stringResource(R.string.connections_app_sign_policy_update_error)
+    val toastExpiryError = stringResource(R.string.connections_app_expiry_update_error)
     val errUpdatePermission = stringResource(R.string.connections_app_permission_update_error)
     val toastRevokePermissionError = stringResource(R.string.connections_app_permission_revoke_error)
 
@@ -258,14 +259,32 @@ private fun AppPermissionsListContent(
                 onExpandedChange = onExpiryDropdownExpandedChange,
                 onDurationSelected = { duration ->
                     coroutineScope.launch {
-                        withContext(Dispatchers.IO) {
-                            permissionStore.setAppExpiry(packageName, duration)
-                        }
-                        onAppSettingsChange(
+                        val renewed = try {
                             withContext(Dispatchers.IO) {
-                                permissionStore.getAppSettings(packageName)
+                                permissionStore.setAppExpiry(
+                                    packageName,
+                                    duration,
+                                    signPolicyStore,
+                                    (context.applicationContext as? KeepMobileApp)?.getAutoSigningSafeguards()
+                                )
                             }
-                        )
+                        } catch (e: Exception) {
+                            if (e is CancellationException) throw e
+                            if (BuildConfig.DEBUG) Log.e("AppPermissions", "Failed to update expiry", e)
+                            false
+                        }
+                        if (!renewed) Toast.makeText(context, toastExpiryError, Toast.LENGTH_SHORT).show()
+                        val (settings, permissions, override) = withContext(Dispatchers.IO) {
+                            Triple(
+                                permissionStore.getAppSettings(packageName),
+                                runCatching { permissionStore.getPermissionsForCaller(packageName) }
+                                    .getOrDefault(appState.permissions),
+                                runCatching { readOverrideOrdinal(signPolicyStore, permissionStore, packageName) }
+                                    .getOrNull()
+                            )
+                        }
+                        onAppSettingsChange(settings)
+                        onAppStateChange(appState.copy(permissions = permissions, signPolicyOverride = override))
                     }
                 }
             )
@@ -291,7 +310,8 @@ private fun AppPermissionsListContent(
                                                 signPolicyStore,
                                                 permissionStore,
                                                 packageName,
-                                                newOverride?.let { SignPolicy.fromOrdinal(it).toSelection() }
+                                                newOverride?.let { SignPolicy.fromOrdinal(it).toSelection() },
+                                                (context.applicationContext as? KeepMobileApp)?.getAutoSigningSafeguards()
                                             )
                                             readOverrideOrdinal(signPolicyStore, permissionStore, packageName)
                                         }

@@ -198,7 +198,7 @@ class AppSignPolicyOverridesInstrumentedTest {
 
     @Test
     fun writeKeepsTheAppExpiryOnTheRow() = runBlocking {
-        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR)
+        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, null, null)
         store.setAppSignPolicyOverride(PKG, SignPolicy.MANUAL.ordinal)
 
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.BASIC)
@@ -323,7 +323,7 @@ class AppSignPolicyOverridesInstrumentedTest {
     fun accountSwitchDropsTheRowsAndLeavesTheTierToItsAccount() = runBlocking {
         core.setGlobalPolicy(SignPolicySelection.MANUAL)
         AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.AUTO)
-        store.setAppExpiry(OTHER_PKG, AppExpiryDuration.ONE_HOUR)
+        store.setAppExpiry(OTHER_PKG, AppExpiryDuration.ONE_HOUR, null, null)
 
         store.clearAllAppSettings()
 
@@ -608,12 +608,148 @@ class AppSignPolicyOverridesInstrumentedTest {
         assertTrue(safeguards.isOptedIn(OTHER_PKG))
         assertEquals(PermissionDecision.ALLOW, store.getPermissionDecision(OTHER_PKG, Nip55RequestType.SIGN_EVENT, 1))
 
-        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR)
+        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, null, null)
 
         assertFalse(store.isAppExpired(PKG))
         assertNull(store.getAppSignPolicyOverride(PKG))
         assertFalse(safeguards.isOptedIn(PKG))
         assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+    }
+
+    /**
+     * Renewing a window that lapsed with no request or sweep in between retires it first,
+     * so the app does not get its grants, tier and opt-in back without being re-approved.
+     */
+    @Test
+    fun renewingALapsedWindowStartsClean() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        val safeguards = AutoSigningSafeguards(context)
+        insertLapsedAutoApp(PKG, safeguards)
+
+        assertTrue(store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, core, safeguards))
+
+        assertFalse(store.isAppExpired(PKG))
+        assertNotNull(store.getAppSettings(PKG)?.expiresAt)
+        assertNull(store.getAppSignPolicyOverride(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
+        assertFalse(safeguards.isOptedIn(PKG))
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+    }
+
+    @Test
+    fun aRenewalWhoseRetirementIsNotConfirmedIsRefused() = runBlocking<Unit> {
+        val flaky = SignPolicyStore(UnremovableStorage(PKG))
+        val safeguards = AutoSigningSafeguards(context)
+        insertLapsedAutoApp(PKG, safeguards, flaky)
+
+        assertFalse(store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, flaky, safeguards))
+
+        assertTrue(store.isAppExpired(PKG))
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+        assertEquals(SignPolicySelection.AUTO, flaky.appOverride(ACCOUNT, PKG))
+        assertTrue("the opt-in stays for a sweep that can confirm the clear", safeguards.isOptedIn(PKG))
+        safeguards.clearOptIn(PKG)
+    }
+
+    @Test
+    fun aRenewalWithNoSafeguardsStoreIsRefused() = runBlocking {
+        insertLapsedAutoApp(PKG, AutoSigningSafeguards(context))
+
+        assertFalse(store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, core, null))
+
+        assertTrue(store.isAppExpired(PKG))
+        AutoSigningSafeguards(context).clearOptIn(PKG)
+        Unit
+    }
+
+    /**
+     * Picking a tier, or going back to the global, on a lapsed app ends its expiry, so it
+     * retires the app first, the same as a renewal.
+     */
+    @Test
+    fun choosingAPolicyForALapsedAppStartsClean() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        for (selection in listOf(SignPolicySelection.BASIC, null)) {
+            val safeguards = AutoSigningSafeguards(context)
+            insertLapsedAutoApp(PKG, safeguards)
+
+            AppSignPolicyOverrides.setOverride(core, store, PKG, selection, safeguards)
+
+            assertFalse(store.isAppExpired(PKG))
+            assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+            assertFalse(safeguards.isOptedIn(PKG))
+            assertEquals(selection, core.appOverride(ACCOUNT, PKG))
+        }
+    }
+
+    @Test
+    fun choosingAPolicyForALapsedAppWhoseRetirementIsNotConfirmedIsRefused() = runBlocking {
+        val flaky = SignPolicyStore(UnremovableStorage(PKG))
+        val safeguards = AutoSigningSafeguards(context)
+        insertLapsedAutoApp(PKG, safeguards, flaky)
+
+        val refused = runCatching {
+            AppSignPolicyOverrides.setOverride(flaky, store, PKG, SignPolicySelection.MANUAL, safeguards)
+        }
+
+        assertTrue(refused.isFailure)
+        assertTrue(store.isAppExpired(PKG))
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+        safeguards.clearOptIn(PKG)
+        Unit
+    }
+
+    @Test
+    fun renewingALiveWindowKeepsWhatItGranted() = runBlocking<Unit> {
+        val safeguards = AutoSigningSafeguards(context)
+        store.setAppExpiry(PKG, AppExpiryDuration.FIVE_MINUTES, core, safeguards)
+        AppSignPolicyOverrides.setOverride(core, store, PKG, SignPolicySelection.AUTO)
+        safeguards.setOptedIn(PKG, true)
+        store.grantPermission(PKG, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+
+        assertTrue(store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR, core, safeguards))
+
+        assertEquals(SignPolicy.AUTO.ordinal, store.getAppSignPolicyOverride(PKG))
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, PKG))
+        assertTrue(safeguards.isOptedIn(PKG))
+        assertEquals(PermissionDecision.ALLOW, store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+        safeguards.clearOptIn(PKG)
+    }
+
+    /** The row write refuses a window that lapsed after [AppSignPolicyOverrides.setOverride] checked it. */
+    @Test
+    fun theRowWriteRefusesALapsedWindow() = runBlocking {
+        val safeguards = AutoSigningSafeguards(context)
+        insertLapsedAutoApp(PKG, safeguards)
+
+        for (ordinal in listOf(SignPolicy.MANUAL.ordinal, null)) {
+            assertTrue(runCatching { store.setAppSignPolicyOverride(PKG, ordinal) }.isFailure)
+            assertTrue(store.isAppExpired(PKG))
+        }
+        safeguards.clearOptIn(PKG)
+        Unit
+    }
+
+    private suspend fun insertLapsedAutoApp(
+        pkg: String,
+        safeguards: AutoSigningSafeguards,
+        policyStore: SignPolicyStore = core
+    ) {
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = pkg,
+                expiresAt = now - 1_000L,
+                signPolicyOverride = SignPolicy.AUTO.ordinal,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+        policyStore.setAppOverride(ACCOUNT, pkg, SignPolicySelection.AUTO)
+        safeguards.setOptedIn(pkg, true)
+        store.grantPermission(pkg, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
     }
 
     @Test
@@ -878,8 +1014,8 @@ class AppSignPolicyOverridesInstrumentedTest {
 
     /**
      * The positive control for withholding the run-wide marker on an expired row. The sweep
-     * can retain such a row, `setAppExpiry` can refresh its window while preserving the
-     * tier, and a later run then has to be able to copy it.
+     * can retain such a row, and if its window is refreshed with the tier intact, a later
+     * run has to be able to copy it.
      */
     @Test
     fun aRefreshedWindowIsCopiedByALaterRun() = runBlocking {

@@ -119,11 +119,10 @@ class PermissionStore(private val database: Nip55Database) {
         if (!cleared || !optInCleared(autoSigning, pkg)) return
         // Re-read before deleting. Both clears above are blocking keystore and disk
         // commits, so the user can refresh this app's window while they run, and the
-        // isExpired check at the top does not cover the delete. This narrows that
-        // window to a single read rather than closing it; a refresh landing between
-        // this read and the delete still loses the row.
+        // isExpired check at the top does not cover the delete. The delete only matches
+        // a row created when this one was, so a renewal landing after it is not lost.
         val current = appSettingsDao.getSettings(pkg) ?: return
-        if (current.isExpired()) appSettingsDao.delete(pkg)
+        if (current.isExpired()) appSettingsDao.deleteIfUnchanged(pkg, current.createdAt, current.createdAtElapsed)
     }
 
     /**
@@ -520,25 +519,43 @@ class PermissionStore(private val database: Nip55Database) {
     suspend fun getAppSettings(callerPackage: String): Nip55AppSettings? =
         appSettingsDao.getSettings(callerPackage)
 
-    suspend fun setAppExpiry(callerPackage: String, duration: AppExpiryDuration) {
+    /**
+     * Sets [callerPackage]'s auto-disconnect window, returning false if it was refused.
+     *
+     * A window that already lapsed is retired first, as a refused request would retire it.
+     * Renewing it in place would carry its grants, core override and opt-in into the live
+     * row, and the app would auto-sign again without being re-approved. If the retirement
+     * cannot be confirmed the renewal is refused, leaving the row expired.
+     */
+    suspend fun setAppExpiry(
+        callerPackage: String,
+        duration: AppExpiryDuration,
+        signPolicyStore: SignPolicyStore?,
+        autoSigning: AutoSigningSafeguards?
+    ): Boolean {
+        retireExpiredApp(callerPackage, signPolicyStore, autoSigning)
         @Suppress("DEPRECATION")
         val expiresAt = duration.expiresAt()
-        val existing = appSettingsDao.getSettings(callerPackage)
-        if (expiresAt == null && existing?.signPolicyOverride == null) {
-            appSettingsDao.delete(callerPackage)
-        } else {
-            val now = System.currentTimeMillis()
-            val nowElapsed = SystemClock.elapsedRealtime()
-            appSettingsDao.insertOrUpdate(
-                Nip55AppSettings(
-                    callerPackage = callerPackage,
-                    expiresAt = expiresAt,
-                    signPolicyOverride = existing?.signPolicyOverride,
-                    createdAt = now,
-                    createdAtElapsed = nowElapsed,
-                    durationMs = duration.millis
+        return database.withTransaction {
+            val existing = appSettingsDao.getSettings(callerPackage)
+            if (existing?.isExpired() == true) return@withTransaction false
+            if (expiresAt == null && existing?.signPolicyOverride == null) {
+                appSettingsDao.delete(callerPackage)
+            } else {
+                val now = System.currentTimeMillis()
+                val nowElapsed = SystemClock.elapsedRealtime()
+                appSettingsDao.insertOrUpdate(
+                    Nip55AppSettings(
+                        callerPackage = callerPackage,
+                        expiresAt = expiresAt,
+                        signPolicyOverride = existing?.signPolicyOverride,
+                        createdAt = now,
+                        createdAtElapsed = nowElapsed,
+                        durationMs = duration.millis
+                    )
                 )
-            )
+            }
+            true
         }
     }
 
@@ -733,11 +750,11 @@ class PermissionStore(private val database: Nip55Database) {
 
     suspend fun setAppSignPolicyOverride(callerPackage: String, signPolicyOrdinal: Int?) {
         val existing = appSettingsDao.getSettings(callerPackage)
-        // A window that has already lapsed must not retroactively expire a fresh choice:
-        // the override would resolve to nothing the moment it was set, and the next sweep
-        // would drop the app onto the global instead of the tier just picked.
-        val lapsed = existing?.isExpired() == true
-        if (signPolicyOrdinal == null && (existing?.expiresAt == null || lapsed)) {
+        // Writing over a lapsed row would end its expiry without retiring its grants and
+        // opt-in. The caller retires it first, so this only fires on a window that lapsed
+        // since that check.
+        check(existing?.isExpired() != true) { "App window lapsed" }
+        if (signPolicyOrdinal == null && existing?.expiresAt == null) {
             appSettingsDao.delete(callerPackage)
         } else {
             val now = System.currentTimeMillis()
@@ -745,11 +762,11 @@ class PermissionStore(private val database: Nip55Database) {
             appSettingsDao.insertOrUpdate(
                 Nip55AppSettings(
                     callerPackage = callerPackage,
-                    expiresAt = existing?.expiresAt.takeUnless { lapsed },
+                    expiresAt = existing?.expiresAt,
                     signPolicyOverride = signPolicyOrdinal,
                     createdAt = existing?.createdAt ?: now,
                     createdAtElapsed = existing?.createdAtElapsed ?: nowElapsed,
-                    durationMs = existing?.durationMs.takeUnless { lapsed }
+                    durationMs = existing?.durationMs
                 )
             )
         }
