@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -1635,9 +1637,10 @@ fun MainScreen(
                 }
             )
         }
-        pendingDkg != null && !dkgRecoveryInProgress -> {
+        pendingDkg != null && !dkgRecoveryInProgress && !pendingDkgDeferred -> {
             PendingDkgShareDialog(
                 groupName = pendingDkg.name,
+                onLater = { pendingDkgDeferred = true },
                 onRecover = {
                     // Single-flight: a same-frame double-tap must not start two recoveries.
                     if (!dkgRecoveryInProgress) try {
@@ -2649,20 +2652,27 @@ private fun KillSwitchConfirmDialog(
 }
 
 @Composable
-private fun PendingDkgShareDialog(
+internal fun PendingDkgShareDialog(
     groupName: String,
+    onLater: () -> Unit,
     onRecover: () -> Unit,
     onDiscard: () -> Unit
 ) {
+    // Later hides it for the session, as for an unreadable stash. It returns on the next
+    // launch, and starting a new group re-shows it, since the stash blocks that.
     AlertDialog(
-        onDismissRequest = {},
+        onDismissRequest = onLater,
+        properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
         title = { Text(stringResource(R.string.main_pending_dkg_title)) },
         text = { Text(stringResource(R.string.main_pending_dkg_text, groupName)) },
         confirmButton = {
             TextButton(onClick = onRecover) { Text(stringResource(R.string.main_pending_dkg_recover)) }
         },
         dismissButton = {
-            TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+            Row {
+                TextButton(onClick = onDiscard) { Text(stringResource(R.string.main_pending_dkg_discard)) }
+                TextButton(onClick = onLater) { Text(stringResource(R.string.main_pending_dkg_later)) }
+            }
         }
     )
 }
