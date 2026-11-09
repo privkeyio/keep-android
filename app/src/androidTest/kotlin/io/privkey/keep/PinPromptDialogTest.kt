@@ -16,6 +16,7 @@ import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.ui.theme.KeepAndroidTheme
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -30,8 +31,8 @@ class PinPromptDialogTest {
     val compose = createComposeRule()
 
     private val verdict = CompletableDeferred<Boolean>()
-    @Volatile private var verifyCalls = 0
-    @Volatile private var dismissCalls = 0
+    private val verifyCalls = AtomicInteger()
+    private val dismissCalls = AtomicInteger()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val cancel = context.getString(R.string.settings_cancel)
 
@@ -47,10 +48,10 @@ class PinPromptDialogTest {
                     message = "Enter your PIN",
                     confirmLabel = CONFIRM,
                     onVerify = {
-                        verifyCalls++
+                        verifyCalls.incrementAndGet()
                         verdict.await()
                     },
-                    onDismiss = { dismissCalls++ },
+                    onDismiss = { dismissCalls.incrementAndGet() },
                 )
             }
         }
@@ -65,10 +66,13 @@ class PinPromptDialogTest {
             click()
             click()
         }
-        compose.runOnIdle { assertEquals(1, verifyCalls) }
+        compose.runOnIdle { assertEquals(1, verifyCalls.get()) }
         verdict.complete(true)
-        waitFor { dismissCalls == 1 }
-        assertEquals(1, verifyCalls)
+        waitFor { dismissCalls.get() >= 1 }
+        compose.runOnIdle {
+            assertEquals(1, dismissCalls.get())
+            assertEquals(1, verifyCalls.get())
+        }
     }
 
     @Test
@@ -78,8 +82,8 @@ class PinPromptDialogTest {
         compose.onNodeWithText(CONFIRM).assertIsNotEnabled()
         verdict.complete(false)
         compose.runOnIdle {
-            assertEquals(1, verifyCalls)
-            assertEquals(0, dismissCalls)
+            assertEquals(1, verifyCalls.get())
+            assertEquals(0, dismissCalls.get())
         }
         compose.onNode(hasSetTextAction()).performTextInput("5678")
         compose.onNodeWithText(CONFIRM).assertIsEnabled()
@@ -92,9 +96,10 @@ class PinPromptDialogTest {
         compose.onNodeWithText(cancel).assertIsNotEnabled()
         Espresso.closeSoftKeyboard()
         Espresso.pressBack()
-        compose.runOnIdle { assertEquals(0, dismissCalls) }
+        compose.runOnIdle { assertEquals(0, dismissCalls.get()) }
         verdict.complete(true)
-        waitFor { dismissCalls == 1 }
+        waitFor { dismissCalls.get() >= 1 }
+        compose.runOnIdle { assertEquals(1, dismissCalls.get()) }
     }
 
     @Test
@@ -105,7 +110,7 @@ class PinPromptDialogTest {
                     enabled = true,
                     onSetupPin = {},
                     onDisablePin = {
-                        verifyCalls++
+                        verifyCalls.incrementAndGet()
                         verdict.await()
                     },
                 )
@@ -120,11 +125,11 @@ class PinPromptDialogTest {
             click()
             click()
         }
-        waitFor { verifyCalls >= 1 }
+        waitFor { verifyCalls.get() >= 1 }
         verdict.complete(true)
         val title = context.getString(R.string.settings_pin_disable_dialog_title)
         waitFor { compose.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty() }
-        assertEquals(1, verifyCalls)
+        assertEquals(1, verifyCalls.get())
     }
 
     private companion object {
