@@ -806,6 +806,25 @@ class KeepMobileApp : Application() {
         }
     }
 
+    /**
+     * Saves the proxy setting. A changed setting makes the core drop the live node, stop
+     * the bunker and stop the approver, since each kept the sockets it was started with,
+     * so the drop is recorded here and the approver is started again. The core counts an
+     * unreadable old setting as a change, and so does this.
+     */
+    fun saveProxyConfig(config: ProxyConfigInfo) {
+        val mobile = checkNotNull(keepMobile) { "Keep not initialized" }
+        val before = runCatching { mobile.getProxyConfig() }.getOrNull()
+        mobile.saveProxyConfig(config)
+        if (before == config) return
+        onLiveNodeDropped()
+        approverController?.let { controller ->
+            runCatching { controller.startIfPaired() }.onFailure {
+                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to restart approver: ${it::class.simpleName}")
+            }
+        }
+    }
+
     fun clearCertificatePin(hostname: String) {
         runCatching { keepMobile?.clearCertificatePin(hostname) }
             .onSuccess { if (it != null) onLiveNodeDropped() }

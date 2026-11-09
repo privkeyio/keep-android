@@ -42,6 +42,7 @@ import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.parseBunkerUrl
 import io.privkey.keep.uniffi.truncateStr
@@ -143,6 +144,21 @@ class BunkerRevokeE2ETest {
             stopService()
             BunkerService.start(context)
             assertEquals(url1, awaitRunning(previous = null))
+            assertOk(settled("sign", c1.secret, url1, "1", "30"))
+
+            // A proxy change drops the core's node and stops its bunker. The app has to restart
+            // the bunker, which serves again once a node is built, here with the decrypt
+            // context the user's authentication would supply. The setting stays disabled and
+            // only the port moves, so no proxy has to exist.
+            val proxy = mobile.getProxyConfig()
+            try {
+                app.saveProxyConfig(ProxyConfigInfo(false, (proxy.port.toInt() % 65_000 + 1).toUShort()))
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-proxy-init")
+                assertOk(settled("sign", c1.secret, url1, "1", "30"))
+            } finally {
+                app.saveProxyConfig(proxy)
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-proxy-restore")
+            }
             assertOk(settled("sign", c1.secret, url1, "1", "30"))
 
             // At the client cap, a connect that holds the bunker secret is refused and granted nothing.
