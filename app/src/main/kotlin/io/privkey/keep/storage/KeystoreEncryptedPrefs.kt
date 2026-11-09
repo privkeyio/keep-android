@@ -1410,12 +1410,15 @@ object KeystoreEncryptedPrefs {
                 // a fresh key and no name it can derive reaches them. Encrypted
                 // afresh rather than copied, so the record changes and other
                 // instances drop what they cached from before the clear. Never
-                // for the deterministic key, which has no record of its own.
+                // for the deterministic key, which has no record of its own. The
+                // published key is kept out of this instance's cache, so it too
+                // re-resolves and moves the file off it now that the entries that
+                // held the move back are gone.
                 if (clearRequested && pendingPuts.isNotEmpty()) {
                     hmacKey?.takeIf { it.record != null && !it.key.contentEquals(deterministicKey) }?.let {
                         val record = encrypt(secretKey, Base64.encodeToString(it.key, Base64.NO_WRAP), HMAC_KEY_PREF)
                         baseEditor.putString(HMAC_KEY_PREF, record)
-                        rewrittenKey = ResolvedKey(it.key, record)
+                        rewrittenKey = ResolvedKey(it.key, record).takeUnless { _ -> it.key.contentEquals(legacyGlobalKey) }
                     }
                 }
 

@@ -165,6 +165,23 @@ class KeystoreEncryptedPrefsRotationTest {
         assertEquals("the key must stay", before, raw().getString(HMAC_KEY_PREF, null))
     }
 
+    // A clear removes the unlisted value that held the move, so the instance
+    // that cleared moves the file on its next read rather than staying on the
+    // published key for the rest of the process.
+    @Test
+    fun aClearWithAPutLetsTheSameInstanceMoveTheFile() {
+        stageFileOnThePublishedKey()
+        raw().edit().putString(globalEpochNameOf(UNLISTED), boundValue("b:true", UNLISTED)).commit()
+        val prefs = reopen()
+        assertTrue(prefs.getBoolean(VICTIM, false))
+
+        assertTrue(prefs.edit().clear().putString(SETTING, "after").commit())
+
+        assertEquals("after", prefs.getString(SETTING, null))
+        assertFalse("the put must not stay at a published name", raw().contains(globalEpochNameOf(SETTING)))
+        assertEquals(mapOf(SETTING to "after"), reopen().all)
+    }
+
     // A non-String where the index belongs stops the move rather than the store.
     @Test
     fun aNonStringAtTheIndexNameStopsOnlyTheMove() {
