@@ -3,6 +3,7 @@ package io.privkey.keep
 import io.privkey.keep.ui.components.KeepCard
 import io.privkey.keep.ui.components.KeepListRow
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -36,7 +37,8 @@ fun RelaysCard(
     onRemoveProfileRelay: (String) -> Unit,
     relayConfigUnreadable: Boolean,
     onResetRelayConfig: () -> Unit,
-    relayHealth: List<RelayHealth>,
+    /** The core's pool health, or null when the node is not running. */
+    relayHealth: List<RelayHealth>?,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -78,9 +80,10 @@ fun RelaysCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
-                val links = relayHealth.map { it.toLink() }
+                val links = relayHealth.orEmpty().map { it.toLink() }
                 relays.forEach { relay ->
-                    RelayHealthRow(relay, relayLinkFor(relay, links))
+                    val link = relayLinkFor(relay, links)
+                    RelayHealthRow(relay, link, relayRowStatus(link, poolUp = links.isNotEmpty()))
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -164,20 +167,12 @@ fun RelaysCard(
 }
 
 @Composable
-private fun RelayHealthRow(relay: String, link: RelayLinkHealth?) {
-    // A configured frost relay with no core row is not in the pool (the node
-    // is down, or the URL was excluded before connect). That is offline, not
-    // a status Android invents by probing.
-    val status = link?.status ?: RelayLinkStatus.OFFLINE
-    val color = when (status) {
-        RelayLinkStatus.CONNECTED -> KeepGreen
-        RelayLinkStatus.CONNECTING -> KeepMuted
-        RelayLinkStatus.OFFLINE -> KeepError
-    }
+private fun RelayHealthRow(relay: String, link: RelayLinkHealth?, status: RelayLinkStatus?) {
     val statusLabel = when (status) {
         RelayLinkStatus.CONNECTED -> stringResource(R.string.connections_relay_status_connected)
         RelayLinkStatus.CONNECTING -> stringResource(R.string.connections_relay_status_connecting)
         RelayLinkStatus.OFFLINE -> stringResource(R.string.connections_relay_status_offline)
+        null -> stringResource(R.string.connections_relay_status_not_connected)
     }
     val subtitle = when {
         link != null && status == RelayLinkStatus.CONNECTED && link.rttMs != null ->
@@ -188,7 +183,7 @@ private fun RelayHealthRow(relay: String, link: RelayLinkHealth?) {
             )
         link != null && status == RelayLinkStatus.OFFLINE && link.lastConnectedMs > 0L ->
             stringResource(
-                R.string.connections_relay_status_last_seen,
+                R.string.connections_relay_status_last_connected,
                 statusLabel,
                 formatTimestampDetailed(link.lastConnectedMs / 1000),
             )
@@ -199,11 +194,15 @@ private fun RelayHealthRow(relay: String, link: RelayLinkHealth?) {
         subtitle = subtitle,
         modifier = Modifier.padding(vertical = Dimens.space4),
         leading = {
+            val dot = Modifier.size(Dimens.space8).clip(CircleShape)
             Box(
-                Modifier
-                    .size(Dimens.space8)
-                    .clip(CircleShape)
-                    .background(color)
+                when (status) {
+                    RelayLinkStatus.CONNECTED -> dot.background(KeepGreen)
+                    RelayLinkStatus.CONNECTING -> dot.background(KeepMuted)
+                    RelayLinkStatus.OFFLINE -> dot.background(KeepError)
+                    // Hollow, so "not running" never reads as a relay's own state.
+                    null -> dot.border(1.dp, KeepMuted, CircleShape)
+                }
             )
         },
     )

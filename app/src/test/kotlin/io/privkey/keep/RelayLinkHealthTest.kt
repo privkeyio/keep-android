@@ -180,4 +180,13 @@ class RelayLinkHealthTest {
         )
         assertNull(relayLinkFor("wss://1.2.3.08", links))
     }
+
+    @Test
+    fun rowIsNotConnectedWithoutAPoolAndOfflineWhenMissingFromOne() {
+        val link = RelayLinkHealth("wss://relay.example.com", RelayLinkStatus.CONNECTED, 0L, 12L)
+        assertNull(relayRowStatus(link = null, poolUp = false))
+        assertNull(relayRowStatus(link = link, poolUp = false))
+        assertEquals(RelayLinkStatus.OFFLINE, relayRowStatus(link = null, poolUp = true))
+        assertEquals(RelayLinkStatus.CONNECTED, relayRowStatus(link = link, poolUp = true))
+    }
 }

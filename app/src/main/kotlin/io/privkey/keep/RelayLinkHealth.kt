@@ -61,6 +61,15 @@ internal fun relayLinkFor(configuredUrl: String, links: List<RelayLinkHealth>): 
     return links.find { normalizeRelayUrl(it.url) == key }
 }
 
+/**
+ * Status a configured relay's row shows, or null for "Not connected": with no
+ * pool up (node stopped, never started, or still building its pool) there is
+ * nothing to report, and calling every relay offline would be wrong. Once the
+ * pool is up, a configured relay with no core row is not in it, which is offline.
+ */
+internal fun relayRowStatus(link: RelayLinkHealth?, poolUp: Boolean): RelayLinkStatus? =
+    if (poolUp) link?.status ?: RelayLinkStatus.OFFLINE else null
+
 private fun stripDefaultRelayPort(scheme: String, authority: String): String {
     val defaultPort = when (scheme) {
         "wss" -> 443
