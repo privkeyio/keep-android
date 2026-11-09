@@ -59,6 +59,10 @@ internal fun normalizeRelayUrl(raw: String): String {
     }.trimEnd('/')
 }
 
+/** A u64 round trip past [Long.MAX_VALUE] is not a real latency, so it is unknown. */
+internal fun rttMsOrNull(rtt: ULong?): Long? =
+    rtt?.takeIf { it <= Long.MAX_VALUE.toULong() }?.toLong()
+
 internal fun relayLinkFor(configuredUrl: String, links: List<RelayLinkHealth>): RelayLinkHealth? {
     val key = normalizeRelayUrl(configuredUrl)
     return links.find { normalizeRelayUrl(it.url) == key }

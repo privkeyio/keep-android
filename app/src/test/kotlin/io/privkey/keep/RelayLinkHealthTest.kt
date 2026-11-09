@@ -189,4 +189,13 @@ class RelayLinkHealthTest {
         assertEquals(RelayLinkStatus.OFFLINE, relayRowStatus(link = null, poolUp = true))
         assertEquals(RelayLinkStatus.CONNECTED, relayRowStatus(link = link, poolUp = true))
     }
+
+    @Test
+    fun rttPastLongRangeIsUnknown() {
+        assertEquals(42L, rttMsOrNull(42uL))
+        assertEquals(Long.MAX_VALUE, rttMsOrNull(Long.MAX_VALUE.toULong()))
+        assertNull(rttMsOrNull(Long.MAX_VALUE.toULong() + 1uL))
+        assertNull(rttMsOrNull(ULong.MAX_VALUE))
+        assertNull(rttMsOrNull(null))
+    }
 }

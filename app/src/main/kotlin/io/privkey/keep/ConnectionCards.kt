@@ -216,7 +216,7 @@ private fun RelayHealth.toLink(): RelayLinkHealth = RelayLinkHealth(
         RelayHealthStatus.OFFLINE -> RelayLinkStatus.OFFLINE
     },
     lastConnectedMs = lastConnectedMs.toLong(),
-    rttMs = rttMs?.toLong(),
+    rttMs = rttMsOrNull(rttMs),
 )
 
 @Composable
