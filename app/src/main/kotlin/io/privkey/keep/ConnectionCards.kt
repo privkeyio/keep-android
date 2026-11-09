@@ -244,6 +244,7 @@ private fun EditRelaysDialog(
     val errTooLong = stringResource(R.string.connections_relays_error_too_long)
     val errInvalid = stringResource(R.string.connections_relays_error_invalid)
     val errPort = stringResource(R.string.connections_relays_error_port)
+    val errDuplicate = stringResource(R.string.connections_bunker_relay_error_duplicate)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -306,6 +307,10 @@ private fun EditRelaysDialog(
                             else -> {
                                 if (!isValidRelayPort(url)) {
                                     error = errPort
+                                    return@IconButton
+                                }
+                                if (isDuplicateRelay(url, relays)) {
+                                    error = errDuplicate
                                     return@IconButton
                                 }
                                 onAddRelay(url)

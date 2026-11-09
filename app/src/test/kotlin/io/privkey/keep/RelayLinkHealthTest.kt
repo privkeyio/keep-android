@@ -1,7 +1,9 @@
 package io.privkey.keep
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayLinkHealthTest {
@@ -197,5 +199,16 @@ class RelayLinkHealthTest {
         assertNull(rttMsOrNull(Long.MAX_VALUE.toULong() + 1uL))
         assertNull(rttMsOrNull(ULong.MAX_VALUE))
         assertNull(rttMsOrNull(null))
+    }
+
+    @Test
+    fun duplicateMatchesRelaysThatNormalizeEqual() {
+        val relays = listOf("wss://relay.example.com", "wss://other.example.com/path")
+        assertTrue(isDuplicateRelay("wss://relay.example.com/", relays))
+        assertTrue(isDuplicateRelay("wss://Relay.Example.com:443", relays))
+        assertTrue(isDuplicateRelay("wss://other.example.com/path/", relays))
+        assertFalse(isDuplicateRelay("wss://relay.example.com/path", relays))
+        assertFalse(isDuplicateRelay("wss://relay.example.com:8443", relays))
+        assertFalse(isDuplicateRelay("wss://relay.example.com", emptyList()))
     }
 }

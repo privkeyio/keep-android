@@ -63,6 +63,12 @@ internal fun normalizeRelayUrl(raw: String): String {
 internal fun rttMsOrNull(rtt: ULong?): Long? =
     rtt?.takeIf { it <= Long.MAX_VALUE.toULong() }?.toLong()
 
+/** True when [url] names the same relay as one already in [relays]. */
+internal fun isDuplicateRelay(url: String, relays: List<String>): Boolean {
+    val key = normalizeRelayUrl(url)
+    return relays.any { normalizeRelayUrl(it) == key }
+}
+
 internal fun relayLinkFor(configuredUrl: String, links: List<RelayLinkHealth>): RelayLinkHealth? {
     val key = normalizeRelayUrl(configuredUrl)
     return links.find { normalizeRelayUrl(it.url) == key }
