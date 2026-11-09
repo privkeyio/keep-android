@@ -355,6 +355,7 @@ fun PinPromptDialog(
     val incorrectPinMsg = stringResource(R.string.settings_pin_incorrect)
     var pinInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var verifying by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = {
@@ -395,19 +396,27 @@ fun PinPromptDialog(
         confirmButton = {
             TextButton(
                 onClick = {
+                    // One verify at a time: a second tap would count a second attempt and
+                    // run the gated action twice.
+                    if (verifying) return@TextButton
+                    verifying = true
                     coroutineScope.launch {
-                        val ok = onVerify(pinInput)
-                        if (ok) {
-                            pinInput = ""
-                            error = null
-                            onDismiss()
-                        } else {
-                            error = incorrectPinMsg
-                            pinInput = ""
+                        try {
+                            val ok = onVerify(pinInput)
+                            if (ok) {
+                                pinInput = ""
+                                error = null
+                                onDismiss()
+                            } else {
+                                error = incorrectPinMsg
+                                pinInput = ""
+                            }
+                        } finally {
+                            verifying = false
                         }
                     }
                 },
-                enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
+                enabled = !verifying && pinInput.length >= PinStore.MIN_PIN_LENGTH
             ) {
                 Text(confirmLabel)
             }
