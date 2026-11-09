@@ -1197,6 +1197,7 @@ object KeystoreEncryptedPrefs {
             private val pendingPuts = mutableMapOf<String, Any?>()
             private val pendingRemoves = mutableSetOf<String>()
             private var clearRequested = false
+            private var rewrittenKey: ResolvedKey? = null
 
             override fun putString(key: String, value: String?): SharedPreferences.Editor {
                 if (value == null) return remove(key)
@@ -1255,7 +1256,9 @@ object KeystoreEncryptedPrefs {
                 // removal could not be certified: the core reads a true here as
                 // "that key is gone from the durable store", and acts on it.
                 val certified = applyChanges()
-                baseEditor.commit() && certified
+                val written = baseEditor.commit()
+                if (written) onWritten()
+                written && certified
             }
 
             // apply() has no result to carry an uncertified removal in, which is
@@ -1269,6 +1272,15 @@ object KeystoreEncryptedPrefs {
                     Log.w("KeystoreEncryptedPrefs", "apply() cannot report an uncertified removal")
                 }
                 baseEditor.apply()
+                onWritten()
+            }
+
+            // The cleared file no longer carries the stranded marker, so deletes
+            // are certifiable again, and the key now matches the record it wrote.
+            private fun onWritten() {
+                if (!clearRequested) return
+                namesPredateThisKey = false
+                rewrittenKey?.let { hmacKey = it }
             }
 
             /**
@@ -1391,6 +1403,23 @@ object KeystoreEncryptedPrefs {
                     val encValue = encryptValue(value, plainKey)
                     baseEditor.putString(encKey, encValue)
                     dropFallbackCopy(plainKey, encKey)
+                }
+
+                // The clear drops the key record with everything else, and these
+                // puts were named with that key. Without it the next process mints
+                // a fresh key and no name it can derive reaches them. Encrypted
+                // afresh rather than copied, so the record changes and other
+                // instances drop what they cached from before the clear. Never
+                // for the deterministic key, which has no record of its own. The
+                // published key is kept out of this instance's cache, so it too
+                // re-resolves and moves the file off it now that the entries that
+                // held the move back are gone.
+                if (clearRequested && pendingPuts.isNotEmpty()) {
+                    hmacKey?.takeIf { it.record != null && !it.key.contentEquals(deterministicKey) }?.let {
+                        val record = encrypt(secretKey, Base64.encodeToString(it.key, Base64.NO_WRAP), HMAC_KEY_PREF)
+                        baseEditor.putString(HMAC_KEY_PREF, record)
+                        rewrittenKey = ResolvedKey(it.key, record).takeUnless { _ -> it.key.contentEquals(legacyGlobalKey) }
+                    }
                 }
 
                 updateKeyRegistry()
