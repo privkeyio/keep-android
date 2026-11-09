@@ -1,13 +1,19 @@
 package io.privkey.keep
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
@@ -25,6 +31,8 @@ class PinPromptDialogTest {
     private val verdict = CompletableDeferred<Boolean>()
     private var verifyCalls = 0
     private var dismissCalls = 0
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val cancel = context.getString(R.string.settings_cancel)
 
     private fun show() {
         compose.setContent {
@@ -58,7 +66,7 @@ class PinPromptDialogTest {
     }
 
     @Test
-    fun confirmIsDisabledWhileVerifying() {
+    fun confirmIsDisabledWhileVerifyingAndReturnsAfterAWrongPin() {
         show()
         compose.onNodeWithText(CONFIRM).performClick()
         compose.onNodeWithText(CONFIRM).assertIsNotEnabled()
@@ -67,6 +75,48 @@ class PinPromptDialogTest {
             assertEquals(1, verifyCalls)
             assertEquals(0, dismissCalls)
         }
+        compose.onNode(hasSetTextAction()).performTextInput("5678")
+        compose.onNodeWithText(CONFIRM).assertIsEnabled()
+    }
+
+    @Test
+    fun theDialogCannotBeDismissedWhileVerifying() {
+        show()
+        compose.onNodeWithText(CONFIRM).performClick()
+        compose.onNodeWithText(cancel).assertIsNotEnabled()
+        Espresso.closeSoftKeyboard()
+        Espresso.pressBack()
+        compose.runOnIdle { assertEquals(0, dismissCalls) }
+        verdict.complete(true)
+        compose.runOnIdle { assertEquals(1, dismissCalls) }
+    }
+
+    @Test
+    fun theSettingsDisablePinDialogDisablesOnceOnADoubleClick() {
+        compose.setContent {
+            KeepAndroidTheme {
+                PinSettingsCard(
+                    enabled = true,
+                    onSetupPin = {},
+                    onDisablePin = {
+                        verifyCalls++
+                        verdict.await()
+                    },
+                )
+            }
+        }
+        val disable = context.getString(R.string.settings_pin_disable)
+        compose.onNodeWithText(disable).performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_pin_disable_dialog_title)).assertExists()
+        compose.onNode(hasSetTextAction()).performTextInput("1234")
+        val click = compose.onNode(hasText(disable) and hasAnyAncestor(isDialog())).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+        compose.runOnUiThread {
+            click()
+            click()
+        }
+        compose.runOnIdle { assertEquals(1, verifyCalls) }
+        verdict.complete(true)
+        compose.onNodeWithText(context.getString(R.string.settings_pin_disable_dialog_title)).assertDoesNotExist()
     }
 
     private companion object {

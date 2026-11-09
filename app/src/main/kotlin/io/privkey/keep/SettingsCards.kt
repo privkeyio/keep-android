@@ -25,11 +25,7 @@ fun PinSettingsCard(
     onSetupPin: () -> Unit,
     onDisablePin: suspend (String) -> Boolean
 ) {
-    val coroutineScope = rememberCoroutineScope()
     var showDisableDialog by remember { mutableStateOf(false) }
-    var pinInput by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    val incorrectPinMsg = stringResource(R.string.settings_pin_incorrect)
 
     KeepCard {
         KeepListRow(
@@ -50,75 +46,12 @@ fun PinSettingsCard(
     }
 
     if (showDisableDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showDisableDialog = false
-                pinInput = ""
-                error = null
-            },
-            title = { Text(stringResource(R.string.settings_pin_disable_dialog_title)) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.settings_pin_disable_dialog_text))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = pinInput,
-                        onValueChange = { newValue ->
-                            if (newValue.length <= PinStore.MAX_PIN_LENGTH && newValue.all { it.isDigit() }) {
-                                pinInput = newValue
-                                error = null
-                            }
-                        },
-                        label = { Text(stringResource(R.string.settings_pin_current_label)) },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.NumberPassword
-                        ),
-                        isError = error != null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    error?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            val disabled = withContext(Dispatchers.IO) {
-                                onDisablePin(pinInput)
-                            }
-                            if (disabled) {
-                                showDisableDialog = false
-                                pinInput = ""
-                                error = null
-                            } else {
-                                error = incorrectPinMsg
-                                pinInput = ""
-                            }
-                        }
-                    },
-                    enabled = pinInput.length >= PinStore.MIN_PIN_LENGTH
-                ) {
-                    Text(stringResource(R.string.settings_pin_disable), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showDisableDialog = false
-                    pinInput = ""
-                    error = null
-                }) {
-                    Text(stringResource(R.string.settings_cancel))
-                }
-            }
+        PinPromptDialog(
+            title = stringResource(R.string.settings_pin_disable_dialog_title),
+            message = stringResource(R.string.settings_pin_disable_dialog_text),
+            confirmLabel = stringResource(R.string.settings_pin_disable),
+            onVerify = { pin -> withContext(Dispatchers.IO) { onDisablePin(pin) } },
+            onDismiss = { showDisableDialog = false },
         )
     }
 }
@@ -357,8 +290,11 @@ fun PinPromptDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var verifying by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+    // Dismissing mid-check would cancel the gated action partway, after the PIN was
+    // accepted, so the prompt stays until the check and its action finish.
     AlertDialog(
         onDismissRequest = {
+            if (verifying) return@AlertDialog
             pinInput = ""
             error = null
             onDismiss()
@@ -422,11 +358,14 @@ fun PinPromptDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = {
-                pinInput = ""
-                error = null
-                onDismiss()
-            }) {
+            TextButton(
+                onClick = {
+                    pinInput = ""
+                    error = null
+                    onDismiss()
+                },
+                enabled = !verifying
+            ) {
                 Text(stringResource(R.string.settings_cancel))
             }
         }
