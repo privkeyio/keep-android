@@ -386,6 +386,18 @@ class PermissionStoreIntegrationTest {
         assertNull(store.getPermissionDecision("com.expired.app", Nip55RequestType.SIGN_EVENT, 1))
     }
 
+    // The request path revokes only on an expiry the store itself still sees, so a
+    // window the user renewed after the refusal keeps what it granted.
+    @Test
+    fun revokeExpiredGrantsLeavesACallerWithALiveWindowAlone() = runBlocking {
+        store.setAppExpiry("com.test.app", AppExpiryDuration.ONE_HOUR)
+        store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+
+        store.revokeExpiredGrants("com.test.app")
+
+        assertEquals(PermissionDecision.ALLOW, store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 1))
+    }
+
     @Test
     fun setPermissionToAsk() = runBlocking {
         store.setPermissionToAsk("com.test.app", Nip55RequestType.SIGN_EVENT, 1)

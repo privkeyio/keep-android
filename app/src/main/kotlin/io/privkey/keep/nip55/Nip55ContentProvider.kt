@@ -424,12 +424,7 @@ class Nip55ContentProvider : ContentProvider() {
             Nip55Outcome.AutoApprove ->
                 executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser, v3Kind, v3Scope)
             is Nip55Outcome.Reject -> {
-                if (outcome.reason == "deny_expired") runWithTimeout {
-                    store.cleanupExpired(
-                        currentApp.getSignPolicyStore(),
-                        currentApp.getAutoSigningSafeguards()
-                    )
-                }
+                if (outcome.reason == "deny_expired") runWithTimeout { store.revokeExpiredGrants(callerPackage) }
                 if (!recordAutoDecision(store, callerPackage, requestType, eventKind, outcome.reason)) {
                     // The refusal still stands, since nothing was released and a
                     // policy rejection tells the caller more than a failure would.

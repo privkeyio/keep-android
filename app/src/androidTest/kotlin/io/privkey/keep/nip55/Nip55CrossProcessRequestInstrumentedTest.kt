@@ -241,6 +241,65 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
     }
 
+    // --- Expired: the refusal revokes the caller's own grants and nothing else ---
+
+    // The full expiry sweep makes a keystore commit per expired package, so running it
+    // on this path let any caller make every request pay for every other app. Another
+    // expired app's row and grant surviving the request shows the sweep stayed off it.
+    @Test
+    fun crossProcess_expiredApp_rejectsAndRevokesOnlyItsOwnGrants() {
+        val store = app().getPermissionStore()!!
+        val settings = Nip55Database.getInstance(context).appSettingsDao()
+        val now = System.currentTimeMillis()
+        fun expired(pkg: String) = Nip55AppSettings(
+            callerPackage = pkg,
+            expiresAt = now - 1_000L,
+            signPolicyOverride = null,
+            createdAt = now - 2_000L,
+            createdAtElapsed = 0L,
+            durationMs = null
+        )
+        try {
+            runBlocking {
+                store.grantPermission(clientPkg, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+                store.denyPermission(clientPkg, Nip55RequestType.NIP44_ENCRYPT, null, PermissionDuration.FOREVER)
+                store.grantPermission(OTHER_EXPIRED_PKG, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+                settings.insertOrUpdate(expired(clientPkg))
+                settings.insertOrUpdate(expired(OTHER_EXPIRED_PKG))
+            }
+
+            val r = parse(runClientQuery(rid("expired"), "io.privkey.keep.SIGN_EVENT", signProjection))
+
+            assertEquals("an expired app must get the rejected-cursor contract", listOf("rejected"), r.cols)
+            runBlocking {
+                assertEquals(
+                    "the caller's grant must be revoked",
+                    null,
+                    store.getPermissionDecision(clientPkg, Nip55RequestType.SIGN_EVENT, 1)
+                )
+                assertEquals(
+                    "a refusal is not part of what the window granted",
+                    PermissionDecision.DENY,
+                    store.getPermissionDecision(clientPkg, Nip55RequestType.NIP44_ENCRYPT, null)
+                )
+                assertTrue("the caller's row must keep it refused until a sweep retires it", store.isAppExpired(clientPkg))
+                assertTrue("another app's row must be left to the sweeps", store.isAppExpired(OTHER_EXPIRED_PKG))
+                assertEquals(
+                    "and so must its grant",
+                    PermissionDecision.ALLOW,
+                    store.getPermissionDecision(OTHER_EXPIRED_PKG, Nip55RequestType.SIGN_EVENT, 1)
+                )
+            }
+        } finally {
+            runBlocking {
+                for (pkg in listOf(clientPkg, OTHER_EXPIRED_PKG)) {
+                    store.revokePermission(pkg)
+                    store.clearAppSettings(pkg)
+                }
+            }
+        }
+    }
+
     // --- Gates ahead of the request: each refuses an external caller outright ---
 
     private val signProjection = arrayOf("""{"kind":1,"content":"gm","tags":[]}""", "", "")
@@ -369,6 +428,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
         const val RELAY_HOSTS = "relay_auth_whitelist_hosts"
         const val RELAY_AUTH_KIND = 22242
         const val RELAY_HOST = "relay.example.com"
+        const val OTHER_EXPIRED_PKG = "io.privkey.keeptest.otherexpired"
 
         // Opt-in gate (mirrors FrostSignFixture.MANUAL_ARG): every test method reports
         // SKIPPED unless invoked with -e crossProcessManual 1, so a local run without the

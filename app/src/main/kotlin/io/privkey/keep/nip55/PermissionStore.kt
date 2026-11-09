@@ -121,6 +121,20 @@ class PermissionStore(private val database: Nip55Database) {
     }
 
     /**
+     * The part of [cleanupExpired] a request refused for expiry runs: the caller's own
+     * grants, so none survives to auto-approve after the user renews the window.
+     *
+     * One package and SQL only. The full sweep touches every expired package and makes
+     * a keystore commit for each, which on the request path let any caller make every
+     * request pay for it. The settings row, the core override and the opt-in stay with
+     * the sweeps at launch and on clearing logs, and the row keeps the app refused until
+     * one of them retires it.
+     */
+    suspend fun revokeExpiredGrants(callerPackage: String) = database.withTransaction {
+        if (appSettingsDao.getSettings(callerPackage)?.isExpired() == true) dao.deleteGrantsForCaller(callerPackage)
+    }
+
+    /**
      * Whether [callerPackage]'s auto-signing opt-in is durably gone.
      *
      * Re-approval, not reset-to-global: an app that keeps its opt-in is auto-approved by
