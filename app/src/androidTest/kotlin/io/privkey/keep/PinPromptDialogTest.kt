@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -29,10 +30,14 @@ class PinPromptDialogTest {
     val compose = createComposeRule()
 
     private val verdict = CompletableDeferred<Boolean>()
-    private var verifyCalls = 0
-    private var dismissCalls = 0
+    @Volatile private var verifyCalls = 0
+    @Volatile private var dismissCalls = 0
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val cancel = context.getString(R.string.settings_cancel)
+
+    // The check resumes off the test thread, on IO for the settings card, which
+    // compose idling does not track, so wait for its effect rather than for idle.
+    private fun waitFor(condition: () -> Boolean) = compose.waitUntil(TIMEOUT_MS, condition)
 
     private fun show() {
         compose.setContent {
@@ -62,7 +67,8 @@ class PinPromptDialogTest {
         }
         compose.runOnIdle { assertEquals(1, verifyCalls) }
         verdict.complete(true)
-        compose.runOnIdle { assertEquals(1, dismissCalls) }
+        waitFor { dismissCalls == 1 }
+        assertEquals(1, verifyCalls)
     }
 
     @Test
@@ -88,7 +94,7 @@ class PinPromptDialogTest {
         Espresso.pressBack()
         compose.runOnIdle { assertEquals(0, dismissCalls) }
         verdict.complete(true)
-        compose.runOnIdle { assertEquals(1, dismissCalls) }
+        waitFor { dismissCalls == 1 }
     }
 
     @Test
@@ -114,12 +120,15 @@ class PinPromptDialogTest {
             click()
             click()
         }
-        compose.runOnIdle { assertEquals(1, verifyCalls) }
+        waitFor { verifyCalls >= 1 }
         verdict.complete(true)
-        compose.onNodeWithText(context.getString(R.string.settings_pin_disable_dialog_title)).assertDoesNotExist()
+        val title = context.getString(R.string.settings_pin_disable_dialog_title)
+        waitFor { compose.onAllNodesWithText(title).fetchSemanticsNodes().isEmpty() }
+        assertEquals(1, verifyCalls)
     }
 
     private companion object {
         const val CONFIRM = "Verify"
+        const val TIMEOUT_MS = 5_000L
     }
 }
