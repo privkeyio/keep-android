@@ -12,9 +12,12 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.KeepMobileApp
 import io.privkey.keep.R
+import io.privkey.keep.uniffi.Nip55RequestType
 import java.util.UUID
 import javax.crypto.Cipher
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +35,13 @@ class Nip55RequestIdCipherKeyTest {
     fun aCallerIdEqualToAnotherFlowsKeyLeavesThatFlowsCipherQueued() {
         val app = context.applicationContext as KeepMobileApp
         val storage = app.getStorage() ?: error("storage not initialized")
+        val callers = app.getCallerVerificationStore() ?: error("caller store not initialized")
+        val permissions = app.getPermissionStore() ?: error("permission store not initialized")
+        val caller = context.packageName
+        // Above PIN the activity stops at the biometric prompt, before the code under test.
+        val risk = runBlocking { permissions.riskAssessor.assess(caller, null, Nip55RequestType.GET_PUBLIC_KEY) }
+        assertTrue("get_public_key must not need biometric here: $risk", !risk.requiredAuth.atLeast(AuthLevel.PIN))
+        val firstUse = callers.verifyOrTrust(caller) is CallerVerificationStore.VerificationResult.FirstUseRequiresApproval
         val sharedId = "in-flight-${UUID.randomUUID()}"
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         storage.setPendingCipher(sharedId, cipher)
@@ -53,6 +63,7 @@ class Nip55RequestIdCipherKeyTest {
             assertSame(cipher, storage.consumePendingCipher(sharedId))
         } finally {
             storage.clearPendingCipher(sharedId)
+            if (firstUse) callers.untrustPackage(caller)
         }
     }
 }
