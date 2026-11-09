@@ -98,6 +98,18 @@ class KeystoreEncryptedPrefsDeleteContractTest {
         assertTrue("and it is still on disk", raw().all.keys.any { it != HMAC_KEY_PREF })
     }
 
+    // A clear removes the stranded entries along with the marker that records
+    // them, so the instance that cleared certifies deletes again.
+    @Test
+    fun aClearWithAPutMakesRemovalsCertifiableAgain() {
+        strandEntriesUnderALostKey()
+        val prefs = reopen()
+        assertTrue(prefs.edit().clear().putString(KEPT_KEY, "2").commit())
+
+        assertTrue("nothing predates the key after a clear", prefs.edit().remove("never_written").commit())
+        assertTrue(reopen().edit().remove("never_written").commit())
+    }
+
     // The baseline the refusal must not swallow: a store whose key accounts for
     // what it holds resolves names conclusively, so a key that was never written
     // is genuinely absent and deleting it succeeds.

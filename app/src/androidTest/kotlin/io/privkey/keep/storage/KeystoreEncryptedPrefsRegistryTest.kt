@@ -91,6 +91,17 @@ class KeystoreEncryptedPrefsRegistryTest {
     }
 
     @Test
+    fun anotherInstanceSeesAClearAndPut() {
+        val other = reopen()
+        other.edit().putString("alpha", "1").commit()
+        assertTrue(reopen().edit().clear().putString("beta", "2").commit())
+
+        other.edit().putString("gamma", "3").commit()
+
+        assertEquals(setOf("beta", "gamma"), reopen().all.keys)
+    }
+
+    @Test
     fun clearStillEmptiesTheRegistry() {
         val prefs = reopen()
         prefs.edit().putString("alpha", "1").commit()
