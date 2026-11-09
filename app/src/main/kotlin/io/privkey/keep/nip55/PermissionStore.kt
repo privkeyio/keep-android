@@ -94,30 +94,60 @@ class PermissionStore(private val database: Nip55Database) {
                 dao.deleteGrantsForCaller(pkg)
             }
         }
-        for (pkg in expiredPackages) {
-            val settings = appSettingsDao.getSettings(pkg) ?: continue
-            if (!settings.isExpired()) continue
-            val cleared = if (signPolicyStore == null) {
-                // Nothing can be cleared or confirmed this session. A row carrying no
-                // override has no core counterpart to orphan, so it expires as it
-                // always did; one that does is left for a sweep that can confirm it.
-                settings.signPolicyOverride == null
-            } else {
-                coreOverrideCleared(signPolicyStore, pkg)
-            }
-            // Gated the same way as the core clear, and for the same reason: once the row
-            // is gone this package never comes back from getExpiredPackages, so neither
-            // can be retried. An opt-in left behind is what lets the policy gate
-            // auto-approve the app again, which is the whole point of the sweep.
-            if (!cleared || !optInCleared(autoSigning, pkg)) continue
-            // Re-read before deleting. Both clears above are blocking keystore and disk
-            // commits, so the user can refresh this app's window while they run, and the
-            // isExpired check at the top of the loop does not cover the delete. This
-            // narrows that window to a single read rather than closing it; a refresh
-            // landing between this read and the delete still loses the row.
-            val current = appSettingsDao.getSettings(pkg) ?: continue
-            if (current.isExpired()) appSettingsDao.delete(pkg)
+        for (pkg in expiredPackages) retireSettingsRow(pkg, signPolicyStore, autoSigning)
+    }
+
+    private suspend fun retireSettingsRow(
+        pkg: String,
+        signPolicyStore: SignPolicyStore?,
+        autoSigning: AutoSigningSafeguards?
+    ) {
+        val settings = appSettingsDao.getSettings(pkg) ?: return
+        if (!settings.isExpired()) return
+        val cleared = if (signPolicyStore == null) {
+            // Nothing can be cleared or confirmed this session. A row carrying no
+            // override has no core counterpart to orphan, so it expires as it
+            // always did; one that does is left for a sweep that can confirm it.
+            settings.signPolicyOverride == null
+        } else {
+            coreOverrideCleared(signPolicyStore, pkg)
         }
+        // Gated the same way as the core clear, and for the same reason: once the row
+        // is gone this package never comes back from getExpiredPackages, so neither
+        // can be retried. An opt-in left behind is what lets the policy gate
+        // auto-approve the app again, which is the whole point of the sweep.
+        if (!cleared || !optInCleared(autoSigning, pkg)) return
+        // Re-read before deleting. Both clears above are blocking keystore and disk
+        // commits, so the user can refresh this app's window while they run, and the
+        // isExpired check at the top does not cover the delete. This narrows that
+        // window to a single read rather than closing it; a refresh landing between
+        // this read and the delete still loses the row.
+        val current = appSettingsDao.getSettings(pkg) ?: return
+        if (current.isExpired()) appSettingsDao.delete(pkg)
+    }
+
+    /**
+     * What [cleanupExpired] does for one package, run for a caller a request just refused
+     * for expiry: its grants, its core override and opt-in, then its settings row.
+     *
+     * Only the caller. The full sweep visits every expired package and makes keystore
+     * commits for each, which on the request path let any caller make every request pay
+     * for every other app. Leaving the caller's own override and opt-in for a later sweep
+     * would not do either: a user renewing the window before that sweep would carry them
+     * into the live row and the app would auto-sign again without being re-approved.
+     * Once the row is gone the app is no longer expired, so this runs once per expiry
+     * unless a clear cannot be confirmed.
+     */
+    suspend fun retireExpiredApp(
+        callerPackage: String,
+        signPolicyStore: SignPolicyStore?,
+        autoSigning: AutoSigningSafeguards?
+    ) {
+        val expired = database.withTransaction {
+            (appSettingsDao.getSettings(callerPackage)?.isExpired() == true)
+                .also { if (it) dao.deleteGrantsForCaller(callerPackage) }
+        }
+        if (expired) retireSettingsRow(callerPackage, signPolicyStore, autoSigning)
     }
 
     /**
