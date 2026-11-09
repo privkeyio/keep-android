@@ -211,4 +211,22 @@ class RelayLinkHealthTest {
         assertFalse(isDuplicateRelay("wss://relay.example.com:8443", relays))
         assertFalse(isDuplicateRelay("wss://relay.example.com", emptyList()))
     }
+
+    @Test
+    fun shortAndHexIpv4HostsAreNonCanonical() {
+        assertTrue(isNonCanonicalIpv4Host("wss://1.2.3"))
+        assertTrue(isNonCanonicalIpv4Host("wss://0x7f.1"))
+        assertTrue(isNonCanonicalIpv4Host("wss://2130706433"))
+        assertTrue(isNonCanonicalIpv4Host("wss://0X7F000001:8443/path"))
+        assertTrue(isNonCanonicalIpv4Host("wss://0x7f.0.0.1"))
+        assertTrue(isNonCanonicalIpv4Host("wss://1.2.3.256"))
+        assertTrue(isNonCanonicalIpv4Host("wss://1.2.3.4.5"))
+        assertFalse(isNonCanonicalIpv4Host("wss://1.2.3.4"))
+        assertFalse(isNonCanonicalIpv4Host("wss://1.2.3.010:8443"))
+        assertFalse(isNonCanonicalIpv4Host("wss://relay.example.com"))
+        assertFalse(isNonCanonicalIpv4Host("wss://0xdead.example.com"))
+        assertFalse(isNonCanonicalIpv4Host("wss://123.example"))
+        assertFalse(isNonCanonicalIpv4Host("wss://1e100.net"))
+        assertFalse(isNonCanonicalIpv4Host("wss://deadbeef"))
+    }
 }

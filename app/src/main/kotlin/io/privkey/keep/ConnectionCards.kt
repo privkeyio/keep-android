@@ -303,7 +303,7 @@ private fun EditRelaysDialog(
                         val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
                         when {
                             url.length > 256 -> error = errTooLong
-                            !url.matches(RELAY_URL_REGEX) -> error = errInvalid
+                            !url.matches(RELAY_URL_REGEX) || isNonCanonicalIpv4Host(url) -> error = errInvalid
                             else -> {
                                 if (!isValidRelayPort(url)) {
                                     error = errPort

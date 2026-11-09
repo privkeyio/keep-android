@@ -69,6 +69,22 @@ internal fun isDuplicateRelay(url: String, relays: List<String>): Boolean {
     return relays.any { normalizeRelayUrl(it) == key }
 }
 
+/**
+ * True for a host WHATWG parses as IPv4 in a form other than a four-part
+ * dotted decimal, such as `1.2.3`, `0x7f.1` or `2130706433`. The core rewrites
+ * those to dotted decimal, so a relay saved that way would never match its
+ * health row. A host is caught when every label is decimal digits or `0x`
+ * followed by hex digits, unless it is a valid dotted decimal quad (octal
+ * octets included), which the matcher already canonicalizes.
+ */
+internal fun isNonCanonicalIpv4Host(url: String): Boolean {
+    val host = url.substringAfter("://").substringBefore('/').substringBefore(':')
+    if (!host.split('.').all { it.matches(NUMERIC_HOST_LABEL) }) return false
+    return dottedQuadOrNull(host) == null
+}
+
+private val NUMERIC_HOST_LABEL = Regex("^([0-9]+|0[xX][0-9a-fA-F]*)$")
+
 internal fun relayLinkFor(configuredUrl: String, links: List<RelayLinkHealth>): RelayLinkHealth? {
     val key = normalizeRelayUrl(configuredUrl)
     return links.find { normalizeRelayUrl(it.url) == key }
@@ -116,13 +132,15 @@ private fun stripDefaultRelayPort(scheme: String, authority: String): String {
  * leading zero is octal, so `010` is 8, and an 8 or 9 in that octet is not an
  * IPv4 host. Anything else is returned unchanged.
  */
-private fun canonicalIpv4Host(host: String): String {
+private fun canonicalIpv4Host(host: String): String = dottedQuadOrNull(host) ?: host
+
+private fun dottedQuadOrNull(host: String): String? {
     val parts = host.split('.')
-    if (parts.size != 4) return host
+    if (parts.size != 4) return null
     val numbers = ArrayList<Int>(4)
     for (part in parts) {
-        val number = parseIpv4Octet(part) ?: return host
-        if (number > 255) return host
+        val number = parseIpv4Octet(part) ?: return null
+        if (number > 255) return null
         numbers.add(number)
     }
     return "${numbers[0]}.${numbers[1]}.${numbers[2]}.${numbers[3]}"
