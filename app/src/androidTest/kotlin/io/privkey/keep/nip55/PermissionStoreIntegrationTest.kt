@@ -386,14 +386,40 @@ class PermissionStoreIntegrationTest {
         assertNull(store.getPermissionDecision("com.expired.app", Nip55RequestType.SIGN_EVENT, 1))
     }
 
-    // The request path revokes only on an expiry the store itself still sees, so a
+    // An expired caller loses what its window granted but keeps its standing refusals
+    // and "always ask" rows, the same split the sweep makes.
+    @Test
+    fun retireExpiredAppRevokesGrantsAndKeepsDenyAndAsk() = runBlocking {
+        val now = System.currentTimeMillis()
+        database.appSettingsDao().insertOrUpdate(
+            Nip55AppSettings(
+                callerPackage = "com.test.app",
+                expiresAt = now - 1_000L,
+                signPolicyOverride = null,
+                createdAt = now - 2_000L,
+                createdAtElapsed = 0L,
+                durationMs = null
+            )
+        )
+        store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+        store.denyPermission("com.test.app", Nip55RequestType.SIGN_EVENT, 2, PermissionDuration.FOREVER)
+        store.setPermissionToAsk("com.test.app", Nip55RequestType.SIGN_EVENT, 3)
+
+        store.retireExpiredApp("com.test.app", null, null)
+
+        assertNull(store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 1))
+        assertEquals(PermissionDecision.DENY, store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 2))
+        assertEquals(PermissionDecision.ASK, store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 3))
+    }
+
+    // The request path retires only on an expiry the store itself still sees, so a
     // window the user renewed after the refusal keeps what it granted.
     @Test
-    fun revokeExpiredGrantsLeavesACallerWithALiveWindowAlone() = runBlocking {
+    fun retireExpiredAppLeavesACallerWithALiveWindowAlone() = runBlocking {
         store.setAppExpiry("com.test.app", AppExpiryDuration.ONE_HOUR)
         store.grantPermission("com.test.app", Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
 
-        store.revokeExpiredGrants("com.test.app")
+        store.retireExpiredApp("com.test.app", null, null)
 
         assertEquals(PermissionDecision.ALLOW, store.getPermissionDecision("com.test.app", Nip55RequestType.SIGN_EVENT, 1))
     }

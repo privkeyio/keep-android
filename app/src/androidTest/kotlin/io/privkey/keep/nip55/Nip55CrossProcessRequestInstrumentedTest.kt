@@ -241,13 +241,15 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
     }
 
-    // --- Expired: the refusal revokes the caller's own grants and nothing else ---
+    // --- Expired: the refusal retires the caller and nothing else ---
 
     // The full expiry sweep makes a keystore commit per expired package, so running it
     // on this path let any caller make every request pay for every other app. Another
     // expired app's row and grant surviving the request shows the sweep stayed off it.
+    // Whether the caller's row goes depends on the core override clear, which needs an
+    // active account, so that part is covered by the store-level test.
     @Test
-    fun crossProcess_expiredApp_rejectsAndRevokesOnlyItsOwnGrants() {
+    fun crossProcess_expiredApp_rejectsAndRetiresOnlyItself() {
         val store = app().getPermissionStore()!!
         val settings = Nip55Database.getInstance(context).appSettingsDao()
         val now = System.currentTimeMillis()
@@ -282,7 +284,6 @@ class Nip55CrossProcessRequestInstrumentedTest {
                     PermissionDecision.DENY,
                     store.getPermissionDecision(clientPkg, Nip55RequestType.NIP44_ENCRYPT, null)
                 )
-                assertTrue("the caller's row must keep it refused until a sweep retires it", store.isAppExpired(clientPkg))
                 assertTrue("another app's row must be left to the sweeps", store.isAppExpired(OTHER_EXPIRED_PKG))
                 assertEquals(
                     "and so must its grant",

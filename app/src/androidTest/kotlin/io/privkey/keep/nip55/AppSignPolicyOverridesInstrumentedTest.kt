@@ -569,6 +569,53 @@ class AppSignPolicyOverridesInstrumentedTest {
         assertNull(store.getAppSettings(PKG))
     }
 
+    /**
+     * A request refused for expiry retires that one app the way the sweep would, so a
+     * user renewing its window starts from a row with no tier and no opt-in rather than
+     * handing the app its auto-approval back. Every other expired app is left for the
+     * sweep.
+     */
+    @Test
+    fun retiringARefusedAppClearsOnlyItAndARenewalStartsClean() = runBlocking {
+        core.setGlobalPolicy(SignPolicySelection.MANUAL)
+        val safeguards = AutoSigningSafeguards(context)
+        val now = System.currentTimeMillis()
+        for (pkg in listOf(PKG, OTHER_PKG)) {
+            database.appSettingsDao().insertOrUpdate(
+                Nip55AppSettings(
+                    callerPackage = pkg,
+                    expiresAt = now - 1_000L,
+                    signPolicyOverride = SignPolicy.AUTO.ordinal,
+                    createdAt = now - 2_000L,
+                    createdAtElapsed = 0L,
+                    durationMs = null
+                )
+            )
+            core.setAppOverride(ACCOUNT, pkg, SignPolicySelection.AUTO)
+            safeguards.setOptedIn(pkg, true)
+            store.grantPermission(pkg, Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.FOREVER)
+        }
+
+        store.retireExpiredApp(PKG, core, safeguards)
+
+        assertNull(store.getAppSettings(PKG))
+        assertNull(core.appOverride(ACCOUNT, PKG))
+        assertFalse(safeguards.isOptedIn(PKG))
+        assertNull(store.getPermissionDecision(PKG, Nip55RequestType.SIGN_EVENT, 1))
+
+        assertTrue("another app is left to the sweep", store.isAppExpired(OTHER_PKG))
+        assertEquals(SignPolicySelection.AUTO, core.appOverride(ACCOUNT, OTHER_PKG))
+        assertTrue(safeguards.isOptedIn(OTHER_PKG))
+        assertEquals(PermissionDecision.ALLOW, store.getPermissionDecision(OTHER_PKG, Nip55RequestType.SIGN_EVENT, 1))
+
+        store.setAppExpiry(PKG, AppExpiryDuration.ONE_HOUR)
+
+        assertFalse(store.isAppExpired(PKG))
+        assertNull(store.getAppSignPolicyOverride(PKG))
+        assertFalse(safeguards.isOptedIn(PKG))
+        assertEquals(SignPolicySelection.MANUAL, AppSignPolicyOverrides.effectivePolicy(core, store, PKG))
+    }
+
     @Test
     fun expirySweepKeepsARowWhoseClearDoesNotVerify() = runBlocking {
         val flaky = SignPolicyStore(UnremovableStorage(PKG))
