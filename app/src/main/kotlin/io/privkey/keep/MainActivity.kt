@@ -443,7 +443,7 @@ fun MainScreen(
     onForegroundServiceChanged: (Boolean) -> Unit = {},
     onBunkerServiceChanged: (Boolean) -> Unit = {},
     onReconnectRelays: () -> Unit = {},
-    onSaveProxyConfig: (ProxyConfigInfo) -> Unit = keepMobile::saveProxyConfig,
+    onSaveProxyConfig: (ProxyConfigInfo) -> Unit,
     onClearCertificatePin: (String) -> Unit = {},
     onClearAllCertificatePins: () -> Unit = {},
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },

@@ -806,6 +806,8 @@ class KeepMobileApp : Application() {
         }
     }
 
+    private val proxySaveLock = Any()
+
     /**
      * Saves the proxy setting. A changed setting makes the core drop the live node, stop
      * the bunker and stop the approver, since each kept the sockets it was started with,
@@ -814,13 +816,21 @@ class KeepMobileApp : Application() {
      */
     fun saveProxyConfig(config: ProxyConfigInfo) {
         val mobile = checkNotNull(keepMobile) { "Keep not initialized" }
-        val before = runCatching { mobile.getProxyConfig() }.getOrNull()
-        mobile.saveProxyConfig(config)
-        if (before == config) return
+        // One save at a time, so another save cannot land between this read and write and
+        // make a change the core acts on look like no change here.
+        val changed = synchronized(proxySaveLock) {
+            val before = runCatching { mobile.getProxyConfig() }.getOrNull()
+            mobile.saveProxyConfig(config)
+            before != config
+        }
+        if (!changed) return
         onLiveNodeDropped()
+        // Off the caller: the start probes the relays through the new proxy.
         approverController?.let { controller ->
-            runCatching { controller.startIfPaired() }.onFailure {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Failed to restart approver: ${it::class.simpleName}")
+            applicationScope.launch(Dispatchers.IO) {
+                runCatching { controller.startIfPaired() }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to restart approver: ${it::class.simpleName}")
+                }
             }
         }
     }
