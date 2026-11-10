@@ -11,7 +11,7 @@ import org.junit.Test
 
 class ApproveFromNotificationTest {
 
-    private fun request(id: String, spend: SpendSummary? = null) = SignRequest(
+    private fun request(id: String, spend: SpendSummary? = null, kind: UInt = 1u) = SignRequest(
         id = id,
         sessionId = ByteArray(0),
         messageType = "nostr-event",
@@ -19,7 +19,8 @@ class ApproveFromNotificationTest {
         messagePreview = "abcd1234abcd1234",
         fromPeer = 2u,
         timestamp = 0uL,
-        metadata = SignRequestMetadata(1u, null, null, null, spend),
+        metadata = SignRequestMetadata(kind, null, null, null, spend),
+        needsFreshAuth = spend != null,
     )
 
     private val approved = mutableListOf<String>()
@@ -44,8 +45,15 @@ class ApproveFromNotificationTest {
 
     @Test
     fun `an unverified request is not approved`() {
-        val bare = request("a").copy(messageType = "bitcoin-sighash", typeVerified = false, metadata = null)
+        val bare = request("a").copy(messageType = "bitcoin-sighash", typeVerified = false, metadata = null, needsFreshAuth = true)
         assertFalse(approveFromNotification(listOf(bare), "a") { approved += it })
+        assertTrue(approved.isEmpty())
+    }
+
+    @Test
+    fun `a request the core marks for fresh authentication is not approved`() {
+        val contacts = request("a", kind = 3u).copy(needsFreshAuth = true)
+        assertFalse(approveFromNotification(listOf(contacts), "a") { approved += it })
         assertTrue(approved.isEmpty())
     }
 

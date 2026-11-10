@@ -108,8 +108,9 @@ object CosignNotifier {
             .setFullScreenIntent(contentIntent, true)
             .setAutoCancel(true)
         // Approve/reject the (most recent) request straight from the notification,
-        // without opening the app, and never from the lock screen. Only a verified Nostr
-        // event: anything else is approved only in the app, with a fresh prompt.
+        // without opening the app, and never from the lock screen. Only a request the core
+        // clears for the usual approval: anything else is approved only in the app, with a
+        // fresh prompt.
         if (approvableFromNotification(first)) {
             builder.addAction(
                 NotificationCompat.Action.Builder(

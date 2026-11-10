@@ -70,13 +70,25 @@ class CosignAuthorizationTest {
 
     @Test
     fun `a verified nostr event keeps the usual authentication`() = runTest {
-        val event = other("nostr-event", typeVerified = true, metadata = nostrEvent)
+        val event = other("nostr-event", typeVerified = true, metadata = nostrEvent).copy(needsFreshAuth = false)
         val prompts = Prompts()
         assertEquals(CosignApproval.APPROVED, authorize(event, false, prompts))
         assertEquals(1, prompts.usual)
         assertEquals(0, prompts.strong)
         prompts.usualAnswer = false
         assertEquals(CosignApproval.NOT_AUTHENTICATED, authorize(event, true, prompts))
+    }
+
+    @Test
+    fun `a verified nostr event the core marks for fresh authentication takes the strict path`() = runTest {
+        listOf(3u, 9321u, 30000u).forEach { kind ->
+            val event = other("nostr-event", typeVerified = true, metadata = SignRequestMetadata(kind, "x", null, null, null))
+            val prompts = Prompts()
+            assertEquals(CosignApproval.APPROVED, authorize(event, true, prompts))
+            assertEquals("kind $kind asks for a fresh prompt", 1, prompts.strong)
+            assertEquals(0, prompts.usual)
+            assertEquals(CosignApproval.NO_SCREEN_LOCK, authorize(event, false, prompts))
+        }
     }
 
     @Test
