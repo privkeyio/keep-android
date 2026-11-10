@@ -1644,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "keep-bitcoin"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "bitcoin",
  "getrandom 0.4.3",
@@ -1660,7 +1660,7 @@ dependencies = [
 
 [[package]]
 name = "keep-core"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "aes 0.9.3",
  "argon2",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "keep-enclave-host"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -1736,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "keep-frost-net"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "async-wsocket",
  "base64 0.23.1",

@@ -22,6 +22,7 @@ class SignRequestDescribeTest {
         messagePreview: String = "abcd1234abcd1234",
         metadata: SignRequestMetadata? = null,
         typeVerified: Boolean = false,
+        needsFreshAuth: Boolean = true,
     ) = SignRequest(
         id = "id",
         sessionId = ByteArray(0),
@@ -31,6 +32,7 @@ class SignRequestDescribeTest {
         fromPeer = 2u,
         timestamp = 0uL,
         metadata = metadata,
+        needsFreshAuth = needsFreshAuth,
     )
 
     @Test
@@ -221,9 +223,15 @@ class SignRequestDescribeTest {
     }
 
     @Test
-    fun `only a verified nostr event is approvable from the notification`() {
+    fun `only a request the core clears for the usual approval is approvable from the notification`() {
         val event = SignRequestMetadata(1u, "hello", null, null, null)
-        assertTrue(CosignNotifier.approvableFromNotification(request(metadata = event, typeVerified = true)))
+        assertTrue(CosignNotifier.approvableFromNotification(request(metadata = event, typeVerified = true, needsFreshAuth = false)))
+        assertFalse(
+            "a verified event of a kind the core marks for fresh authentication",
+            CosignNotifier.approvableFromNotification(
+                request(metadata = SignRequestMetadata(3u, "contacts", null, null, null), typeVerified = true),
+            ),
+        )
         assertFalse(CosignNotifier.approvableFromNotification(spendRequest(twoOutputs)))
         assertFalse(
             "an untweaked sighash sent without its transaction",
