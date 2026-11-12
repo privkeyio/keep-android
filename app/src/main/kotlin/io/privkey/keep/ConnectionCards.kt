@@ -1,7 +1,11 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.ui.components.KeepListRow
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -9,11 +13,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import io.privkey.keep.ui.theme.Dimens
+import io.privkey.keep.ui.theme.KeepError
+import io.privkey.keep.ui.theme.KeepGreen
+import io.privkey.keep.ui.theme.KeepMuted
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.PeerInfo
 import io.privkey.keep.uniffi.PeerStatus
+import io.privkey.keep.uniffi.RelayHealth
+import io.privkey.keep.uniffi.RelayHealthStatus
+import io.privkey.keep.uniffi.formatTimestampDetailed
 
 @Composable
 fun RelaysCard(
@@ -24,7 +36,9 @@ fun RelaysCard(
     onAddProfileRelay: (String) -> Unit,
     onRemoveProfileRelay: (String) -> Unit,
     relayConfigUnreadable: Boolean,
-    onResetRelayConfig: () -> Unit
+    onResetRelayConfig: () -> Unit,
+    /** The core's pool health, or null when the node is not running. */
+    relayHealth: List<RelayHealth>?,
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -66,8 +80,10 @@ fun RelaysCard(
                     style = MaterialTheme.typography.bodySmall
                 )
             } else {
+                val links = relayHealth.orEmpty().map { it.toLink() }
                 relays.forEach { relay ->
-                    RelayRow(relay)
+                    val link = relayLinkFor(relay, links)
+                    RelayHealthRow(relay, link, relayRowStatus(link, poolUp = links.isNotEmpty()))
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -151,6 +167,59 @@ fun RelaysCard(
 }
 
 @Composable
+private fun RelayHealthRow(relay: String, link: RelayLinkHealth?, status: RelayLinkStatus?) {
+    val statusLabel = when (status) {
+        RelayLinkStatus.CONNECTED -> stringResource(R.string.connections_relay_status_connected)
+        RelayLinkStatus.CONNECTING -> stringResource(R.string.connections_relay_status_connecting)
+        RelayLinkStatus.OFFLINE -> stringResource(R.string.connections_relay_status_offline)
+        null -> stringResource(R.string.connections_relay_status_not_connected)
+    }
+    val subtitle = when {
+        link != null && status == RelayLinkStatus.CONNECTED && link.rttMs != null ->
+            stringResource(
+                R.string.connections_relay_status_with_latency,
+                statusLabel,
+                link.rttMs,
+            )
+        link != null && status == RelayLinkStatus.OFFLINE && link.lastConnectedMs > 0L ->
+            stringResource(
+                R.string.connections_relay_status_last_connected,
+                statusLabel,
+                formatTimestampDetailed(link.lastConnectedMs / 1000),
+            )
+        else -> statusLabel
+    }
+    KeepListRow(
+        title = relay.removePrefix("wss://"),
+        subtitle = subtitle,
+        modifier = Modifier.padding(vertical = Dimens.space4),
+        leading = {
+            val dot = Modifier.size(Dimens.space8).clip(CircleShape)
+            Box(
+                when (status) {
+                    RelayLinkStatus.CONNECTED -> dot.background(KeepGreen)
+                    RelayLinkStatus.CONNECTING -> dot.background(KeepMuted)
+                    RelayLinkStatus.OFFLINE -> dot.background(KeepError)
+                    // Hollow, so "not running" never reads as a relay's own state.
+                    null -> dot.border(1.dp, KeepMuted, CircleShape)
+                }
+            )
+        },
+    )
+}
+
+private fun RelayHealth.toLink(): RelayLinkHealth = RelayLinkHealth(
+    url = url,
+    status = when (status) {
+        RelayHealthStatus.CONNECTING -> RelayLinkStatus.CONNECTING
+        RelayHealthStatus.CONNECTED -> RelayLinkStatus.CONNECTED
+        RelayHealthStatus.OFFLINE -> RelayLinkStatus.OFFLINE
+    },
+    lastConnectedMs = lastConnectedMs.toLong(),
+    rttMs = rttMsOrNull(rttMs),
+)
+
+@Composable
 private fun RelayRow(relay: String) {
     Text(
         relay.removePrefix("wss://"),
@@ -175,6 +244,7 @@ private fun EditRelaysDialog(
     val errTooLong = stringResource(R.string.connections_relays_error_too_long)
     val errInvalid = stringResource(R.string.connections_relays_error_invalid)
     val errPort = stringResource(R.string.connections_relays_error_port)
+    val errDuplicate = stringResource(R.string.connections_bunker_relay_error_duplicate)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -233,10 +303,14 @@ private fun EditRelaysDialog(
                         val url = if (raw.startsWith("wss://")) raw else "wss://$raw"
                         when {
                             url.length > 256 -> error = errTooLong
-                            !url.matches(RELAY_URL_REGEX) -> error = errInvalid
+                            !url.matches(RELAY_URL_REGEX) || isNonCanonicalIpv4Host(url) -> error = errInvalid
                             else -> {
                                 if (!isValidRelayPort(url)) {
                                     error = errPort
+                                    return@IconButton
+                                }
+                                if (isDuplicateRelay(url, relays)) {
+                                    error = errDuplicate
                                     return@IconButton
                                 }
                                 onAddRelay(url)

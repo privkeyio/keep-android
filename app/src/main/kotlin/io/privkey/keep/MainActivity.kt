@@ -1874,6 +1874,8 @@ fun MainScreen(
                     relays = relays,
                     profileRelays = profileRelays,
                     relayConfigUnreadable = relayConfigUnreadable,
+                    // Null (not running) also covers a stale state left by a stop or error.
+                    relayHealth = appLiveState?.relays?.takeIf { isConnected || isConnecting },
                     certificatePins = certificatePins,
                     proxyEnabled = proxyEnabled,
                     proxyPort = proxyPort,
@@ -2331,6 +2333,7 @@ private fun SettingsTab(
     relays: List<String>,
     profileRelays: List<String>,
     relayConfigUnreadable: Boolean,
+    relayHealth: List<RelayHealth>?,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2385,6 +2388,7 @@ private fun SettingsTab(
                 relays = relays,
                 profileRelays = profileRelays,
                 relayConfigUnreadable = relayConfigUnreadable,
+                relayHealth = relayHealth,
                 certificatePins = certificatePins,
                 proxyEnabled = proxyEnabled,
                 proxyPort = proxyPort,
@@ -2778,6 +2782,7 @@ private fun ShareSettingsSection(
     relays: List<String>,
     profileRelays: List<String>,
     relayConfigUnreadable: Boolean,
+    relayHealth: List<RelayHealth>?,
     certificatePins: List<CertificatePin>,
     proxyEnabled: Boolean,
     proxyPort: Int,
@@ -2800,7 +2805,8 @@ private fun ShareSettingsSection(
         onAddProfileRelay = onAddProfileRelay,
         onRemoveProfileRelay = onRemoveProfileRelay,
         relayConfigUnreadable = relayConfigUnreadable,
-        onResetRelayConfig = onResetRelayConfig
+        onResetRelayConfig = onResetRelayConfig,
+        relayHealth = relayHealth,
     )
     Spacer(modifier = Modifier.height(16.dp))
 

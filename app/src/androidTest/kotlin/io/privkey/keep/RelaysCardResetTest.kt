@@ -37,7 +37,8 @@ class RelaysCardResetTest {
                     onAddProfileRelay = {},
                     onRemoveProfileRelay = {},
                     relayConfigUnreadable = unreadable,
-                    onResetRelayConfig = onReset
+                    onResetRelayConfig = onReset,
+                    relayHealth = emptyList()
                 )
             }
         }
@@ -80,7 +81,8 @@ class RelaysCardResetTest {
                     onAddProfileRelay = {},
                     onRemoveProfileRelay = {},
                     relayConfigUnreadable = unreadable,
-                    onResetRelayConfig = {}
+                    onResetRelayConfig = {},
+                    relayHealth = emptyList()
                 )
             }
         }
