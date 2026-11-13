@@ -5,13 +5,14 @@ import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.storage.RelayAuthWhitelistStore
+import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55DecisionInputs
+import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55Outcome
 import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55StoredPermission
 import io.privkey.keep.uniffi.Nip55VelocityCheck
 import io.privkey.keep.uniffi.SignPolicySelection
-import io.privkey.keep.uniffi.evaluateNip55Request
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -33,16 +34,36 @@ class RelayAuthDecisionTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private lateinit var store: RelayAuthWhitelistStore
+    private lateinit var mobile: KeepMobile
+    private lateinit var handler: Nip55Handler
 
     @Before
     fun setup() {
         context.deleteSharedPreferences(RelayAuthWhitelistStore.PREFS_NAME)
         store = RelayAuthWhitelistStore(context)
+        mobile = KeepMobile(FrostSignTestSupport.noAuthStorage())
+        handler = Nip55Handler(mobile)
     }
 
     @After
     fun teardown() {
+        handler.destroy()
+        mobile.destroy()
         context.deleteSharedPreferences(RelayAuthWhitelistStore.PREFS_NAME)
+    }
+
+    @Test
+    fun theCoreKillSwitchRefusesAListedRelayTheAppHoldsAGrantFor() {
+        // The platform no longer passes the switch in, so this is the core reading its own.
+        store.add("relay.example.com")
+        mobile.setKillSwitch(true)
+        val outcome = try {
+            decide(exact = allow())
+        } finally {
+            mobile.setKillSwitch(false)
+        }
+        assertEquals(Nip55Outcome.Error("Signing is disabled (kill switch is active)"), outcome)
+        assertEquals(Nip55Outcome.AutoApprove, decide(exact = allow()))
     }
 
     @Test
@@ -79,11 +100,10 @@ class RelayAuthDecisionTest {
 
     private fun decide(exact: Nip55StoredPermission?): Nip55Outcome {
         val (hosts, readFailed) = relayWhitelistInputs(store)
-        return evaluateNip55Request(
+        return handler.evaluateRequest(
             Nip55DecisionInputs(
                 packageName = "com.test.app",
                 callerVerified = true,
-                signingKilled = false,
                 isLocked = false,
                 requestType = Nip55RequestType.SIGN_EVENT,
                 eventJson = EVENT_22242,

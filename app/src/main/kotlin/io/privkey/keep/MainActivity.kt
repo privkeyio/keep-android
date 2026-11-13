@@ -385,6 +385,21 @@ internal suspend fun saveRelaysOrToast(context: Context, save: suspend () -> Uni
         }
         .isSuccess
 
+internal enum class KillSwitchEngage { SAVED, UNSAVED, FAILED }
+
+/**
+ * Engages the kill switch and reports what signing will now do. The core treats an
+ * engage that did not save as engaged until a release saves, so a failed save is
+ * reported by what the core reads, not as off.
+ */
+internal suspend fun engageKillSwitch(keepMobile: KeepMobile): KillSwitchEngage = withContext(Dispatchers.IO) {
+    when {
+        runCatching { keepMobile.setKillSwitch(true) }.isSuccess -> KillSwitchEngage.SAVED
+        runCatching { keepMobile.getKillSwitch() }.getOrDefault(true) -> KillSwitchEngage.UNSAVED
+        else -> KillSwitchEngage.FAILED
+    }
+}
+
 /** Outcome of the pending-DKG gate that guards entry into the group-creation ceremony. */
 enum class GroupCreationGate { WAIT, BLOCK, ALLOW }
 
@@ -825,17 +840,15 @@ fun MainScreen(
         KillSwitchConfirmDialog(
             onConfirm = {
                 coroutineScope.launch {
-                    val updated = withContext(Dispatchers.IO) {
-                        runCatching { keepMobile.setKillSwitch(true) }.isSuccess
+                    val result = engageKillSwitch(keepMobile)
+                    killSwitchEnabled = result != KillSwitchEngage.FAILED
+                    val failure = when (result) {
+                        KillSwitchEngage.SAVED -> null
+                        KillSwitchEngage.UNSAVED -> R.string.main_enable_kill_switch_unsaved
+                        KillSwitchEngage.FAILED -> R.string.main_enable_kill_switch_failed
                     }
-                    if (updated) {
-                        killSwitchEnabled = true
-                    } else {
-                        Toast.makeText(
-                            appContext,
-                            appContext.getString(R.string.main_enable_kill_switch_failed),
-                            Toast.LENGTH_LONG,
-                        ).show()
+                    if (failure != null) {
+                        Toast.makeText(appContext, appContext.getString(failure), Toast.LENGTH_LONG).show()
                     }
                     showKillSwitchConfirmDialog = false
                 }

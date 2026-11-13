@@ -611,7 +611,11 @@ class Nip55Activity : FragmentActivity() {
                             responses.add(response.copy(id = item.requestId))
                         }
                         .onFailure { e ->
-                            val action = if (e is PreApproveFailedException) "preapprove_failed" else "deny"
+                            val action = when {
+                                e is PreApproveFailedException -> "preapprove_failed"
+                                mapExceptionToError(e) == "signing_disabled" -> "signing_disabled"
+                                else -> "deny"
+                            }
                             store?.logOperation(callerId, req.requestType, eventKind, action, wasAutomatic = false)
                             if (BuildConfig.DEBUG) Log.w(TAG, "Batch item failed: ${e::class.simpleName}")
                             responses.add(Nip55Response(result = "", event = null, error = "request_failed", id = item.requestId, rejected = true))
@@ -840,6 +844,9 @@ class Nip55Activity : FragmentActivity() {
         is KeepMobileException.NotInitialized -> "not_initialized"
         is KeepMobileException.PubkeyMismatch -> "pubkey_mismatch"
         is KeepMobileException.InvalidTimestamp -> "invalid_timestamp"
+        // The core refuses with this once the switch is engaged after the checks above.
+        is KeepMobileException.PolicyViolation ->
+            if (e.reason == mapErrorToUserMessage("signing_disabled")) "signing_disabled" else "request_failed"
         else -> "request_failed"
     }
 

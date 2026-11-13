@@ -30,7 +30,6 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import io.privkey.keep.uniffi.Nip55Response
 import io.privkey.keep.uniffi.Nip55VelocityCheck
 import io.privkey.keep.uniffi.SignPolicySelection
-import io.privkey.keep.uniffi.evaluateNip55Request
 import io.privkey.keep.uniffi.nip55ExtractRelayHost
 import io.privkey.keep.uniffi.nip55SignableEventKind
 import kotlinx.coroutines.CancellationException
@@ -294,7 +293,8 @@ class Nip55ContentProvider : ContentProvider() {
 
     /**
      * Gather the platform inputs and delegate the full auto-sign decision to the
-     * Rust orchestrator (`evaluateNip55Request`), then map its outcome to a cursor.
+     * Rust orchestrator (`Nip55Handler.evaluateRequest`, which reads the kill switch
+     * from the core), then map its outcome to a cursor.
      * The stateful, ordered side effects (the atomic velocity check-and-record and
      * the opt-in rate-limiter record) run here and their results feed the pure
      * decision; the gate sequence, precedence, and DENY-wins rules live in Rust,
@@ -398,7 +398,6 @@ class Nip55ContentProvider : ContentProvider() {
         val inputs = Nip55DecisionInputs(
             packageName = callerPackage,
             callerVerified = true,
-            signingKilled = false,
             isLocked = false,
             requestType = requestType,
             eventJson = rawContent,
@@ -420,7 +419,7 @@ class Nip55ContentProvider : ContentProvider() {
             nowWallMs = System.currentTimeMillis()
         )
 
-        return when (val outcome = evaluateNip55Request(inputs)) {
+        return when (val outcome = h.evaluateRequest(inputs)) {
             Nip55Outcome.AutoApprove ->
                 executeBackgroundRequest(h, store, currentApp, callerPackage, requestType, rawContent, rawPubkey, null, eventKind, currentUser, v3Kind, v3Scope)
             is Nip55Outcome.Reject -> {
