@@ -5,9 +5,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.KeepMobileApp
+import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.Nip55Handler
 import io.privkey.keep.uniffi.Nip55RequestType
-import io.privkey.keep.uniffi.NoHandle
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -68,7 +68,8 @@ class Nip55ProviderTimeoutInstrumentedTest {
     }
 
     private fun invokeDecide(): Cursor? {
-        val handler = Nip55Handler(NoHandle)
+        val mobile = KeepMobile(FrostSignTestSupport.noAuthStorage())
+        val handler = Nip55Handler(mobile)
         // Kotlin mangles a method's JVM name when its signature carries a value-class
         // parameter (here v3Kind: UInt?), appending "-<hash>". Match on the base name so
         // the lookup survives that mangling.
@@ -76,10 +77,15 @@ class Nip55ProviderTimeoutInstrumentedTest {
             it.name.substringBefore('-') == "decideBackgroundRequest"
         }
         m.isAccessible = true
-        return m.invoke(
-            provider, app, store, handler, pkg, Nip55RequestType.SIGN_EVENT,
-            content, null, 1, null, null, null
-        ) as Cursor?
+        try {
+            return m.invoke(
+                provider, app, store, handler, pkg, Nip55RequestType.SIGN_EVENT,
+                content, null, 1, null, null, null
+            ) as Cursor?
+        } finally {
+            handler.destroy()
+            mobile.destroy()
+        }
     }
 
     private fun assertRejected(cursor: Cursor?) {
