@@ -200,6 +200,42 @@ class PrefReadTest {
         assertEquals(PrefRead.Unreadable, prefs.readString("k"))
     }
 
+    @Test
+    fun getAll_skips_a_body_that_will_not_parse_as_the_typed_getters_do() {
+        val storedName = writeAndFindStoredName { it.edit().putInt("k", 7).commit() }
+        raw().edit().putString(storedName, unboundCiphertext("i:not-a-number")).commit()
+
+        val all = open().all
+        assertEquals(-1, open().getInt("k", -1))
+        assertTrue("an unparsable number must not be listed as null: $all", "k" !in all)
+        assertEquals("0", all["anchor"])
+    }
+
+    @Test
+    fun getAll_lists_a_set_as_the_typed_getter_reads_it() {
+        open().edit()
+            .putStringSet("empty", mutableSetOf())
+            .putStringSet("two", mutableSetOf("one", "two"))
+            .commit()
+
+        val all = open().all
+        assertEquals(emptySet<String>(), all["empty"])
+        assertEquals(setOf("one", "two"), all["two"])
+    }
+
+    @Test
+    fun a_set_member_that_cannot_round_trip_is_refused_at_the_put() {
+        open().edit().putStringSet("s", mutableSetOf("kept")).commit()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            open().edit().putStringSet("s", mutableSetOf("a\u0000b"))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            open().edit().putStringSet("s", mutableSetOf("", "x"))
+        }
+        assertEquals(PrefRead.Found(setOf("kept")), open().readStringSet("s"))
+    }
+
     private companion object {
         const val PREFS_NAME = "pref_read_test"
         const val HMAC_KEY = "__hmac_key__"

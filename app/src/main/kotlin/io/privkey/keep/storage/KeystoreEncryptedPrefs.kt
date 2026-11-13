@@ -1025,14 +1025,19 @@ object KeystoreEncryptedPrefs {
             val decrypted = decrypt(secretKey, encrypted, plainKey)
             return when {
                 decrypted.startsWith(PREFIX_STRING) -> decrypted.removePrefix(PREFIX_STRING)
-                decrypted.startsWith(PREFIX_INT) -> decrypted.removePrefix(PREFIX_INT).toIntOrNull()
-                decrypted.startsWith(PREFIX_LONG) -> decrypted.removePrefix(PREFIX_LONG).toLongOrNull()
-                decrypted.startsWith(PREFIX_FLOAT) -> decrypted.removePrefix(PREFIX_FLOAT).toFloatOrNull()
+                // Parsed the way the typed getters parse, so a body they treat as unreadable
+                // is skipped here too rather than listed as null.
+                decrypted.startsWith(PREFIX_INT) -> decrypted.removePrefix(PREFIX_INT).toInt()
+                decrypted.startsWith(PREFIX_LONG) -> decrypted.removePrefix(PREFIX_LONG).toLong()
+                decrypted.startsWith(PREFIX_FLOAT) -> decrypted.removePrefix(PREFIX_FLOAT).toFloat()
                 decrypted.startsWith(PREFIX_BOOL) -> decrypted.removePrefix(PREFIX_BOOL) == "true"
-                decrypted.startsWith(PREFIX_STRING_SET) -> decrypted.removePrefix(PREFIX_STRING_SET).split(STRING_SET_DELIMITER).toSet()
+                decrypted.startsWith(PREFIX_STRING_SET) -> parseStringSet(decrypted.removePrefix(PREFIX_STRING_SET))
                 else -> decrypted
             }
         }
+
+        private fun parseStringSet(raw: String): Set<String> =
+            raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toSet()
 
         private fun encryptValue(value: Any?, plainKey: String): String {
             val prefixed = when (value) {
@@ -1135,9 +1140,7 @@ object KeystoreEncryptedPrefs {
             guardedRead(key, PREFIX_STRING) { it }
 
         override fun readStringSet(key: String): PrefRead<Set<String>> =
-            guardedRead(key, PREFIX_STRING_SET) { raw ->
-                raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toSet()
-            }
+            guardedRead(key, PREFIX_STRING_SET) { parseStringSet(it) }
 
         override fun readInt(key: String): PrefRead<Int> =
             guardedRead(key, PREFIX_INT) { it.toInt() }
@@ -1152,9 +1155,7 @@ object KeystoreEncryptedPrefs {
             getTypedValue(key, defValue, PREFIX_STRING) { it }
 
         override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
-            getTypedValue(key, defValues, PREFIX_STRING_SET) { raw ->
-                raw.split(STRING_SET_DELIMITER).filter { it.isNotEmpty() }.toMutableSet()
-            }
+            getTypedValue(key, defValues, PREFIX_STRING_SET) { parseStringSet(it).toMutableSet() }
 
         override fun getInt(key: String, defValue: Int): Int =
             getTypedValue(key, defValue, PREFIX_INT) { it.toInt() }
@@ -1207,6 +1208,11 @@ object KeystoreEncryptedPrefs {
 
             override fun putStringSet(key: String, values: MutableSet<String>?): SharedPreferences.Editor {
                 if (values == null) return remove(key)
+                // Members are joined on NUL and empty ones are dropped on read, so either
+                // would come back as a different set.
+                require(values.none { it.isEmpty() || it.contains(STRING_SET_DELIMITER) }) {
+                    "string set members must be non-empty and free of NUL"
+                }
                 pendingPuts[key] = values
                 return this
             }
