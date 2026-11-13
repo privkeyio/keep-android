@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import androidx.room.withTransaction
+import io.privkey.keep.uniffi.Nip55AuditChainVerifier
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -76,9 +77,9 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         familiarity.remove(database)
     }
 
-    // Atomic read of rows + anchor + tamper flag under the same lock every write takes,
+    // Atomic walk of rows + anchor + tamper flag under the same lock every write takes,
     // so no append/prune/clear can interleave between the reads and skew the snapshot.
-    suspend fun snapshot(): Triple<List<Nip55AuditLog>, AuditAnchor?, Boolean> = mutex.withLock {
+    suspend fun snapshot(hmacKey: ByteArray): Triple<AuditChainScan, AuditAnchor?, Boolean> = mutex.withLock {
         val state = reconcile()
         // The verify pass sees an unreadable read too, and the next write is not
         // guaranteed to see it again: the only other record is the corrupted entry
@@ -87,7 +88,7 @@ internal class AuditLogWriter(private val database: Nip55Database) {
             Nip55Database.setAuditTamperDetected()
             familiarity[database] = AuditFamiliarity(trusted = false)
         }
-        Triple(auditDao.getAllOrdered(), state.anchor, state.tamperDetected)
+        Triple(scan(hmacKey), state.anchor, state.tamperDetected)
     }
 
     // A verification that found the chain broken withdraws familiarity until the log is
@@ -104,19 +105,18 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     suspend fun familiar(
         callerPackage: String,
         eventKind: Int,
-        chainIntact: (List<Nip55AuditLog>, AuditAnchor?, Boolean) -> Boolean
+        chainIntact: (AuditChainScan, AuditAnchor?, Boolean) -> Boolean
     ): Boolean = mutex.withLock {
         // Not cancellable once started, so a caller's timeout cannot discard a build
         // that every later query would then have to start again under the lock.
         val known = familiarity[database] ?: withContext(NonCancellable) {
             val state = reconcile()
             if (state.unreadable) Nip55Database.setAuditTamperDetected()
-            val rows = auditDao.getAllOrdered()
-            val trusted = !state.unreadable && chainIntact(rows, state.anchor, state.tamperDetected)
-            AuditFamiliarity(trusted).also { built ->
-                if (trusted) rows.forEach(built::add)
-                familiarity[database] = built
-            }
+            val hmacKey = Nip55Database.getHmacKey()
+            val built = AuditFamiliarity(trusted = true)
+            val trusted = hmacKey != null && !state.unreadable &&
+                chainIntact(scan(hmacKey, built::add), state.anchor, state.tamperDetected)
+            (if (trusted) built else AuditFamiliarity(trusted = false)).also { familiarity[database] = it }
         }
         known.signed(callerPackage, eventKind)
     }
@@ -163,6 +163,32 @@ internal class AuditLogWriter(private val database: Nip55Database) {
             auditDao.getLastPreviousHash()
         )
 
+    // Feeds the core's verifier a page at a time inside one read transaction, so the
+    // verdict is over one snapshot and the log is never held in memory at once, however
+    // far a calling app grows it. A failed read throws, which fails the verification.
+    private suspend fun scan(hmacKey: ByteArray, onRow: (Nip55AuditLog) -> Unit = {}): AuditChainScan =
+        database.withTransaction {
+            Nip55AuditChainVerifier(hmacKey).use { verifier ->
+                var count = 0L
+                var latest: Nip55AuditLog? = null
+                while (true) {
+                    val page = auditDao.getPageAfter(latest?.id ?: Long.MIN_VALUE, AUDIT_PAGE_SIZE)
+                    if (page.isEmpty()) break
+                    verifier.feed(page.map { it.toRustAuditEntry() })
+                    page.forEach(onRow)
+                    count += page.size
+                    latest = page.last()
+                }
+                AuditChainScan(
+                    result = verifier.finish(null).toChainVerificationResult(),
+                    count = count,
+                    latestId = latest?.id ?: 0L,
+                    latestHash = latest?.entryHash ?: "",
+                    latestPreviousHash = latest?.previousHash
+                )
+            }
+        }
+
     private suspend fun advanceAnchor() {
         Nip55Database.setAuditAnchor(
             AuditAnchor(auditDao.getLastEntryHash() ?: "", auditDao.getCount().toLong())
@@ -170,6 +196,8 @@ internal class AuditLogWriter(private val database: Nip55Database) {
     }
 
     companion object {
+        internal const val AUDIT_PAGE_SIZE = 256
+
         // Serializes every audit write so an in-flight append cannot observe another
         // writer's half-committed state and raise a false tamper flag.
         private val mutex = Mutex()
@@ -179,6 +207,15 @@ internal class AuditLogWriter(private val database: Nip55Database) {
         private val familiarity = java.util.WeakHashMap<Nip55Database, AuditFamiliarity>()
     }
 }
+
+/** The verdict over the whole log, and the facts about its last row the anchor checks need. */
+internal class AuditChainScan(
+    val result: ChainVerificationResult,
+    val count: Long,
+    val latestId: Long,
+    val latestHash: String,
+    val latestPreviousHash: String?
+)
 
 /**
  * Which callers have a standing approval for which kinds, over rows in id order. Rows

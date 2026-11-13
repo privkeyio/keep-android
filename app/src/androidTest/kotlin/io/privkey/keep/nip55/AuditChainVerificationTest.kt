@@ -122,6 +122,31 @@ class AuditChainVerificationTest {
     }
 
     @Test
+    fun aLogOfSeveralPagesVerifiesAndATamperedRowOnALaterPageIsPinpointed() = runBlocking {
+        val total = AuditLogWriter.AUDIT_PAGE_SIZE * 2 + 3
+        store.logOperation("com.first.app", Nip55RequestType.SIGN_EVENT, 7, "allow", wasAutomatic = false)
+        repeat(total - 2) {
+            store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        }
+        store.logOperation("com.last.app", Nip55RequestType.SIGN_EVENT, 7, "allow", wasAutomatic = false)
+        assertEquals(total, store.getAuditLogCount())
+
+        // Familiarity is built from the paged walk, so rows on the first and last pages count.
+        assertTrue(store.hasSignedKindBefore("com.first.app", 7))
+        assertTrue(store.hasSignedKindBefore("com.last.app", 7))
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+
+        val rows = store.getAuditLog(total).sortedBy { it.id }
+        val tampered = rows[AuditLogWriter.AUDIT_PAGE_SIZE + 5]
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE nip55_audit_log SET decision = 'deny' WHERE id = ?",
+            arrayOf<Any?>(tampered.id)
+        )
+
+        assertEquals(ChainVerificationResult.Tampered(tampered.id), store.verifyAuditChain())
+    }
+
+    @Test
     fun anUnreadableAnchorCountIsTamperRatherThanAnUnpinnedChain() = runBlocking {
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
