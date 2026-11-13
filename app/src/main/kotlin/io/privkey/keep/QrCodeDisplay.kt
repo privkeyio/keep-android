@@ -1,7 +1,6 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipDescription
@@ -39,6 +38,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import io.privkey.keep.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -253,10 +253,13 @@ fun QrCodeDisplay(
     onTapToCopy: (() -> Unit)? = null,
     onCopied: () -> Unit = {}
 ) {
-    @SuppressLint("ProduceStateDoesNotAssignValue")
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = data) {
-        value = withContext(Dispatchers.Default) { generateQrCode(data) }
-        awaitDispose { value?.recycle() }
+        value = null
+        value = generateQrCodes(listOf(data)).firstOrNull()
+    }
+    DisposableEffect(bitmap) {
+        val shown = bitmap
+        onDispose { shown?.wipe() }
     }
 
     QrDisplayContainer(
@@ -292,17 +295,15 @@ fun AnimatedQrCodeDisplay(
     var generationError by remember { mutableStateOf(false) }
 
     LaunchedEffect(frames) {
-        val oldBitmaps = bitmaps
-        val generated = withContext(Dispatchers.Default) {
-            frames.mapNotNull { generateQrCode(it) }
-        }
+        val generated = generateQrCodes(frames)
         generationError = generated.size != frames.size
         bitmaps = generated
-        oldBitmaps.forEach { it.recycle() }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { bitmaps.forEach { it.recycle() } }
+    // Released only once the UI has moved off these bitmaps, so no draw can reach a recycled one.
+    DisposableEffect(bitmaps) {
+        val shown = bitmaps
+        onDispose { shown.forEach { it.wipe() } }
     }
 
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
@@ -347,7 +348,25 @@ fun AnimatedQrCodeDisplay(
     )
 }
 
-private fun generateQrCode(content: String): Bitmap? {
+internal fun Bitmap.wipe() {
+    if (isRecycled) return
+    if (isMutable) eraseColor(0)
+    recycle()
+}
+
+// withContext returns only after its block finishes, so a cancelled caller still sees and wipes what was made.
+private suspend fun generateQrCodes(contents: List<String>): List<Bitmap> {
+    val made = ArrayList<Bitmap>(contents.size)
+    try {
+        withContext(Dispatchers.Default) { contents.mapNotNullTo(made, ::generateQrCode) }
+    } catch (e: CancellationException) {
+        made.forEach { it.wipe() }
+        throw e
+    }
+    return made
+}
+
+internal fun generateQrCode(content: String): Bitmap? {
     return try {
         val hints = mapOf(
             EncodeHintType.MARGIN to 1,
@@ -359,7 +378,14 @@ private fun generateQrCode(content: String): Bitmap? {
         val pixels = IntArray(bitMatrix.width * bitMatrix.height) { i ->
             if (bitMatrix[i % bitMatrix.width, i / bitMatrix.width]) black else white
         }
-        Bitmap.createBitmap(pixels, bitMatrix.width, bitMatrix.height, Bitmap.Config.ARGB_8888)
+        try {
+            Bitmap.createBitmap(bitMatrix.width, bitMatrix.height, Bitmap.Config.ARGB_8888).apply {
+                setPixels(pixels, 0, bitMatrix.width, 0, 0, bitMatrix.width, bitMatrix.height)
+            }
+        } finally {
+            pixels.fill(0)
+            bitMatrix.clear()
+        }
     } catch (e: Exception) {
         if (BuildConfig.DEBUG) {
             android.util.Log.w("QrCodeDisplay", "Failed to generate QR code", e)
