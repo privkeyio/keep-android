@@ -37,7 +37,8 @@ import kotlin.random.Random
  * amount, the fee and the total. The notification counts the outputs, says the rest is in
  * the app, and offers no Approve, and an approve sent from a notification is refused. A
  * key-path spend of the group's own taproot output is shown the same way and signs under
- * the tweaked output key.
+ * the tweaked output key. A Nostr note signs from the notification, while a contact list,
+ * which the core marks as needing a fresh authentication, signs only when approved in the app.
  *
  * Manual only: run testharness/cosignpeer/run-spend-e2e.sh, which serves the peer.
  */
@@ -165,6 +166,39 @@ class CosignSpendE2ETest {
         )
         val keyPathSigned = answerUntilPeerReplies(mobile, since3, keyPath, expectedKeyPath, mobile::approveRequest)
         assertTrue("the approved key-path spend is signed: $keyPathSigned", keyPathSigned.startsWith("SIGNED "))
+
+        // A contact list is a verified Nostr event, but the core asks for a fresh
+        // authentication for it, so a notification approve is refused. Approved in the
+        // app, which asks for that authentication first, it still signs.
+        val since4 = System.currentTimeMillis() / 1000
+        val contacts = askPeer("contacts")
+        val isContacts = isThisEvent(3u, since4)
+        val contactList = awaitRequest(mobile, "the peer's contact list reaches this device", isContacts)
+        assertTrue(contactList.typeVerified)
+        assertTrue("the core marks a contact list for fresh authentication", contactList.needsFreshAuth)
+        assertFalse(CosignNotifier.approvableFromNotification(contactList))
+        approved = false
+        assertFalse(approveFromNotification(mobile.getPendingRequests(), contactList.id) { approved = true })
+        assertFalse("an approve from the notification must not reach the core", approved)
+        val contactsSigned = answerUntilPeerReplies(mobile, contacts, isContacts, mobile::approveRequest)
+        assertTrue("the contact list approved in the app is signed: $contactsSigned", contactsSigned.startsWith("SIGNED "))
+
+        // A note keeps the usual approval and signs from the notification.
+        val since5 = System.currentTimeMillis() / 1000
+        val note = askPeer("note")
+        val isNote = isThisEvent(1u, since5)
+        val noteShown = awaitRequest(mobile, "the peer's note reaches this device", isNote)
+        assertFalse("the core clears a note for the usual approval", noteShown.needsFreshAuth)
+        assertTrue(CosignNotifier.approvableFromNotification(noteShown))
+        val noteSigned = answerUntilPeerReplies(mobile, note, isNote) { id ->
+            check(approveFromNotification(mobile.getPendingRequests(), id, mobile::approveRequest))
+        }
+        assertTrue("the note approved from the notification is signed: $noteSigned", noteSigned.startsWith("SIGNED "))
+    }
+
+    private fun isThisEvent(kind: UInt, since: Long): (SignRequest) -> Boolean = {
+        it.messageType == "nostr-event" && it.timestamp.toLong() >= since &&
+            it.metadata?.eventKind == kind && it.metadata?.contentPreview?.startsWith("cosign-e2e $salt ") == true
     }
 
     // The record the core reads the account's network from, as a descriptor session stores it.
@@ -189,31 +223,37 @@ class CosignSpendE2ETest {
     // On connecting, the device fetches recent relay history and can raise an earlier run's
     // request again. Only this run's exact spend counts, and any other is declined, since the
     // device takes the next message only once the request in front of it is answered.
-    private fun awaitSpend(mobile: KeepMobile, since: Long, expected: SpendSummary): SignRequest {
+    private fun awaitSpend(mobile: KeepMobile, since: Long, expected: SpendSummary): SignRequest =
+        awaitRequest(mobile, "the peer's spend reaches this device") { isThisSpend(it, since, expected) }
+
+    private fun awaitRequest(mobile: KeepMobile, what: String, matches: (SignRequest) -> Boolean): SignRequest {
         var found: SignRequest? = null
-        awaitTrue("the peer's spend reaches this device", 180_000) {
-            declineOthers(mobile, since, expected)
-            found = mobile.getPendingRequests().firstOrNull { isThisSpend(it, since, expected) }
+        awaitTrue(what, 180_000) {
+            declineOthers(mobile, matches)
+            found = mobile.getPendingRequests().firstOrNull(matches)
             found != null
         }
         return requireNotNull(found)
     }
 
-    private fun declineOthers(mobile: KeepMobile, since: Long, expected: SpendSummary) =
-        mobile.getPendingRequests().filterNot { isThisSpend(it, since, expected) }.forEach { mobile.rejectRequest(it.id) }
+    private fun declineOthers(mobile: KeepMobile, matches: (SignRequest) -> Boolean) =
+        mobile.getPendingRequests().filterNot(matches).forEach { mobile.rejectRequest(it.id) }
 
     private fun isThisSpend(request: SignRequest, since: Long, expected: SpendSummary) =
         request.messageType == "bitcoin-sighash" && request.timestamp.toLong() >= since && request.metadata?.spend == expected
 
     // The peer waits one short round per request and then asks again as a new request, so
     // every request for this spend is answered until the peer reports the outcome.
-    private fun answerUntilPeerReplies(mobile: KeepMobile, since: Long, n: Int, expected: SpendSummary, answer: (String) -> Unit): String {
+    private fun answerUntilPeerReplies(mobile: KeepMobile, since: Long, n: Int, expected: SpendSummary, answer: (String) -> Unit): String =
+        answerUntilPeerReplies(mobile, n, { isThisSpend(it, since, expected) }, answer)
+
+    private fun answerUntilPeerReplies(mobile: KeepMobile, n: Int, matches: (SignRequest) -> Boolean, answer: (String) -> Unit): String {
         val res = File(dir, "res-$n")
         val answered = mutableSetOf<String>()
         awaitTrue("the peer answers request $n", 300_000) {
-            declineOthers(mobile, since, expected)
+            declineOthers(mobile, matches)
             mobile.getPendingRequests()
-                .filter { isThisSpend(it, since, expected) && it.id !in answered }
+                .filter { matches(it) && it.id !in answered }
                 .forEach {
                     answered += it.id
                     answer(it.id)

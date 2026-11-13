@@ -10,6 +10,9 @@
 //! salt sats to the same output but spends the group's own BIP-86 output on the key
 //! path, so the phone signs under the tweaked output key. The salt, under 1,000, lets the phone tell this run's spend
 //! from a relay's replay of an earlier run's.
+//!
+//! `note` and `contacts` instead ask the phone to co-sign a Nostr event of kind 1 or 3,
+//! with its body attached and the salt in its content.
 
 use std::io::BufRead;
 use std::sync::Arc;
@@ -18,7 +21,9 @@ use std::time::Duration;
 use bitcoin::hashes::Hash;
 use bitcoin::{Amount, ScriptBuf, TxOut, WPubkeyHash};
 use keep_core::frost::ShareExport;
-use keep_frost_net::{KfpNode, KfpNodeEvent, MSG_TYPE_BITCOIN_SIGHASH};
+use keep_frost_net::{
+    KfpNode, KfpNodeEvent, NostrEventPayload, MSG_TYPE_BITCOIN_SIGHASH, MSG_TYPE_NOSTR_EVENT,
+};
 use tokio::time::timeout;
 
 fn p2wpkh(value: u64) -> TxOut {
@@ -79,6 +84,30 @@ fn payload_paying(spent: &ScriptBuf, outputs: Vec<TxOut>) -> ([u8; 32], Vec<u8>)
     )
 }
 
+/// An event of `kind` by the group, and its NIP-01 id, which is what gets signed.
+fn nostr_event(group_pubkey: &[u8; 32], kind: u16, salt: u64, attempt: u32) -> ([u8; 32], Vec<u8>) {
+    let event = NostrEventPayload {
+        pubkey: *group_pubkey,
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        kind,
+        tags: vec![],
+        content: format!("cosign-e2e {salt} {attempt}"),
+    };
+    let canonical = serde_json::json!([
+        0,
+        hex::encode(event.pubkey),
+        event.created_at,
+        event.kind,
+        event.tags,
+        event.content,
+    ]);
+    let id = bitcoin::hashes::sha256::Hash::hash(canonical.to_string().as_bytes());
+    (id.to_byte_array(), serde_json::to_vec(&event).expect("event serializes"))
+}
+
 async fn run(line: &str) -> Result<String, String> {
     let mut fields = line.split_whitespace();
     let (Some(case), Some(salt), Some(relay), Some(passphrase), Some(export)) = (
@@ -94,7 +123,13 @@ async fn run(line: &str) -> Result<String, String> {
         Ok(s) if s < 1_000 => s,
         _ => return Err(format!("bad salt {salt}")),
     };
+    let nostr_kind = match case {
+        "note" => Some(1),
+        "contacts" => Some(3),
+        _ => None,
+    };
     let outputs = match case {
+        "note" | "contacts" => vec![],
         "one" => vec![p2wpkh(99_000 - salt)],
         "keypath" => vec![p2wpkh(98_000 - salt)],
         "two" => vec![
@@ -140,9 +175,19 @@ async fn run(line: &str) -> Result<String, String> {
     let mut attempt = 0;
     let (sighash, signature) = loop {
         attempt += 1;
-        let (sighash, payload) = payload_paying(&spent, outputs.clone());
+        let (sighash, payload) = match nostr_kind {
+            Some(kind) => nostr_event(&group_pubkey, kind, salt, attempt),
+            None => payload_paying(&spent, outputs.clone()),
+        };
         let request = async {
-            if key_path {
+            if nostr_kind.is_some() {
+                node.request_signature_structured(
+                    sighash.to_vec(),
+                    MSG_TYPE_NOSTR_EVENT,
+                    Some(payload),
+                )
+                .await
+            } else if key_path {
                 node.request_key_path_spend(sighash.to_vec(), payload, vec![], Default::default())
                     .await
             } else {

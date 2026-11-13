@@ -89,14 +89,10 @@ internal enum class CosignApproval { APPROVED, NOT_AUTHENTICATED, NO_SCREEN_LOCK
 
 /**
  * Whether the usual approval applies: from the notification, and in the app with the
- * usual authentication. Only for a Nostr event the core rebuilt from its body and matched
- * against the bytes being signed. Anything else, a spend, an unverified label or bare
- * bytes, could be a Bitcoin spend and is approved only in the app with a fresh prompt.
- * A peer chooses whether to send a body, so this asks for the positive case rather than
- * the absence of a spend. To be replaced by the core's own per-request approval level.
+ * usual authentication. The core decides this per request. Anything it marks as needing
+ * a fresh authentication is approved only in the app with a fresh prompt.
  */
-internal fun SignRequest.usualApproval(): Boolean =
-    typeVerified && metadata?.eventKind != null && metadata?.spend == null
+internal fun SignRequest.usualApproval(): Boolean = !needsFreshAuth
 
 /** Shown with a request the core could not check: what it signs is unknown. */
 internal fun SignRequest.unverifiable(): Boolean = metadata == null
@@ -105,7 +101,7 @@ internal fun SignRequest.unverifiable(): Boolean = metadata == null
  * Whether approving [request] in the app is authorized. A request outside the usual
  * approval always asks for a strong biometric or the lock-screen credential now, never
  * reusing an earlier authentication, and is refused on a device with no secure lock, or
- * one whose lock state is unknown. A verified Nostr event keeps the [usual] authentication.
+ * one whose lock state is unknown. A request inside it keeps the [usual] authentication.
  */
 internal suspend fun authorizeCosign(
     request: SignRequest,
