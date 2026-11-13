@@ -146,6 +146,17 @@ class BunkerRevokeE2ETest {
             assertEquals(url1, awaitRunning(previous = null))
             assertOk(settled("sign", c1.secret, url1, "1", "30"))
 
+            // The kill switch refuses a sign the remembered grant would otherwise make with no
+            // prompt, on the running bunker, and signing comes back once it is released.
+            mobile.setKillSwitch(true)
+            val whileKilled = try {
+                settled("sign", c1.secret, url1, "1", "30")
+            } finally {
+                mobile.setKillSwitch(false)
+            }
+            assertFalse("the kill switch must refuse a remembered grant's sign; got: $whileKilled", whileKilled.startsWith("OK "))
+            assertOk(settled("sign", c1.secret, url1, "1", "30"))
+
             // A proxy change drops the core's node and stops its bunker. The app has to restart
             // the bunker, which serves again once a node is built, here with the decrypt
             // context the user's authentication would supply. The setting stays disabled and
