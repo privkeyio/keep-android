@@ -61,6 +61,9 @@ private class AuditAppendIncomplete : Exception("Audit append did not complete")
 /** A handler call its caller stopped waiting for. */
 internal class HandlerTimedOut : Exception("Handler call timed out")
 
+/** A result produced before the kill switch was engaged, held back from the caller. */
+private class SigningKilledBeforeDelivery : Exception("Signing is disabled (kill switch is active)")
+
 class Nip55ContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "Nip55ContentProvider"
@@ -524,6 +527,7 @@ class Nip55ContentProvider : ContentProvider() {
                     // is a real refusal here because the signature has not left the
                     // process, and it matches what the foreground path now does with
                     // a request it cannot record.
+                    if (app.isSigningKilled()) throw SigningKilledBeforeDelivery()
                     if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
                         throw AuditAppendIncomplete()
                     }
@@ -554,6 +558,8 @@ class Nip55ContentProvider : ContentProvider() {
                     if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
                     if (e is BiometricHelper.BiometricNotReadyException) {
                         errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+                    } else if (e is SigningKilledBeforeDelivery) {
+                        errorCursor("Signing is disabled (kill switch is active)", id)
                     } else {
                         errorCursor("Request failed", id)
                     }

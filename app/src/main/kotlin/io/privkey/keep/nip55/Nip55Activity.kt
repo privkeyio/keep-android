@@ -912,6 +912,7 @@ class Nip55Activity : FragmentActivity() {
         checkPubkey(request?.requestType, response.result, storage?.getShareMetadata()?.groupPubkey)
 
     private fun finishWithResult(response: Nip55Response) {
+        if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
         cancelAllNotifications()
         val req = request
 
@@ -937,6 +938,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithBatchResults(nip55Handler: Nip55Handler, responses: List<Nip55Response>) {
+        if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
         cancelAllNotifications()
         val json = runCatching { nip55Handler.serializeBatchResults(responses) }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to serialize batch results: ${it::class.simpleName}") }
