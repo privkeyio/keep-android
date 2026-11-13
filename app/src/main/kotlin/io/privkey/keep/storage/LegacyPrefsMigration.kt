@@ -45,10 +45,13 @@ object LegacyPrefsMigration {
                     is Long -> editor.putLong(key, value)
                     is Float -> editor.putFloat(key, value)
                     is Boolean -> editor.putBoolean(key, value)
-                    is Set<*> -> {
-                        @Suppress("UNCHECKED_CAST")
-                        editor.putStringSet(key, value as Set<String>)
-                    }
+                    // A member the new store cannot hold is dropped here rather than
+                    // refused, which would fail the whole migration and lose every key.
+                    is Set<*> -> editor.putStringSet(
+                        key,
+                        value.filterIsInstance<String>()
+                            .filterTo(mutableSetOf(), KeystoreEncryptedPrefs::canHoldSetMember)
+                    )
                 }
             }
 

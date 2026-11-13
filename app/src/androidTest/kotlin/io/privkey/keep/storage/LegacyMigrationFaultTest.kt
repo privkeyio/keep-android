@@ -33,7 +33,7 @@ class LegacyMigrationFaultTest {
 
     private fun wipe() {
         context.deleteSharedPreferences(TEST_PREFS)
-        markers().edit().remove(STRING_MARKER).commit()
+        markers().edit().remove(STRING_MARKER).remove(FILE_MARKER).commit()
     }
 
     private fun markers() = context.getSharedPreferences("keep_migration_markers", Context.MODE_PRIVATE)
@@ -107,8 +107,25 @@ class LegacyMigrationFaultTest {
         assertTrue(markers().getBoolean(STRING_MARKER, false))
     }
 
+    @Test
+    fun aLegacySetMemberTheNewStoreCannotHoldIsDroppedWithoutLosingTheRest() {
+        assertTrue(
+            legacyStore().edit()
+                .putStringSet("set", setOf("ok", "", "a\u0000b"))
+                .putString(KEY, "legacy-secret")
+                .commit()
+        )
+
+        val migrated = LegacyPrefsMigration.migrateIfNeeded(context, TEST_PREFS, newStore())
+
+        assertEquals(setOf("ok"), migrated.getStringSet("set", null))
+        assertEquals("legacy-secret", migrated.getString(KEY, null))
+        assertTrue(markers().getBoolean(FILE_MARKER, false))
+    }
+
     private companion object {
         const val TEST_PREFS = "test_legacy_migration_fault"
+        const val FILE_MARKER = "${TEST_PREFS}_migrated_v1"
         const val KEY = "secret"
         const val STRING_MARKER = "${TEST_PREFS}_${KEY}_migrated"
         val KEYSETS = listOf(
