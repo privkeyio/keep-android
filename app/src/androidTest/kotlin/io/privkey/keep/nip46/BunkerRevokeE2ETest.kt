@@ -154,7 +154,7 @@ class BunkerRevokeE2ETest {
             } finally {
                 mobile.setKillSwitch(false)
             }
-            assertFalse("the kill switch must refuse a remembered grant's sign; got: $whileKilled", whileKilled.startsWith("OK "))
+            assertEquals("the kill switch must refuse a remembered grant's sign", "ERR Permission denied", whileKilled)
             assertOk(settled("sign", c1.secret, url1, "1", "30"))
 
             // A proxy change drops the core's node and stops its bunker. The app has to restart
