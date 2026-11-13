@@ -582,7 +582,7 @@ fun MainScreen(
     var descriptorCount by remember { mutableIntStateOf(0) }
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
-    var certificatePins by remember { mutableStateOf(keepMobile.getCertificatePinsCompat()) }
+    var certificatePins by remember { mutableStateOf(emptyList<CertificatePin>()) }
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
     var showExportLogs by remember { mutableStateOf(false) }
@@ -697,6 +697,8 @@ fun MainScreen(
     suspend fun refreshCertificatePins() {
         certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
     }
+
+    LaunchedEffect(Unit) { refreshCertificatePins() }
 
     fun loadProfileRelays(accountKey: String?): List<String> {
         if (accountKey == null) return emptyList()
