@@ -62,7 +62,7 @@ class RelayAuthDecisionTest {
         } finally {
             mobile.setKillSwitch(false)
         }
-        assertTrue("an engaged kill switch must refuse, got $outcome", outcome is Nip55Outcome.Error)
+        assertEquals(Nip55Outcome.Error("Signing is disabled (kill switch is active)"), outcome)
         assertEquals(Nip55Outcome.AutoApprove, decide(exact = allow()))
     }
 
