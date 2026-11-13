@@ -163,31 +163,47 @@ internal class AuditLogWriter(private val database: Nip55Database) {
             auditDao.getLastPreviousHash()
         )
 
-    // Feeds the core's verifier a page at a time inside one read transaction, so the
-    // verdict is over one snapshot and the log is never held in memory at once, however
-    // far a calling app grows it. A failed read throws, which fails the verification.
-    private suspend fun scan(hmacKey: ByteArray, onRow: (Nip55AuditLog) -> Unit = {}): AuditChainScan =
-        database.withTransaction {
-            Nip55AuditChainVerifier(hmacKey).use { verifier ->
-                var count = 0L
-                var latest: Nip55AuditLog? = null
-                while (true) {
-                    val page = auditDao.getPageAfter(latest?.id ?: Long.MIN_VALUE, AUDIT_PAGE_SIZE)
-                    if (page.isEmpty()) break
-                    verifier.feed(page.map { it.toRustAuditEntry() })
-                    page.forEach(onRow)
-                    count += page.size
-                    latest = page.last()
+    // Feeds the core's verifier a page at a time, so the log is never held in memory at
+    // once, however far a calling app grows it. Callers hold [mutex], which every write of
+    // this table takes, so the pages are one snapshot without a transaction holding the
+    // database's write lock through the walk. Rows the walk would not reach, and ids that
+    // do not climb, are tamper, and the walk stops at the counted rows so a rebuilt table
+    // cannot keep it going. A failed read throws, which fails the verification.
+    private suspend fun scan(hmacKey: ByteArray, onRow: (Nip55AuditLog) -> Unit = {}): AuditChainScan {
+        val rows = auditDao.getCount().toLong()
+        return Nip55AuditChainVerifier(hmacKey).use { verifier ->
+            var count = 0L
+            var latest: Nip55AuditLog? = null
+            var walked = true
+            while (true) {
+                val page = auditDao.getPageAfter(latest?.id, AUDIT_PAGE_SIZE)
+                if (page.isEmpty()) break
+                val previousId = latest?.id
+                val climbs = (previousId == null || page.first().id > previousId) &&
+                    page.zipWithNext().all { (a, b) -> a.id < b.id }
+                count += page.size
+                latest = page.last()
+                if (!climbs || count > rows) {
+                    walked = false
+                    break
                 }
-                AuditChainScan(
-                    result = verifier.finish(null).toChainVerificationResult(),
-                    count = count,
-                    latestId = latest?.id ?: 0L,
-                    latestHash = latest?.entryHash ?: "",
-                    latestPreviousHash = latest?.previousHash
-                )
+                verifier.feed(page.map { it.toRustAuditEntry() })
+                page.forEach(onRow)
             }
+            val result = if (walked && count == rows) {
+                verifier.finish(null).toChainVerificationResult()
+            } else {
+                ChainVerificationResult.Tampered(latest?.id ?: 0L)
+            }
+            AuditChainScan(
+                result = result,
+                count = count,
+                latestId = latest?.id ?: 0L,
+                latestHash = latest?.entryHash ?: "",
+                latestPreviousHash = latest?.previousHash
+            )
         }
+    }
 
     private suspend fun advanceAnchor() {
         Nip55Database.setAuditAnchor(

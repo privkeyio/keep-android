@@ -223,7 +223,7 @@ class RiskAssessorInstrumentedTest {
         override suspend fun getLastUsedTimeForPermission(callerPackage: String, requestType: String, eventKind: Int): Long? = null
         override suspend fun getLastEntryHash(): String? = null
         override suspend fun getLastPreviousHash(): String? = null
-        override suspend fun getPageAfter(afterId: Long, limit: Int): List<Nip55AuditLog> = emptyList()
+        override suspend fun getPageAfter(afterId: Long?, limit: Int): List<Nip55AuditLog> = emptyList()
         override suspend fun getCount(): Int = 0
         override suspend fun countSince(packageName: String, since: Long): Int = recentCount
         override suspend fun deleteAll() {}

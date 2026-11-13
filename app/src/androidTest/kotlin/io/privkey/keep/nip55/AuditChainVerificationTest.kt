@@ -147,6 +147,25 @@ class AuditChainVerificationTest {
     }
 
     @Test
+    fun aRowForgedAtTheLowestPossibleIdIsNotSkipped() = runBlocking {
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+
+        database.openHelper.writableDatabase.execSQL(
+            "INSERT INTO nip55_audit_log (id, timestamp, callerPackage, requestType, eventKind, decision, wasAutomatic, previousHash, entryHash, requestId) " +
+                "VALUES (?, 0, 'com.forged.app', 'SIGN_EVENT', 1, 'allow', 0, NULL, '', NULL)",
+            arrayOf<Any?>(Long.MIN_VALUE)
+        )
+
+        val result = store.verifyAuditChain()
+        assertTrue(
+            "expected a forged row to fail verification but was $result",
+            result !is ChainVerificationResult.Valid && result !is ChainVerificationResult.PartiallyVerified
+        )
+    }
+
+    @Test
     fun anUnreadableAnchorCountIsTamperRatherThanAnUnpinnedChain() = runBlocking {
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
