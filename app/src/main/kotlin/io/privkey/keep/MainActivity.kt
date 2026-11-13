@@ -703,6 +703,10 @@ fun MainScreen(
         return runCatching { keepMobile.getRelayConfig(accountKey).profileRelays }.getOrDefault(emptyList())
     }
 
+    suspend fun storedRelayConfig(): RelayConfigInfo? = withContext(Dispatchers.IO) {
+        runCatching { keepMobile.getRelayConfig(storage.getActiveShareKey()) }.getOrNull()
+    }
+
     suspend fun saveProfileRelays(updated: List<String>) {
         val key = withContext(Dispatchers.IO) { storage.getActiveShareKey() } ?: return
         withContext(Dispatchers.IO) {
@@ -1897,10 +1901,11 @@ fun MainScreen(
                             coroutineScope.launch {
                                 val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
                                 if (check == RelayHostCheck.REACHABLE) {
-                                    val previous = relays
-                                    val updated = previous + relay
+                                    val updated = relays + relay
                                     relays = updated
-                                    if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) relays = previous
+                                    if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) {
+                                        relays = storedRelayConfig()?.frostRelays ?: (relays - relay)
+                                    }
                                 } else {
                                     showRelayHostCheckToast(appContext, check)
                                 }
@@ -1908,11 +1913,12 @@ fun MainScreen(
                         }
                     },
                     onRemoveRelay = { relay ->
-                        val previous = relays
-                        val updated = previous - relay
+                        val updated = relays - relay
                         relays = updated
                         coroutineScope.launch {
-                            if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) relays = previous
+                            if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) {
+                                relays = storedRelayConfig()?.frostRelays ?: (relays + relay)
+                            }
                         }
                     },
                     onAddProfileRelay = { relay ->
@@ -1920,10 +1926,11 @@ fun MainScreen(
                             coroutineScope.launch {
                                 val check = withContext(Dispatchers.IO) { checkRelayHost(relay) }
                                 if (check == RelayHostCheck.REACHABLE) {
-                                    val previous = profileRelays
-                                    val updated = previous + relay
+                                    val updated = profileRelays + relay
                                     profileRelays = updated
-                                    if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) profileRelays = previous
+                                    if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) {
+                                        profileRelays = storedRelayConfig()?.profileRelays ?: (profileRelays - relay)
+                                    }
                                 } else {
                                     showRelayHostCheckToast(appContext, check)
                                 }
@@ -1931,11 +1938,12 @@ fun MainScreen(
                         }
                     },
                     onRemoveProfileRelay = { relay ->
-                        val previous = profileRelays
-                        val updated = previous - relay
+                        val updated = profileRelays - relay
                         profileRelays = updated
                         coroutineScope.launch {
-                            if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) profileRelays = previous
+                            if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) {
+                                profileRelays = storedRelayConfig()?.profileRelays ?: (profileRelays + relay)
+                            }
                         }
                     },
                     onResetRelayConfig = {
