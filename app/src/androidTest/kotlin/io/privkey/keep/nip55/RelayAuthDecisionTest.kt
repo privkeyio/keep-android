@@ -66,7 +66,7 @@ class RelayAuthDecisionTest {
     @Test
     fun anUnlistedRelayIsRejectedEvenWithAStandingPermission() {
         store.add("other.example.com")
-        assertEquals(Nip55Outcome.Reject("deny_relay_whitelist"), decide(exact = allow()))
+        assertEquals(Nip55Outcome.Reject("deny_relay_whitelist", false), decide(exact = allow()))
     }
 
     private fun allow() = Nip55StoredPermission(

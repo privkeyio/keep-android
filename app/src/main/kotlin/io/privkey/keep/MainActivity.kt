@@ -317,6 +317,7 @@ class MainActivity : FragmentActivity() {
                                 app.updateBunkerService(enabled)
                             },
                             onReconnectRelays = { app.reconnectRelays() },
+                            onSaveProxyConfig = app::saveProxyConfig,
                             onClearCertificatePin = app::clearCertificatePin,
                             onClearAllCertificatePins = app::clearAllCertificatePins,
                             onStageCertificatePin = app::stageCertificatePin,
@@ -442,6 +443,7 @@ fun MainScreen(
     onForegroundServiceChanged: (Boolean) -> Unit = {},
     onBunkerServiceChanged: (Boolean) -> Unit = {},
     onReconnectRelays: () -> Unit = {},
+    onSaveProxyConfig: (ProxyConfigInfo) -> Unit,
     onClearCertificatePin: (String) -> Unit = {},
     onClearAllCertificatePins: () -> Unit = {},
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
@@ -1987,7 +1989,7 @@ fun MainScreen(
                     onProxyActivate = { port ->
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
-                                keepMobile.saveProxyConfig(ProxyConfigInfo(true, port.toUShort()))
+                                onSaveProxyConfig(ProxyConfigInfo(true, port.toUShort()))
                             }
                             proxyEnabled = true
                             proxyPort = port
@@ -1997,7 +1999,7 @@ fun MainScreen(
                     onProxyDeactivate = {
                         coroutineScope.launch {
                             withContext(Dispatchers.IO) {
-                                keepMobile.saveProxyConfig(ProxyConfigInfo(false, proxyPort.toUShort()))
+                                onSaveProxyConfig(ProxyConfigInfo(false, proxyPort.toUShort()))
                             }
                             proxyEnabled = false
                             if (isConnected) onReconnectRelays()

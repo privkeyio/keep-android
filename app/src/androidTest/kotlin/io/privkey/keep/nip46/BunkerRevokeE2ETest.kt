@@ -42,6 +42,7 @@ import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.BunkerRememberDuration
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
+import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.parseBunkerUrl
 import io.privkey.keep.uniffi.truncateStr
@@ -143,6 +144,21 @@ class BunkerRevokeE2ETest {
             stopService()
             BunkerService.start(context)
             assertEquals(url1, awaitRunning(previous = null))
+            assertOk(settled("sign", c1.secret, url1, "1", "30"))
+
+            // A proxy change drops the core's node and stops its bunker. The app has to restart
+            // the bunker, which serves again once a node is built, here with the decrypt
+            // context the user's authentication would supply. The setting stays disabled and
+            // only the port moves, so no proxy has to exist.
+            val proxy = checkNotNull(saved.proxy)
+            try {
+                app.saveProxyConfig(ProxyConfigInfo(false, (proxy.port.toInt() % 65_000 + 1).toUShort()))
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-proxy-init")
+                assertOk(settled("sign", c1.secret, url1, "1", "30"))
+            } finally {
+                app.saveProxyConfig(proxy)
+                FrostSignTestSupport.initializeWithDecryptContext(mobile, storage, "bunker-e2e-proxy-restore")
+            }
             assertOk(settled("sign", c1.secret, url1, "1", "30"))
 
             // At the client cap, a connect that holds the bunker secret is refused and granted nothing.
@@ -684,6 +700,7 @@ class BunkerRevokeE2ETest {
         val denylist: Set<String>,
         val marker: Boolean,
         val revokeAllMark: Boolean,
+        val proxy: ProxyConfigInfo?,
     ) {
         /** Restores each part on its own, so one failure does not skip the rest. Returns the failures. */
         fun restore(
@@ -698,6 +715,7 @@ class BunkerRevokeE2ETest {
                 failures += "$name: $it"
             }
             step("relay config") { mobile.saveRelayConfig(null, relays) }
+            proxy?.let { step("proxy config") { mobile.saveProxyConfig(it) } }
             step("bunker config") { mobile.saveBunkerConfig(bunker) }
             step("denylist") { Nip46ClientStore.setDenylistForTest(context, denylist) }
             step("bunker markers") {
@@ -726,6 +744,7 @@ class BunkerRevokeE2ETest {
                 .put("denylist", JSONArray(denylist.toList()))
                 .put("marker", marker)
                 .put("revokeAllMark", revokeAllMark)
+            proxy?.let { json.put("proxyEnabled", it.enabled).put("proxyPort", it.port.toInt()) }
             val tmp = File(file.path + ".tmp")
             tmp.writeText(json.toString())
             check(tmp.renameTo(file))
@@ -741,6 +760,7 @@ class BunkerRevokeE2ETest {
                     .getBoolean(BunkerService.KEY_ROTATED_FOR_EARLIER_REVOKES, false),
                 revokeAllMark = context.getSharedPreferences(BunkerService.BUNKER_MARKERS_PREFS, Context.MODE_PRIVATE)
                     .getBoolean(BunkerService.KEY_REVOKE_ALL_ON_START, false),
+                proxy = mobile.getProxyConfig(),
             )
 
             fun readFrom(file: File): SavedState {
@@ -753,6 +773,12 @@ class BunkerRevokeE2ETest {
                     denylist = list("denylist").toSet(),
                     marker = json.getBoolean("marker"),
                     revokeAllMark = json.optBoolean("revokeAllMark", false),
+                    // Absent in a file saved before the proxy step existed, which never changed it.
+                    proxy = if (json.has("proxyPort")) {
+                        ProxyConfigInfo(json.getBoolean("proxyEnabled"), json.getInt("proxyPort").toUShort())
+                    } else {
+                        null
+                    },
                 )
             }
         }
