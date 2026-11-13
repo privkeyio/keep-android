@@ -50,7 +50,7 @@ object LegacyPrefsMigration {
                     is Set<*> -> editor.putStringSet(
                         key,
                         value.filterIsInstance<String>()
-                            .filterTo(mutableSetOf()) { it.isNotEmpty() && '\u0000' !in it }
+                            .filterTo(mutableSetOf(), KeystoreEncryptedPrefs::canHoldSetMember)
                     )
                 }
             }

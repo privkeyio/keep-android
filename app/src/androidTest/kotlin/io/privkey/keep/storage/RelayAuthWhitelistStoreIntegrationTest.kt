@@ -53,6 +53,9 @@ class RelayAuthWhitelistStoreIntegrationTest {
     fun rejectsUnnormalizableInput() {
         assertEquals(RelayAuthWhitelistStore.AddResult.InvalidHost, store.add("   "))
         assertEquals(RelayAuthWhitelistStore.AddResult.InvalidHost, store.add(""))
+        // The normalizer passes NUL through, and the stored set is joined on it, so
+        // this would otherwise be refused by the store and crash the caller.
+        assertEquals(RelayAuthWhitelistStore.AddResult.InvalidHost, store.add("wss://evil\u0000relay.example.com"))
         assertTrue(store.hosts().isEmpty())
     }
 

@@ -46,6 +46,13 @@ object KeystoreEncryptedPrefs {
     private const val PREFIX_BOOL = "b:"
     private const val PREFIX_STRING_SET = "ss:"
     private const val STRING_SET_DELIMITER = "\u0000"
+
+    /**
+     * Members are joined on NUL and empty ones are dropped on read, so a member failing
+     * this would come back as a different set.
+     */
+    internal fun canHoldSetMember(member: String): Boolean =
+        member.isNotEmpty() && STRING_SET_DELIMITER !in member
     private const val KEY_REGISTRY = "__keys__"
     private const val KEY_REGISTRY_DELIMITER = "\u0000"
     private const val HMAC_KEY_PREF = "__hmac_key__"
@@ -1208,9 +1215,7 @@ object KeystoreEncryptedPrefs {
 
             override fun putStringSet(key: String, values: MutableSet<String>?): SharedPreferences.Editor {
                 if (values == null) return remove(key)
-                // Members are joined on NUL and empty ones are dropped on read, so either
-                // would come back as a different set.
-                require(values.none { it.isEmpty() || it.contains(STRING_SET_DELIMITER) }) {
+                require(values.all(::canHoldSetMember)) {
                     "string set members must be non-empty and free of NUL"
                 }
                 pendingPuts[key] = values

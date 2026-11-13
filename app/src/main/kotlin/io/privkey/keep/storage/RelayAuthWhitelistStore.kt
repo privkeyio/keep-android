@@ -69,7 +69,9 @@ class RelayAuthWhitelistStore(context: Context) {
     /** Normalizes [rawUrl] and adds it. */
     @Synchronized
     fun add(rawUrl: String): AddResult {
-        val host = nip55NormalizeRelayHost(rawUrl) ?: return AddResult.InvalidHost
+        val host = nip55NormalizeRelayHost(rawUrl)
+            ?.takeIf(KeystoreEncryptedPrefs::canHoldSetMember)
+            ?: return AddResult.InvalidHost
         val current = when (val read = prefs.readStringSet(KEY_HOSTS)) {
             is PrefRead.Found -> read.value.toMutableSet()
             PrefRead.Absent -> mutableSetOf()

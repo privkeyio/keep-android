@@ -941,6 +941,9 @@ class AndroidKeystoreStorage(
 
     private fun storeShareByKeyUnguarded(key: String, data: ByteArray, metadata: ShareMetadataInfo) {
         require(key.isNotBlank()) { "Share key must not be blank" }
+        // Checked before anything is written: the registry cannot list it, so the share
+        // would otherwise land on disk unlisted.
+        require(KeystoreEncryptedPrefs.canHoldSetMember(key)) { "Share key must not contain NUL" }
         require(data.isNotEmpty()) { "Share data must not be empty" }
         if (isDkgSecretKey(key)) {
             storeDkgSecret(data)
