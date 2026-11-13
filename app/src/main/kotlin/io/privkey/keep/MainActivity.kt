@@ -274,7 +274,7 @@ class MainActivity : FragmentActivity() {
                             lifecycleOwner = this@MainActivity,
                             biometricStatus = biometricStatus,
                             onRelaysChanged = { relays ->
-                                lifecycleScope.launch { app.initializeWithRelays(relays) }
+                                app.initializeWithRelays(relays)
                             },
                             onConnect = { cipher, onResult ->
                                 app.connectWithCipher(
@@ -377,6 +377,14 @@ private fun showRelayHostCheckToast(context: Context, result: RelayHostCheck) {
     Toast.makeText(context, resId, Toast.LENGTH_LONG).show()
 }
 
+internal suspend fun saveRelaysOrToast(context: Context, save: suspend () -> Unit): Boolean =
+    runCatching { save() }
+        .onFailure {
+            if (it is CancellationException) throw it
+            Toast.makeText(context, R.string.connections_bunker_toast_save_relay_failed, Toast.LENGTH_LONG).show()
+        }
+        .isSuccess
+
 /** Outcome of the pending-DKG gate that guards entry into the group-creation ceremony. */
 enum class GroupCreationGate { WAIT, BLOCK, ALLOW }
 
@@ -434,7 +442,7 @@ fun MainScreen(
     permissionStore: PermissionStore,
     securityLevel: String,
     lifecycleOwner: LifecycleOwner,
-    onRelaysChanged: (List<String>) -> Unit,
+    onRelaysChanged: suspend (List<String>) -> Unit,
     onConnect: (Cipher, (Boolean, String?) -> Unit) -> Unit,
     onBiometricRequest: (String, String, Cipher, (Cipher?) -> Unit) -> Unit,
     biometricStatus: BiometricHelper.BiometricStatus = BiometricHelper.BiometricStatus.NOT_AVAILABLE,
@@ -693,6 +701,10 @@ fun MainScreen(
     fun loadProfileRelays(accountKey: String?): List<String> {
         if (accountKey == null) return emptyList()
         return runCatching { keepMobile.getRelayConfig(accountKey).profileRelays }.getOrDefault(emptyList())
+    }
+
+    suspend fun storedRelayConfig(): RelayConfigInfo? = withContext(Dispatchers.IO) {
+        runCatching { keepMobile.getRelayConfig(storage.getActiveShareKey()) }.getOrNull()
     }
 
     suspend fun saveProfileRelays(updated: List<String>) {
@@ -1891,7 +1903,9 @@ fun MainScreen(
                                 if (check == RelayHostCheck.REACHABLE) {
                                     val updated = relays + relay
                                     relays = updated
-                                    onRelaysChanged(updated)
+                                    if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) {
+                                        relays = storedRelayConfig()?.frostRelays ?: (relays - relay)
+                                    }
                                 } else {
                                     showRelayHostCheckToast(appContext, check)
                                 }
@@ -1901,7 +1915,11 @@ fun MainScreen(
                     onRemoveRelay = { relay ->
                         val updated = relays - relay
                         relays = updated
-                        onRelaysChanged(updated)
+                        coroutineScope.launch {
+                            if (!saveRelaysOrToast(appContext) { onRelaysChanged(updated) }) {
+                                relays = storedRelayConfig()?.frostRelays ?: (relays + relay)
+                            }
+                        }
                     },
                     onAddProfileRelay = { relay ->
                         if (!profileRelays.contains(relay) && profileRelays.size < 20) {
@@ -1910,7 +1928,9 @@ fun MainScreen(
                                 if (check == RelayHostCheck.REACHABLE) {
                                     val updated = profileRelays + relay
                                     profileRelays = updated
-                                    saveProfileRelays(updated)
+                                    if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) {
+                                        profileRelays = storedRelayConfig()?.profileRelays ?: (profileRelays - relay)
+                                    }
                                 } else {
                                     showRelayHostCheckToast(appContext, check)
                                 }
@@ -1920,7 +1940,11 @@ fun MainScreen(
                     onRemoveProfileRelay = { relay ->
                         val updated = profileRelays - relay
                         profileRelays = updated
-                        coroutineScope.launch { saveProfileRelays(updated) }
+                        coroutineScope.launch {
+                            if (!saveRelaysOrToast(appContext) { saveProfileRelays(updated) }) {
+                                profileRelays = storedRelayConfig()?.profileRelays ?: (profileRelays + relay)
+                            }
+                        }
                     },
                     onResetRelayConfig = {
                         val confirmedKey = activeAccountKey
