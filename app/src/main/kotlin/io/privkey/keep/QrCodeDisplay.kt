@@ -38,7 +38,6 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import io.privkey.keep.BuildConfig
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -253,13 +252,17 @@ fun QrCodeDisplay(
     onTapToCopy: (() -> Unit)? = null,
     onCopied: () -> Unit = {}
 ) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = data) {
+    val bitmapState = produceState<Bitmap?>(initialValue = null, key1 = data) {
         value = null
         value = generateQrCodes(listOf(data)).firstOrNull()
     }
+    val bitmap = bitmapState.value
     DisposableEffect(bitmap) {
-        val shown = bitmap
-        onDispose { shown?.wipe() }
+        onDispose { bitmap?.wipe() }
+    }
+    // Catches a bitmap written in the same frame the screen leaves, before the keyed effect sees it.
+    DisposableEffect(Unit) {
+        onDispose { bitmapState.value?.wipe() }
     }
 
     QrDisplayContainer(
@@ -304,6 +307,9 @@ fun AnimatedQrCodeDisplay(
     DisposableEffect(bitmaps) {
         val shown = bitmaps
         onDispose { shown.forEach { it.wipe() } }
+    }
+    DisposableEffect(Unit) {
+        onDispose { bitmaps.forEach { it.wipe() } }
     }
 
     val currentFrame = rememberAnimatedFrameIndex(bitmaps.size)
@@ -355,13 +361,16 @@ internal fun Bitmap.wipe() {
 }
 
 // withContext returns only after its block finishes, so a cancelled caller still sees and wipes what was made.
-private suspend fun generateQrCodes(contents: List<String>): List<Bitmap> {
+internal suspend fun generateQrCodes(
+    contents: List<String>,
+    generate: (String) -> Bitmap? = ::generateQrCode
+): List<Bitmap> {
     val made = ArrayList<Bitmap>(contents.size)
     try {
-        withContext(Dispatchers.Default) { contents.mapNotNullTo(made, ::generateQrCode) }
-    } catch (e: CancellationException) {
+        withContext(Dispatchers.Default) { contents.mapNotNullTo(made, generate) }
+    } catch (t: Throwable) {
         made.forEach { it.wipe() }
-        throw e
+        throw t
     }
     return made
 }

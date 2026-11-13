@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.privkey.keep.ui.theme.KeepAndroidTheme
@@ -16,6 +17,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 
 @RunWith(AndroidJUnit4::class)
 class QrBitmapWipeTest {
@@ -47,6 +55,9 @@ class QrBitmapWipeTest {
         compose.waitForIdle()
         compose.waitUntil(10_000) {
             compose.onAllNodesWithContentDescription("single-qr").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("of 3", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithContentDescription("animated-qr").assertExists()
         shown = false
@@ -82,5 +93,28 @@ class QrBitmapWipeTest {
         assertFalse(immutable.isMutable)
         immutable.wipe()
         assertTrue(immutable.isRecycled)
+    }
+
+    @Test
+    fun qrCodesMadeForACallerCancelledMidGenerationAreWiped() = runBlocking {
+        val made = mutableListOf<Bitmap>()
+        val firstMade = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val job = async(Dispatchers.IO) {
+            generateQrCodes(listOf("frame-1", "frame-2")) { content ->
+                if (content == "frame-2") {
+                    firstMade.complete(Unit)
+                    release.await(10, TimeUnit.SECONDS)
+                }
+                generateQrCode(content)!!.also { synchronized(made) { made += it } }
+            }
+        }
+        firstMade.await()
+        job.cancel()
+        release.countDown()
+        val thrown = runCatching { job.await() }.exceptionOrNull()
+        assertTrue(thrown is CancellationException)
+        assertTrue(made.size == 2)
+        assertTrue("every bitmap made for a cancelled caller is wiped", made.all { it.isRecycled })
     }
 }
