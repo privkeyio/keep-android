@@ -122,6 +122,50 @@ class AuditChainVerificationTest {
     }
 
     @Test
+    fun aLogOfSeveralPagesVerifiesAndATamperedRowOnALaterPageIsPinpointed() = runBlocking {
+        val total = AuditLogWriter.AUDIT_PAGE_SIZE * 2 + 3
+        store.logOperation("com.first.app", Nip55RequestType.SIGN_EVENT, 7, "allow", wasAutomatic = false)
+        repeat(total - 2) {
+            store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        }
+        store.logOperation("com.last.app", Nip55RequestType.SIGN_EVENT, 7, "allow", wasAutomatic = false)
+        assertEquals(total, store.getAuditLogCount())
+
+        // Familiarity is built from the paged walk, so rows on the first and last pages count.
+        assertTrue(store.hasSignedKindBefore("com.first.app", 7))
+        assertTrue(store.hasSignedKindBefore("com.last.app", 7))
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+
+        val rows = store.getAuditLog(total).sortedBy { it.id }
+        val tampered = rows[AuditLogWriter.AUDIT_PAGE_SIZE + 5]
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE nip55_audit_log SET decision = 'deny' WHERE id = ?",
+            arrayOf<Any?>(tampered.id)
+        )
+
+        assertEquals(ChainVerificationResult.Tampered(tampered.id), store.verifyAuditChain())
+    }
+
+    @Test
+    fun aRowForgedAtTheLowestPossibleIdIsNotSkipped() = runBlocking {
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
+        assertEquals(ChainVerificationResult.Valid, store.verifyAuditChain())
+
+        database.openHelper.writableDatabase.execSQL(
+            "INSERT INTO nip55_audit_log (id, timestamp, callerPackage, requestType, eventKind, decision, wasAutomatic, previousHash, entryHash, requestId) " +
+                "VALUES (?, 0, 'com.forged.app', 'SIGN_EVENT', 1, 'allow', 0, NULL, '', NULL)",
+            arrayOf<Any?>(Long.MIN_VALUE)
+        )
+
+        val result = store.verifyAuditChain()
+        assertTrue(
+            "expected a forged row to fail verification but was $result",
+            result !is ChainVerificationResult.Valid && result !is ChainVerificationResult.PartiallyVerified
+        )
+    }
+
+    @Test
     fun anUnreadableAnchorCountIsTamperRatherThanAnUnpinnedChain() = runBlocking {
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)
         store.logOperation("com.test.app", Nip55RequestType.SIGN_EVENT, 1, "allow", wasAutomatic = false)

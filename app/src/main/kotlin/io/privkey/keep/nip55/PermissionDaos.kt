@@ -167,8 +167,9 @@ interface Nip55AuditLogDao {
     @Query("SELECT previousHash FROM nip55_audit_log ORDER BY id DESC LIMIT 1")
     suspend fun getLastPreviousHash(): String?
 
-    @Query("SELECT * FROM nip55_audit_log ORDER BY id ASC")
-    suspend fun getAllOrdered(): List<Nip55AuditLog>
+    // A null cursor is the first page, so no id, not even Long.MIN_VALUE, is left out.
+    @Query("SELECT * FROM nip55_audit_log WHERE :afterId IS NULL OR id > :afterId ORDER BY id ASC LIMIT :limit")
+    suspend fun getPageAfter(afterId: Long?, limit: Int): List<Nip55AuditLog>
 
     @Query("SELECT COUNT(*) FROM nip55_audit_log")
     suspend fun getCount(): Int
