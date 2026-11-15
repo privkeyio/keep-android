@@ -534,6 +534,11 @@ class Nip55Activity : FragmentActivity() {
                             finishWithError(pubkeyError)
                             return@onSuccess
                         }
+                        if (keepApp?.isSigningKilled() != false) {
+                            store?.logOperation(callerId, req.requestType, eventKind, "signing_disabled", wasAutomatic = false)
+                            finishWithError("signing_disabled")
+                            return@onSuccess
+                        }
                         recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, relayScope))
                         // On a get_public_key connect, grant the checked pre-declared
                         // permission bundle so the ContentProvider can answer those
@@ -605,6 +610,11 @@ class Nip55Activity : FragmentActivity() {
                     val result = signOneRequest(req, null, nip55Handler, callerId, keystoreStorage, currentApp)
                     result
                         .onSuccess { response ->
+                            if (keepApp?.isSigningKilled() != false) {
+                                store?.logOperation(callerId, req.requestType, eventKind, "signing_disabled", wasAutomatic = false)
+                                responses.add(Nip55Response(result = "", event = null, error = "request_failed", id = item.requestId, rejected = true))
+                                return@onSuccess
+                            }
                             // Batch has no per-event scope toggle; relay-auth events grant
                             // to their specific relay (the secure default).
                             recordGrantAndTrust(store, callerId, req, eventKind, duration, relayScopeForGrant(req, RelayAuthScope.SPECIFIC))
@@ -818,7 +828,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun mapErrorToUserMessage(error: String): String = when (error) {
-        "signing_disabled" -> "Signing is disabled (kill switch is active)"
+        "signing_disabled" -> KILL_SWITCH_MESSAGE
         "locked" -> "Keep is locked, please unlock it first"
         "unknown_caller" -> "Request from unverified app"
         "store_unavailable" -> STORE_UNAVAILABLE_MESSAGE
@@ -912,7 +922,7 @@ class Nip55Activity : FragmentActivity() {
         checkPubkey(request?.requestType, response.result, storage?.getShareMetadata()?.groupPubkey)
 
     private fun finishWithResult(response: Nip55Response) {
-        if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
+        if (keepApp?.isSigningKilled() != false) return finishWithError("signing_disabled")
         cancelAllNotifications()
         val req = request
 
@@ -938,7 +948,7 @@ class Nip55Activity : FragmentActivity() {
     }
 
     private fun finishWithBatchResults(nip55Handler: Nip55Handler, responses: List<Nip55Response>) {
-        if (keepApp?.isSigningKilled() == true) return finishWithError("signing_disabled")
+        if (responses.any { !it.rejected } && keepApp?.isSigningKilled() != false) return finishWithError("signing_disabled")
         cancelAllNotifications()
         val json = runCatching { nip55Handler.serializeBatchResults(responses) }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to serialize batch results: ${it::class.simpleName}") }
