@@ -144,7 +144,6 @@ fun ApprovalScreen(
 ) {
     val context = LocalContext.current
     var isLoading by remember { mutableStateOf(false) }
-    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     val eventPreview = remember(request) {
         if (request.requestType == Nip55RequestType.SIGN_EVENT) parseEventPreview(request.content) else null
@@ -153,6 +152,10 @@ fun ApprovalScreen(
     val relayAuthHost = remember(request) {
         if (request.eventKind() == KIND_NIP42_AUTH) nip55ExtractRelayHost(request.content) else null
     }
+    // A relay auth whose relay cannot be read has nothing to scope a remembered
+    // choice to, so it is only ever answered once.
+    val unreadableRelayAuth = request.eventKind() == KIND_NIP42_AUTH && relayAuthHost == null
+    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null && !unreadableRelayAuth
     var relayScope by remember { mutableStateOf(RelayAuthScope.SPECIFIC) }
     // A client MAY pre-declare a permission bundle alongside get_public_key; the
     // user picks which to grant. Parsing/validation happens in Rust.

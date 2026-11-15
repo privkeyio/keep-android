@@ -1,6 +1,7 @@
 package io.privkey.keep.nip55
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -200,5 +201,40 @@ class Nip55ApprovalScreenTest {
 
         compose.onNodeWithText(context.getString(R.string.nip55_unverified_caller_warning))
             .assertIsDisplayed()
+    }
+
+    private fun relayAuthRequest(relay: String) = signEventRequest().copy(
+        content = """{"kind":22242,"content":"","tags":[["relay","$relay"],["challenge","c"]]}"""
+    )
+
+    private fun rememberChoiceCount(relay: String): Int {
+        var duration: PermissionDuration? = null
+        compose.setContent {
+            KeepAndroidTheme {
+                ApprovalScreen(
+                    request = relayAuthRequest(relay),
+                    callerPackage = "com.example.client",
+                    callerVerified = true,
+                    onApprove = { d, _, _ -> duration = d },
+                    onReject = { _, _ -> }
+                )
+            }
+        }
+        val count = compose.onAllNodesWithText(context.getString(R.string.connections_nip55_remember_choice))
+            .fetchSemanticsNodes().size
+        compose.onNodeWithText(context.getString(R.string.connections_nip55_approve)).performClick()
+        compose.waitForIdle()
+        assertEquals(PermissionDuration.JUST_THIS_TIME, duration)
+        return count
+    }
+
+    @Test
+    fun relayAuth_withAReadableRelay_offersToRememberTheChoice() {
+        assertEquals(1, rememberChoiceCount("wss://relay.example.com"))
+    }
+
+    @Test
+    fun relayAuth_withoutAReadableRelay_isOnlyAnsweredOnce() {
+        assertEquals(0, rememberChoiceCount("https://relay.example.com"))
     }
 }

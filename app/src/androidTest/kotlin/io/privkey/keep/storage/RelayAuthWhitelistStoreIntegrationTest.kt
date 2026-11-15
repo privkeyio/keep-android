@@ -59,6 +59,9 @@ class RelayAuthWhitelistStoreIntegrationTest {
             "wss://relay .example.com",
             "wss://relay%2eexample.com",
             "wss://*",
+            "https://relay.example.com",
+            "wss:/relay.example.com",
+            "wss://relay.example.com:0",
         )) {
             assertEquals(url, RelayAuthWhitelistStore.AddResult.InvalidHost, store.add(url))
         }

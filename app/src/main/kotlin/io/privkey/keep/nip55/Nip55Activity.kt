@@ -674,10 +674,11 @@ class Nip55Activity : FragmentActivity() {
 
     // Resolves the relay scope to persist for a grant. Only kind-22242 (NIP-42) carries
     // a relay: ALL -> the wildcard; SPECIFIC -> the event's relay host. If the host
-    // can't be extracted (missing/empty/multi relay tag) we fall back to RELAY_NONE,
-    // NOT the wildcard: extraction fails identically at lookup time, so a RELAY_NONE
-    // grant re-matches only the same malformed event (fail-closed) and never grants
-    // other relays. Every non-22242 request grants with no relay scope.
+    // can't be extracted (missing/empty/multi relay tag) this falls back to RELAY_NONE,
+    // NOT the wildcard. Every relay auth without a readable relay would share that one
+    // scope, so no allow is remembered for it (see recordGrantAndTrust) and the core
+    // asks for each one even with a stored allow. Every non-22242 request grants with
+    // no relay scope.
     private fun relayScopeForGrant(req: Nip55Request, scope: RelayAuthScope?): String {
         if (req.requestType != Nip55RequestType.SIGN_EVENT || req.eventKind() != KIND_NIP42_AUTH) {
             return RELAY_NONE
@@ -694,10 +695,12 @@ class Nip55Activity : FragmentActivity() {
         duration: PermissionDuration,
         relay: String = RELAY_NONE
     ) {
+        val unreadableRelayAuth = eventKind == KIND_NIP42_AUTH && relay == RELAY_NONE
+        val kept = if (unreadableRelayAuth) PermissionDuration.JUST_THIS_TIME else duration
         val permResult = runCatching {
-            store?.grantPermission(callerId, req.requestType, eventKind, duration, relay)
-            if (eventKind != null && !isSensitiveKind(eventKind) && duration != PermissionDuration.JUST_THIS_TIME && !req.requestType.isNip44V3()) {
-                store?.grantPermission(callerId, req.requestType, null, duration)
+            store?.grantPermission(callerId, req.requestType, eventKind, kept, relay)
+            if (eventKind != null && !isSensitiveKind(eventKind) && kept != PermissionDuration.JUST_THIS_TIME && !req.requestType.isNip44V3()) {
+                store?.grantPermission(callerId, req.requestType, null, kept)
             }
 
             if (callerPendingFirstUse) {
