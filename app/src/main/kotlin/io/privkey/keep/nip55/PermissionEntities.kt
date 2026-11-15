@@ -47,6 +47,16 @@ const val RELAY_WILDCARD = "*"
 // NIP-42 relay authentication event kind; the only kind that carries relay scope.
 const val KIND_NIP42_AUTH = 22242
 
+// A relay auth stored with no relay would answer every relay auth whose relay cannot
+// be read, so a choice about one is never remembered.
+internal fun rememberedDuration(eventKind: Int?, relay: String, duration: PermissionDuration): PermissionDuration =
+    if (eventKind == KIND_NIP42_AUTH && relay == RELAY_NONE) PermissionDuration.JUST_THIS_TIME else duration
+
+// A batch row does not show a relay auth's relay, so a batch choice about one is
+// never remembered either.
+internal fun batchDuration(eventKind: Int?, duration: PermissionDuration): PermissionDuration =
+    if (eventKind == KIND_NIP42_AUTH) PermissionDuration.JUST_THIS_TIME else duration
+
 // User's chosen scope when approving a kind-22242 (NIP-42) auth request.
 enum class RelayAuthScope { SPECIFIC, ALL }
 

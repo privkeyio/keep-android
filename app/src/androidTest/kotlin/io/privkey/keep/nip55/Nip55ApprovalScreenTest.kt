@@ -237,4 +237,30 @@ class Nip55ApprovalScreenTest {
     fun relayAuth_withoutAReadableRelay_isOnlyAnsweredOnce() {
         assertEquals(0, rememberChoiceCount("https://relay.example.com"))
     }
+
+    private fun batchRememberChoiceCount(requests: List<Nip55Request>): Int {
+        compose.setContent {
+            KeepAndroidTheme {
+                BatchApprovalScreen(
+                    requests = requests,
+                    callerPackage = "com.example.client",
+                    callerVerified = true,
+                    onApprove = { },
+                    onReject = { }
+                )
+            }
+        }
+        return compose.onAllNodesWithText(context.getString(R.string.connections_nip55_remember_choice))
+            .fetchSemanticsNodes().size
+    }
+
+    @Test
+    fun batch_withoutARelayAuth_offersToRememberTheChoice() {
+        assertEquals(1, batchRememberChoiceCount(listOf(signEventRequest(), signEventRequest().copy(id = "req-2"))))
+    }
+
+    @Test
+    fun batch_withARelayAuth_doesNotOfferToRememberTheChoice() {
+        assertEquals(0, batchRememberChoiceCount(listOf(signEventRequest(), relayAuthRequest("wss://relay.example.com").copy(id = "req-2"))))
+    }
 }

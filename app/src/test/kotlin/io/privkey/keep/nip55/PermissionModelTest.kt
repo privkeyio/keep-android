@@ -143,3 +143,28 @@ class FormatFunctionsTest {
         assertTrue(formatExpiry(oneHourFromNow).startsWith("in "))
     }
 }
+
+class RememberedDurationTest {
+    @Test
+    fun aRelayAuthWithNoRelayIsNeverRemembered() {
+        assertEquals(PermissionDuration.JUST_THIS_TIME, rememberedDuration(KIND_NIP42_AUTH, RELAY_NONE, PermissionDuration.FOREVER))
+    }
+
+    @Test
+    fun aRelayAuthScopedToARelayOrAllRelaysKeepsItsDuration() {
+        assertEquals(PermissionDuration.ONE_DAY, rememberedDuration(KIND_NIP42_AUTH, "relay.example.com", PermissionDuration.ONE_DAY))
+        assertEquals(PermissionDuration.ONE_DAY, rememberedDuration(KIND_NIP42_AUTH, RELAY_WILDCARD, PermissionDuration.ONE_DAY))
+    }
+
+    @Test
+    fun otherKindsKeepTheirDuration() {
+        assertEquals(PermissionDuration.FOREVER, rememberedDuration(1, RELAY_NONE, PermissionDuration.FOREVER))
+        assertEquals(PermissionDuration.FOREVER, rememberedDuration(null, RELAY_NONE, PermissionDuration.FOREVER))
+    }
+
+    @Test
+    fun aBatchNeverRemembersARelayAuth() {
+        assertEquals(PermissionDuration.JUST_THIS_TIME, batchDuration(KIND_NIP42_AUTH, PermissionDuration.ONE_DAY))
+        assertEquals(PermissionDuration.ONE_DAY, batchDuration(1, PermissionDuration.ONE_DAY))
+    }
+}

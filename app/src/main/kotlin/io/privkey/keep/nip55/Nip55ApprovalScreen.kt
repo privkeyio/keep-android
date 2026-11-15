@@ -360,7 +360,10 @@ fun BatchApprovalScreen(
     onReject: (PermissionDuration) -> Unit
 ) {
     var isLoading by remember { mutableStateOf(false) }
-    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null
+    // A batch row does not show a relay auth's relay, so no choice about one is
+    // remembered from here.
+    val anyRelayAuth = remember(requests) { requests.any { it.eventKind() == KIND_NIP42_AUTH } }
+    val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null && !anyRelayAuth
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     val anySensitive = remember(requests) {
         requests.any { req -> req.eventKind()?.let { isSensitiveKind(it) } == true }
