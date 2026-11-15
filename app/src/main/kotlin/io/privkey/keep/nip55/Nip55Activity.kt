@@ -617,7 +617,7 @@ class Nip55Activity : FragmentActivity() {
                             }
                             // Batch has no per-event scope toggle; relay-auth events grant
                             // to their specific relay (the secure default).
-                            recordGrantAndTrust(store, callerId, req, eventKind, batchDuration(eventKind, duration), relayScopeForGrant(req, RelayAuthScope.SPECIFIC))
+                            recordGrantAndTrust(store, callerId, req, eventKind, batchDuration(req.requestType, eventKind, duration), relayScopeForGrant(req, RelayAuthScope.SPECIFIC))
                             responses.add(response.copy(id = item.requestId))
                         }
                         .onFailure { e ->
@@ -695,7 +695,7 @@ class Nip55Activity : FragmentActivity() {
         duration: PermissionDuration,
         relay: String = RELAY_NONE
     ) {
-        val kept = rememberedDuration(eventKind, relay, duration)
+        val kept = rememberedDuration(req.requestType, eventKind, relay, duration)
         val permResult = runCatching {
             store?.grantPermission(callerId, req.requestType, eventKind, kept, relay)
             if (eventKind != null && !isSensitiveKind(eventKind) && kept != PermissionDuration.JUST_THIS_TIME && !req.requestType.isNip44V3()) {
@@ -732,7 +732,7 @@ class Nip55Activity : FragmentActivity() {
     ) {
         if (store == null) return
         declared.forEach { perm ->
-            val grantResult = runCatching { store.grantPermission(callerId, perm.requestType, perm.kind, rememberedDuration(perm.kind, RELAY_NONE, duration)) }
+            val grantResult = runCatching { store.grantPermission(callerId, perm.requestType, perm.kind, rememberedDuration(perm.requestType, perm.kind, RELAY_NONE, duration)) }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Bundle grant failed for ${perm.requestType.name}: ${it.message}") }
             val auditAction = if (grantResult.isFailure) "allow_grant_failed" else "allow"
             store.logOperation(callerId, perm.requestType, perm.kind, auditAction, wasAutomatic = false)
@@ -902,7 +902,7 @@ class Nip55Activity : FragmentActivity() {
                     val eventKind = item.request.eventKind()
                     // Mirror the batch grant default (specific relay) so a batch reject for
                     // kind-22242 is scoped and remembered like its approve counterpart.
-                    store.denyPermission(callerId, item.request.requestType, eventKind, batchDuration(eventKind, duration), relayScopeForGrant(item.request, RelayAuthScope.SPECIFIC))
+                    store.denyPermission(callerId, item.request.requestType, eventKind, batchDuration(item.request.requestType, eventKind, duration), relayScopeForGrant(item.request, RelayAuthScope.SPECIFIC))
                     store.logOperation(callerId, item.request.requestType, eventKind, "deny", wasAutomatic = false)
                 }
             }

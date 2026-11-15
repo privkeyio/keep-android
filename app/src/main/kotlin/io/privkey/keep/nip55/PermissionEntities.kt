@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.room.*
 import io.privkey.keep.R
+import io.privkey.keep.uniffi.Nip55RequestType
 
 enum class PermissionDecision(@param:StringRes val displayNameRes: Int) {
     ALLOW(R.string.permission_decision_allow),
@@ -49,13 +50,18 @@ const val KIND_NIP42_AUTH = 22242
 
 // A relay auth stored with no relay would answer every relay auth whose relay cannot
 // be read, so a choice about one is never remembered.
-internal fun rememberedDuration(eventKind: Int?, relay: String, duration: PermissionDuration): PermissionDuration =
-    if (eventKind == KIND_NIP42_AUTH && relay == RELAY_NONE) PermissionDuration.JUST_THIS_TIME else duration
+internal fun rememberedDuration(requestType: Nip55RequestType, eventKind: Int?, relay: String, duration: PermissionDuration): PermissionDuration =
+    if (isRelayAuth(requestType, eventKind) && relay == RELAY_NONE) PermissionDuration.JUST_THIS_TIME else duration
 
 // A batch row does not show a relay auth's relay, so a batch choice about one is
 // never remembered either.
-internal fun batchDuration(eventKind: Int?, duration: PermissionDuration): PermissionDuration =
-    if (eventKind == KIND_NIP42_AUTH) PermissionDuration.JUST_THIS_TIME else duration
+internal fun batchDuration(requestType: Nip55RequestType, eventKind: Int?, duration: PermissionDuration): PermissionDuration =
+    if (isRelayAuth(requestType, eventKind)) PermissionDuration.JUST_THIS_TIME else duration
+
+// Only a sign_event carries a relay auth. A NIP-44 v3 request names a kind too, but
+// it is an encryption, not an event to sign.
+internal fun isRelayAuth(requestType: Nip55RequestType, eventKind: Int?): Boolean =
+    requestType == Nip55RequestType.SIGN_EVENT && eventKind == KIND_NIP42_AUTH
 
 // User's chosen scope when approving a kind-22242 (NIP-42) auth request.
 enum class RelayAuthScope { SPECIFIC, ALL }

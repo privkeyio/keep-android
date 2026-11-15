@@ -150,11 +150,11 @@ fun ApprovalScreen(
     }
     // Kind-22242 (NIP-42) relay auth: let the user scope the grant to this relay or all.
     val relayAuthHost = remember(request) {
-        if (request.eventKind() == KIND_NIP42_AUTH) nip55ExtractRelayHost(request.content) else null
+        if (isRelayAuth(request.requestType, request.eventKind())) nip55ExtractRelayHost(request.content) else null
     }
     // A relay auth whose relay cannot be read has nothing to scope a remembered
     // choice to, so it is only ever answered once.
-    val unreadableRelayAuth = request.eventKind() == KIND_NIP42_AUTH && relayAuthHost == null
+    val unreadableRelayAuth = isRelayAuth(request.requestType, request.eventKind()) && relayAuthHost == null
     val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null && !unreadableRelayAuth
     var relayScope by remember { mutableStateOf(RelayAuthScope.SPECIFIC) }
     // A client MAY pre-declare a permission bundle alongside get_public_key; the
@@ -362,7 +362,7 @@ fun BatchApprovalScreen(
     var isLoading by remember { mutableStateOf(false) }
     // A batch row does not show a relay auth's relay, so no choice about one is
     // remembered from here.
-    val anyRelayAuth = remember(requests) { requests.any { it.eventKind() == KIND_NIP42_AUTH } }
+    val anyRelayAuth = remember(requests) { requests.any { isRelayAuth(it.requestType, it.eventKind()) } }
     val canRememberChoice = (callerVerified || showFirstUseWarning) && callerPackage != null && !anyRelayAuth
     var selectedDuration by remember { mutableStateOf(PermissionDuration.JUST_THIS_TIME) }
     val anySensitive = remember(requests) {
