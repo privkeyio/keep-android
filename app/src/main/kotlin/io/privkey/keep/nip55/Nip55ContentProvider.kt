@@ -55,11 +55,16 @@ import java.util.concurrent.atomic.AtomicReference
 // cannot leave the two paths describing the same fault differently.
 internal const val STORE_UNAVAILABLE_MESSAGE = "Permission store is not available"
 
+internal const val KILL_SWITCH_MESSAGE = "Signing is disabled (kill switch is active)"
+
 /** An auto-signed request whose audit row was not observed to land. */
 private class AuditAppendIncomplete : Exception("Audit append did not complete")
 
 /** A handler call its caller stopped waiting for. */
 internal class HandlerTimedOut : Exception("Handler call timed out")
+
+/** A result produced before the kill switch was engaged, held back from the caller. */
+private class SigningKilledBeforeDelivery : Exception(KILL_SWITCH_MESSAGE)
 
 class Nip55ContentProvider : ContentProvider() {
     companion object {
@@ -218,7 +223,7 @@ class Nip55ContentProvider : ContentProvider() {
         }
 
         if (currentApp.isSigningKilled()) {
-            return errorCursor("Signing is disabled (kill switch is active)", null)
+            return errorCursor(KILL_SWITCH_MESSAGE, null)
         }
         if (currentApp.getPinStore()?.requiresAuthentication() == true) {
             return errorCursor("Keep is locked, please unlock it first", null)
@@ -516,6 +521,11 @@ class Nip55ContentProvider : ContentProvider() {
                     checkPubkey(requestType, response.result, app.getStorage()?.getShareMetadata()?.groupPubkey)?.let {
                         throw IllegalStateException("Pubkey verification failed")
                     }
+                    if (app.isSigningKilled()) {
+                        recordAutoDecision(store, callerPackage, requestType, eventKind, "signing_disabled")
+                        throw SigningKilledBeforeDelivery()
+                    }
+                    val auditId = newRequestId()
                     // The row is the operation's only record: the user sees nothing
                     // else for a request answered in the background, and the velocity
                     // and frequency inputs of later decisions are counted from these
@@ -524,8 +534,17 @@ class Nip55ContentProvider : ContentProvider() {
                     // is a real refusal here because the signature has not left the
                     // process, and it matches what the foreground path now does with
                     // a request it cannot record.
-                    if (!recordAutoSigned(store, callerPackage, requestType, eventKind)) {
+                    if (!recordAutoSigned(store, callerPackage, requestType, eventKind, auditId)) {
                         throw AuditAppendIncomplete()
+                    }
+                    // The append can wait for its budget, so the switch is read again
+                    // and a result held back here is recorded as abandoned, not signed.
+                    if (app.isSigningKilled()) {
+                        auditScope.launch {
+                            runCatching { store.logAbandoned(callerPackage, requestType, eventKind, auditId) }
+                                .onFailure { Log.w(TAG, "Abandoned audit row not written: ${it::class.simpleName}") }
+                        }
+                        throw SigningKilledBeforeDelivery()
                     }
                     // The notification is not the record and stays best effort.
                     runCatching { showBackgroundSigningNotification(callerPackage, requestType, eventKind) }
@@ -554,6 +573,8 @@ class Nip55ContentProvider : ContentProvider() {
                     if (BuildConfig.DEBUG) Log.e(TAG, "Background request failed: ${e::class.simpleName}: ${e.message}")
                     if (e is BiometricHelper.BiometricNotReadyException) {
                         errorCursor(e.message ?: "Biometric authentication is unavailable", id)
+                    } else if (e is SigningKilledBeforeDelivery) {
+                        errorCursor(KILL_SWITCH_MESSAGE, id)
                     } else {
                         errorCursor("Request failed", id)
                     }
@@ -649,7 +670,8 @@ class Nip55ContentProvider : ContentProvider() {
         callerPackage: String,
         requestType: Nip55RequestType,
         eventKind: Int?,
-    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, "allow", newRequestId())
+        requestId: String = newRequestId(),
+    ): Boolean = appendAudited(store, callerPackage, requestType, eventKind, "allow", requestId)
 
     /**
      * The same bounded, caller-thread append for a decision that refused.
