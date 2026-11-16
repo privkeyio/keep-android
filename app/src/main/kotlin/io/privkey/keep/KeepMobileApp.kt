@@ -824,8 +824,16 @@ class KeepMobileApp : Application() {
             before != config
         }
         if (!changed) return
+        onConnectionSettingChanged()
+    }
+
+    /**
+     * For a saved setting the core read into the sockets it opened: it has dropped the live
+     * node and stopped the approver, so the drop is recorded and the approver started again.
+     * Off the caller, since the start probes the relays under the new setting.
+     */
+    private fun onConnectionSettingChanged() {
         onLiveNodeDropped()
-        // Off the caller: the start probes the relays through the new proxy.
         approverController?.let { controller ->
             applicationScope.launch(Dispatchers.IO) {
                 runCatching { controller.startIfPaired() }.onFailure {
@@ -837,23 +845,23 @@ class KeepMobileApp : Application() {
 
     fun clearCertificatePin(hostname: String) {
         runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onSuccess { if (it != null) onLiveNodeDropped() }
+            .onSuccess { if (it != null) onConnectionSettingChanged() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
-            .onSuccess { if (it != null) onLiveNodeDropped() }
+            .onSuccess { if (it != null) onConnectionSettingChanged() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
     fun stageCertificatePin(hostname: String, spkiHash: String): Boolean =
         (keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false)
-            .also { if (it) onLiveNodeDropped() }
+            .also { if (it) onConnectionSettingChanged() }
 
     fun removeCertificatePin(hostname: String, spkiHash: String): CertPinRemoval? =
         keepMobile?.removeCertificatePinCompat(hostname, spkiHash)
-            ?.also { onLiveNodeDropped() }
+            ?.also { onConnectionSettingChanged() }
 
     fun dismissPinMismatch() {
         pinMismatch = null
