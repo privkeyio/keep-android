@@ -42,6 +42,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Semaphore
@@ -158,6 +159,23 @@ class Nip55ContentProvider : ContentProvider() {
     )
 
     private val app: KeepMobileApp? get() = context?.applicationContext as? KeepMobileApp
+
+    // Refused on every request while storage stays broken, so logged once per process.
+    private val storageFaultLogged = ConcurrentHashMap.newKeySet<String>()
+
+    // Logged in every build: either one changes how this app is signed for until it clears.
+    private fun logLimiterFault(app: KeepMobileApp, packageName: String, decision: AutoSignDecision) {
+        val message = when (decision) {
+            is AutoSignDecision.LimitStateUnreadable ->
+                "auto-signing limits could not be read and were reset as reached; auto-signing paused until " +
+                    Instant.ofEpochMilli(decision.untilMs.toLong())
+            AutoSignDecision.StorageUnavailable ->
+                if (!storageFaultLogged.add(packageName)) return else "auto-signing limits could not be read or saved; every request asks for approval until storage recovers"
+            else -> return
+        }
+        val level = if (decision is AutoSignDecision.StorageUnavailable) EventLogLevel.ERROR else EventLogLevel.WARN
+        app.logActivityEvent(EventLogCategory.SIGNER, level, packageName, message)
+    }
 
     // Run `block` under a real wall-clock bound. `block` may reach a blocking,
     // non-cancellable FFI call, which `withTimeoutOrNull` cannot interrupt in place
@@ -371,7 +389,7 @@ class Nip55ContentProvider : ContentProvider() {
                         if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed to UI: ${e::class.simpleName}")
                         null
                     }
-                }
+                }?.also { logLimiterFault(currentApp, callerPackage, it) }
             }
         } else {
             null

@@ -405,6 +405,40 @@ class Nip55CrossProcessRequestInstrumentedTest {
         }
     }
 
+    // An opted-in caller whose limit state will not decrypt: the core rewrites it as reached
+    // and the request goes to the user, and the pause is in the event log in every build.
+    @Test
+    fun crossProcess_unreadableLimitState_pausesAutoSigningAndLogsIt() {
+        val safeguards = app().getAutoSigningSafeguards()!!
+        val log = app().getEventLogStore()!!
+        val daily = "daily_:$clientPkg"
+        val since = System.currentTimeMillis()
+        try {
+            safeguards.setOptedIn(clientPkg, true)
+            assertTrue(AndroidSigningRateLimiterStorage(context).save(daily, "x"))
+            corruptExistingValue(context, LIMITER_PREFS, daily) { it.putString(daily, "x") }
+
+            val raw = runClientQuery(rid("limits"), "io.privkey.keep.SIGN_EVENT", signProjection)
+            assertTrue("a paused caller goes to the user, not signed for: $raw", raw.endsWith("cursor=null"))
+            val entry = awaitLog(log, since) { it.source == clientPkg && it.category == EventLogCategory.SIGNER.name }
+            assertNotNull("the pause must be logged", entry)
+            assertEquals(EventLogLevel.WARN.name, entry!!.level)
+            assertTrue(entry.message, entry.message.contains("paused until"))
+        } finally {
+            safeguards.clearOptIn(clientPkg)
+            app().getSigningRateLimiter()?.clearCoolingOff(clientPkg)
+        }
+    }
+
+    private fun awaitLog(log: EventLogStore, since: Long, match: (EventLogEntry) -> Boolean): EventLogEntry? {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            runBlocking { log.getRecent(50) }.firstOrNull { it.timestamp >= since && match(it) }?.let { return it }
+            Thread.sleep(200)
+        }
+        return null
+    }
+
     private fun latestAuditId(): Long = runBlocking {
         app().getPermissionStore()!!.getAuditLog(limit = 1).firstOrNull()?.id ?: 0L
     }
@@ -430,6 +464,7 @@ class Nip55CrossProcessRequestInstrumentedTest {
         const val RELAY_AUTH_KIND = 22242
         const val RELAY_HOST = "relay.example.com"
         const val OTHER_EXPIRED_PKG = "io.privkey.keeptest.otherexpired"
+        const val LIMITER_PREFS = "nip55_rate_limiter"
 
         // Opt-in gate (mirrors FrostSignFixture.MANUAL_ARG): every test method reports
         // SKIPPED unless invoked with -e crossProcessManual 1, so a local run without the
