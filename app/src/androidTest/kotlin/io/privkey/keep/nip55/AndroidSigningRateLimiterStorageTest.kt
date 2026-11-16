@@ -3,7 +3,13 @@ package io.privkey.keep.nip55
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.os.SystemClock
+import io.privkey.keep.uniffi.AutoSignDecision
+import io.privkey.keep.uniffi.SigningRateLimiter
 import io.privkey.keep.uniffi.StorageRead
+import io.privkey.keep.storage.KeystoreEncryptedPrefs
+import java.io.File
+import java.security.KeyStore
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -195,6 +201,38 @@ class AndroidSigningRateLimiterStorageTest {
         )
     }
 
+    // A file that no longer parses loads as empty. Every one of the package's limit keys
+    // has to read as unknown then, never as unused, or the core starts fresh windows
+    // instead of rewriting the state as full, and corrupting the file resets the limits.
+    // On a file of its own: dropping the platform's cached copy of the real one would leave
+    // the app's own store reading a map that no longer matches the disk.
+    @Test
+    fun aCorruptedFileReadsEveryLimitKeyUnavailable() {
+        val pkg = "com.example.app"
+        val keys = listOf("cooled_off_", "cooled_off_elapsed_", "hourly_", "daily_").map { "$it:$pkg" }
+        try {
+            val own = AndroidSigningRateLimiterStorage(context, CORRUPT_PREFS)
+            keys.forEach { assertTrue(own.save(it, "1")) }
+            val file = File(context.dataDir, "shared_prefs/$CORRUPT_PREFS.xml")
+            val written = file.readText()
+            assertTrue("the entries must have reached the file", written.length > 40)
+
+            context.deleteSharedPreferences(CORRUPT_PREFS)
+            file.writeText(written.substring(0, written.length / 2))
+
+            val reopened = AndroidSigningRateLimiterStorage(context, CORRUPT_PREFS)
+            keys.forEach { assertEquals(it, StorageRead.Unavailable, reopened.load(it)) }
+            val decision = SigningRateLimiter(reopened).checkAndRecord(
+                pkg, SystemClock.elapsedRealtime().toULong(), System.currentTimeMillis().toULong()
+            )
+            assertFalse("a corrupted file must not allow auto-signing", decision is AutoSignDecision.Allowed)
+        } finally {
+            context.deleteSharedPreferences(CORRUPT_PREFS)
+            KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                .deleteEntry(KeystoreEncryptedPrefs.keyAliasFor(CORRUPT_PREFS))
+        }
+    }
+
     @Test
     fun aNeverWrittenKeyReadsAbsentSoTheWindowCanStartFresh() {
         assertEquals(StorageRead.Absent, storage.load("com.example.never.written"))
@@ -202,6 +240,7 @@ class AndroidSigningRateLimiterStorageTest {
 
     companion object {
         private const val PREFS_NAME = "nip55_rate_limiter"
+        private const val CORRUPT_PREFS = "nip55_rate_limiter_corrupt_test"
 
         /** The one entry the encrypted store keeps under its literal name. */
         private const val HMAC_KEY_PREF = "__hmac_key__"

@@ -267,10 +267,16 @@ class KeepMobileApp : Application() {
         is ConnectionStatus.Error -> Triple(EventLogLevel.ERROR, "", status.message)
     }
 
-    private fun logActivityEvent(category: EventLogCategory, level: EventLogLevel, source: String, message: String) {
-        val store = eventLogStore ?: return
+    fun logActivityEvent(
+        category: EventLogCategory,
+        level: EventLogLevel,
+        source: String,
+        message: String,
+        onNotLogged: () -> Unit = {},
+    ) {
+        val store = eventLogStore ?: return onNotLogged()
         applicationScope.launch {
-            runCatching { store.log(category, level, source, message) }
+            runCatching { store.log(category, level, source, message) }.onFailure { onNotLogged() }
         }
     }
 

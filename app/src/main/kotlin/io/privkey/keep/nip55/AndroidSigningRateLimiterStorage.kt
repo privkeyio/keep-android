@@ -30,9 +30,12 @@ private const val TAG = "RateLimiterStorage"
  * unexpected-callback error and panics Rust on the signing path, so faults are
  * converted into the failure value instead.
  */
-class AndroidSigningRateLimiterStorage(context: Context) : SigningRateLimiterStorage {
+class AndroidSigningRateLimiterStorage(
+    context: Context,
+    prefsName: String = PREFS_NAME,
+) : SigningRateLimiterStorage {
 
-    private val prefs = KeystoreEncryptedPrefs.create(context, PREFS_NAME)
+    private val prefs = KeystoreEncryptedPrefs.create(context, prefsName)
 
     override fun load(key: String): StorageRead =
         runCatching {

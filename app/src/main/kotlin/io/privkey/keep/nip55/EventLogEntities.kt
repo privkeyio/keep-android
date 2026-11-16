@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-enum class EventLogCategory { RELAY, BUNKER, PEER }
+enum class EventLogCategory { RELAY, BUNKER, PEER, SIGNER }
 
 enum class EventLogLevel { INFO, WARN, ERROR }
 
