@@ -239,6 +239,7 @@ fun CertificatePinsCard(
     var showClearAllDialog by remember { mutableStateOf(false) }
     var showStageDialog by remember { mutableStateOf(false) }
     var showTrustHostDialog by remember { mutableStateOf(false) }
+    var hostToTrust by remember { mutableStateOf<String?>(null) }
     var pinToRetire by remember { mutableStateOf<CertificatePin?>(null) }
 
     KeepCard(contentPadding = PaddingValues(0.dp)) {
@@ -255,13 +256,14 @@ fun CertificatePinsCard(
                     }
                 }
             }
-            if (pins.isEmpty()) {
+            val held = holds?.takeIf { it.hosts.isNotEmpty() || it.everyUnpinnedHost }
+            if (pins.isEmpty() && held == null) {
                 Text(
                     stringResource(R.string.settings_cert_pins_empty),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
-            } else {
+            } else if (pins.isNotEmpty()) {
                 pins.forEach { pin ->
                     Row(
                         modifier = Modifier
@@ -297,8 +299,8 @@ fun CertificatePinsCard(
             TextButton(onClick = { showStageDialog = true }) {
                 Text(stringResource(R.string.settings_cert_pins_stage))
             }
-            if (holds != null && (holds.hosts.isNotEmpty() || holds.everyUnpinnedHost)) {
-                HeldHostsSection(holds, onTrustNextKey, onTrustOtherHost = { showTrustHostDialog = true })
+            if (held != null) {
+                HeldHostsSection(held, onTrustNextKey = { hostToTrust = it }, onTrustOtherHost = { showTrustHostDialog = true })
             }
         }
     }
@@ -307,8 +309,31 @@ fun CertificatePinsCard(
         TrustHostDialog(
             onDismiss = { showTrustHostDialog = false },
             onTrust = { host ->
-                onTrustNextKey(host)
+                hostToTrust = host
                 showTrustHostDialog = false
+            }
+        )
+    }
+
+    // The one action here that trusts a key on first use, so the warning is shown in the app
+    // whatever the lock: the gate after it may be a biometric prompt or no prompt at all.
+    hostToTrust?.let { host ->
+        AlertDialog(
+            onDismissRequest = { hostToTrust = null },
+            title = { Text(stringResource(R.string.settings_cert_pins_trust_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_cert_pins_trust_dialog_text, host)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onTrustNextKey(host)
+                    hostToTrust = null
+                }) {
+                    Text(stringResource(R.string.settings_cert_pins_trust_next), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { hostToTrust = null }) {
+                    Text(stringResource(R.string.settings_cancel))
+                }
             }
         )
     }

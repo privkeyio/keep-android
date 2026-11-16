@@ -845,11 +845,27 @@ class KeepMobileApp : Application() {
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read certificatePinHolds: ${it::class.simpleName}") }
             .getOrNull()
 
-    /** Lets the next connection to [hostname] trust whatever key it shows, so callers gate it on the user. */
-    fun releaseCertificatePinHold(hostname: String): Boolean =
-        runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
+    /**
+     * Lets the next connection to [hostname] trust whatever key it shows, so callers gate it
+     * on the user. That choice is also the start the hold waited for: a bunker serving without
+     * the relay and a paired approver the hold stopped start again, and the caller reconnects
+     * the node.
+     */
+    fun releaseCertificatePinHold(hostname: String): Boolean {
+        val released = runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to releaseCertificatePinHold: ${it::class.simpleName}") }
             .isSuccess
+        if (!released) return false
+        io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop()
+        approverController?.let { controller ->
+            applicationScope.launch(Dispatchers.IO) {
+                runCatching { controller.startIfPaired() }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start approver: ${it::class.simpleName}")
+                }
+            }
+        }
+        return true
+    }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }

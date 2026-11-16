@@ -55,6 +55,9 @@ class CertificatePinHoldsCardTest {
         compose.onNodeWithText(heldTitle).assertIsDisplayed()
         compose.onNodeWithText("relay.two.com").assertIsDisplayed()
         compose.onAllNodesWithText(trustNext)[1].performClick()
+        assertEquals("nothing is trusted before the warning is confirmed", emptyList<String>(), trusted)
+        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_trust_dialog_text, "relay.two.com")).assertIsDisplayed()
+        compose.onAllNodesWithText(trustNext).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
         assertEquals(listOf("relay.two.com"), trusted)
         assertEquals(0, compose.onAllNodesWithText(trustHost).fetchSemanticsNodes().size)
     }
@@ -68,7 +71,19 @@ class CertificatePinHoldsCardTest {
         compose.onNodeWithText(trustHost).performClick()
         compose.onNodeWithText(context.getString(R.string.settings_cert_pins_stage_host_label)).performTextInput(" relay.example.com ")
         compose.onNodeWithText(trustNext).performClick()
+        assertEquals(emptyList<String>(), trusted)
+        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_trust_dialog_text, "relay.example.com")).assertIsDisplayed()
+        compose.onNodeWithText(trustNext).performClick()
         assertEquals(listOf("relay.example.com"), trusted)
+    }
+
+    @Test
+    fun cancellingTheWarningTrustsNothing() {
+        val trusted = mutableListOf<String>()
+        show(CertificatePinHolds(listOf("relay.one.com"), false, emptyList()), trusted)
+        compose.onNodeWithText(trustNext).performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_cancel)).performClick()
+        assertEquals(emptyList<String>(), trusted)
     }
 
     @Test

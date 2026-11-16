@@ -721,6 +721,19 @@ fun MainScreen(
 
     LaunchedEffect(Unit) { refreshCertificatePins() }
 
+    suspend fun afterRelease(hostname: String, released: Boolean) {
+        refreshCertificatePins()
+        if (released) {
+            onReconnectRelays()
+        } else {
+            Toast.makeText(
+                appContext,
+                appContext.getString(R.string.settings_cert_pins_trust_failed, hostname),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     fun loadProfileRelays(accountKey: String?): List<String> {
         if (accountKey == null) return emptyList()
         return runCatching { keepMobile.getRelayConfig(accountKey).profileRelays }.getOrDefault(emptyList())
@@ -1630,16 +1643,7 @@ fun MainScreen(
                         onClearCertificatePin(pinMismatchInfo.hostname) &&
                             onReleaseCertificatePinHold(pinMismatchInfo.hostname)
                     }
-                    refreshCertificatePins()
-                    if (trusted) {
-                        onReconnectRelays()
-                    } else {
-                        Toast.makeText(
-                            appContext,
-                            appContext.getString(R.string.settings_cert_pins_trust_failed, pinMismatchInfo.hostname),
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
+                    afterRelease(pinMismatchInfo.hostname, trusted)
                 }
             },
             onDismiss = onDismissPinMismatch
@@ -2018,7 +2022,14 @@ fun MainScreen(
                         // retiring pins one at a time.
                         requireAuthThen(
                             appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
-                            appContext.getString(R.string.settings_cert_pins_clear_dialog_text, hostname),
+                            appContext.getString(
+                                if (isLastPinForHost(certificatePins, hostname)) {
+                                    R.string.settings_cert_pins_retire_last_dialog_text
+                                } else {
+                                    R.string.settings_cert_pins_retire_keep_others
+                                },
+                                hostname
+                            ),
                             appContext.getString(R.string.settings_cert_pins_clear),
                         ) {
                             val removal = withContext(Dispatchers.IO) {
@@ -2040,17 +2051,7 @@ fun MainScreen(
                             appContext.getString(R.string.settings_cert_pins_trust_dialog_text, hostname),
                             appContext.getString(R.string.settings_cert_pins_trust_next),
                         ) {
-                            val released = withContext(Dispatchers.IO) { onReleaseCertificatePinHold(hostname) }
-                            refreshCertificatePins()
-                            if (released) {
-                                onReconnectRelays()
-                            } else {
-                                Toast.makeText(
-                                    appContext,
-                                    appContext.getString(R.string.settings_cert_pins_trust_failed, hostname),
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
+                            afterRelease(hostname, withContext(Dispatchers.IO) { onReleaseCertificatePinHold(hostname) })
                         }
                     },
                     onClearAllPins = {
