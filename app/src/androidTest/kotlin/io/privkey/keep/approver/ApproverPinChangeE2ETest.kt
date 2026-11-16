@@ -26,9 +26,9 @@ import java.security.spec.ECGenParameterSpec
 /**
  * End-to-end: the app's own approver, paired with a gateway that never answers over a
  * public relay, is started again by the core after a certificate pin change. Once a
- * change leaves its relay without a pin the restart is refused, and nothing in the app
- * starts it either, since a start would trust whatever key the relay shows; only a start
- * by hand does. Manual-only, since it needs the relay: run it with `-e approverManual 1`.
+ * change leaves its relay without a pin the restart is refused, and nothing in this
+ * process starts it either, since a start would trust whatever key the relay shows; only
+ * a start by hand does. Manual-only, since it needs the relay: run it with `-e approverManual 1`.
  * The test key needs no biometric, unlike the app's approver key, and is deleted after.
  */
 @RunWith(AndroidJUnit4::class)
@@ -76,6 +76,7 @@ class ApproverPinChangeE2ETest {
                 "the restart was refused with the relay unpinned",
                 awaitStatus(handler) { s -> s.alerts.any { it.message == CERT_PIN_STOP } },
             )
+            // Catches an app restart only if its relay probe finishes inside the wait.
             Thread.sleep(SETTLE_MS)
             assertFalse("nothing started the approver on an unpinned relay", handler.status().running)
 
@@ -93,9 +94,11 @@ class ApproverPinChangeE2ETest {
         assertEquals(devicePins, mobile.getCertificatePins())
     }
 
-    // The stop lands before the pin call returns, so serving again afterwards is the restart.
+    // The stop lands before the pin call returns, and the restart probes the relay before it
+    // serves, so the approver reads as stopped right after the action.
     private fun restartsAfter(handler: ApproverHandler, change: String, action: () -> Unit) {
         action()
+        assertFalse("the core stopped the approver after $change", handler.status().running)
         assertTrue("the approver serves again after $change", awaitStatus(handler) { it.running && it.pairing })
         assertTrue("no alert after $change", handler.status().alerts.none { it.message == CERT_PIN_STOP })
     }
