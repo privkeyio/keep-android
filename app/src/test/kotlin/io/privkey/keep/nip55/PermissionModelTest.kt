@@ -1,5 +1,6 @@
 package io.privkey.keep.nip55
 
+import io.privkey.keep.uniffi.Nip55RequestType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -141,5 +142,36 @@ class FormatFunctionsTest {
     fun `formatExpiry shows remaining time for future timestamps`() {
         val oneHourFromNow = System.currentTimeMillis() + 60 * 60 * 1000
         assertTrue(formatExpiry(oneHourFromNow).startsWith("in "))
+    }
+}
+
+class RememberedDurationTest {
+    @Test
+    fun aRelayAuthWithNoRelayIsNeverRemembered() {
+        assertEquals(PermissionDuration.JUST_THIS_TIME, rememberedDuration(Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, RELAY_NONE, PermissionDuration.FOREVER))
+    }
+
+    @Test
+    fun aRelayAuthScopedToARelayOrAllRelaysKeepsItsDuration() {
+        assertEquals(PermissionDuration.ONE_DAY, rememberedDuration(Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, "relay.example.com", PermissionDuration.ONE_DAY))
+        assertEquals(PermissionDuration.ONE_DAY, rememberedDuration(Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, RELAY_WILDCARD, PermissionDuration.ONE_DAY))
+    }
+
+    @Test
+    fun otherKindsKeepTheirDuration() {
+        assertEquals(PermissionDuration.FOREVER, rememberedDuration(Nip55RequestType.SIGN_EVENT, 1, RELAY_NONE, PermissionDuration.FOREVER))
+        assertEquals(PermissionDuration.FOREVER, rememberedDuration(Nip55RequestType.SIGN_EVENT, null, RELAY_NONE, PermissionDuration.FOREVER))
+    }
+
+    @Test
+    fun aBatchNeverRemembersARelayAuth() {
+        assertEquals(PermissionDuration.JUST_THIS_TIME, batchDuration(Nip55RequestType.SIGN_EVENT, KIND_NIP42_AUTH, PermissionDuration.ONE_DAY))
+        assertEquals(PermissionDuration.ONE_DAY, batchDuration(Nip55RequestType.SIGN_EVENT, 1, PermissionDuration.ONE_DAY))
+    }
+
+    @Test
+    fun aNip44V3RequestNamingTheRelayAuthKindKeepsItsDuration() {
+        assertEquals(PermissionDuration.ONE_DAY, rememberedDuration(Nip55RequestType.NIP44_V3_ENCRYPT, KIND_NIP42_AUTH, RELAY_NONE, PermissionDuration.ONE_DAY))
+        assertEquals(PermissionDuration.ONE_DAY, batchDuration(Nip55RequestType.NIP44_V3_DECRYPT, KIND_NIP42_AUTH, PermissionDuration.ONE_DAY))
     }
 }
