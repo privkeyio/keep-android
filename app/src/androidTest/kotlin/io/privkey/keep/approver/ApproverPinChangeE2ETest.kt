@@ -9,6 +9,7 @@ import io.privkey.keep.uniffi.ApproverCallbacks
 import io.privkey.keep.uniffi.ApproverEvent
 import io.privkey.keep.uniffi.ApproverHandler
 import io.privkey.keep.uniffi.ApproverStatus
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -45,6 +46,9 @@ class ApproverPinChangeE2ETest {
             .get(controller) as ApproverHandler
         val before = handler.status()
         assumeTrue("a real pairing is on this device", !before.paired && !before.pairing)
+        // The run clears every pin, so the device's own are put back after it.
+        val mobile = checkNotNull(app.getKeepMobile()) { "Keep not initialized" }
+        val devicePins = mobile.getCertificatePins()
 
         val secret = ByteArray(32).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
         val uri = "keep-approver:v1?gateway=$GATEWAY&secret=$secret&relay=$relay"
@@ -66,12 +70,14 @@ class ApproverPinChangeE2ETest {
             restartsAfter(handler, "clear all") { app.clearAllCertificatePins() }
             assertFalse(handler.status().paired)
         } finally {
-            runCatching { app.clearCertificatePin(PIN_HOST) }
             runCatching { handler.forget() }
+            mobile.clearCertificatePins()
+            devicePins.forEach { mobile.stageCertificatePin(it.hostname, it.spkiHash) }
             runCatching { controller.startIfPaired() }
             runCatching { keyStore().deleteEntry(ALIAS) }
         }
         assertFalse(handler.status().running)
+        assertEquals(devicePins, mobile.getCertificatePins())
     }
 
     private fun restartsAfter(handler: ApproverHandler, change: String, action: () -> Unit) {
