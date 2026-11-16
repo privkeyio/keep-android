@@ -52,6 +52,7 @@ import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.SigningAuditLog
+import io.privkey.keep.uniffi.CertificatePinHolds
 import io.privkey.keep.uniffi.SigningRateLimiter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -833,11 +834,22 @@ class KeepMobileApp : Application() {
         onLiveNodeDropped()
     }
 
-    fun clearCertificatePin(hostname: String) {
-        runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onSuccess { if (it != null) onLiveNodeDropped() }
+    fun clearCertificatePin(hostname: String): Boolean =
+        runCatching { checkNotNull(keepMobile).clearCertificatePin(hostname) }
+            .onSuccess { onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
-    }
+            .isSuccess
+
+    fun certificatePinHolds(): CertificatePinHolds? =
+        runCatching { keepMobile?.certificatePinHolds() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read certificatePinHolds: ${it::class.simpleName}") }
+            .getOrNull()
+
+    /** Lets the next connection to [hostname] trust whatever key it shows, so callers gate it on the user. */
+    fun releaseCertificatePinHold(hostname: String): Boolean =
+        runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to releaseCertificatePinHold: ${it::class.simpleName}") }
+            .isSuccess
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }

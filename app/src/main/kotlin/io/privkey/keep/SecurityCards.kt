@@ -1,6 +1,7 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
+import io.privkey.keep.uniffi.CertificatePinHolds
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -229,12 +230,15 @@ internal fun isValidSpkiHash(hash: String): Boolean =
 @Composable
 fun CertificatePinsCard(
     pins: List<CertificatePin>,
+    holds: CertificatePinHolds?,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
+    onTrustNextKey: (String) -> Unit,
     onClearAllPins: () -> Unit
 ) {
     var showClearAllDialog by remember { mutableStateOf(false) }
     var showStageDialog by remember { mutableStateOf(false) }
+    var showTrustHostDialog by remember { mutableStateOf(false) }
     var pinToRetire by remember { mutableStateOf<CertificatePin?>(null) }
 
     KeepCard(contentPadding = PaddingValues(0.dp)) {
@@ -293,7 +297,20 @@ fun CertificatePinsCard(
             TextButton(onClick = { showStageDialog = true }) {
                 Text(stringResource(R.string.settings_cert_pins_stage))
             }
+            if (holds != null && (holds.hosts.isNotEmpty() || holds.everyUnpinnedHost)) {
+                HeldHostsSection(holds, onTrustNextKey, onTrustOtherHost = { showTrustHostDialog = true })
+            }
         }
+    }
+
+    if (showTrustHostDialog) {
+        TrustHostDialog(
+            onDismiss = { showTrustHostDialog = false },
+            onTrust = { host ->
+                onTrustNextKey(host)
+                showTrustHostDialog = false
+            }
+        )
     }
 
     pinToRetire?.let { pin ->
@@ -356,6 +373,73 @@ fun CertificatePinsCard(
             }
         )
     }
+}
+
+@Composable
+private fun HeldHostsSection(
+    holds: CertificatePinHolds,
+    onTrustNextKey: (String) -> Unit,
+    onTrustOtherHost: () -> Unit
+) {
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(stringResource(R.string.settings_cert_pins_held_title), style = MaterialTheme.typography.titleSmall)
+    Text(
+        stringResource(
+            if (holds.everyUnpinnedHost) R.string.settings_cert_pins_held_all_text else R.string.settings_cert_pins_held_text
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    holds.hosts.forEach { host ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(host, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { onTrustNextKey(host) }) {
+                Text(stringResource(R.string.settings_cert_pins_trust_next))
+            }
+        }
+    }
+    if (holds.everyUnpinnedHost) {
+        TextButton(onClick = onTrustOtherHost) {
+            Text(stringResource(R.string.settings_cert_pins_trust_host))
+        }
+    }
+}
+
+@Composable
+private fun TrustHostDialog(
+    onDismiss: () -> Unit,
+    onTrust: (String) -> Unit
+) {
+    var host by remember { mutableStateOf("") }
+    val hostTrimmed = host.trim()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_cert_pins_trust_host)) },
+        text = {
+            OutlinedTextField(
+                value = host,
+                onValueChange = { host = it },
+                label = { Text(stringResource(R.string.settings_cert_pins_stage_host_label)) },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onTrust(hostTrimmed) }, enabled = hostTrimmed.isNotEmpty()) {
+                Text(stringResource(R.string.settings_cert_pins_trust_next))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        }
+    )
 }
 
 @Composable

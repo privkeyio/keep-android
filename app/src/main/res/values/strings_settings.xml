@@ -93,14 +93,22 @@
     <string name="settings_cert_pins_empty">Pins are set on first connection to each relay</string>
     <string name="settings_cert_pins_clear_cd">Clear pin</string>
     <string name="settings_cert_pins_clear_dialog_title">Clear Pin?</string>
-    <string name="settings_cert_pins_clear_dialog_text">Remove the certificate pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>? A new pin will be set on next connection.</string>
+    <string name="settings_cert_pins_clear_dialog_text">Remove the certificate pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>? The relay stays disconnected until you stage a new pin or choose to trust its next key.</string>
     <string name="settings_cert_pins_clear">Clear</string>
     <string name="settings_cert_pins_clear_all_dialog_title">Clear All Pins?</string>
-    <string name="settings_cert_pins_clear_all_dialog_text">This will remove all stored certificate pins. New pins will be set on next connection.</string>
+    <string name="settings_cert_pins_clear_all_dialog_text">This will remove all stored certificate pins. Each relay that had one stays disconnected until you stage a new pin or choose to trust its next key.</string>
     <string name="settings_cert_pins_retire_keep_others">Remove this pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>? The host\'s other pins stay active.</string>
-    <string name="settings_cert_pins_retire_last_dialog_text">This is the only pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>. Removing it leaves the relay unpinned, so the next connection trusts whatever certificate is presented (including an attacker\'s). Only continue if you intend to reset this relay\'s pin.</string>
-    <string name="settings_cert_pins_unpinned_warning"><xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> is now unpinned; the next connection sets a new pin.</string>
+    <string name="settings_cert_pins_retire_last_dialog_text">This is the only pin for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g>. Removing it leaves the relay disconnected until you stage a new pin or choose to trust its next key.</string>
+    <string name="settings_cert_pins_unpinned_warning"><xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> has no pin now and stays disconnected until you stage one or trust its next key.</string>
     <string name="settings_cert_pins_stage">Stage backup pin</string>
+    <string name="settings_cert_pins_held_title">Waiting for a new key</string>
+    <string name="settings_cert_pins_held_text">These relays had their pin removed. They stay disconnected until you stage a new pin or trust the key they show next.</string>
+    <string name="settings_cert_pins_held_all_text">Your pin records could not be read, so every relay without a pin stays disconnected until you stage a pin for it or trust its next key.</string>
+    <string name="settings_cert_pins_trust_next">Trust next key</string>
+    <string name="settings_cert_pins_trust_host">Trust a relay\'s next key</string>
+    <string name="settings_cert_pins_trust_dialog_title">Trust Next Key?</string>
+    <string name="settings_cert_pins_trust_dialog_text">The next connection to <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> will trust whatever certificate it shows, including an attacker\'s, and pin it. Only continue if you know why its pin was removed.</string>
+    <string name="settings_cert_pins_trust_failed">Could not trust the next key for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g></string>
     <string name="settings_cert_pins_stage_dialog_title">Stage Backup Pin</string>
     <string name="settings_cert_pins_stage_dialog_text">Add a backup certificate pin so a relay key rotation verifies against the current or the next certificate during the overlap. Any certificate matching a pin is fully trusted: only enter a hash you obtained from the relay operator over a trusted channel.</string>
     <string name="settings_cert_pins_stage_host_label">Relay host</string>
