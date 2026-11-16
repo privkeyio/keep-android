@@ -810,9 +810,9 @@ class KeepMobileApp : Application() {
 
     /**
      * Saves the proxy setting. A changed setting makes the core drop the live node, stop
-     * the bunker and stop the approver, since each kept the sockets it was started with,
-     * so the drop is recorded here and the approver is started again. The core counts an
-     * unreadable old setting as a change, and so does this.
+     * the bunker and restart the approver, since each kept the sockets it was started with,
+     * so the drop is recorded here. The core counts an unreadable old setting as a change,
+     * and so does this.
      */
     fun saveProxyConfig(config: ProxyConfigInfo) {
         val mobile = checkNotNull(keepMobile) { "Keep not initialized" }
@@ -824,44 +824,28 @@ class KeepMobileApp : Application() {
             before != config
         }
         if (!changed) return
-        onConnectionSettingChanged()
-    }
-
-    /**
-     * For a saved setting the core read into the sockets it opened: it has dropped the live
-     * node and stopped the approver, so the drop is recorded and the approver started again.
-     * Off the caller, since the start probes the relays under the new setting.
-     */
-    private fun onConnectionSettingChanged() {
         onLiveNodeDropped()
-        approverController?.let { controller ->
-            applicationScope.launch(Dispatchers.IO) {
-                runCatching { controller.startIfPaired() }.onFailure {
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to restart approver: ${it::class.simpleName}")
-                }
-            }
-        }
     }
 
     fun clearCertificatePin(hostname: String) {
         runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onSuccess { if (it != null) onConnectionSettingChanged() }
+            .onSuccess { if (it != null) onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
     }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
-            .onSuccess { if (it != null) onConnectionSettingChanged() }
+            .onSuccess { if (it != null) onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePins: ${it::class.simpleName}") }
     }
 
     fun stageCertificatePin(hostname: String, spkiHash: String): Boolean =
         (keepMobile?.stageCertificatePinCompat(hostname, spkiHash) ?: false)
-            .also { if (it) onConnectionSettingChanged() }
+            .also { if (it) onLiveNodeDropped() }
 
     fun removeCertificatePin(hostname: String, spkiHash: String): CertPinRemoval? =
         keepMobile?.removeCertificatePinCompat(hostname, spkiHash)
-            ?.also { onConnectionSettingChanged() }
+            ?.also { onLiveNodeDropped() }
 
     fun dismissPinMismatch() {
         pinMismatch = null

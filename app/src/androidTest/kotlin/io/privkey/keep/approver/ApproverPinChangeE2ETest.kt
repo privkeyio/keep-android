@@ -25,8 +25,10 @@ import java.security.spec.ECGenParameterSpec
 
 /**
  * End-to-end: the app's own approver, paired with a gateway that never answers over a
- * public relay, is stopped by the core when a certificate pin changes and started again
- * by the app. Manual-only, since it needs the relay: run it with `-e approverManual 1`.
+ * public relay, is started again by the core after a certificate pin change. Once a
+ * change leaves its relay without a pin the restart is refused, and nothing in this
+ * process starts it either, since a start would trust whatever key the relay shows; only
+ * a start by hand does. Manual-only, since it needs the relay: run it with `-e approverManual 1`.
  * The test key needs no biometric, unlike the app's approver key, and is deleted after.
  */
 @RunWith(AndroidJUnit4::class)
@@ -37,7 +39,7 @@ class ApproverPinChangeE2ETest {
         .targetContext.applicationContext as KeepMobileApp
 
     @Test
-    fun aPinChangeStopsTheApproverAndTheAppStartsItAgain() {
+    fun theCoreRestartsTheApproverAfterAPinChangeUnlessItsRelayLostItsPin() {
         assumeTrue(args.getString("approverManual") == "1")
         val relay = args.getString("approverRelay") ?: "wss://nos.lol"
         val controller = checkNotNull(app.getApproverController()) { "no approver" }
@@ -67,7 +69,19 @@ class ApproverPinChangeE2ETest {
             restartsAfter(handler, "stage again") { assertTrue(app.stageCertificatePin(PIN_HOST, PIN_HASH_2)) }
             restartsAfter(handler, "remove") { assertTrue(app.removeCertificatePin(PIN_HOST, PIN_HASH)?.pinRemoved == true) }
             restartsAfter(handler, "clear host") { app.clearCertificatePin(PIN_HOST) }
-            restartsAfter(handler, "clear all") { app.clearAllCertificatePins() }
+
+            handler.status().alerts.maxOfOrNull { it.seq }?.let(handler::acknowledgeAlerts)
+            app.clearAllCertificatePins()
+            assertTrue(
+                "the restart was refused with the relay unpinned",
+                awaitStatus(handler) { s -> s.alerts.any { it.message == CERT_PIN_STOP } },
+            )
+            // Catches an app restart only if its relay probe finishes inside the wait.
+            Thread.sleep(SETTLE_MS)
+            assertFalse("nothing started the approver on an unpinned relay", handler.status().running)
+
+            controller.startIfPaired()
+            assertTrue("a start by hand serves again", awaitStatus(handler) { it.running && it.pairing })
             assertFalse(handler.status().paired)
         } finally {
             runCatching { handler.forget() }
@@ -80,15 +94,13 @@ class ApproverPinChangeE2ETest {
         assertEquals(devicePins, mobile.getCertificatePins())
     }
 
+    // The stop lands before the pin call returns, and the restart probes the relay before it
+    // serves, so the approver reads as stopped right after the action.
     private fun restartsAfter(handler: ApproverHandler, change: String, action: () -> Unit) {
-        // An alert stands until the owner acknowledges it, and the same one is not raised twice.
-        handler.status().alerts.maxOfOrNull { it.seq }?.let(handler::acknowledgeAlerts)
         action()
-        assertTrue(
-            "the core stopped the approver after $change",
-            awaitStatus(handler) { s -> s.alerts.any { it.message == CERT_PIN_STOP } },
-        )
-        assertTrue("the app started the approver again after $change", awaitStatus(handler) { it.running && it.pairing })
+        assertFalse("the core stopped the approver after $change", handler.status().running)
+        assertTrue("the approver serves again after $change", awaitStatus(handler) { it.running && it.pairing })
+        assertTrue("no alert after $change", handler.status().alerts.none { it.message == CERT_PIN_STOP })
     }
 
     private fun awaitStatus(handler: ApproverHandler, check: (ApproverStatus) -> Boolean): Boolean {
@@ -127,6 +139,8 @@ class ApproverPinChangeE2ETest {
         const val PIN_HOST = "pin-e2e.example.com"
         const val PIN_HASH = "0000000000000000000000000000000000000000000000000000000000000001"
         const val PIN_HASH_2 = "0000000000000000000000000000000000000000000000000000000000000002"
-        const val CERT_PIN_STOP = "Approvals stopped because the certificate pins changed. Start the approver again."
+        const val CERT_PIN_STOP =
+            "Approvals stopped because the certificate pins changed and the approver could not start again under them. Start the approver again."
+        const val SETTLE_MS = 5_000L
     }
 }
