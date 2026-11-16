@@ -354,6 +354,58 @@ class PermissionDatabaseIntegrationTest {
     }
 
     @Test
+    fun everyExpiryQueryAgreesWithTheCorePredicate() = runBlocking {
+        val now = System.currentTimeMillis()
+        val nowElapsed = 100000L
+        data class Case(val name: String, val expiresAt: Long?, val createdAt: Long, val createdAtElapsed: Long, val durationMs: Long?)
+        val cases = listOf(
+            Case("permanent", null, now, 0, null),
+            Case("wall.expired", now - 1000, now - 2000, 0, null),
+            Case("wall.valid", now + 60000, now, 0, null),
+            Case("wall.manipulated", now + 60000, now + 120000, 0, null),
+            Case("mono.expired", null, now - 70000, nowElapsed - 70000, 60000),
+            Case("mono.valid", null, now, nowElapsed - 10000, 60000),
+            Case("mono.regressed", null, now, nowElapsed + 50000, 60000),
+            Case("mono.boundary", null, now - 60000, nowElapsed - 60000, 60000),
+            Case("wall.boundary", now, now - 1000, 0, null),
+            Case("legacy.duration.overflow", null, now, 0, Long.MAX_VALUE),
+            Case("legacy.duration.expired", null, now - 70000, 0, 60000),
+            Case("legacy.duration.boundary", null, now - 60000, 0, 60000),
+            Case("legacy.duration.valid", null, now - 10000, 0, 60000),
+            Case("legacy.duration.expired.with.expiry", now + 60000, now - 70000, 0, 60000),
+        )
+        val expired = cases.associate { c ->
+            "com.case.${c.name}" to isTimestampExpired(c.expiresAt, c.createdAt, c.createdAtElapsed, c.durationMs, nowElapsed, now)
+        }
+        cases.forEach { c ->
+            val pkg = "com.case.${c.name}"
+            permissionDao.insertPermission(
+                createPermission(callerPackage = pkg, expiresAt = c.expiresAt, createdAt = c.createdAt, createdAtElapsed = c.createdAtElapsed, durationMs = c.durationMs)
+            )
+            appSettingsDao.insertOrUpdate(
+                createAppSettings(callerPackage = pkg, expiresAt = c.expiresAt, createdAt = c.createdAt, createdAtElapsed = c.createdAtElapsed, durationMs = c.durationMs)
+            )
+        }
+        assertTrue("the matrix covers a legacy row the SQL used to miss", expired.getValue("com.case.legacy.duration.expired"))
+
+        val live = permissionDao.getAllCallerPackages(now, nowElapsed).toSet()
+        val expiredSettings = appSettingsDao.getExpiredPackages(now, nowElapsed).toSet()
+        expired.forEach { (pkg, isExpired) ->
+            assertEquals("getAllCallerPackages $pkg", !isExpired, pkg in live)
+            assertEquals("getForCaller $pkg", !isExpired, permissionDao.getForCaller(pkg, now, nowElapsed).isNotEmpty())
+            assertEquals("getPermissionCountForCaller $pkg", if (isExpired) 0 else 1, permissionDao.getPermissionCountForCaller(pkg, now, nowElapsed))
+            assertEquals("getExpiredPackages $pkg", isExpired, pkg in expiredSettings)
+        }
+
+        permissionDao.deleteExpired(now, nowElapsed)
+        appSettingsDao.deleteExpired(now, nowElapsed)
+        expired.forEach { (pkg, isExpired) ->
+            assertEquals("permission deleteExpired $pkg", !isExpired, permissionDao.getPermission(pkg, "SIGN_EVENT", 1, "") != null)
+            assertEquals("settings deleteExpired $pkg", !isExpired, appSettingsDao.getSettings(pkg) != null)
+        }
+    }
+
+    @Test
     fun updateDecision() = runBlocking {
         permissionDao.insertPermission(createPermission())
 

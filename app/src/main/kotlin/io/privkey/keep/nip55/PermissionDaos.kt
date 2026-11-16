@@ -24,6 +24,7 @@ interface Nip55PermissionDao {
         OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND createdAtElapsed > :nowElapsed)
+        OR (createdAtElapsed <= 0 AND durationMs IS NOT NULL AND (createdAt + durationMs) <= :now)
     """)
     suspend fun deleteExpired(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime())
 
@@ -55,6 +56,7 @@ interface Nip55PermissionDao {
         AND (expiresAt IS NULL OR :now >= createdAt)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR createdAtElapsed <= :nowElapsed)
+        AND (createdAtElapsed > 0 OR durationMs IS NULL OR (createdAt + durationMs) > :now)
     """)
     suspend fun getAllCallerPackages(now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
@@ -64,6 +66,7 @@ interface Nip55PermissionDao {
         AND (expiresAt IS NULL OR :now >= createdAt)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR createdAtElapsed <= :nowElapsed)
+        AND (createdAtElapsed > 0 OR durationMs IS NULL OR (createdAt + durationMs) > :now)
         ORDER BY createdAt DESC
     """)
     suspend fun getForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<Nip55Permission>
@@ -74,6 +77,7 @@ interface Nip55PermissionDao {
         AND (expiresAt IS NULL OR :now >= createdAt)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR (createdAtElapsed + durationMs) > :nowElapsed)
         AND (createdAtElapsed <= 0 OR durationMs IS NULL OR createdAtElapsed <= :nowElapsed)
+        AND (createdAtElapsed > 0 OR durationMs IS NULL OR (createdAt + durationMs) > :now)
     """)
     suspend fun getPermissionCountForCaller(callerPackage: String, now: Long, nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): Int
 
@@ -219,6 +223,7 @@ interface Nip55AppSettingsDao {
         OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND createdAtElapsed > :nowElapsed)
+        OR (createdAtElapsed <= 0 AND durationMs IS NOT NULL AND (createdAt + durationMs) <= :now)
     """)
     suspend fun getExpiredPackages(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime()): List<String>
 
@@ -228,6 +233,7 @@ interface Nip55AppSettingsDao {
         OR (expiresAt IS NOT NULL AND :now < createdAt)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND (createdAtElapsed + durationMs) <= :nowElapsed)
         OR (createdAtElapsed > 0 AND durationMs IS NOT NULL AND createdAtElapsed > :nowElapsed)
+        OR (createdAtElapsed <= 0 AND durationMs IS NOT NULL AND (createdAt + durationMs) <= :now)
     """)
     suspend fun deleteExpired(now: Long = System.currentTimeMillis(), nowElapsed: Long = android.os.SystemClock.elapsedRealtime())
 
