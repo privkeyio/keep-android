@@ -174,7 +174,9 @@ class Nip55ContentProvider : ContentProvider() {
             else -> return
         }
         val level = if (decision is AutoSignDecision.StorageUnavailable) EventLogLevel.ERROR else EventLogLevel.WARN
-        app.logActivityEvent(EventLogCategory.SIGNER, level, packageName, message)
+        app.logActivityEvent(EventLogCategory.SIGNER, level, packageName, message) {
+            if (decision is AutoSignDecision.StorageUnavailable) storageFaultLogged.remove(packageName)
+        }
     }
 
     // Run `block` under a real wall-clock bound. `block` may reach a blocking,
@@ -380,16 +382,17 @@ class Nip55ContentProvider : ContentProvider() {
             } else {
                 runWithTimeout {
                     try {
+                        // Logged here so a check that outlives the timeout still records it.
                         limiter.checkAndRecord(
                             callerPackage,
                             SystemClock.elapsedRealtime().toULong(),
                             System.currentTimeMillis().toULong()
-                        )
+                        ).also { logLimiterFault(currentApp, callerPackage, it) }
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "Rate limiter check failed, failing closed to UI: ${e::class.simpleName}")
                         null
                     }
-                }?.also { logLimiterFault(currentApp, callerPackage, it) }
+                }
             }
         } else {
             null
