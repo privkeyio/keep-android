@@ -87,6 +87,18 @@ class CertificatePinHoldsCardTest {
     }
 
     @Test
+    fun theMismatchDialogWarnsBeforeClearingAndTrusting() {
+        var cleared = 0
+        compose.setContent {
+            KeepAndroidTheme { PinMismatchDialog("relay.example.com", onClearAndRetry = { cleared++ }, onDismiss = {}) }
+        }
+        compose.onNodeWithText(context.getString(R.string.main_clear_pin_and_retry_text, "relay.example.com")).assertIsDisplayed()
+        assertEquals(0, cleared)
+        compose.onNodeWithText(context.getString(R.string.main_clear_pin_and_retry)).performClick()
+        assertEquals(1, cleared)
+    }
+
+    @Test
     fun nothingHeldShowsNoSection() {
         show(CertificatePinHolds(emptyList(), false, emptyList()), mutableListOf())
         assertEquals(0, compose.onAllNodesWithText(heldTitle).fetchSemanticsNodes().size)

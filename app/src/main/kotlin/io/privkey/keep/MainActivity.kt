@@ -2841,7 +2841,7 @@ private fun DiscardPendingDkgDialog(
 }
 
 @Composable
-private fun PinMismatchDialog(
+internal fun PinMismatchDialog(
     hostname: String,
     onClearAndRetry: () -> Unit,
     onDismiss: () -> Unit
@@ -2850,7 +2850,11 @@ private fun PinMismatchDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.main_pin_mismatch_title)) },
         text = {
-            Text(stringResource(R.string.main_pin_mismatch_text, hostname))
+            // Shown here, not only in the auth prompt, which a device with no lock skips.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.main_pin_mismatch_text, hostname))
+                Text(stringResource(R.string.main_clear_pin_and_retry_text, hostname))
+            }
         },
         confirmButton = {
             TextButton(onClick = onClearAndRetry) { Text(stringResource(R.string.main_clear_pin_and_retry)) }
