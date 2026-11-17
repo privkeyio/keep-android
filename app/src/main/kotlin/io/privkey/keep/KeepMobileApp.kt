@@ -841,12 +841,13 @@ class KeepMobileApp : Application() {
     /**
      * The node, bunker and approver relays waiting on the user for a pin, or null if unreadable.
      * The candidates are gathered here until the core lists the relays it connects to itself.
+     * Any source that cannot be read makes the whole list unreadable rather than incomplete.
      */
     fun heldRelays(): List<String>? = runCatching {
         val mobile = checkNotNull(keepMobile)
-        val nodeRelays = getActiveRelays().ifEmpty { DEFAULT_NODE_RELAYS }
+        val nodeRelays = mobile.getRelayConfig(storage?.getActiveShareKey()).frostRelays.ifEmpty { DEFAULT_NODE_RELAYS }
         val bunkerRelays = mobile.getRelayConfig(null).bunkerRelays
-        val approverRelays = approverController?.let { runCatching { it.handlerStatusRelays() }.getOrNull() }.orEmpty()
+        val approverRelays = approverController?.handlerStatusRelays().orEmpty()
         mobile.heldRelays((nodeRelays + bunkerRelays + approverRelays).distinct())
     }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read heldRelays: ${it::class.simpleName}") }
         .getOrNull()
