@@ -1635,7 +1635,7 @@ fun MainScreen(
             onClearAndRetry = {
                 // Pins the exact key the dialog showed, so nothing else is learned in between.
                 requireAuthThen(
-                    appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
+                    appContext.getString(R.string.main_trust_new_certificate_title),
                     appContext.getString(R.string.main_clear_pin_and_retry_text, pinMismatchInfo.hostname),
                     appContext.getString(R.string.main_clear_pin_and_retry),
                 ) {

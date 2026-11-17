@@ -126,6 +126,7 @@
     <string name="main_pin_mismatch_text">The certificate for <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> has changed. This could indicate a security issue or a legitimate certificate rotation.</string>
     <string name="main_clear_pin_and_retry">Trust New Certificate</string>
     <string name="main_clear_pin_and_retry_text">Pin the certificate <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> showed just now in place of its old pin? If you do not know why it changed, someone may be intercepting the connection.</string>
+    <string name="main_trust_new_certificate_title">Trust New Certificate?</string>
     <string name="main_pin_mismatch_new_key">New key: <xliff:g id="spki_hash" example="3b2f…">%1$s</xliff:g></string>
     <string name="main_dismiss">Dismiss</string>
     <string name="main_database_size_label">Database: <xliff:g id="size" example="1.23">%1$s</xliff:g> MB</string>

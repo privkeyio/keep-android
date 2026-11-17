@@ -103,7 +103,7 @@
     <string name="settings_cert_pins_stage">Stage backup pin</string>
     <string name="settings_cert_pins_held_title">Waiting for a new key</string>
     <string name="settings_cert_pins_held_text">These relays have no pin and stay disconnected until you stage a new pin or trust the key they show next.</string>
-    <string name="settings_cert_pins_held_unreadable">The certificate pin records could not be read, so relays may not connect.</string>
+    <string name="settings_cert_pins_held_unreadable">Could not check which relays are waiting for a new key.</string>
     <string name="settings_cert_pins_trust_next">Trust next key</string>
     <string name="settings_cert_pins_trust_dialog_title">Trust Next Key?</string>
     <string name="settings_cert_pins_trust_dialog_text">The next connection to <xliff:g id="hostname" example="relay.example.com">%1$s</xliff:g> will trust whatever certificate it shows, including an attacker\'s, and pin it. Only continue if you know why its pin was removed.</string>

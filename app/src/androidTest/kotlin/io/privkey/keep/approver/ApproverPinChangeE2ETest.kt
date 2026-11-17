@@ -18,7 +18,6 @@ import org.junit.runner.RunWith
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.PrivateKey
-import io.privkey.keep.uniffi.CertificatePin
 import java.net.URI
 import java.security.SecureRandom
 import java.security.Signature
@@ -53,9 +52,8 @@ class ApproverPinChangeE2ETest {
         val mobile = checkNotNull(app.getKeepMobile()) { "Keep not initialized" }
         val devicePins = mobile.getCertificatePins()
         val relayHost = checkNotNull(URI(relay).host)
-        // Pairing learns the relay's key; a pin is the only thing that ends its hold afterwards.
-        var relayPins = emptyList<CertificatePin>()
         // A run that died before its cleanup leaves the relay held, which no pairing can reach.
+        // This is a test device's relay, so trusting its next key here is the run's own choice.
         mobile.heldRelays(listOf(relay)).forEach { mobile.releaseCertificatePinHold(it) }
 
         val secret = ByteArray(32).also(SecureRandom()::nextBytes).joinToString("") { "%02x".format(it) }
@@ -70,7 +68,6 @@ class ApproverPinChangeE2ETest {
             val attestation = keyStore().getCertificateChain(ALIAS).map { it.encoded }
             handler.finishPairing(signature, attestation, NoCallbacks)
             assertTrue("serving the pairing", awaitStatus(handler) { it.pairing && it.running })
-            relayPins = mobile.getCertificatePins().filter { it.hostname == relayHost }
 
             restartsAfter(handler, "stage") { assertTrue(app.stageCertificatePin(PIN_HOST, PIN_HASH)) }
             restartsAfter(handler, "stage again") { assertTrue(app.stageCertificatePin(PIN_HOST, PIN_HASH_2)) }
@@ -97,6 +94,8 @@ class ApproverPinChangeE2ETest {
             assertTrue("the resumed start pinned the relay", mobile.getCertificatePins().any { it.hostname == relayHost })
         } finally {
             runCatching { handler.forget() }
+            // Clearing holds the relay, and only a pin ends that, so the key it showed goes back.
+            val relayPins = mobile.getCertificatePins().filter { it.hostname == relayHost }
             mobile.clearCertificatePins()
             devicePins.forEach { mobile.stageCertificatePin(it.hostname, it.spkiHash) }
             if (devicePins.none { it.hostname == relayHost }) {
