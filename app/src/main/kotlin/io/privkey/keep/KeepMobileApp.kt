@@ -52,6 +52,7 @@ import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.SigningAuditLog
+import io.privkey.keep.uniffi.CertificatePinHolds
 import io.privkey.keep.uniffi.SigningRateLimiter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -833,10 +834,37 @@ class KeepMobileApp : Application() {
         onLiveNodeDropped()
     }
 
-    fun clearCertificatePin(hostname: String) {
-        runCatching { keepMobile?.clearCertificatePin(hostname) }
-            .onSuccess { if (it != null) onLiveNodeDropped() }
+    fun clearCertificatePin(hostname: String): Boolean =
+        runCatching { checkNotNull(keepMobile).clearCertificatePin(hostname) }
+            .onSuccess { onLiveNodeDropped() }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
+            .isSuccess
+
+    fun certificatePinHolds(): CertificatePinHolds? =
+        runCatching { keepMobile?.certificatePinHolds() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read certificatePinHolds: ${it::class.simpleName}") }
+            .getOrNull()
+
+    /**
+     * Lets the next connection to [hostname] trust whatever key it shows, so callers gate it
+     * on the user. That choice is also the start the hold waited for: a bunker serving without
+     * the relay and a paired approver the hold stopped start again, and the caller reconnects
+     * the node.
+     */
+    fun releaseCertificatePinHold(hostname: String): Boolean {
+        val released = runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to releaseCertificatePinHold: ${it::class.simpleName}") }
+            .isSuccess
+        if (!released) return false
+        io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop()
+        approverController?.let { controller ->
+            applicationScope.launch(Dispatchers.IO) {
+                runCatching { controller.startIfPaired() }.onFailure {
+                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start approver: ${it::class.simpleName}")
+                }
+            }
+        }
+        return true
     }
 
     fun clearAllCertificatePins() {

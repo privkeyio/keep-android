@@ -319,6 +319,8 @@ class MainActivity : FragmentActivity() {
                             onReconnectRelays = { app.reconnectRelays() },
                             onSaveProxyConfig = app::saveProxyConfig,
                             onClearCertificatePin = app::clearCertificatePin,
+                            onCertificatePinHolds = app::certificatePinHolds,
+                            onReleaseCertificatePinHold = app::releaseCertificatePinHold,
                             onClearAllCertificatePins = app::clearAllCertificatePins,
                             onStageCertificatePin = app::stageCertificatePin,
                             onRemoveCertificatePin = { hostname, spkiHash ->
@@ -467,7 +469,9 @@ fun MainScreen(
     onBunkerServiceChanged: (Boolean) -> Unit = {},
     onReconnectRelays: () -> Unit = {},
     onSaveProxyConfig: (ProxyConfigInfo) -> Unit,
-    onClearCertificatePin: (String) -> Unit = {},
+    onClearCertificatePin: (String) -> Boolean = { false },
+    onCertificatePinHolds: () -> CertificatePinHolds? = { null },
+    onReleaseCertificatePinHold: (String) -> Boolean = { false },
     onClearAllCertificatePins: () -> Unit = {},
     onStageCertificatePin: (String, String) -> Boolean = { _, _ -> false },
     onRemoveCertificatePin: (String, String) -> CertPinRemoval? = { _, _ -> null },
@@ -598,6 +602,7 @@ fun MainScreen(
     val bunkerUrl by BunkerService.bunkerUrl.collectAsState()
     val bunkerStatus by BunkerService.status.collectAsState()
     var certificatePins by remember { mutableStateOf(emptyList<CertificatePin>()) }
+    var certificatePinHolds by remember { mutableStateOf<CertificatePinHolds?>(null) }
     var profileRelays by remember { mutableStateOf(emptyList<String>()) }
     var showSecuritySettings by remember { mutableStateOf(false) }
     var showExportLogs by remember { mutableStateOf(false) }
@@ -711,9 +716,23 @@ fun MainScreen(
 
     suspend fun refreshCertificatePins() {
         certificatePins = withContext(Dispatchers.IO) { keepMobile.getCertificatePinsCompat() }
+        certificatePinHolds = withContext(Dispatchers.IO) { onCertificatePinHolds() }
     }
 
     LaunchedEffect(Unit) { refreshCertificatePins() }
+
+    suspend fun afterRelease(hostname: String, released: Boolean) {
+        refreshCertificatePins()
+        if (released) {
+            onReconnectRelays()
+        } else {
+            Toast.makeText(
+                appContext,
+                appContext.getString(R.string.settings_cert_pins_trust_failed, hostname),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     fun loadProfileRelays(accountKey: String?): List<String> {
         if (accountKey == null) return emptyList()
@@ -1612,16 +1631,19 @@ fun MainScreen(
         PinMismatchDialog(
             hostname = pinMismatchInfo.hostname,
             onClearAndRetry = {
-                // Clearing a pin re-opens trust-on-first-use for this host (here, right after
-                // a possible-MITM mismatch), so require a fresh auth factor first.
+                // Clearing holds the host, so the retry needs the hold released too: trusting
+                // the key it now shows, right after a possible MITM, is what this asks for,
+                // so both steps sit behind one fresh auth factor.
                 requireAuthThen(
                     appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
-                    appContext.getString(R.string.settings_cert_pins_clear_dialog_text, pinMismatchInfo.hostname),
+                    appContext.getString(R.string.main_clear_pin_and_retry_text, pinMismatchInfo.hostname),
                     appContext.getString(R.string.settings_cert_pins_clear),
                 ) {
-                    withContext(Dispatchers.IO) { onClearCertificatePin(pinMismatchInfo.hostname) }
-                    refreshCertificatePins()
-                    onReconnectRelays()
+                    val trusted = withContext(Dispatchers.IO) {
+                        onClearCertificatePin(pinMismatchInfo.hostname) &&
+                            onReleaseCertificatePinHold(pinMismatchInfo.hostname)
+                    }
+                    afterRelease(pinMismatchInfo.hostname, trusted)
                 }
             },
             onDismiss = onDismissPinMismatch
@@ -1906,6 +1928,7 @@ fun MainScreen(
                     // Null (not running) also covers a stale state left by a stop or error.
                     relayHealth = appLiveState?.relays?.takeIf { isConnected || isConnecting },
                     certificatePins = certificatePins,
+                    certificatePinHolds = certificatePinHolds,
                     proxyEnabled = proxyEnabled,
                     proxyPort = proxyPort,
                     autoStartEnabled = autoStartEnabled,
@@ -1999,7 +2022,14 @@ fun MainScreen(
                         // retiring pins one at a time.
                         requireAuthThen(
                             appContext.getString(R.string.settings_cert_pins_clear_dialog_title),
-                            appContext.getString(R.string.settings_cert_pins_clear_dialog_text, hostname),
+                            appContext.getString(
+                                if (isLastPinForHost(certificatePins, hostname)) {
+                                    R.string.settings_cert_pins_retire_last_dialog_text
+                                } else {
+                                    R.string.settings_cert_pins_retire_keep_others
+                                },
+                                hostname
+                            ),
                             appContext.getString(R.string.settings_cert_pins_clear),
                         ) {
                             val removal = withContext(Dispatchers.IO) {
@@ -2013,6 +2043,15 @@ fun MainScreen(
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
+                        }
+                    },
+                    onTrustNextKey = { hostname ->
+                        requireAuthThen(
+                            appContext.getString(R.string.settings_cert_pins_trust_dialog_title),
+                            appContext.getString(R.string.settings_cert_pins_trust_dialog_text, hostname),
+                            appContext.getString(R.string.settings_cert_pins_trust_next),
+                        ) {
+                            afterRelease(hostname, withContext(Dispatchers.IO) { onReleaseCertificatePinHold(hostname) })
                         }
                     },
                     onClearAllPins = {
@@ -2376,6 +2415,7 @@ private fun SettingsTab(
     relayConfigUnreadable: Boolean,
     relayHealth: List<RelayHealth>?,
     certificatePins: List<CertificatePin>,
+    certificatePinHolds: CertificatePinHolds?,
     proxyEnabled: Boolean,
     proxyPort: Int,
     autoStartEnabled: Boolean,
@@ -2388,6 +2428,7 @@ private fun SettingsTab(
     onResetRelayConfig: () -> Unit,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
+    onTrustNextKey: (String) -> Unit,
     onClearAllPins: () -> Unit,
     onProxyActivate: (Int) -> Unit,
     onProxyDeactivate: () -> Unit,
@@ -2431,6 +2472,7 @@ private fun SettingsTab(
                 relayConfigUnreadable = relayConfigUnreadable,
                 relayHealth = relayHealth,
                 certificatePins = certificatePins,
+                certificatePinHolds = certificatePinHolds,
                 proxyEnabled = proxyEnabled,
                 proxyPort = proxyPort,
                 onAddRelay = onAddRelay,
@@ -2440,6 +2482,7 @@ private fun SettingsTab(
                 onResetRelayConfig = onResetRelayConfig,
                 onStagePin = onStagePin,
                 onRetirePin = onRetirePin,
+                onTrustNextKey = onTrustNextKey,
                 onClearAllPins = onClearAllPins,
                 onProxyActivate = onProxyActivate,
                 onProxyDeactivate = onProxyDeactivate
@@ -2798,7 +2841,7 @@ private fun DiscardPendingDkgDialog(
 }
 
 @Composable
-private fun PinMismatchDialog(
+internal fun PinMismatchDialog(
     hostname: String,
     onClearAndRetry: () -> Unit,
     onDismiss: () -> Unit
@@ -2807,7 +2850,11 @@ private fun PinMismatchDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.main_pin_mismatch_title)) },
         text = {
-            Text(stringResource(R.string.main_pin_mismatch_text, hostname))
+            // Shown here, not only in the auth prompt, which a device with no lock skips.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.main_pin_mismatch_text, hostname))
+                Text(stringResource(R.string.main_clear_pin_and_retry_text, hostname))
+            }
         },
         confirmButton = {
             TextButton(onClick = onClearAndRetry) { Text(stringResource(R.string.main_clear_pin_and_retry)) }
@@ -2825,6 +2872,7 @@ private fun ShareSettingsSection(
     relayConfigUnreadable: Boolean,
     relayHealth: List<RelayHealth>?,
     certificatePins: List<CertificatePin>,
+    certificatePinHolds: CertificatePinHolds?,
     proxyEnabled: Boolean,
     proxyPort: Int,
     onAddRelay: (String) -> Unit,
@@ -2834,6 +2882,7 @@ private fun ShareSettingsSection(
     onResetRelayConfig: () -> Unit,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
+    onTrustNextKey: (String) -> Unit,
     onClearAllPins: () -> Unit,
     onProxyActivate: (Int) -> Unit,
     onProxyDeactivate: () -> Unit
@@ -2853,8 +2902,10 @@ private fun ShareSettingsSection(
 
     CertificatePinsCard(
         pins = certificatePins,
+        holds = certificatePinHolds,
         onStagePin = onStagePin,
         onRetirePin = onRetirePin,
+        onTrustNextKey = onTrustNextKey,
         onClearAllPins = onClearAllPins
     )
     Spacer(modifier = Modifier.height(16.dp))
