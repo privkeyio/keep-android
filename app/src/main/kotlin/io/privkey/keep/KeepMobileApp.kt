@@ -66,6 +66,7 @@ import java.util.UUID
 import javax.crypto.Cipher
 
 private const val TAG = "KeepMobileApp"
+private val DEFAULT_NODE_RELAYS = listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
 private const val EVENT_LOG_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
 
 class KeepMobileApp : Application() {
@@ -518,9 +519,7 @@ class KeepMobileApp : Application() {
         initMutex.withLock {
             if (isNodeLive() && mobile.getShareInfo() != null) return
 
-            val relays = getActiveRelays().ifEmpty {
-                listOf("wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net")
-            }
+            val relays = getActiveRelays().ifEmpty { DEFAULT_NODE_RELAYS }
             val store = storage
             withContext(initDispatcher) {
                 if (requestId != null && store != null) {
@@ -839,12 +838,16 @@ class KeepMobileApp : Application() {
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
             .isSuccess
 
-    /** The node, bunker and approver relays waiting on the user for a pin, or null if unreadable. */
+    /**
+     * The node, bunker and approver relays waiting on the user for a pin, or null if unreadable.
+     * The candidates are gathered here until the core lists the relays it connects to itself.
+     */
     fun heldRelays(): List<String>? = runCatching {
         val mobile = checkNotNull(keepMobile)
-        val config = mobile.getRelayConfig(storage?.getActiveShareKey())
-        val approverRelays = approverController?.state?.value?.status?.relays.orEmpty()
-        mobile.heldRelays((config.frostRelays + config.bunkerRelays + approverRelays).distinct())
+        val nodeRelays = getActiveRelays().ifEmpty { DEFAULT_NODE_RELAYS }
+        val bunkerRelays = mobile.getRelayConfig(null).bunkerRelays
+        val approverRelays = approverController?.let { runCatching { it.handlerStatusRelays() }.getOrNull() }.orEmpty()
+        mobile.heldRelays((nodeRelays + bunkerRelays + approverRelays).distinct())
     }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read heldRelays: ${it::class.simpleName}") }
         .getOrNull()
 
@@ -864,7 +867,8 @@ class KeepMobileApp : Application() {
         runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to releaseCertificatePinHold: ${it::class.simpleName}") }
             .getOrNull()
-            ?.also { io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop() }
+            // The core drops the node when it uses the host; this also restarts the bunker.
+            ?.also { onLiveNodeDropped() }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
