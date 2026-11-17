@@ -48,6 +48,9 @@ class ApproverKeyInvalidatedException : Exception()
  */
 class ApproverController(private val context: Context, mobile: KeepMobile) {
     private val handler = ApproverHandler(mobile)
+
+    /** The relays the approver serves or waits on, read from the core rather than the last refresh. */
+    fun handlerStatusRelays(): List<String> = handler.status().relays
     private val notifier = ApproverNotifier(context)
 
     private val _state = MutableStateFlow(ApproverState())
