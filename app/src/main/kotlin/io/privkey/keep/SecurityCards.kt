@@ -1,7 +1,6 @@
 package io.privkey.keep
 
 import io.privkey.keep.ui.components.KeepCard
-import io.privkey.keep.uniffi.CertificatePinHolds
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -230,7 +229,7 @@ internal fun isValidSpkiHash(hash: String): Boolean =
 @Composable
 fun CertificatePinsCard(
     pins: List<CertificatePin>,
-    holds: CertificatePinHolds?,
+    held: List<String>?,
     onStagePin: (String, String) -> Unit,
     onRetirePin: (String, String) -> Unit,
     onTrustNextKey: (String) -> Unit,
@@ -238,7 +237,6 @@ fun CertificatePinsCard(
 ) {
     var showClearAllDialog by remember { mutableStateOf(false) }
     var showStageDialog by remember { mutableStateOf(false) }
-    var showTrustHostDialog by remember { mutableStateOf(false) }
     var hostToTrust by remember { mutableStateOf<String?>(null) }
     var pinToRetire by remember { mutableStateOf<CertificatePin?>(null) }
 
@@ -256,8 +254,7 @@ fun CertificatePinsCard(
                     }
                 }
             }
-            val held = holds?.takeIf { it.hosts.isNotEmpty() || it.everyUnpinnedHost }
-            if (pins.isEmpty() && held == null) {
+            if (pins.isEmpty() && held?.isEmpty() == true) {
                 Text(
                     stringResource(R.string.settings_cert_pins_empty),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -299,20 +296,16 @@ fun CertificatePinsCard(
             TextButton(onClick = { showStageDialog = true }) {
                 Text(stringResource(R.string.settings_cert_pins_stage))
             }
-            if (held != null) {
-                HeldHostsSection(held, onTrustNextKey = { hostToTrust = it }, onTrustOtherHost = { showTrustHostDialog = true })
+            if (held == null) {
+                Text(
+                    stringResource(R.string.settings_cert_pins_held_unreadable),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else if (held.isNotEmpty()) {
+                HeldRelaysSection(held, onTrustNextKey = { hostToTrust = it })
             }
         }
-    }
-
-    if (showTrustHostDialog) {
-        TrustHostDialog(
-            onDismiss = { showTrustHostDialog = false },
-            onTrust = { host ->
-                hostToTrust = host
-                showTrustHostDialog = false
-            }
-        )
     }
 
     // The one action here that trusts a key on first use, so the warning is shown in the app
@@ -401,21 +394,15 @@ fun CertificatePinsCard(
 }
 
 @Composable
-private fun HeldHostsSection(
-    holds: CertificatePinHolds,
-    onTrustNextKey: (String) -> Unit,
-    onTrustOtherHost: () -> Unit
-) {
+private fun HeldRelaysSection(relays: List<String>, onTrustNextKey: (String) -> Unit) {
     Spacer(modifier = Modifier.height(8.dp))
     Text(stringResource(R.string.settings_cert_pins_held_title), style = MaterialTheme.typography.titleSmall)
     Text(
-        stringResource(
-            if (holds.everyUnpinnedHost) R.string.settings_cert_pins_held_all_text else R.string.settings_cert_pins_held_text
-        ),
+        stringResource(R.string.settings_cert_pins_held_text),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    holds.hosts.forEach { host ->
+    relays.forEach { relay ->
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -423,48 +410,12 @@ private fun HeldHostsSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(host, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { onTrustNextKey(host) }) {
+            Text(relay, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { onTrustNextKey(relay) }) {
                 Text(stringResource(R.string.settings_cert_pins_trust_next))
             }
         }
     }
-    if (holds.everyUnpinnedHost) {
-        TextButton(onClick = onTrustOtherHost) {
-            Text(stringResource(R.string.settings_cert_pins_trust_host))
-        }
-    }
-}
-
-@Composable
-private fun TrustHostDialog(
-    onDismiss: () -> Unit,
-    onTrust: (String) -> Unit
-) {
-    var host by remember { mutableStateOf("") }
-    val hostTrimmed = host.trim()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_cert_pins_trust_host)) },
-        text = {
-            OutlinedTextField(
-                value = host,
-                onValueChange = { host = it },
-                label = { Text(stringResource(R.string.settings_cert_pins_stage_host_label)) },
-                singleLine = true
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { onTrust(hostTrimmed) }, enabled = hostTrimmed.isNotEmpty()) {
-                Text(stringResource(R.string.settings_cert_pins_trust_next))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_cancel))
-            }
-        }
-    )
 }
 
 @Composable

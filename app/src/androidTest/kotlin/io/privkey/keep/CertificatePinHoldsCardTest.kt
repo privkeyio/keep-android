@@ -5,11 +5,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.privkey.keep.ui.theme.KeepAndroidTheme
-import io.privkey.keep.uniffi.CertificatePinHolds
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -18,7 +16,7 @@ import org.junit.runner.RunWith
 /**
  * A relay whose pin was removed stays disconnected until the user acts, so the card has to
  * show it and offer the way back for each one, including the case where the core could not
- * read which hosts it holds.
+ * read the pin records.
  */
 @RunWith(AndroidJUnit4::class)
 class CertificatePinHoldsCardTest {
@@ -31,14 +29,13 @@ class CertificatePinHoldsCardTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val trustNext get() = context.getString(R.string.settings_cert_pins_trust_next)
-    private val trustHost get() = context.getString(R.string.settings_cert_pins_trust_host)
     private val heldTitle get() = context.getString(R.string.settings_cert_pins_held_title)
 
-    private fun show(holds: CertificatePinHolds?, trusted: MutableList<String>) = compose.setContent {
+    private fun show(held: List<String>?, trusted: MutableList<String>) = compose.setContent {
         KeepAndroidTheme {
             CertificatePinsCard(
                 pins = emptyList(),
-                holds = holds,
+                held = held,
                 onStagePin = { _, _ -> },
                 onRetirePin = { _, _ -> },
                 onTrustNextKey = { trusted += it },
@@ -50,37 +47,28 @@ class CertificatePinHoldsCardTest {
     @Test
     fun eachHeldHostOffersToTrustItsNextKey() {
         val trusted = mutableListOf<String>()
-        show(CertificatePinHolds(listOf("relay.one.com", "relay.two.com"), false, emptyList()), trusted)
+        show(listOf("wss://relay.one.com", "wss://relay.two.com"), trusted)
 
         compose.onNodeWithText(heldTitle).assertIsDisplayed()
-        compose.onNodeWithText("relay.two.com").assertIsDisplayed()
+        compose.onNodeWithText("wss://relay.two.com").assertIsDisplayed()
         compose.onAllNodesWithText(trustNext)[1].performClick()
         assertEquals("nothing is trusted before the warning is confirmed", emptyList<String>(), trusted)
-        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_trust_dialog_text, "relay.two.com")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_trust_dialog_text, "wss://relay.two.com")).assertIsDisplayed()
         compose.onAllNodesWithText(trustNext).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
-        assertEquals(listOf("relay.two.com"), trusted)
-        assertEquals(0, compose.onAllNodesWithText(trustHost).fetchSemanticsNodes().size)
+        assertEquals(listOf("wss://relay.two.com"), trusted)
     }
 
     @Test
-    fun unreadableHoldsOfferToTrustAHostByName() {
-        val trusted = mutableListOf<String>()
-        show(CertificatePinHolds(emptyList(), true, emptyList()), trusted)
-
-        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_held_all_text)).assertIsDisplayed()
-        compose.onNodeWithText(trustHost).performClick()
-        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_stage_host_label)).performTextInput(" relay.example.com ")
-        compose.onNodeWithText(trustNext).performClick()
-        assertEquals(emptyList<String>(), trusted)
-        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_trust_dialog_text, "relay.example.com")).assertIsDisplayed()
-        compose.onNodeWithText(trustNext).performClick()
-        assertEquals(listOf("relay.example.com"), trusted)
+    fun unreadableHoldsSayTheRecordsCouldNotBeRead() {
+        show(null, mutableListOf())
+        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_held_unreadable)).assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText(context.getString(R.string.settings_cert_pins_empty)).fetchSemanticsNodes().size)
     }
 
     @Test
     fun cancellingTheWarningTrustsNothing() {
         val trusted = mutableListOf<String>()
-        show(CertificatePinHolds(listOf("relay.one.com"), false, emptyList()), trusted)
+        show(listOf("wss://relay.one.com"), trusted)
         compose.onNodeWithText(trustNext).performClick()
         compose.onNodeWithText(context.getString(R.string.settings_cancel)).performClick()
         assertEquals(emptyList<String>(), trusted)
@@ -90,9 +78,10 @@ class CertificatePinHoldsCardTest {
     fun theMismatchDialogWarnsBeforeClearingAndTrusting() {
         var cleared = 0
         compose.setContent {
-            KeepAndroidTheme { PinMismatchDialog("relay.example.com", onClearAndRetry = { cleared++ }, onDismiss = {}) }
+            KeepAndroidTheme { PinMismatchDialog("relay.example.com", NEW_KEY, onClearAndRetry = { cleared++ }, onDismiss = {}) }
         }
         compose.onNodeWithText(context.getString(R.string.main_clear_pin_and_retry_text, "relay.example.com")).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.main_pin_mismatch_new_key, NEW_KEY)).assertIsDisplayed()
         assertEquals(0, cleared)
         compose.onNodeWithText(context.getString(R.string.main_clear_pin_and_retry)).performClick()
         assertEquals(1, cleared)
@@ -100,7 +89,12 @@ class CertificatePinHoldsCardTest {
 
     @Test
     fun nothingHeldShowsNoSection() {
-        show(CertificatePinHolds(emptyList(), false, emptyList()), mutableListOf())
+        show(emptyList(), mutableListOf())
         assertEquals(0, compose.onAllNodesWithText(heldTitle).fetchSemanticsNodes().size)
+        compose.onNodeWithText(context.getString(R.string.settings_cert_pins_empty)).assertIsDisplayed()
+    }
+
+    private companion object {
+        const val NEW_KEY = "3b2f000000000000000000000000000000000000000000000000000000000a1c"
     }
 }

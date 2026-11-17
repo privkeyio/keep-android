@@ -52,7 +52,6 @@ import io.privkey.keep.uniffi.ProxyConfigInfo
 import io.privkey.keep.uniffi.RelayConfigInfo
 import io.privkey.keep.uniffi.SignPolicyStore
 import io.privkey.keep.uniffi.SigningAuditLog
-import io.privkey.keep.uniffi.CertificatePinHolds
 import io.privkey.keep.uniffi.SigningRateLimiter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -840,32 +839,32 @@ class KeepMobileApp : Application() {
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to clearCertificatePin: ${it::class.simpleName}") }
             .isSuccess
 
-    fun certificatePinHolds(): CertificatePinHolds? =
-        runCatching { keepMobile?.certificatePinHolds() }
-            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read certificatePinHolds: ${it::class.simpleName}") }
-            .getOrNull()
+    /** The node, bunker and approver relays waiting on the user for a pin, or null if unreadable. */
+    fun heldRelays(): List<String>? = runCatching {
+        val mobile = checkNotNull(keepMobile)
+        val config = mobile.getRelayConfig(storage?.getActiveShareKey())
+        val approverRelays = approverController?.state?.value?.status?.relays.orEmpty()
+        mobile.heldRelays((config.frostRelays + config.bunkerRelays + approverRelays).distinct())
+    }.onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to read heldRelays: ${it::class.simpleName}") }
+        .getOrNull()
+
+    /** Pins [spkiHash] as the host's only key, for a mismatch the user chose to accept. Gate it on the user. */
+    fun replaceCertificatePins(hostname: String, spkiHash: String): Boolean =
+        runCatching { checkNotNull(keepMobile).replaceCertificatePins(hostname, spkiHash) }
+            .onSuccess { onLiveNodeDropped() }
+            .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to replaceCertificatePins: ${it::class.simpleName}") }
+            .isSuccess
 
     /**
-     * Lets the next connection to [hostname] trust whatever key it shows, so callers gate it
-     * on the user. That choice is also the start the hold waited for: a bunker serving without
-     * the relay and a paired approver the hold stopped start again, and the caller reconnects
-     * the node.
+     * Lets a probe of [hostname] in the next ten minutes trust whatever key it shows, so callers
+     * gate it on the user and reconnect right after. Returns the host the core released. The core
+     * resumes an approver waiting on it, but not the bunker yet, so that restart stays here.
      */
-    fun releaseCertificatePinHold(hostname: String): Boolean {
-        val released = runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
+    fun releaseCertificatePinHold(hostname: String): String? =
+        runCatching { checkNotNull(keepMobile).releaseCertificatePinHold(hostname) }
             .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to releaseCertificatePinHold: ${it::class.simpleName}") }
-            .isSuccess
-        if (!released) return false
-        io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop()
-        approverController?.let { controller ->
-            applicationScope.launch(Dispatchers.IO) {
-                runCatching { controller.startIfPaired() }.onFailure {
-                    if (BuildConfig.DEBUG) Log.e(TAG, "Failed to start approver: ${it::class.simpleName}")
-                }
-            }
-        }
-        return true
-    }
+            .getOrNull()
+            ?.also { io.privkey.keep.nip46.BunkerService.restartAfterNodeDrop() }
 
     fun clearAllCertificatePins() {
         runCatching { keepMobile?.clearCertificatePins() }
