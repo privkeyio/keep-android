@@ -57,6 +57,7 @@ class AndroidKeystoreStorage(
     // test overrides it so its no-auth storage never contends with the app's
     // auth-gated storage over the one shared alias, whose auth requirement is
     // fixed by whichever caller creates it first (keep-android-dcq).
+    // FrostSignTestSupport.noAuthStorage() keeps the production alias on purpose; see there.
     @get:VisibleForTesting
     internal val keystoreAlias: String = KEYSTORE_ALIAS,
     // Test seam: suffix appended to every SharedPreferences namespace (legacy
@@ -115,6 +116,13 @@ class AndroidKeystoreStorage(
         // No read wipes anything now, so every record has that protection and the
         // exemption has nothing left to say.
         private const val RSA_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
+
+        // Process-wide, not per instance: aliases such as METADATA_KEY_ALIAS and
+        // KEYSTORE_ALIAS are shared by every instance in the process. Two that each found
+        // one absent would each generate it, the second replacing the first and leaving
+        // data sealed under the first undecryptable (#638). The StrongBox path widens the
+        // window, as it generates, probes, and may delete and generate again.
+        private val keyCreationLock = Any()
     }
 
     /** The operation a pending [Cipher] is for, so it is consumed by the matching callback. */
@@ -702,8 +710,7 @@ class AndroidKeystoreStorage(
             !keyStore.containsAlias(getLegacyKeystoreAlias(key))
     }
 
-    @Synchronized
-    private fun getOrCreateKeyWithAlias(alias: String, requireUserAuth: Boolean = true): SecretKey {
+    private fun getOrCreateKeyWithAlias(alias: String, requireUserAuth: Boolean = true): SecretKey = synchronized(keyCreationLock) {
         if (!keyStore.containsAlias(alias)) {
             val keyGenerator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES,
@@ -760,7 +767,7 @@ class AndroidKeystoreStorage(
             }
         }
 
-        return keyStore.getKey(alias, null) as? SecretKey
+        keyStore.getKey(alias, null) as? SecretKey
             ?: throw KeepMobileException.StorageException("Key $alias is not a SecretKey")
     }
 
@@ -1400,8 +1407,7 @@ class AndroidKeystoreStorage(
 
     private val dkgSecretPrefs: ReadablePrefs by lazy { createEncryptedPrefs(DKG_SECRET_PREFS) }
 
-    @Synchronized
-    private fun getOrCreateDkgSecretKeypair() {
+    private fun getOrCreateDkgSecretKeypair(): Unit = synchronized(keyCreationLock) {
         if (keyStore.containsAlias(DKG_SECRET_ALIAS)) {
             // Reusing an existing alias is correct only if it carries the auth
             // gate this key exists to provide. A non-auth key at this alias (e.g.
