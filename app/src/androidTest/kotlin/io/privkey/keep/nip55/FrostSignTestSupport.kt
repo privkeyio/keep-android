@@ -9,6 +9,12 @@ import javax.crypto.Cipher
 
 object FrostSignTestSupport {
 
+    // Shares the app's own alias and prefs rather than an isolated sandbox, on purpose: a
+    // share imported here is the one the app's storage then reads, and the alias created
+    // here without auth is the one the app's storage reuses, which is how the
+    // BunkerRevokeE2ETest harness gets a share key usable without a biometric (see
+    // testharness/nip46probe/README.md). It and the app's storage exist side by side, so
+    // both rely on key creation being serialized across instances (#638).
     fun noAuthStorage(): AndroidKeystoreStorage {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         return AndroidKeystoreStorage(context, requireUserAuth = false)

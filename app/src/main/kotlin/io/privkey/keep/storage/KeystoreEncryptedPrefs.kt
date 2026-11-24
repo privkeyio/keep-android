@@ -178,7 +178,12 @@ object KeystoreEncryptedPrefs {
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
     }.getOrDefault(false)
 
-    private fun getOrCreateKey(context: Context, alias: String): SecretKey {
+    // Process-wide: every opener of a file, in any instance, must see one key. Two that
+    // each find the alias absent would each generate one, the second replacing the first
+    // and stranding whatever the first wrote under it (#638).
+    private val keyCreationLock = Any()
+
+    private fun getOrCreateKey(context: Context, alias: String): SecretKey = synchronized(keyCreationLock) {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(alias)) {
             return keyStore.getKey(alias, null) as? SecretKey
