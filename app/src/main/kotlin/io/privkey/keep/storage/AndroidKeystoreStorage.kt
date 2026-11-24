@@ -156,7 +156,7 @@ class AndroidKeystoreStorage(
         val alias = "$APPROVER_WRAP_ALIAS$prefsSuffix"
         ApproverStateFile(
             File(context.noBackupFilesDir, "$APPROVER_STATE_FILE$prefsSuffix"),
-            wrappingKey = { keyStore.getKey(alias, null) as? SecretKey },
+            wrappingKey = { synchronized(keyCreationLock) { keyStore.getKey(alias, null) as? SecretKey } },
             createWrappingKey = { getOrCreateKeyWithAlias(alias, requireUserAuth = false) },
             // The state is already gone, and a store reuses a key left behind, so a
             // failed delete here must not fail the removal.
@@ -673,8 +673,10 @@ class AndroidKeystoreStorage(
         }
     }
 
-    @Synchronized
-    private fun getOrCreateKeyForShare(key: String): SecretKey {
+    // Under the process-wide lock, fast path included: while another instance is between
+    // generating a StrongBox key and probing it, the alias already exists, and the key it
+    // would hand back may be deleted and regenerated when the probe fails.
+    private fun getOrCreateKeyForShare(key: String): SecretKey = synchronized(keyCreationLock) {
         val newAlias = getKeystoreAlias(key)
         if (keyStore.containsAlias(newAlias)) {
             return keyStore.getKey(newAlias, null) as? SecretKey
@@ -689,7 +691,7 @@ class AndroidKeystoreStorage(
             return keyStore.getKey(keystoreAlias, null) as? SecretKey
                 ?: throw KeepMobileException.StorageException("Key $keystoreAlias is not a SecretKey")
         }
-        return getOrCreateKeyWithAlias(newAlias, requireUserAuth)
+        getOrCreateKeyWithAlias(newAlias, requireUserAuth)
     }
 
     // Creates (but does not use) the per-share key, so a test can trigger the

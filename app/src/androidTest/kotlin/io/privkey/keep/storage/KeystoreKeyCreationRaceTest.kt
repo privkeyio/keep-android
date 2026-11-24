@@ -1,18 +1,24 @@
 package io.privkey.keep.storage
 
 import android.content.Context
+import android.security.keystore.KeyInfo
+import android.security.keystore.KeyProperties
+import androidx.biometric.BiometricManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.security.KeyStore
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 /**
@@ -90,6 +96,53 @@ class KeystoreKeyCreationRaceTest {
         }
     }
 
+    /**
+     * While one instance is between generating a StrongBox share key and finding it
+     * unusable, the alias already exists. Another instance must not take that key from
+     * its fast path, as the first then deletes it and generates the TEE key in its place.
+     */
+    @Test
+    fun shareKeyFastPathWaitsOutAStrongBoxFallback() {
+        assumeTrue(context.packageManager.hasSystemFeature("android.hardware.strongbox_keystore"))
+        assumeTrue(
+            "requires an enrolled strong biometric",
+            BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+                BiometricManager.BIOMETRIC_SUCCESS
+        )
+        repeat(ROUNDS) { round ->
+            val share = "${run}_fallback$round"
+            val probing = CountDownLatch(1)
+            val first = AndroidKeystoreStorage(
+                context,
+                requireUserAuth = true,
+                strongBoxUseTimeProbe = { probing.countDown(); Thread.sleep(PROBE_HOLD_MS); false },
+                keystoreAlias = "keep_${run}_fa$round",
+                prefsSuffix = "_${run}_fa$round",
+            )
+            val second = AndroidKeystoreStorage(
+                context,
+                requireUserAuth = true,
+                keystoreAlias = "keep_${run}_fb$round",
+                prefsSuffix = "_${run}_fb$round",
+            )
+            shareAliases += first.keystoreAliasFor(share)
+            val (a, b) = concurrently(
+                { first.ensureShareKey(share) },
+                { check(probing.await(30, TimeUnit.SECONDS)); second.ensureShareKey(share) },
+            )
+            val stored = keyStore.getKey(first.keystoreAliasFor(share), null) as SecretKey
+            listOf(a, b).forEach { key ->
+                assertEquals("round $round", stored, key)
+                assertEquals("round $round", KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT, securityLevelOf(key))
+                Cipher.getInstance("AES/GCM/NoPadding").init(Cipher.ENCRYPT_MODE, key)
+            }
+        }
+    }
+
+    private fun securityLevelOf(key: SecretKey): Int =
+        (SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo)
+            .securityLevel
+
     @Test
     fun concurrentFirstOpenOfEncryptedPrefsSharesOneKey() {
         repeat(ROUNDS) { round ->
@@ -106,6 +159,7 @@ class KeystoreKeyCreationRaceTest {
 
     private companion object {
         const val ROUNDS = 5
+        const val PROBE_HOLD_MS = 1_000L
         val PLAINTEXT = "keep-638".toByteArray()
     }
 }
