@@ -245,11 +245,20 @@ class BunkerService : Service() {
          * clients itself (privkeyio/keep follow-up), and with it [authorizedClientsCache]. The
          * holds also do the in-flight dedupe, which that follow-up has to replace: the core's
          * refuse_to_register would then answer a second accept "already connected".
+         *
+         * Bound to the bunker serving when this is called, which the user approved it on: one
+         * reset or restarted since, an account switch's included, fails it as not running.
          */
         internal suspend fun acceptNostrconnect(context: Context, uri: String, info: NostrConnectInfo, approvedPerms: String?): NostrconnectOutcome {
             val appContext = context.applicationContext
+            val service = current()
+            val handler = service?.bunkerHandler
+            val keepMobile = service?.keepMobileRef
             return acceptScope.async {
-                val result = runCatching { acceptNostrconnectNow(appContext, uri, info, approvedPerms) }
+                val result = runCatching {
+                    if (service == null || handler == null || keepMobile == null) throw KeepMobileException.BunkerNotRunning()
+                    acceptNostrconnectNow(appContext, service, handler, keepMobile, uri, info, approvedPerms)
+                }
                 val message = result.fold(
                     onSuccess = { outcome ->
                         val name = nostrconnectDisplayName(info.name) ?: appContext.getString(R.string.connections_nostrconnect_unknown_app)
@@ -266,10 +275,15 @@ class BunkerService : Service() {
             }.await()
         }
 
-        private suspend fun acceptNostrconnectNow(context: Context, uri: String, info: NostrConnectInfo, approvedPerms: String?): NostrconnectOutcome {
-            val service = current() ?: throw KeepMobileException.BunkerNotRunning()
-            val handler = service.bunkerHandler ?: throw KeepMobileException.BunkerNotRunning()
-            val keepMobile = service.keepMobileRef ?: throw KeepMobileException.BunkerNotRunning()
+        private suspend fun acceptNostrconnectNow(
+            context: Context,
+            service: BunkerService,
+            handler: BunkerHandler,
+            keepMobile: io.privkey.keep.uniffi.KeepMobile,
+            uri: String,
+            info: NostrConnectInfo,
+            approvedPerms: String?,
+        ): NostrconnectOutcome {
             val pk = info.clientPubkey.lowercase()
             if (!HEX_PUBKEY_REGEX.matches(pk)) throw KeepMobileException.InvalidInput("Invalid client pubkey")
             val name = nostrconnectClientName(info.name, pk)
@@ -279,7 +293,11 @@ class BunkerService : Service() {
                 cache = service.authorizedClientsCache,
                 revokes = NostrconnectRevokeState(revokeGeneration::get, everyClientRevokedAt::get) { clientRevokedAt[it] },
                 withLock = { block -> BunkerConfigStore.withLock { block() } },
-                accept = { withContext(Dispatchers.IO) { handler.acceptNostrconnect(uri, approvedPerms) } },
+                accept = {
+                    // Failed as the core fails a stopped bunker, so a revoke or switch since is reported as such.
+                    if (current() !== service || service.bunkerHandler !== handler) throw KeepMobileException.BunkerNotRunning()
+                    withContext(Dispatchers.IO) { handler.acceptNostrconnect(uri, approvedPerms) }
+                },
                 readClients = { withContext(Dispatchers.IO) { keepMobile.getBunkerConfig().authorizedClients } },
                 saveName = {
                     withContext(Dispatchers.IO) {
@@ -382,14 +400,15 @@ class BunkerService : Service() {
                     runCatching { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }.exceptionOrNull()?.let(e::addSuppressed)
                     e
                 }
+                // Under the lock, so an accept that admits the client again names it after this.
+                revoked.forEach { pubkey ->
+                    runCatching { Nip46ClientStore.removeClient(context, pubkey) }
+                        .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
+                }
                 if (pubkeys == null || failure != null) everyClientRevokedAt.accumulateAndGet(generation, ::maxOf)
                 failure
             }
             if (nothingChosen) return keepMobile.getBunkerConfig()
-            revoked.forEach { pubkey ->
-                runCatching { Nip46ClientStore.removeClient(context, pubkey) }
-                    .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
-            }
             clientListChanged()
             // The mark holds in memory even when it cannot be saved, so the restart revokes first.
             revokeFailure?.let { e -> runCatching { revokeAllMark(context).set() }.exceptionOrNull()?.let(e::addSuppressed) }

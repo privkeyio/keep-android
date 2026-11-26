@@ -53,6 +53,8 @@ class NostrConnectAcceptConcurrencyStressTest {
         @Volatile var serving = true
         // Accept lock sections asked for, counted before the lock is taken.
         val lockRequests = AtomicInteger()
+        // Completed when an accept's second lock section, the admission's, finds the lock held.
+        val admissionLockContended = CompletableDeferred<Unit>()
 
         val revokes = NostrconnectRevokeState(generation::get, everyClientRevokedAt::get) { clientRevokedAt[it] }
 
@@ -84,20 +86,35 @@ class NostrConnectAcceptConcurrencyStressTest {
             core: suspend () -> Unit = {},
             readClients: suspend () -> List<String> = { listed.toList() },
             saveName: suspend () -> Unit = { named += client },
-        ): NostrconnectOutcome = acceptAndAdmit(
-            pk = client,
-            holds = holds,
-            cache = cache,
-            revokes = revokes,
-            withLock = { block -> lockRequests.incrementAndGet(); lock.withLock { block() } },
-            accept = {
-                core()
-                if (!serving) throw KeepMobileException.BunkerNotRunning()
-                listed += client
-            },
-            readClients = readClients,
-            saveName = saveName,
-        )
+        ): NostrconnectOutcome {
+            var locks = 0
+            return acceptAndAdmit(
+                pk = client,
+                holds = holds,
+                cache = cache,
+                revokes = revokes,
+                withLock = { block ->
+                    lockRequests.incrementAndGet()
+                    val section = ++locks
+                    if (!lock.tryLock()) {
+                        if (section == 2) admissionLockContended.complete(Unit)
+                        lock.lock()
+                    }
+                    try {
+                        block()
+                    } finally {
+                        lock.unlock()
+                    }
+                },
+                accept = {
+                    core()
+                    if (!serving) throw KeepMobileException.BunkerNotRunning()
+                    listed += client
+                },
+                readClients = readClients,
+                saveName = saveName,
+            )
+        }
     }
 
     @Test
@@ -191,13 +208,15 @@ class NostrConnectAcceptConcurrencyStressTest {
                     saveName = { if (phase == "name") { parked.complete(Unit); never.await() } },
                 )
             }
-            if (phase == "lock") {
-                while (!m.listed.contains(pk)) yield()
-            } else {
-                parked.await()
+            try {
+                withTimeout(DEADLINE_MS) { if (phase == "lock") m.admissionLockContended.await() else parked.await() }
+                // Still held, so the cancel lands while the accept waits for the admission's lock.
+                if (phase == "lock") assertTrue(phase, m.lock.isLocked && m.listed.contains(pk))
+                withTimeout(DEADLINE_MS) { job.cancelAndJoin() }
+            } finally {
+                never.complete(Unit)
+                job.cancel()
             }
-            job.cancelAndJoin()
-            never.complete(Unit)
             assertTrue(phase, m.holds.isEmpty())
             // Only a cancel inside saveName finds the client already admitted, unnamed.
             assertEquals(phase, phase == "name", m.cache.contains(pk))
@@ -246,19 +265,24 @@ class NostrConnectAcceptConcurrencyStressTest {
         val m = Model()
         val inCore = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        val first = async(Dispatchers.Default) { m.accept(pk, core = { inCore.complete(Unit); release.await() }) }
-        inCore.await()
-        m.revoke(pk)
-        m.restart()
-        val secondInCore = CompletableDeferred<Unit>()
         val secondRelease = CompletableDeferred<Unit>()
-        val second = async(Dispatchers.Default) { m.accept(pk, core = { secondInCore.complete(Unit); secondRelease.await() }) }
-        secondInCore.await()
-        release.complete(Unit)
-        assertEquals(NostrconnectOutcome.REVOKED, first.await())
-        assertTrue("the second accept is still held", m.holds.containsKey(pk))
-        secondRelease.complete(Unit)
-        assertEquals(NostrconnectOutcome.CONNECTED, second.await())
+        try {
+            val first = async(Dispatchers.Default) { m.accept(pk, core = { inCore.complete(Unit); release.await() }) }
+            withTimeout(DEADLINE_MS) { inCore.await() }
+            m.revoke(pk)
+            m.restart()
+            val secondInCore = CompletableDeferred<Unit>()
+            val second = async(Dispatchers.Default) { m.accept(pk, core = { secondInCore.complete(Unit); secondRelease.await() }) }
+            withTimeout(DEADLINE_MS) { secondInCore.await() }
+            release.complete(Unit)
+            assertEquals(NostrconnectOutcome.REVOKED, withTimeout(DEADLINE_MS) { first.await() })
+            assertTrue("the second accept is still held", m.holds.containsKey(pk))
+            secondRelease.complete(Unit)
+            assertEquals(NostrconnectOutcome.CONNECTED, withTimeout(DEADLINE_MS) { second.await() })
+        } finally {
+            release.complete(Unit)
+            secondRelease.complete(Unit)
+        }
         assertTrue(m.holds.isEmpty())
         assertEquals(setOf(pk), m.cache)
     }
@@ -266,10 +290,11 @@ class NostrConnectAcceptConcurrencyStressTest {
     // A revoke bumps the generation under the lock before its engine revoke. An accept started
     // in that window waits on the lock for its hold and generation read, so it reaches the core
     // only once the engine revoke ran, and then meets the bunker the revoke stopped: the handler
-    // it captured stays stopped while the service restarts on a new one.
+    // it captured stays stopped while the service restarts on a new one, unless [restarted].
     private suspend fun acceptInsideRevokeWindow(
         m: Model,
         readClients: suspend () -> List<String>,
+        restarted: Boolean = false,
     ): Result<NostrconnectOutcome> {
         var outcome: Deferred<Result<NostrconnectOutcome>>? = null
         val engineRan = AtomicInteger()
@@ -278,24 +303,30 @@ class NostrConnectAcceptConcurrencyStressTest {
                 runCatching {
                     m.accept(
                         pk,
-                        core = { assertEquals("the core ran inside the revoke window", 1, engineRan.get()) },
+                        core = {
+                            assertEquals("the core ran inside the revoke window", 1, engineRan.get())
+                            if (restarted) m.restart()
+                        },
                         readClients = readClients,
                     )
                 }
             }
-            withTimeout(5_000) { while (m.lockRequests.get() == 0) yield() }
+            withTimeout(DEADLINE_MS) { while (m.lockRequests.get() == 0) yield() }
             repeat(100) { yield() }
             assertTrue(m.holds.isEmpty())
             assertFalse(m.listed.contains(pk))
             engineRan.set(1)
         }
-        return outcome!!.await()
+        return withTimeout(DEADLINE_MS) { outcome!!.await() }
     }
 
     @Test
     fun aRevokeWindowAcceptWithAReadableConfigIsNotAdmitted() = runBlocking {
         val m = Model()
-        val result = acceptInsideRevokeWindow(m, readClients = { m.listed.toList() })
+        val reads = AtomicInteger()
+        val result = acceptInsideRevokeWindow(m, readClients = { reads.incrementAndGet(); m.listed.toList() })
+        // The core failure comes before the admission, which so never rereads the config.
+        assertEquals(0, reads.get())
         // The revoke had bumped the generation before this accept read it, so its failure on the
         // stopped bunker reads as "not running"; the user is told to check the bunker and try again.
         assertTrue("$result", result.exceptionOrNull() is KeepMobileException.BunkerNotRunning)
@@ -304,18 +335,21 @@ class NostrConnectAcceptConcurrencyStressTest {
         assertTrue(m.holds.isEmpty())
     }
 
+    // Its generation was read after the revoke's bump, so on a bunker serving again the fallback
+    // for an unreadable config admits it: that revoke came before this accept, not during it.
     @Test
-    fun aRevokeWindowAcceptWithAnUnreadableConfigIsNotAdmitted() = runBlocking {
+    fun aRevokeWindowAcceptOnARestartedBunkerWithAnUnreadableConfigFallsBackAndIsAdmitted() = runBlocking {
         val m = Model()
+        val reads = AtomicInteger()
         val result = acceptInsideRevokeWindow(
             m,
-            readClients = { throw KeepMobileException.StorageException("unreadable") },
+            readClients = { reads.incrementAndGet(); throw KeepMobileException.StorageException("unreadable") },
+            restarted = true,
         )
-        assertFalse("listed=${m.listed}", m.listed.contains(pk))
-        // The revoke had bumped the generation before this accept read it, so its failure on the
-        // stopped bunker reads as "not running"; the user is told to check the bunker and try again.
-        assertTrue("$result", result.exceptionOrNull() is KeepMobileException.BunkerNotRunning)
-        assertFalse(m.cache.contains(pk))
+        assertEquals("the unreadable config was read", 1, reads.get())
+        assertEquals(NostrconnectOutcome.CONNECTED, result.getOrThrow())
+        assertTrue(m.listed.contains(pk))
+        assertTrue(m.cache.contains(pk))
         assertTrue(m.holds.isEmpty())
     }
 
@@ -335,10 +369,13 @@ class NostrConnectAcceptConcurrencyStressTest {
                 )
             }
         }
-        inCore.await()
-        m.revoke(pk)
-        gate.complete(Unit)
-        assertEquals(NostrconnectOutcome.REVOKED, deferred.await().getOrThrow())
+        try {
+            withTimeout(DEADLINE_MS) { inCore.await() }
+            m.revoke(pk)
+        } finally {
+            gate.complete(Unit)
+        }
+        assertEquals(NostrconnectOutcome.REVOKED, withTimeout(DEADLINE_MS) { deferred.await() }.getOrThrow())
         assertFalse(m.cache.contains(pk))
         assertTrue(m.holds.isEmpty())
     }
@@ -354,5 +391,9 @@ class NostrConnectAcceptConcurrencyStressTest {
             fail("expected the core refusal")
         } catch (_: KeepMobileException.TooManyAuthorizedClients) {
         }
+    }
+
+    private companion object {
+        const val DEADLINE_MS = 5_000L
     }
 }

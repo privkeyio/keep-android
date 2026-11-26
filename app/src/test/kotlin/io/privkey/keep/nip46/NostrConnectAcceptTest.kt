@@ -7,6 +7,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,8 +35,13 @@ class NostrConnectAcceptTest {
         fun revoke(client: String?) {
             generation++
             if (client == null) everyClientRevokedAt = generation else clientRevokedAt[client] = generation
-            client?.let { holds.remove(it) } ?: holds.clear()
-            client?.let { cache.remove(it) } ?: cache.clear()
+            if (client == null) {
+                holds.clear()
+                cache.clear()
+            } else {
+                holds.remove(client)
+                cache.remove(client)
+            }
         }
 
         /** [beforeLock] runs before the admission's lock, the second one an accept takes. */
@@ -109,6 +115,18 @@ class NostrConnectAcceptTest {
     }
 
     @Test
+    fun aRevokeOfAnUnheldClientKeepsOtherClientsHolds() = runBlocking {
+        val f = Fixture(pk)
+        val otherHold = Any()
+        f.holds[other] = otherHold
+        var heldAfterRevoke = false
+        val outcome = f.accept(accept = { f.revoke("ef".repeat(32)); heldAfterRevoke = f.holds.containsKey(pk) })
+        assertEquals(NostrconnectOutcome.CONNECTED, outcome)
+        assertTrue(heldAfterRevoke)
+        assertSame(otherHold, f.holds[other])
+    }
+
+    @Test
     fun aRevokeOfEveryClientDuringTheAcceptIsARevoke() = runBlocking {
         val f = Fixture(pk)
         val outcome = f.accept(accept = { f.revoke(null); throw KeepMobileException.BunkerNotRunning() })
@@ -165,14 +183,14 @@ class NostrConnectAcceptTest {
         val f = Fixture(pk)
         val release = CompletableDeferred<Unit>()
         val first = async { f.accept(accept = { release.await() }) }
-        while (!f.holds.containsKey(pk)) yield()
+        withTimeout(DEADLINE_MS) { while (!f.holds.containsKey(pk)) yield() }
         val firstHold = f.holds[pk]
 
         assertEquals(NostrconnectOutcome.ALREADY_ACCEPTING, f.accept())
         assertSame(firstHold, f.holds[pk])
 
         release.complete(Unit)
-        assertEquals(NostrconnectOutcome.CONNECTED, first.await())
+        assertEquals(NostrconnectOutcome.CONNECTED, withTimeout(DEADLINE_MS) { first.await() })
         assertTrue(f.holds.isEmpty())
     }
 
@@ -181,14 +199,14 @@ class NostrConnectAcceptTest {
         val f = Fixture(pk)
         val release = CompletableDeferred<Unit>()
         val first = async { f.accept(accept = { release.await() }) }
-        while (!f.holds.containsKey(pk)) yield()
+        withTimeout(DEADLINE_MS) { while (!f.holds.containsKey(pk)) yield() }
         // A revoke drops the first hold; a later accept for the key then holds it.
         f.revoke(pk)
         val laterHold = Any()
         f.holds[pk] = laterHold
 
         release.complete(Unit)
-        assertEquals(NostrconnectOutcome.REVOKED, first.await())
+        assertEquals(NostrconnectOutcome.REVOKED, withTimeout(DEADLINE_MS) { first.await() })
         assertSame(laterHold, f.holds[pk])
     }
 
@@ -236,8 +254,8 @@ class NostrConnectAcceptTest {
 
         val cancelled = Fixture(pk)
         val job = launch { cancelled.accept(accept = { CompletableDeferred<Unit>().await() }) }
-        while (!cancelled.holds.containsKey(pk)) yield()
-        job.cancelAndJoin()
+        withTimeout(DEADLINE_MS) { while (!cancelled.holds.containsKey(pk)) yield() }
+        withTimeout(DEADLINE_MS) { job.cancelAndJoin() }
         assertTrue(cancelled.holds.isEmpty())
         assertTrue(cancelled.cache.isEmpty())
     }
@@ -311,5 +329,9 @@ class NostrConnectAcceptTest {
         val padded = name.map { "$it\u00AD" }.joinToString("")
         assertEquals(name, nostrconnectDisplayName(padded))
         assertFalse(nostrconnectDisplayName(padded)!!.contains('\u00AD'))
+    }
+
+    private companion object {
+        const val DEADLINE_MS = 5_000L
     }
 }
