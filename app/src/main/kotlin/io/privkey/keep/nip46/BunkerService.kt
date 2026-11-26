@@ -325,6 +325,7 @@ class BunkerService : Service() {
                         service.authorizedClientsCache.clear()
                         service.pendingAuthSaves.clear()
                     }
+                    // No revision: the reset drops every client, whatever was listed since the read.
                     io.privkey.keep.uniffi.BunkerConfigInfo(false, emptyList())
                 }
             }
@@ -870,7 +871,7 @@ class BunkerService : Service() {
                         val clients = withClientAdded(config.authorizedClients, pk)
                             ?: return@update config.also { full = true }
                         accepted = true
-                        io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, clients)
+                        config.copy(authorizedClients = clients)
                     }
                 }.onSuccess {
                     if (accepted) authorizedClientsCache.add(pk)

@@ -28,7 +28,6 @@ import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.copySensitiveText
 import io.privkey.keep.isInternalHost
 import io.privkey.keep.setSecureScreen
-import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.BunkerStatus
 import io.privkey.keep.uniffi.KeepMobile
 import io.privkey.keep.uniffi.RelayConfigInfo
@@ -233,9 +232,7 @@ fun BunkerScreen(
                 scope.launch {
                     runCatching {
                         withContext(Dispatchers.IO) {
-                            BunkerConfigStore.update(keepMobile) { current ->
-                                BunkerConfigInfo(enabled, current.authorizedClients)
-                            }
+                            BunkerConfigStore.update(keepMobile) { it.copy(enabled = enabled) }
                         }
                     }.onSuccess {
                         onToggleBunker(enabled)

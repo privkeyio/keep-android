@@ -41,7 +41,6 @@ import io.privkey.keep.storage.OnboardingStore
 import io.privkey.keep.storage.PinStore
 import io.privkey.keep.storage.RelayAuthWhitelistStore
 import io.privkey.keep.storage.SignPolicySelectionPrefs
-import io.privkey.keep.uniffi.BunkerConfigInfo
 import io.privkey.keep.uniffi.ConnectionStatus
 import io.privkey.keep.uniffi.KeepLiveState
 import io.privkey.keep.uniffi.KeepMobile
@@ -484,8 +483,7 @@ class KeepMobileApp : Application() {
         applicationScope.launch(bunkerToggleDispatcher) {
             BunkerConfigStore.withLock {
                 runCatching {
-                    val current = mobile.getBunkerConfig()
-                    mobile.saveBunkerConfig(BunkerConfigInfo(enabled, current.authorizedClients))
+                    BunkerConfigStore.updateHeld(mobile) { it.copy(enabled = enabled) }
                 }.onFailure {
                     if (BuildConfig.DEBUG) Log.e(TAG, "Failed to save bunker config: ${it::class.simpleName}")
                     return@withLock
@@ -811,25 +809,13 @@ class KeepMobileApp : Application() {
         }
     }
 
-    private val proxySaveLock = Any()
-
     /**
      * Saves the proxy setting. A changed setting makes the core drop the live node, stop
      * the bunker and restart the approver, since each kept the sockets it was started with,
-     * so the drop is recorded here. The core counts an unreadable old setting as a change,
-     * and so does this.
+     * so the drop is recorded here.
      */
     fun saveProxyConfig(config: ProxyConfigInfo) {
-        val mobile = checkNotNull(keepMobile) { "Keep not initialized" }
-        // One save at a time, so another save cannot land between this read and write and
-        // make a change the core acts on look like no change here.
-        val changed = synchronized(proxySaveLock) {
-            val before = runCatching { mobile.getProxyConfig() }.getOrNull()
-            mobile.saveProxyConfig(config)
-            before != config
-        }
-        if (!changed) return
-        onLiveNodeDropped()
+        if (checkNotNull(keepMobile) { "Keep not initialized" }.saveProxyConfig(config)) onLiveNodeDropped()
     }
 
     fun clearCertificatePin(hostname: String): Boolean =
