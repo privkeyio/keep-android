@@ -119,7 +119,7 @@
             android:launchMode="singleTop"
             android:excludeFromRecents="true"
             android:autoRemoveFromRecents="true"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|density|keyboard|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|density|keyboard|keyboardHidden|fontScale|navigation|touchscreen|mcc|mnc|colorMode|fontWeightAdjustment|grammaticalGender"
             android:theme="@style/Theme.KeepAndroid">
 
             <intent-filter>

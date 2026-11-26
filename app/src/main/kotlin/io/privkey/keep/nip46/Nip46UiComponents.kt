@@ -105,9 +105,15 @@ internal fun sanitizeDisplayName(name: String): String {
     return name
         .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "")
         .replace(Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
-        .take(50)
+        .takeCodePoints(MAX_DISPLAY_NAME_CODE_POINTS)
         .ifBlank { "Unknown App" }
 }
+
+// The core's cap on a client name, in code points, so a surrogate pair is never split.
+private const val MAX_DISPLAY_NAME_CODE_POINTS = 50
+
+private fun String.takeCodePoints(n: Int): String =
+    if (codePointCount(0, length) <= n) this else substring(0, offsetByCodePoints(0, n))
 
 internal fun mapMethodToNip55RequestType(method: String): Nip55RequestType? = when (method) {
     "sign_event" -> Nip55RequestType.SIGN_EVENT

@@ -8,7 +8,6 @@ import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
-import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -22,19 +21,20 @@ import io.privkey.keep.R
 import io.privkey.keep.ui.theme.KeepAndroidTheme
 import io.privkey.keep.uniffi.BunkerHandler
 import io.privkey.keep.uniffi.BunkerStatus
-import io.privkey.keep.uniffi.KeepMobileException
 import io.privkey.keep.uniffi.NostrConnectInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Approves a `nostrconnect://` request, from a link another app opened or a code scanned on
  * the bunker screen. The core parses, checks and answers it; this shows what it asks for and
- * takes the user's approval. The URI carries the client's secret, so it is never logged.
+ * takes the user's approval. The URI carries the client's secret, so it is never logged, and a
+ * scanned one is handed over in-process ([intent]) rather than as Intent data.
  *
  * It is singleTop and does not handle onNewIntent: a request that arrives while one is shown is
  * dropped, so the user answers the one in front of them and the app that sent the other can show
@@ -54,10 +54,13 @@ class NostrConnectActivity : FragmentActivity() {
         window.setHideOverlayWindows(true)
         biometricHelper = BiometricHelper(this, keepApp?.getBiometricTimeoutStore())
 
-        val requestUri = intent?.data?.takeIf { it.scheme == SCHEME }?.toString()
+        val requestUri = requestUri(intent)
         val keepMobile = keepApp?.getKeepMobile()
         if (requestUri == null || keepMobile == null) {
-            finishWith(getString(R.string.connections_nostrconnect_invalid))
+            // A scanned request's token is taken on the first create, and the URI is never saved
+            // since it carries the client's secret, so a recreated screen just closes: its accept,
+            // if one started, reports its own result.
+            if (savedInstanceState != null) finish() else finishWith(getString(R.string.connections_nostrconnect_invalid))
             return
         }
         if (keepApp?.isSigningKilled() == true) {
@@ -80,7 +83,7 @@ class NostrConnectActivity : FragmentActivity() {
                 return@launch
             }
             // Its accept is already running, and reports its own result.
-            if (parsed.clientPubkey.lowercase() in accepting) {
+            if (BunkerService.isAcceptingNostrconnect(parsed.clientPubkey)) {
                 finish()
                 return@launch
             }
@@ -116,7 +119,6 @@ class NostrConnectActivity : FragmentActivity() {
             onComplete(false)
             return
         }
-        val pk = request.clientPubkey.lowercase()
         val name = nostrconnectDisplayName(request.name) ?: getString(R.string.connections_nostrconnect_unknown_app)
 
         lifecycleScope.launch {
@@ -130,39 +132,20 @@ class NostrConnectActivity : FragmentActivity() {
                 onComplete(false)
                 return@launch
             }
-            // Another screen's accept for this client got there first and reports its own result.
-            if (!accepting.add(pk)) {
-                onComplete(false)
-                finishWith(getString(R.string.connections_nostrconnect_already_connecting))
-                return@launch
-            }
-            // Once asked, the core may accept, so the accept and the admission that must follow
-            // it run on the application's scope, which leaving this screen does not cancel. Only
-            // the result comes back here, and only while the screen is still up.
-            val appContext = applicationContext
+            // The accept runs detached in the service, which shows its result, so leaving this
+            // screen cancels only the wait here. Only the outcome comes back, and only while the
+            // screen is still up.
             val screen = WeakReference(this@NostrConnectActivity)
-            app.launchDetached {
-                val (connected, message) = try {
-                    if (BunkerService.acceptNostrconnect(appContext, requestUri, request, approvedPerms)) {
-                        true to appContext.getString(R.string.connections_nostrconnect_connected, name)
-                    } else {
-                        false to appContext.getString(R.string.connections_nostrconnect_error_revoked)
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "nostrconnect accept failed: ${e::class.simpleName}")
-                    false to appContext.getString(acceptErrorMessage(e))
-                } finally {
-                    accepting.remove(pk)
-                }
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                    screen.get()?.takeUnless { it.isDestroyed }?.let {
-                        onComplete(connected)
-                        it.finish()
-                    }
-                }
+            val connected = try {
+                BunkerService.acceptNostrconnect(applicationContext, requestUri, request, approvedPerms) == NostrconnectOutcome.CONNECTED
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                false
+            }
+            screen.get()?.takeUnless { it.isDestroyed }?.let {
+                onComplete(connected)
+                it.finish()
             }
         }
     }
@@ -175,30 +158,26 @@ class NostrConnectActivity : FragmentActivity() {
     companion object {
         private const val TAG = "NostrConnectActivity"
         const val SCHEME = "nostrconnect"
+        private const val EXTRA_HANDOFF = "io.privkey.keep.nip46.NOSTRCONNECT_HANDOFF"
 
-        // Clients whose accept is in flight, so another screen for one neither offers it again
-        // nor races the first accept.
-        private val accepting: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        // Scanned requests by one-shot token: the URI carries the client's secret, which Intent
+        // data would expose to system logging, so only the token travels in the Intent.
+        private val handedOff = ConcurrentHashMap<String, String>()
 
-        fun intent(context: Context, uri: String): Intent =
-            Intent(context, NostrConnectActivity::class.java).setData(Uri.parse(uri))
+        /** Opens the approval for a scanned [uri], handed over in-process and taken once. */
+        fun intent(context: Context, uri: String): Intent {
+            val token = UUID.randomUUID().toString()
+            handedOff[token] = uri
+            return Intent(context, NostrConnectActivity::class.java).putExtra(EXTRA_HANDOFF, token)
+        }
 
-        @StringRes
-        private fun acceptErrorMessage(e: Exception): Int = when (e) {
-            is KeepMobileException.BunkerNotRunning -> R.string.connections_nostrconnect_error_not_running
-            is KeepMobileException.TooManyAuthorizedClients -> R.string.nip46_client_limit_toast
-            is KeepMobileException.PolicyViolation -> R.string.kill_switch_active_toast
-            is KeepMobileException.Timeout -> R.string.connections_nostrconnect_error_timeout
-            is KeepMobileException.NetworkException -> R.string.connections_nostrconnect_error_network
-            is KeepMobileException.CertificatePinMismatch -> R.string.certificate_pin_mismatch_error
-            // The request already parsed, so an input error here is not a bad request. The core
-            // refuses a client it already lists with one (keep-mobile nip46.rs
-            // refuse_to_register), told apart only by its message until the core reports it as
-            // ClientAlreadyConnected (privkeyio/keep follow-up).
-            is KeepMobileException.InvalidInput ->
-                if (e.msg.contains("already connected")) R.string.connections_nostrconnect_error_already_connected
-                else R.string.connections_nostrconnect_error_failed
-            else -> R.string.connections_nostrconnect_error_failed
+        // A scanned request by its token, or a link another app opened.
+        private fun requestUri(intent: Intent?): String? {
+            intent ?: return null
+            intent.getStringExtra(EXTRA_HANDOFF)?.let { token ->
+                return handedOff.remove(token)?.takeIf { Uri.parse(it).scheme == SCHEME }
+            }
+            return intent.data?.takeIf { it.scheme == SCHEME }?.toString()
         }
     }
 }

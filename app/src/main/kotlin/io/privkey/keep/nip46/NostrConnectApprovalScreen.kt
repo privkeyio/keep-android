@@ -8,11 +8,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.NostrConnectInfo
 import io.privkey.keep.uniffi.formatPubkeyDisplay
+import kotlinx.coroutines.delay
 
 // The methods a user can withhold on a nostrconnect accept, mirroring keep-nip46 handler.rs
 // parse_permission_string. The core grants sign_event for every kind even when the request
@@ -64,18 +66,31 @@ internal fun approvedNostrconnectPerms(offered: List<String>, kept: Set<String>)
 
 /**
  * A client's name fit to show, or null when it has no letter or digit to show (blank, only
- * marks, or Hangul fillers), so the caller shows its own placeholder.
+ * marks, format characters or Hangul fillers), so the caller shows its own placeholder.
+ * Invisible format characters (tag characters, the soft hyphen, U+180E and the rest of Cf) are
+ * dropped for display only, so "Damus" followed by tag characters shows as "Damus".
  */
 internal fun nostrconnectDisplayName(name: String?): String? {
-    if (name == null || !name.hasVisibleCharacter()) return null
+    val visible = name?.withoutFormatCharacters() ?: return null
+    if (!visible.hasVisibleCharacter()) return null
     // Checked again after cleaning, which can cut the name short of its first visible character.
-    return sanitizeDisplayName(name).trim().takeIf { it.hasVisibleCharacter() }
+    return sanitizeDisplayName(visible).trim().takeIf { it.hasVisibleCharacter() }
+}
+
+private fun String.withoutFormatCharacters(): String = buildString {
+    this@withoutFormatCharacters.codePoints().forEach { cp ->
+        val hidden = cp in 0xE0000..0xE007F || cp == 0x00AD || cp == 0x180E ||
+            Character.getType(cp) == Character.FORMAT.toInt()
+        if (!hidden) appendCodePoint(cp)
+    }
 }
 
 private fun String.hasVisibleCharacter(): Boolean =
     codePoints().anyMatch { cp -> Character.isLetterOrDigit(cp) && cp !in HANGUL_FILLERS }
 
 private val HANGUL_FILLERS = setOf(0x115F, 0x1160, 0x3164, 0xFFA0)
+
+private const val CONNECT_ARM_DELAY_MS = 500L
 
 @Composable
 fun NostrConnectApprovalScreen(
@@ -90,6 +105,13 @@ fun NostrConnectApprovalScreen(
     val namesNothing = remember(info) { namesNoNostrconnectPerms(info.requestedPermissions) }
     var kept by remember(info) { mutableStateOf(offered.toSet()) }
     var isLoading by remember { mutableStateOf(false) }
+    // Taps on Connect are ignored at first, as on the system permission dialogs, so a tap meant
+    // for whatever was on screen before cannot approve.
+    var connectArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(CONNECT_ARM_DELAY_MS)
+        connectArmed = true
+    }
     val name = nostrconnectDisplayName(info.name) ?: stringResource(R.string.connections_nostrconnect_unknown_app)
 
     Column(
@@ -111,6 +133,24 @@ fun NostrConnectApprovalScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+        // The key is what the app is; its name and website below are only what it claims.
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.connections_nostrconnect_client_pubkey),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = formatPubkeyDisplay(info.clientPubkey),
+            style = MaterialTheme.typography.titleSmall,
+            fontFamily = FontFamily.Monospace
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.connections_nostrconnect_unverified),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(12.dp))
         Surface(
@@ -137,13 +177,11 @@ fun NostrConnectApprovalScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Nip46DetailRow(stringResource(R.string.connections_nostrconnect_client_pubkey), formatPubkeyDisplay(info.clientPubkey))
                 info.url?.let {
+                    Nip46DetailRow(stringResource(R.string.connections_nostrconnect_website_claimed), it)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Nip46DetailRow(stringResource(R.string.connections_nostrconnect_website), it)
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = stringResource(R.string.connections_nostrconnect_relays),
                     style = MaterialTheme.typography.labelMedium,
@@ -175,6 +213,12 @@ fun NostrConnectApprovalScreen(
                         Text(text = formatNip46Method(method), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.connections_nostrconnect_grant_scope),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -197,6 +241,7 @@ fun NostrConnectApprovalScreen(
                             if (!success) isLoading = false
                         }
                     },
+                    enabled = connectArmed,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(stringResource(R.string.connections_nostrconnect_connect))

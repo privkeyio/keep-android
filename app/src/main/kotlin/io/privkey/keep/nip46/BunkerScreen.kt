@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -134,15 +135,20 @@ fun BunkerScreen(
     val toastUrlRotated = stringResource(R.string.connections_bunker_toast_url_rotated)
     val toastRotateUrlFailed = stringResource(R.string.connections_bunker_toast_rotate_url_failed)
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
-                withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
-            }
-            runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
-                withContext(Dispatchers.Main) { relays = config.bunkerRelays }
+    // On every resume, not once: a client connected from a scanned code or a link is listed
+    // when the approval screen closes.
+    LifecycleResumeEffect(keepMobile) {
+        val load = scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
+                    withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
+                }
+                runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
+                    withContext(Dispatchers.Main) { relays = config.bunkerRelays }
+                }
             }
         }
+        onPauseOrDispose { load.cancel() }
     }
 
     DisposableEffect(Unit) {
