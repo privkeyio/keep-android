@@ -6,23 +6,22 @@ import org.junit.Test
 class RequestedPermissionsTest {
 
     @Test
-    fun splitsMethodsAndKinds() {
+    fun listsEachMethodOnceWithoutKinds() {
         assertEquals(
-            listOf("get_public_key" to null, "sign_event" to "1", "nip44_encrypt" to null),
-            requestedPermissions("get_public_key, sign_event:1,,nip44_encrypt"),
+            listOf("get_public_key", "sign_event", "nip44_encrypt"),
+            requestedPermissions("get_public_key, sign_event:1,,sign_event:7,nip44_encrypt"),
         )
     }
 
     @Test
     fun nothingRequestedShowsNoRows() {
-        assertEquals(emptyList<Pair<String, String?>>(), requestedPermissions(null))
-        assertEquals(emptyList<Pair<String, String?>>(), requestedPermissions(" , "))
+        assertEquals(emptyList<String>(), requestedPermissions(null))
+        assertEquals(emptyList<String>(), requestedPermissions(" , "))
     }
 
     @Test
     fun controlCharactersAndLengthAreStrippedForDisplay() {
-        val (method, kind) = requestedPermissions("sign‮event:1\u0000" + "9".repeat(80)).single()
-        assertEquals("signevent", method)
-        assertEquals(50, kind!!.length)
+        assertEquals(listOf("signevent"), requestedPermissions("sign\u202Eevent:1"))
+        assertEquals(50, requestedPermissions("x".repeat(80)).single().length)
     }
 }

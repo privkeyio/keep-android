@@ -13,7 +13,7 @@ The probe and the test exchange requests through the app's `files/bunker-e2e` di
 
 ## nostrconnect pairing
 
-`nostrconnect <client_secret_hex> <relay> [perms|-] [timeout_secs]` on stdin plays the client side of a `nostrconnect://` pairing by hand. It prints `URI <link>`, waits for a signer to answer the link's secret, then asks that signer for `get_public_key` and prints the result. Open the printed link on the device with `adb shell am start -a android.intent.action.VIEW -d '"<link>"'` and approve it in Keep, with the bunker running.
+`nostrconnect <client_secret_hex> <relay> [perms|-] [timeout_secs] [sign]` on stdin plays the client side of a `nostrconnect://` pairing by hand. It prints `URI <link>`, waits for a signer to answer the link's secret, then asks that signer for `get_public_key`, or with `sign` sends a kind 1 `sign_event` at once, and prints the result. Open the printed link on the device with `adb shell am start -a android.intent.action.VIEW -d '"<link>"'` and approve it in Keep, with the bunker running.
 
 ## Run
 

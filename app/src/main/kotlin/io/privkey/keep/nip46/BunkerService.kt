@@ -41,6 +41,7 @@ import io.privkey.keep.uniffi.Nip55RequestType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -202,14 +203,24 @@ class BunkerService : Service() {
             val handler = service?.bunkerHandler ?: throw io.privkey.keep.uniffi.KeepMobileException.BunkerNotRunning()
             val pk = info.clientPubkey.lowercase()
             val generation = revokeGeneration.get()
-            handler.acceptNostrconnect(uri, null)
-            // Under the config lock, as revokes take it, so a revoke that landed since the core
-            // listed the client is not undone here.
-            BunkerConfigStore.withLock {
-                if (revokedSince(generation, everyClientRevokedAt.get(), clientRevokedAt[pk])) return@withLock
-                service.authorizedClientsCache.add(pk)
-                runCatching { Nip46ClientStore.saveClient(context, pk, sanitizeDisplayName(info.name.orEmpty()), info.relays) }
-                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not save the client's name: ${it::class.simpleName}") }
+            // The core answers the client before it returns, so the client's first requests can
+            // arrive before the cache holds it. As in authorizeClient, the pending set lets them
+            // through meanwhile, and a revoke drops the client from it.
+            service.pendingAuthSaves.add(pk)
+            try {
+                handler.acceptNostrconnect(uri, null)
+                // Not cancellable, since the core has listed the client by now. Under the config
+                // lock, as revokes take it, so a revoke since the core listed the client holds.
+                withContext(NonCancellable) {
+                    BunkerConfigStore.withLock {
+                        if (pk !in service.pendingAuthSaves || revokedSince(generation, everyClientRevokedAt.get(), clientRevokedAt[pk])) return@withLock
+                        service.authorizedClientsCache.add(pk)
+                        runCatching { Nip46ClientStore.saveClient(context, pk, sanitizeDisplayName(info.name.orEmpty()), info.relays) }
+                            .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not save the client's name: ${it::class.simpleName}") }
+                    }
+                }
+            } finally {
+                service.pendingAuthSaves.remove(pk)
             }
         }
 

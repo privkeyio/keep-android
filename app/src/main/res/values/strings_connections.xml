@@ -130,20 +130,20 @@
     <string name="connections_nostrconnect_title">Connection Request</string>
     <string name="connections_nostrconnect_from">from <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
     <string name="connections_nostrconnect_unnamed">An app that gave no name</string>
-    <string name="connections_nostrconnect_description">This app wants to connect to your bunker through its own relays. Connecting lets it send signing requests, and it can use what it asks for below without asking you again until you revoke it.</string>
+    <string name="connections_nostrconnect_description">This app wants to connect to your bunker through its own relays. Connecting lets it ask Keep to sign for it until you revoke it. Your signing policy decides which requests you approve first.</string>
     <string name="connections_nostrconnect_client_pubkey">Client Pubkey</string>
     <string name="connections_nostrconnect_url">Website</string>
     <string name="connections_nostrconnect_relays">Relays</string>
     <string name="connections_nostrconnect_requested_permissions">Requested Permissions</string>
     <string name="connections_nostrconnect_default_permissions">Your public key and signing events</string>
-    <string name="connections_nostrconnect_permission_with_kind"><xliff:g id="method" example="sign_event">%1$s</xliff:g> (kind <xliff:g id="kind" example="1">%2$s</xliff:g>)</string>
     <string name="connections_nostrconnect_reject">Reject</string>
     <string name="connections_nostrconnect_connect">Connect</string>
     <string name="connections_nostrconnect_auth_title">Approve Connection</string>
-    <string name="connections_nostrconnect_auth_subtitle">Authenticate to connect this app</string>
+    <string name="connections_nostrconnect_auth_subtitle">Authenticate to connect <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nostrconnect_locked">Unlock Keep, then open the link again</string>
     <string name="connections_nostrconnect_connected">Connected</string>
     <string name="connections_nostrconnect_invalid">This connection link could not be read</string>
-    <string name="connections_nostrconnect_bunker_stopped">Start the bunker in Keep, then open the link again</string>
+    <string name="connections_nostrconnect_bunker_stopped">The bunker is not running or just restarted. Make sure it is on in Keep, then open the link again</string>
     <string name="connections_nostrconnect_pin_mismatch">A relay\'s certificate does not match its pin, so Keep did not connect</string>
     <string name="connections_nostrconnect_network">Could not reach the app\'s relays: <xliff:g id="reason" example="timed out">%1$s</xliff:g></string>
     <string name="connections_nostrconnect_failed">Keep could not connect this app</string>

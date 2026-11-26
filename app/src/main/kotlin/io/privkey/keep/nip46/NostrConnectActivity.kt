@@ -34,11 +34,14 @@ class NostrConnectActivity : FragmentActivity() {
 
     private val keepApp: KeepMobileApp? get() = application as? KeepMobileApp
     private lateinit var biometric: BiometricHelper
+    private var accepting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        biometric = BiometricHelper(this, keepApp?.getBiometricTimeoutStore())
+        window.setHideOverlayWindows(true)
+        // No timeout store: pairing always prompts, and its prompt opens no window for other flows.
+        biometric = BiometricHelper(this, null)
 
         val uri = intent?.dataString
         val mobile = keepApp?.getKeepMobile()
@@ -48,6 +51,10 @@ class NostrConnectActivity : FragmentActivity() {
         }
         if (keepApp?.isSigningKilled() == true) {
             finishWith(getString(R.string.kill_switch_active_toast))
+            return
+        }
+        if (keepApp?.getPinStore()?.requiresAuthentication() == true) {
+            finishWith(getString(R.string.connections_nostrconnect_locked))
             return
         }
         if (!BunkerService.isServing()) {
@@ -80,8 +87,13 @@ class NostrConnectActivity : FragmentActivity() {
     }
 
     private fun approve(uri: String, info: NostrConnectInfo, onComplete: (Boolean) -> Unit) {
+        if (accepting) return
         if (keepApp?.isSigningKilled() == true) {
             finishWith(getString(R.string.kill_switch_active_toast))
+            return
+        }
+        if (keepApp?.getPinStore()?.requiresAuthentication() == true) {
+            finishWith(getString(R.string.connections_nostrconnect_locked))
             return
         }
         val status = biometric.checkBiometricStatus()
@@ -89,15 +101,18 @@ class NostrConnectActivity : FragmentActivity() {
             finishWith(BiometricHelper.getBiometricNotReadyMessage(this, status))
             return
         }
+        accepting = true
         lifecycleScope.launch {
+            val name = info.name?.let(::sanitizeDisplayName) ?: getString(R.string.connections_nostrconnect_unnamed)
             val authenticated = runCatching {
                 biometric.authenticate(
                     title = getString(R.string.connections_nostrconnect_auth_title),
-                    subtitle = getString(R.string.connections_nostrconnect_auth_subtitle),
+                    subtitle = getString(R.string.connections_nostrconnect_auth_subtitle, name),
                     forcePrompt = true,
                 )
             }.getOrDefault(false)
             if (!authenticated) {
+                accepting = false
                 onComplete(false)
                 return@launch
             }

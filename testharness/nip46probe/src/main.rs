@@ -6,9 +6,10 @@
 //!   connect <client_secret_hex> <bunker_url> [timeout_secs]
 //!   sign    <client_secret_hex> <bunker_url> <kind> [timeout_secs]
 //!   pubkeys <count>             (fresh client keys, space separated, to fill the client list)
-//!   nostrconnect <client_secret_hex> <relay> [perms] [timeout_secs]
+//!   nostrconnect <client_secret_hex> <relay> [perms|-] [timeout_secs] [sign]
 //!                               (prints `URI <nostrconnect url>`, waits for the signer's connect
-//!                                reply, then asks it for get_public_key; prints `OK <pubkey>`)
+//!                                reply, then asks it for get_public_key, or with `sign` sends a
+//!                                kind 1 sign_event at once; prints the answer)
 //!
 //! `sign` sends sign_event without connecting first, so it can exercise a grant the
 //! bunker restored from disk. Prints one line: `OK <result>`, `ERR <error>`, `TIMEOUT`,
@@ -45,19 +46,13 @@ async fn main() {
         "sign" => {
             let (signer, relays, _) = bunker(&args[2]);
             let kind: u16 = args[3].parse().expect("kind");
-            let event = serde_json::json!({
-                "kind": kind,
-                "content": "keep-android bunker revoke e2e",
-                "tags": [],
-                "created_at": Timestamp::now().as_secs()
-            })
-            .to_string();
-            println!("{}", request(&keys, signer, &relays, "sign_event", vec![event], timeout(4)).await);
+            println!("{}", request(&keys, signer, &relays, "sign_event", vec![sign_event_body(kind)], timeout(4)).await);
         }
         "nostrconnect" => {
             let relay = RelayUrl::parse(&args[2]).expect("relay");
             let perms = args.get(3).filter(|p| *p != "-").cloned();
-            println!("{}", nostrconnect(&keys, relay, perms, timeout(4)).await);
+            let sign = args.get(5).is_some_and(|a| a == "sign");
+            println!("{}", nostrconnect(&keys, relay, perms, timeout(4), sign).await);
         }
         other => panic!("unknown command {other}"),
     }
@@ -65,7 +60,7 @@ async fn main() {
 
 /// The client side of a nostrconnect pairing: offers a URI, waits for a signer to answer it
 /// with the URI's secret, then makes one request to that signer through the new pairing.
-async fn nostrconnect(keys: &Keys, relay: RelayUrl, perms: Option<String>, timeout: u64) -> String {
+async fn nostrconnect(keys: &Keys, relay: RelayUrl, perms: Option<String>, timeout: u64, sign: bool) -> String {
     let secret = Keys::generate().public_key().to_hex()[..32].to_string();
     let mut uri = format!(
         "nostrconnect://{}?relay={}&secret={}&name=nip46probe",
@@ -109,7 +104,20 @@ async fn nostrconnect(keys: &Keys, relay: RelayUrl, perms: Option<String>, timeo
         }
     };
     client.disconnect().await;
+    if sign {
+        return request(keys, signer, &[relay], "sign_event", vec![sign_event_body(1)], timeout).await;
+    }
     request(keys, signer, &[relay], "get_public_key", vec![], timeout).await
+}
+
+fn sign_event_body(kind: u16) -> String {
+    serde_json::json!({
+        "kind": kind,
+        "content": "keep-android bunker revoke e2e",
+        "tags": [],
+        "created_at": Timestamp::now().as_secs()
+    })
+    .to_string()
 }
 
 fn percent(s: &str) -> String {

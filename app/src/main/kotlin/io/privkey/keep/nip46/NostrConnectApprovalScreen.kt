@@ -79,13 +79,7 @@ internal fun NostrConnectApprovalScreen(
                 if (requested.isEmpty()) {
                     Text(stringResource(R.string.connections_nostrconnect_default_permissions), style = MaterialTheme.typography.bodyMedium)
                 }
-                requested.forEach { (method, kind) ->
-                    Text(
-                        if (kind == null) formatNip46Method(method)
-                        else stringResource(R.string.connections_nostrconnect_permission_with_kind, formatNip46Method(method), kind),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+                requested.forEach { Text(formatNip46Method(it), style = MaterialTheme.typography.bodyMedium) }
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
@@ -115,9 +109,10 @@ private fun Label(text: String) {
     Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** The request's `perms` split for display only, as `method` and an optional kind. */
-internal fun requestedPermissions(perms: String?): List<Pair<String, String?>> =
-    perms.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.map { perm ->
-        val method = sanitizeDisplayName(perm.substringBefore(':'))
-        method to perm.substringAfter(':', "").takeIf { it.isNotEmpty() }?.let(::sanitizeDisplayName)
-    }
+/**
+ * The methods the request's `perms` names, for display only. Kinds are left out, since the core
+ * grants a method for every kind. Stopgap until the core returns the grant it will give.
+ */
+internal fun requestedPermissions(perms: String?): List<String> =
+    perms.orEmpty().split(',').map { it.trim().substringBefore(':').trim() }.filter { it.isNotEmpty() }
+        .map(::sanitizeDisplayName).distinct()
