@@ -280,9 +280,9 @@ dependencies {
     // the modern activity stack, where that validator is gone.
     implementation("androidx.fragment:fragment:1.9.1")
     implementation("androidx.security:security-crypto:1.1.0")
-    implementation("androidx.camera:camera-camera2:1.6.1")
-    implementation("androidx.camera:camera-lifecycle:1.6.1")
-    implementation("androidx.camera:camera-view:1.6.1")
+    implementation("androidx.camera:camera-camera2:1.7.0")
+    implementation("androidx.camera:camera-lifecycle:1.7.0")
+    implementation("androidx.camera:camera-view:1.7.0")
     implementation("com.google.zxing:core:3.5.4")
     implementation("net.java.dev.jna:jna:5.19.1@aar")
 
