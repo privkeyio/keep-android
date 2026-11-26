@@ -27,7 +27,9 @@ object BunkerConfigStore {
                 mobile.saveBunkerConfig(updated)
                 return updated
             } catch (e: KeepMobileException.InvalidInput) {
-                val stale = updated.revision != null && mobile.getBunkerConfig().revision != updated.revision
+                val stale = updated.revision != null &&
+                    runCatching { mobile.getBunkerConfig().revision != updated.revision }
+                        .onFailure(e::addSuppressed).getOrDefault(false)
                 if (!stale || ++attempt >= ATTEMPTS) throw e
             }
         }
