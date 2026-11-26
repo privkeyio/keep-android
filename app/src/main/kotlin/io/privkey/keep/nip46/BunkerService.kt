@@ -325,6 +325,7 @@ class BunkerService : Service() {
                         service.authorizedClientsCache.clear()
                         service.pendingAuthSaves.clear()
                     }
+                    // No revision: the reset drops every client, whatever was listed since the read.
                     io.privkey.keep.uniffi.BunkerConfigInfo(false, emptyList())
                 }
             }
@@ -863,6 +864,9 @@ class BunkerService : Service() {
                 var full = false
                 runCatching {
                     BunkerConfigStore.update(mobile) { config ->
+                        // A refused save runs this again on a fresh read, so only the last run counts.
+                        accepted = false
+                        full = false
                         // Decided under the same lock as revokeClients, which drops a client from
                         // pendingAuthSaves and records the generation when it revokes, so a revoke
                         // that lands while this connect is being saved is never undone by it.
@@ -870,7 +874,7 @@ class BunkerService : Service() {
                         val clients = withClientAdded(config.authorizedClients, pk)
                             ?: return@update config.also { full = true }
                         accepted = true
-                        io.privkey.keep.uniffi.BunkerConfigInfo(config.enabled, clients)
+                        config.copy(authorizedClients = clients)
                     }
                 }.onSuccess {
                     if (accepted) authorizedClientsCache.add(pk)
