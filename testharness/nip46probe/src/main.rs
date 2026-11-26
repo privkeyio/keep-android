@@ -6,6 +6,9 @@
 //!   connect <client_secret_hex> <bunker_url> [timeout_secs]
 //!   sign    <client_secret_hex> <bunker_url> <kind> [timeout_secs]
 //!   pubkeys <count>             (fresh client keys, space separated, to fill the client list)
+//!   nostrconnect <client_secret_hex> <relay> [perms] [timeout_secs]
+//!                               (prints `URI <nostrconnect url>`, waits for the signer's connect
+//!                                reply, then asks it for get_public_key; prints `OK <pubkey>`)
 //!
 //! `sign` sends sign_event without connecting first, so it can exercise a grant the
 //! bunker restored from disk. Prints one line: `OK <result>`, `ERR <error>`, `TIMEOUT`,
@@ -51,8 +54,71 @@ async fn main() {
             .to_string();
             println!("{}", request(&keys, signer, &relays, "sign_event", vec![event], timeout(4)).await);
         }
+        "nostrconnect" => {
+            let relay = RelayUrl::parse(&args[2]).expect("relay");
+            let perms = args.get(3).filter(|p| *p != "-").cloned();
+            println!("{}", nostrconnect(&keys, relay, perms, timeout(4)).await);
+        }
         other => panic!("unknown command {other}"),
     }
+}
+
+/// The client side of a nostrconnect pairing: offers a URI, waits for a signer to answer it
+/// with the URI's secret, then makes one request to that signer through the new pairing.
+async fn nostrconnect(keys: &Keys, relay: RelayUrl, perms: Option<String>, timeout: u64) -> String {
+    let secret = Keys::generate().public_key().to_hex()[..32].to_string();
+    let mut uri = format!(
+        "nostrconnect://{}?relay={}&secret={}&name=nip46probe",
+        keys.public_key().to_hex(),
+        percent(relay.as_str()),
+        secret
+    );
+    if let Some(perms) = perms {
+        uri.push_str(&format!("&perms={}", percent(&perms)));
+    }
+    let client = Client::new(keys.clone());
+    client.add_relay(relay.clone()).await.expect("add relay");
+    client.connect().await;
+    client.wait_for_connection(Duration::from_secs(10)).await;
+    let since = Timestamp::from_secs(Timestamp::now().as_secs().saturating_sub(60));
+    let filter = Filter::new().kind(Kind::NostrConnect).pubkey(keys.public_key()).since(since);
+    let subscribed = client.subscribe(filter, None).await.expect("subscribe");
+    if subscribed.success.is_empty() {
+        client.disconnect().await;
+        return format!("UNSENT subscribe failed {:?}", subscribed.failed);
+    }
+    let mut notifications = client.notifications();
+    {
+        use std::io::Write;
+        println!("URI {uri}");
+        std::io::stdout().flush().ok();
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
+    let signer = loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let Ok(received) = tokio::time::timeout(left, notifications.recv()).await else {
+            client.disconnect().await;
+            return "TIMEOUT".to_string();
+        };
+        let Ok(RelayPoolNotification::Event { event, .. }) = received else { continue };
+        let Ok(plain) = nip44::decrypt(keys.secret_key(), &event.pubkey, &event.content) else { continue };
+        let Ok(response) = serde_json::from_str::<serde_json::Value>(&plain) else { continue };
+        debug(format!("received {plain} from {}", event.pubkey));
+        if response["result"] == secret.as_str() {
+            break event.pubkey;
+        }
+    };
+    client.disconnect().await;
+    request(keys, signer, &[relay], "get_public_key", vec![], timeout).await
+}
+
+fn percent(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 fn debug(line: String) {

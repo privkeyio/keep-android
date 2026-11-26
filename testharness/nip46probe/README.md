@@ -11,6 +11,10 @@ The test runs the real `BunkerService` against a public relay and drives each re
 
 The probe and the test exchange requests through the app's `files/bunker-e2e` directory over `adb shell run-as`. Requests reach the probe, and its replies reach the device, on stdin, so client secrets, test account keys and bunker URLs never appear in a process listing. The probe prints one line per request: `OK`, `ERR`, `TIMEOUT`, or `UNSENT` when no relay took the request, so a request that never left cannot pass for a dead URL.
 
+## nostrconnect pairing
+
+`nostrconnect <client_secret_hex> <relay> [perms|-] [timeout_secs]` on stdin plays the client side of a `nostrconnect://` pairing by hand. It prints `URI <link>`, waits for a signer to answer the link's secret, then asks that signer for `get_public_key` and prints the result. Open the printed link on the device with `adb shell am start -a android.intent.action.VIEW -d '"<link>"'` and approve it in Keep, with the bunker running.
+
 ## Run
 
 ```bash

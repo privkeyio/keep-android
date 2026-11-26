@@ -189,6 +189,30 @@ class BunkerService : Service() {
             current()?.pendingAuthSaves?.remove(pubkey.lowercase())
         }
 
+        internal fun isServing(): Boolean = current()?.bunkerHandler != null
+
+        /**
+         * Accepts a nostrconnect request the user approved, through the running bunker's own
+         * handler, since the core joins the client's relays on the bunker it serves. The core
+         * grants only what the request asked for and lists the client. Blocks up to the core's
+         * accept deadline.
+         */
+        internal suspend fun acceptNostrconnect(context: Context, uri: String, info: io.privkey.keep.uniffi.NostrConnectInfo) {
+            val service = current()
+            val handler = service?.bunkerHandler ?: throw io.privkey.keep.uniffi.KeepMobileException.BunkerNotRunning()
+            val pk = info.clientPubkey.lowercase()
+            val generation = revokeGeneration.get()
+            handler.acceptNostrconnect(uri, null)
+            // Under the config lock, as revokes take it, so a revoke that landed since the core
+            // listed the client is not undone here.
+            BunkerConfigStore.withLock {
+                if (revokedSince(generation, everyClientRevokedAt.get(), clientRevokedAt[pk])) return@withLock
+                service.authorizedClientsCache.add(pk)
+                runCatching { Nip46ClientStore.saveClient(context, pk, sanitizeDisplayName(info.name.orEmpty()), info.relays) }
+                    .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not save the client's name: ${it::class.simpleName}") }
+            }
+        }
+
         // Through a handler of its own: the core revoke reaches the running engine from any
         // handler, drops persisted grants with no bunker running, and stops whatever bunker
         // is running, which the caller restarts.
