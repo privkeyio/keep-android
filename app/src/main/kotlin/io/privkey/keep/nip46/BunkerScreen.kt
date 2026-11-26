@@ -2,6 +2,7 @@ package io.privkey.keep.nip46
 
 import io.privkey.keep.ui.components.KeepCard
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.privkey.keep.MAX_BUNKER_RELAYS
 import io.privkey.keep.QrCodeDisplay
+import io.privkey.keep.QrScannerScreen
 import io.privkey.keep.R
 import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.copySensitiveText
@@ -118,6 +120,7 @@ fun BunkerScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<String?>(null) }
     var showRotateUrlDialog by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
 
     val toastBunkerUrlCopied = stringResource(R.string.connections_bunker_url_copied)
@@ -160,6 +163,20 @@ fun BunkerScreen(
                 Toast.makeText(context, toastSaveRelayFailed, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    if (showScanner) {
+        BackHandler { showScanner = false }
+        QrScannerScreen(
+            onCodeScanned = {
+                context.startActivity(NostrConnectActivity.intent(context, it))
+                showScanner = false
+            },
+            onDismiss = { showScanner = false },
+            validator = { it.startsWith("nostrconnect://") },
+            title = stringResource(R.string.connections_bunker_scan_connect_title)
+        )
+        return
     }
 
     Scaffold(
@@ -206,6 +223,15 @@ fun BunkerScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.connections_bunker_copy_button))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { showScanner = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.connections_bunker_scan_connect_button))
             }
 
             Spacer(modifier = Modifier.height(8.dp))

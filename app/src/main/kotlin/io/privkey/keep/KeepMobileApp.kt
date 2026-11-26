@@ -280,6 +280,9 @@ class KeepMobileApp : Application() {
         }
     }
 
+    /** Runs [block] on the application's scope, so work that must finish once begun outlives the screen that began it. */
+    fun launchDetached(block: suspend CoroutineScope.() -> Unit): Job = applicationScope.launch(block = block)
+
     private fun initializeNetworkMonitoring() {
         val autoStartEnabled = autoStartStore?.isEnabled() == true
         val foregroundServiceEnabled = foregroundServiceStore?.isEnabled() == true

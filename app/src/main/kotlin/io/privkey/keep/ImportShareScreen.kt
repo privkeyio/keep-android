@@ -213,6 +213,9 @@ internal class FrameCollector {
         if (isValidBech32Payload("kshare1", trimmed)) return trimmed
 
         if (trimmed.length > MAX_FRAME_LENGTH) return null
+        // Plain text (an nsec, an approver pairing URI, a nostrconnect URI) is a single-frame
+        // code: hand it to the caller's validator, which decides what that screen accepts.
+        if (!trimmed.startsWith("{")) return trimmed
         val parsed = try { JSONObject(trimmed) } catch (_: Exception) { return null } catch (_: StackOverflowError) { return null }
 
         if (parsed.has("f") && parsed.has("t") && parsed.has("d")) {
