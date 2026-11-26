@@ -7,6 +7,9 @@ updates:
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Until the material3 1.5 move to SecureTextField lands.
+      - dependency-name: "androidx.compose:compose-bom"
     open-pull-requests-limit: 5
 
   - package-ecosystem: "github-actions"
