@@ -29,39 +29,48 @@ internal class NostrconnectRevokeState(
 )
 
 /**
- * The race logic of [BunkerService.acceptNostrconnect]. Holds [pk] in [holds] for the whole
- * accept, failing fast with [NostrconnectOutcome.ALREADY_ACCEPTING] when another call holds it,
- * and drops only the hold it added. Runs [accept] (the core call), then under [withLock] (the
- * lock revokes hold) reads the listed clients with [readClients] and admits [pk] into [cache]
- * and names it with [saveName] only while no revoke covering it came since the accept began.
- * An unreadable config falls back to the generation, which every revoke moves.
+ * The race logic of [BunkerService.acceptNostrconnect]. Under [withLock] (the lock revokes hold)
+ * holds [pk] in [holds] and reads the revoke generation, failing fast with
+ * [NostrconnectOutcome.ALREADY_ACCEPTING] when another call holds it. Under that lock the read
+ * comes before a revoke starts, which then counts, or after it finished, engine revoke included.
+ * Runs [accept] (the core call), then under [withLock] again reads the listed clients with
+ * [readClients] and admits [pk] into [cache] and names it with [saveName] only while no revoke
+ * covering it came since the read. An unreadable config falls back to the generation, which
+ * every revoke moves. Drops only the hold it added.
+ *
+ * A failed core call is judged against the generation read before the lock as well, since one
+ * that waited behind a revoke reads its generation after it, yet runs on the bunker that revoke
+ * stopped. That earlier read only words the failure; admission keeps the read under the lock.
+ * One that arrived after the revoke's bump still fails as BunkerNotRunning, which is safe.
  */
 internal suspend fun acceptAndAdmit(
     pk: String,
     holds: ConcurrentMap<String, Any>,
     cache: MutableSet<String>,
     revokes: NostrconnectRevokeState,
-    withLock: suspend (suspend () -> NostrconnectOutcome) -> NostrconnectOutcome,
+    withLock: suspend (suspend () -> Unit) -> Unit,
     accept: suspend () -> Unit,
     readClients: suspend () -> List<String>,
     saveName: suspend () -> Unit,
 ): NostrconnectOutcome {
-    val generation = revokes.generation()
     val hold = Any()
-    if (holds.putIfAbsent(pk, hold) != null) return NostrconnectOutcome.ALREADY_ACCEPTING
-    fun revoked() = revokedSince(generation, revokes.everyClientRevokedAt(), revokes.clientRevokedAt(pk))
     try {
+        val beforeLock = revokes.generation()
+        var started: Long? = null
+        withLock { if (holds.putIfAbsent(pk, hold) == null) started = revokes.generation() }
+        val generation = started ?: return NostrconnectOutcome.ALREADY_ACCEPTING
         try {
             accept()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // A revoke stops the bunker, which the accept then fails on.
-            if (revoked()) return NostrconnectOutcome.REVOKED
-            if (revokes.generation() != generation) return NostrconnectOutcome.RESTARTED
+            if (revokedSince(beforeLock, revokes.everyClientRevokedAt(), revokes.clientRevokedAt(pk))) return NostrconnectOutcome.REVOKED
+            if (e is KeepMobileException.BunkerNotRunning && revokes.generation() != beforeLock) return NostrconnectOutcome.RESTARTED
             throw e
         }
-        return withLock {
+        var outcome = NostrconnectOutcome.REVOKED
+        withLock {
             // The core listed it when it returned. The re-read only catches a revoke since,
             // which also moves the generation, so an unreadable config falls back to that.
             val clients = try {
@@ -75,11 +84,10 @@ internal suspend fun acceptAndAdmit(
                 cache.add(pk)
                 // Under the lock, so a revoke cannot land between the admission and the name.
                 saveName()
-                NostrconnectOutcome.CONNECTED
-            } else {
-                NostrconnectOutcome.REVOKED
+                outcome = NostrconnectOutcome.CONNECTED
             }
         }
+        return outcome
     } finally {
         holds.remove(pk, hold)
     }
@@ -90,7 +98,7 @@ internal suspend fun acceptAndAdmit(
  * "App" and the first 8 hex digits of its key. That is the core's fallback (keep-mobile nip46.rs
  * nostrconnect_name), but the core falls back only for a name that is empty after Rust's trim,
  * so a name made only of invisible characters is listed here under the fallback while the core
- * keeps it raw.
+ * keeps it as parsed.
  */
 internal fun nostrconnectClientName(name: String?, pubkey: String): String =
     nostrconnectDisplayName(name) ?: "App ${pubkey.lowercase().take(8)}"

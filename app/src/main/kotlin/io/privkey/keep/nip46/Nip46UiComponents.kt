@@ -101,13 +101,17 @@ internal fun formatNip46Method(method: String): String = when (method) {
     else -> method
 }
 
-internal fun sanitizeDisplayName(name: String): String {
-    return name
-        .replace(Regex("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "")
-        .replace(Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]"), "")
-        .takeCodePoints(MAX_DISPLAY_NAME_CODE_POINTS)
-        .ifBlank { "Unknown App" }
-}
+internal fun sanitizeDisplayName(name: String): String =
+    stripInvisibleAndCap(name).ifBlank { "Unknown App" }
+
+// The core's strip_invisible (keep-nip46 bunker.rs): every control character (Cc, C1 and line
+// breaks included), the zero-width and bidi marks, U+2028..U+202E, U+2060..U+206F, the Arabic
+// letter mark and the BOM.
+private val INVISIBLE = Regex("[\\p{Cc}\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\u061C\\uFEFF]")
+
+/** [name] as the core cleans and caps a client name, with no fallback when nothing is left. */
+internal fun stripInvisibleAndCap(name: String): String =
+    name.replace(INVISIBLE, "").takeCodePoints(MAX_DISPLAY_NAME_CODE_POINTS)
 
 // The core's cap on a client name, in code points, so a surrogate pair is never split.
 private const val MAX_DISPLAY_NAME_CODE_POINTS = 50

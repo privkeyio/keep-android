@@ -38,21 +38,25 @@ class NostrConnectAcceptTest {
             client?.let { cache.remove(it) } ?: cache.clear()
         }
 
+        /** [beforeLock] runs before the admission's lock, the second one an accept takes. */
         suspend fun accept(
             accept: suspend () -> Unit = {},
             beforeLock: () -> Unit = {},
             readClients: suspend () -> List<String> = { listOf(pk) },
             saveName: suspend () -> Unit = { named += pk },
-        ): NostrconnectOutcome = acceptAndAdmit(
-            pk = pk,
-            holds = holds,
-            cache = cache,
-            revokes = NostrconnectRevokeState({ generation }, { everyClientRevokedAt }) { clientRevokedAt[it] },
-            withLock = { block -> beforeLock(); block() },
-            accept = accept,
-            readClients = readClients,
-            saveName = saveName,
-        )
+        ): NostrconnectOutcome {
+            var locks = 0
+            return acceptAndAdmit(
+                pk = pk,
+                holds = holds,
+                cache = cache,
+                revokes = NostrconnectRevokeState({ generation }, { everyClientRevokedAt }) { clientRevokedAt[it] },
+                withLock = { block -> if (++locks == 2) beforeLock(); block() },
+                accept = accept,
+                readClients = readClients,
+                saveName = saveName,
+            )
+        }
     }
 
     @Test
@@ -88,6 +92,20 @@ class NostrConnectAcceptTest {
         assertEquals(NostrconnectOutcome.RESTARTED, outcome)
         assertTrue(f.cache.isEmpty())
         assertTrue(f.holds.isEmpty())
+    }
+
+    @Test
+    fun aCoreRefusalDuringARevokeOfAnotherClientKeepsItsOwnError() = runBlocking {
+        for (refusal in listOf(KeepMobileException.PolicyViolation("killed"), KeepMobileException.TooManyAuthorizedClients(10u))) {
+            val f = Fixture(pk)
+            try {
+                f.accept(accept = { f.revoke(other); throw refusal })
+                fail("rethrown")
+            } catch (e: KeepMobileException) {
+                assertSame(refusal, e)
+            }
+            assertTrue(f.holds.isEmpty())
+        }
     }
 
     @Test

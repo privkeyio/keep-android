@@ -53,6 +53,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -204,6 +205,16 @@ class BunkerService : Service() {
         private val revokeGeneration = AtomicLong()
         private val everyClientRevokedAt = AtomicLong()
         private val clientRevokedAt = ConcurrentHashMap<String, Long>()
+        // Clients a nostrconnect accept is admitting, each to the accept that holds it (see
+        // acceptNostrconnect). Here rather than on an instance, as [acceptScope] is, so an
+        // accept that outlives a service keeps its hold through the next one.
+        private val nostrconnectHolds = ConcurrentHashMap<String, Any>()
+
+        private val _clientListVersion = MutableStateFlow(0L)
+        /** Moves after every nostrconnect accept ends, whatever its outcome, and after every revoke. */
+        val clientListVersion: StateFlow<Long> = _clientListVersion.asStateFlow()
+
+        private fun clientListChanged() = _clientListVersion.update { it + 1 }
 
         fun current(): BunkerService? = serviceInstanceRef.get()
 
@@ -214,9 +225,11 @@ class BunkerService : Service() {
          * decided under the lock revokes hold, so a revoke that lands after the accept is not
          * undone here. Returns [NostrconnectOutcome.REVOKED] when a revoke covering the client
          * landed first, so it is not connected, and [NostrconnectOutcome.RESTARTED] when a revoke
-         * of others or an account switch stopped the bunker under it; the core is to report those
-         * itself (privkeyio/keep follow-up). Throws [KeepMobileException.BunkerNotRunning] with no
-         * bunker serving, and whatever else the core fails with.
+         * of others or an account switch stopped the bunker under it. Both are told apart here
+         * until the core reports why an accept hit BunkerNotRunning: its client revoked, the
+         * bunker rotated or torn down (privkeyio/keep follow-up). Throws
+         * [KeepMobileException.BunkerNotRunning] with no bunker serving, and whatever else the
+         * core fails with.
          *
          * The work runs on [acceptScope], which no screen owns: once asked, the core may accept,
          * so cancelling the caller must not skip the admission that follows. It shows its own
@@ -229,7 +242,9 @@ class BunkerService : Service() {
          * accept for the key is refused as [NostrconnectOutcome.ALREADY_ACCEPTING]. A revoke drops
          * it under the lock, so it still wins. A revoke that lands during the accept is reported
          * as such, whatever the core then fails with. That gate goes once the core gates unlisted
-         * clients itself (privkeyio/keep follow-up), and with it [authorizedClientsCache].
+         * clients itself (privkeyio/keep follow-up), and with it [authorizedClientsCache]. The
+         * holds also do the in-flight dedupe, which that follow-up has to replace: the core's
+         * refuse_to_register would then answer a second accept "already connected".
          */
         internal suspend fun acceptNostrconnect(context: Context, uri: String, info: NostrConnectInfo, approvedPerms: String?): NostrconnectOutcome {
             val appContext = context.applicationContext
@@ -245,6 +260,7 @@ class BunkerService : Service() {
                         appContext.getString(acceptErrorMessage(e))
                     },
                 )
+                clientListChanged()
                 withContext(Dispatchers.Main) { Toast.makeText(appContext, message, Toast.LENGTH_LONG).show() }
                 result.getOrThrow()
             }.await()
@@ -259,7 +275,7 @@ class BunkerService : Service() {
             val name = nostrconnectClientName(info.name, pk)
             return acceptAndAdmit(
                 pk = pk,
-                holds = service.nostrconnectHolds,
+                holds = nostrconnectHolds,
                 cache = service.authorizedClientsCache,
                 revokes = NostrconnectRevokeState(revokeGeneration::get, everyClientRevokedAt::get) { clientRevokedAt[it] },
                 withLock = { block -> BunkerConfigStore.withLock { block() } },
@@ -276,17 +292,16 @@ class BunkerService : Service() {
 
         /** Whether an accept for [pubkey] is in flight, which reports its own result. */
         internal fun isAcceptingNostrconnect(pubkey: String): Boolean =
-            current()?.nostrconnectHolds?.containsKey(pubkey.lowercase()) == true
+            nostrconnectHolds.containsKey(pubkey.lowercase())
 
         // Outlives every screen and service instance, so an accept the core may have begun
         // always runs to its admission and its result.
         private val acceptScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         internal fun forgetPendingAuth(pubkey: String) {
-            val service = current() ?: return
             val pk = pubkey.lowercase()
-            service.pendingAuthSaves.remove(pk)
-            service.nostrconnectHolds.remove(pk)
+            nostrconnectHolds.remove(pk)
+            current()?.pendingAuthSaves?.remove(pk)
         }
 
         // Through a handler of its own: the core revoke reaches the running engine from any
@@ -352,7 +367,7 @@ class BunkerService : Service() {
                     config.authorizedClients,
                     service?.authorizedClientsCache?.let { synchronized(it) { it.toList() } }.orEmpty(),
                     service?.pendingAuthSaves?.let { synchronized(it) { it.toList() } }.orEmpty() +
-                        service?.nostrconnectHolds?.keys?.toList().orEmpty(),
+                        nostrconnectHolds.keys.toList(),
                 )
                 revoked.forEach {
                     clientRevokedAt[it] = generation
@@ -375,6 +390,7 @@ class BunkerService : Service() {
                 runCatching { Nip46ClientStore.removeClient(context, pubkey) }
                     .onFailure { if (BuildConfig.DEBUG) Log.e(TAG, "Failed to remove NIP-46 client: ${it::class.simpleName}") }
             }
+            clientListChanged()
             // The mark holds in memory even when it cannot be saved, so the restart revokes first.
             revokeFailure?.let { e -> runCatching { revokeAllMark(context).set() }.exceptionOrNull()?.let(e::addSuppressed) }
             current()?.restartIfServing()
@@ -430,14 +446,15 @@ class BunkerService : Service() {
                     current()?.let { service ->
                         service.authorizedClientsCache.clear()
                         service.pendingAuthSaves.clear()
-                        service.nostrconnectHolds.clear()
                     }
+                    nostrconnectHolds.clear()
                     // No revision: the reset drops every client, whatever was listed since the read.
                     io.privkey.keep.uniffi.BunkerConfigInfo(false, emptyList())
                 }
             }
             runCatching { Nip46ClientStore.getClients(context).keys.forEach { Nip46ClientStore.removeClient(context, it) } }
                 .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "Could not clear the NIP-46 client list: ${it::class.simpleName}") }
+            clientListChanged()
             // Standalone: the service is being stopped for the switch and must not restart.
             step { BunkerHandler(keepMobile).use { it.rotateBunkerCredentials() } }
             // Now rather than only at the next start, since the core revokes with no bunker
@@ -602,8 +619,6 @@ class BunkerService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingAuthSaves = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    // Clients a nostrconnect accept is admitting, each to the accept that holds it (see acceptNostrconnect).
-    private val nostrconnectHolds = ConcurrentHashMap<String, Any>()
     private val authorizedClientsCache = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val startStopMutex = Mutex()
     private val approvalIdCounter = AtomicInteger(0)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
@@ -28,7 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Approves a `nostrconnect://` request, from a link another app opened or a code scanned on
@@ -59,7 +60,8 @@ class NostrConnectActivity : FragmentActivity() {
         if (requestUri == null || keepMobile == null) {
             // A scanned request's token is taken on the first create, and the URI is never saved
             // since it carries the client's secret, so a recreated screen just closes: its accept,
-            // if one started, reports its own result.
+            // if one started, reports its own result, unless the process died, when the core
+            // rolls the accept back on its next start.
             if (savedInstanceState != null) finish() else finishWith(getString(R.string.connections_nostrconnect_invalid))
             return
         }
@@ -160,22 +162,36 @@ class NostrConnectActivity : FragmentActivity() {
         const val SCHEME = "nostrconnect"
         private const val EXTRA_HANDOFF = "io.privkey.keep.nip46.NOSTRCONNECT_HANDOFF"
 
-        // Scanned requests by one-shot token: the URI carries the client's secret, which Intent
-        // data would expose to system logging, so only the token travels in the Intent.
-        private val handedOff = ConcurrentHashMap<String, String>()
+        private const val HANDOFF_TTL_MS = 60_000L
+
+        private class Handoff(val token: String, val uri: String, val at: Long)
+
+        // The scanned request by one-shot token: the URI carries the client's secret, which Intent
+        // data would expose to system logging, so only the token travels in the Intent. One slot,
+        // which the next scan replaces, and dropped unused once stale on the next read, so a screen
+        // that never opened does not keep the secret for long.
+        private val handedOff = AtomicReference<Handoff?>(null)
 
         /** Opens the approval for a scanned [uri], handed over in-process and taken once. */
         fun intent(context: Context, uri: String): Intent {
             val token = UUID.randomUUID().toString()
-            handedOff[token] = uri
+            handedOff.set(Handoff(token, uri, SystemClock.elapsedRealtime()))
             return Intent(context, NostrConnectActivity::class.java).putExtra(EXTRA_HANDOFF, token)
         }
 
-        // A scanned request by its token, or a link another app opened.
+        // A scanned request by its token, or a link another app opened. An unknown or stale token
+        // gets null, never the Intent data.
         private fun requestUri(intent: Intent?): String? {
             intent ?: return null
             intent.getStringExtra(EXTRA_HANDOFF)?.let { token ->
-                return handedOff.remove(token)?.takeIf { Uri.parse(it).scheme == SCHEME }
+                val handoff = handedOff.get() ?: return null
+                val stale = SystemClock.elapsedRealtime() - handoff.at > HANDOFF_TTL_MS
+                if (stale) {
+                    handedOff.compareAndSet(handoff, null)
+                    return null
+                }
+                if (handoff.token != token || !handedOff.compareAndSet(handoff, null)) return null
+                return handoff.uri.takeIf { Uri.parse(it).scheme == SCHEME }
             }
             return intent.data?.takeIf { it.scheme == SCHEME }?.toString()
         }

@@ -21,6 +21,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.privkey.keep.MAX_BUNKER_RELAYS
@@ -149,6 +151,14 @@ fun BunkerScreen(
             }
         }
         onPauseOrDispose { load.cancel() }
+    }
+    // And whenever an accept or a revoke ends while this screen is shown, as one left running
+    // by an approval screen the user backed out of.
+    LaunchedEffect(keepMobile) {
+        BunkerService.clientListVersion.drop(1).collectLatest {
+            withContext(Dispatchers.IO) { runCatching { keepMobile.getBunkerConfig() } }
+                .onSuccess { config -> authorizedClients = config.authorizedClients.toSet() }
+        }
     }
 
     DisposableEffect(Unit) {

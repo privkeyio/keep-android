@@ -11,10 +11,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.privkey.keep.R
 import io.privkey.keep.uniffi.NostrConnectInfo
 import io.privkey.keep.uniffi.formatPubkeyDisplay
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // The methods a user can withhold on a nostrconnect accept, mirroring keep-nip46 handler.rs
 // parse_permission_string. The core grants sign_event for every kind even when the request
@@ -74,7 +76,7 @@ internal fun nostrconnectDisplayName(name: String?): String? {
     val visible = name?.withoutFormatCharacters() ?: return null
     if (!visible.hasVisibleCharacter()) return null
     // Checked again after cleaning, which can cut the name short of its first visible character.
-    return sanitizeDisplayName(visible).trim().takeIf { it.hasVisibleCharacter() }
+    return stripInvisibleAndCap(visible).trim().takeIf { it.hasVisibleCharacter() }
 }
 
 private fun String.withoutFormatCharacters(): String = buildString {
@@ -105,12 +107,20 @@ fun NostrConnectApprovalScreen(
     val namesNothing = remember(info) { namesNoNostrconnectPerms(info.requestedPermissions) }
     var kept by remember(info) { mutableStateOf(offered.toSet()) }
     var isLoading by remember { mutableStateOf(false) }
-    // Taps on Connect are ignored at first, as on the system permission dialogs, so a tap meant
-    // for whatever was on screen before cannot approve.
+    // Taps on Connect are ignored for a moment after every resume, as on the system permission
+    // dialogs, so a tap meant for whatever was on screen before, or for a screen that covered
+    // this one and just closed, cannot approve.
     var connectArmed by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(CONNECT_ARM_DELAY_MS)
-        connectArmed = true
+    val armScope = rememberCoroutineScope()
+    LifecycleResumeEffect(Unit) {
+        val arming = armScope.launch {
+            delay(CONNECT_ARM_DELAY_MS)
+            connectArmed = true
+        }
+        onPauseOrDispose {
+            arming.cancel()
+            connectArmed = false
+        }
     }
     val name = nostrconnectDisplayName(info.name) ?: stringResource(R.string.connections_nostrconnect_unknown_app)
 
