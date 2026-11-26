@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -373,6 +374,8 @@ class PermissionDatabaseIntegrationTest {
             Case("legacy.duration.boundary", null, now - 60000, 0, 60000),
             Case("legacy.duration.valid", null, now - 10000, 0, 60000),
             Case("legacy.duration.expired.with.expiry", now + 60000, now - 70000, 0, 60000),
+            Case("legacy.duration.clock.set.back", null, now + 1, 0, 60000),
+            Case("legacy.duration.clock.at.creation", null, now, 0, 60000),
         )
         val expired = cases.associate { c ->
             "com.case.${c.name}" to isTimestampExpired(c.expiresAt, c.createdAt, c.createdAtElapsed, c.durationMs, nowElapsed, now)
@@ -387,6 +390,8 @@ class PermissionDatabaseIntegrationTest {
             )
         }
         assertTrue("the matrix covers a legacy row the SQL used to miss", expired.getValue("com.case.legacy.duration.expired"))
+        assertTrue("a legacy duration row created after now has expired", expired.getValue("com.case.legacy.duration.clock.set.back"))
+        assertFalse(expired.getValue("com.case.legacy.duration.clock.at.creation"))
 
         val live = permissionDao.getAllCallerPackages(now, nowElapsed).toSet()
         val expiredSettings = appSettingsDao.getExpiredPackages(now, nowElapsed).toSet()
