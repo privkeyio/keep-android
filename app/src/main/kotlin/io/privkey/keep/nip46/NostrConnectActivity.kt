@@ -130,7 +130,7 @@ class NostrConnectActivity : FragmentActivity() {
             return
         }
         // The request was shown for this account; a switch since then must not pair it with another.
-        if (activeAccount() != account) {
+        if (account == null || activeAccount() != account) {
             onComplete(false)
             finishWith(getString(R.string.connections_nostrconnect_error_account_changed))
             return
@@ -151,9 +151,22 @@ class NostrConnectActivity : FragmentActivity() {
                 subtitle = getString(R.string.connections_nostrconnect_auth_subtitle, name),
                 forcePrompt = true
             )
-            if (!authed || activeAccount() != account) {
+            if (!authed) {
                 approving = false
                 onComplete(false)
+                return@launch
+            }
+            // The prompt can stay up for a while, so what was checked before it is checked again.
+            val refusal = when {
+                app.isSigningKilled() -> R.string.kill_switch_active_toast
+                app.getPinStore()?.requiresAuthentication() == true -> R.string.connections_nostrconnect_error_locked
+                activeAccount() != account -> R.string.connections_nostrconnect_error_account_changed
+                else -> null
+            }
+            if (refusal != null) {
+                approving = false
+                onComplete(false)
+                finishWith(getString(refusal))
                 return@launch
             }
             // The accept runs detached in the service, which shows its result, so leaving this
