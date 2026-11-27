@@ -132,104 +132,106 @@ fun NostrConnectApprovalScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = stringResource(R.string.connections_nostrconnect_title),
-            style = MaterialTheme.typography.headlineMedium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.connections_nostrconnect_from, name),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        // The key is what the app is; its name and website below are only what it claims.
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = stringResource(R.string.connections_nostrconnect_client_pubkey),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = formatPubkeyDisplay(info.clientPubkey),
-            style = MaterialTheme.typography.titleSmall,
-            fontFamily = FontFamily.Monospace
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(R.string.connections_nostrconnect_unverified),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Surface(
-            color = MaterialTheme.colorScheme.tertiaryContainer,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier.fillMaxWidth()
+        // Everything above the actions scrolls, so Connect and Reject stay on screen in a short
+        // window or at a large font scale.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = stringResource(R.string.connections_nostrconnect_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                modifier = Modifier.padding(12.dp)
+                text = stringResource(R.string.connections_nostrconnect_title),
+                style = MaterialTheme.typography.headlineMedium
             )
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState())
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.connections_nostrconnect_from, name),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            // The key is what the app is; its name and website below are only what it claims.
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.connections_nostrconnect_client_pubkey),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = formatPubkeyDisplay(info.clientPubkey),
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = FontFamily.Monospace
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.connections_nostrconnect_unverified),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                info.url?.let {
-                    Nip46DetailRow(stringResource(R.string.connections_nostrconnect_website_claimed), it)
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
                 Text(
-                    text = stringResource(R.string.connections_nostrconnect_relays),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = stringResource(R.string.connections_nostrconnect_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(12.dp)
                 )
-                info.relays.forEach { relay ->
-                    Text(text = relay.removePrefix("wss://"), style = MaterialTheme.typography.bodyMedium)
-                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.connections_nostrconnect_requested_permissions),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                val permissionsNote = when {
-                    namesNothing -> R.string.connections_nostrconnect_default_permissions
-                    offered.isEmpty() -> R.string.connections_nostrconnect_no_permissions
-                    else -> null
-                }
-                permissionsNote?.let { Text(text = stringResource(it), style = MaterialTheme.typography.bodyMedium) }
-                offered.forEach { method ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = method in kept,
-                            enabled = !isLoading,
-                            onCheckedChange = { checked -> kept = if (checked) kept + method else kept - method }
-                        )
-                        Text(text = formatNip46Method(method), style = MaterialTheme.typography.bodyMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    info.url?.let {
+                        Nip46DetailRow(stringResource(R.string.connections_nostrconnect_website_claimed), it)
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
-                }
-                if ("sign_event" in kept) {
-                    Spacer(modifier = Modifier.height(8.dp))
+
                     Text(
-                        text = stringResource(R.string.connections_nostrconnect_grant_scope),
-                        style = MaterialTheme.typography.bodySmall,
+                        text = stringResource(R.string.connections_nostrconnect_relays),
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    info.relays.forEach { relay ->
+                        Text(text = relay.removePrefix("wss://"), style = MaterialTheme.typography.bodyMedium)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.connections_nostrconnect_requested_permissions),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val permissionsNote = when {
+                        namesNothing -> R.string.connections_nostrconnect_default_permissions
+                        offered.isEmpty() -> R.string.connections_nostrconnect_no_permissions
+                        else -> null
+                    }
+                    permissionsNote?.let { Text(text = stringResource(it), style = MaterialTheme.typography.bodyMedium) }
+                    offered.forEach { method ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = method in kept,
+                                enabled = !isLoading,
+                                onCheckedChange = { checked -> kept = if (checked) kept + method else kept - method }
+                            )
+                            Text(text = formatNip46Method(method), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    if ("sign_event" in kept) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.connections_nostrconnect_grant_scope),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }

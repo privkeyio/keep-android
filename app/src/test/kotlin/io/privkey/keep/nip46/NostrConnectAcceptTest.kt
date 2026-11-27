@@ -273,6 +273,18 @@ class NostrConnectAcceptTest {
     }
 
     @Test
+    fun anAcceptRunsOnlyOnTheBunkerTheUserTappedConnectOn() {
+        val service = Any()
+        val handler = Any()
+        assertTrue(isSameServingBunker(service, handler, service, handler))
+        assertFalse("a restart installs a new handler", isSameServingBunker(service, handler, service, Any()))
+        assertFalse("a new service", isSameServingBunker(service, handler, Any(), handler))
+        assertFalse("stopped since", isSameServingBunker(service, handler, null, null))
+        assertFalse("none was serving", isSameServingBunker(null, null, null, null))
+        assertFalse("serving without a handler", isSameServingBunker(service, null, service, null))
+    }
+
+    @Test
     fun acceptErrorsMapToTheirMessages() {
         assertEquals(
             R.string.connections_nostrconnect_error_already_connected,

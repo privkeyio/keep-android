@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancelAndJoin
@@ -161,20 +162,26 @@ class NostrConnectAcceptConcurrencyStressTest {
                 val m = Model()
                 val keys = listOf(pk, other)
                 runBlocking(dispatcher) {
-                    val jobs = (0 until 12).map { i ->
-                        val seed = rnd.nextInt()
-                        async {
-                            val r = Random(seed)
-                            when (r.nextInt(4)) {
-                                0 -> m.revoke(if (r.nextBoolean()) null else keys[r.nextInt(2)])
-                                1 -> m.restart()
-                                else -> runCatching {
-                                    m.accept(keys[i % 2], core = { if (r.nextBoolean()) yield() })
-                                }.exceptionOrNull()?.let { if (it !is KeepMobileException.BunkerNotRunning) throw it }
+                    try {
+                        withTimeout(DEADLINE_MS) {
+                            val jobs = (0 until 12).map { i ->
+                                val seed = rnd.nextInt()
+                                async {
+                                    val r = Random(seed)
+                                    when (r.nextInt(4)) {
+                                        0 -> m.revoke(if (r.nextBoolean()) null else keys[r.nextInt(2)])
+                                        1 -> m.restart()
+                                        else -> runCatching {
+                                            m.accept(keys[i % 2], core = { if (r.nextBoolean()) yield() })
+                                        }.exceptionOrNull()?.let { if (it !is KeepMobileException.BunkerNotRunning) throw it }
+                                    }
+                                }
                             }
+                            jobs.awaitAll()
                         }
+                    } catch (_: TimeoutCancellationException) {
+                        fail("round $round: did not finish within $DEADLINE_MS ms")
                     }
-                    jobs.awaitAll()
                 }
                 val cached = synchronized(m.cache) { m.cache.toSet() }
                 assertTrue("round $round: cache $cached listed ${m.listed}", m.listed.containsAll(cached))

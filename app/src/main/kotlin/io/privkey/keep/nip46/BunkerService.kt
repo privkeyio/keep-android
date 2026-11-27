@@ -99,6 +99,14 @@ internal fun admitsNostrconnectClient(
     authorizedClients.any { it.equals(pubkey, ignoreCase = true) } &&
         !revokedSince(generation, everyClientRevokedAt, clientRevokedAt)
 
+/**
+ * Whether the bunker serving now, [service] running [handler], is the one captured as
+ * [servedService] and [servedHandler] when the user tapped Connect. A restart in between
+ * installs a new handler, and an accept approved on one bunker never runs on its replacement.
+ */
+internal fun isSameServingBunker(servedService: Any?, servedHandler: Any?, service: Any?, handler: Any?): Boolean =
+    servedService != null && servedHandler != null && servedService === service && servedHandler === handler
+
 class BunkerService : Service() {
 
     companion object {
@@ -218,6 +226,14 @@ class BunkerService : Service() {
 
         fun current(): BunkerService? = serviceInstanceRef.get()
 
+        /** The bunker serving at this moment, which an accept the user then approves is bound to. */
+        class ServingBunker internal constructor(
+            internal val service: BunkerService?,
+            internal val handler: BunkerHandler?,
+        )
+
+        internal fun servingBunker(): ServingBunker = current().let { ServingBunker(it, it?.bunkerHandler) }
+
         /**
          * Accepts a `nostrconnect://` request the user approved, on the running bunker. The core
          * registers, persists and answers the client. This then admits it past the request gate
@@ -246,17 +262,24 @@ class BunkerService : Service() {
          * holds also do the in-flight dedupe, which that follow-up has to replace: the core's
          * refuse_to_register would then answer a second accept "already connected".
          *
-         * Bound to the bunker serving when this is called, which the user approved it on: one
-         * reset or restarted since, an account switch's included, fails it as not running.
+         * Bound to [serving], the bunker the user tapped Connect on, captured before the prompt:
+         * one reset or restarted since, an account switch's included, fails it as not running.
          */
-        internal suspend fun acceptNostrconnect(context: Context, uri: String, info: NostrConnectInfo, approvedPerms: String?): NostrconnectOutcome {
+        internal suspend fun acceptNostrconnect(
+            context: Context,
+            serving: ServingBunker,
+            uri: String,
+            info: NostrConnectInfo,
+            approvedPerms: String?,
+        ): NostrconnectOutcome {
             val appContext = context.applicationContext
-            val service = current()
-            val handler = service?.bunkerHandler
+            val service = serving.service
+            val handler = serving.handler
             val keepMobile = service?.keepMobileRef
+            val stillServing = current().let { isSameServingBunker(service, handler, it, it?.bunkerHandler) }
             return acceptScope.async {
                 val result = runCatching {
-                    if (service == null || handler == null || keepMobile == null) throw KeepMobileException.BunkerNotRunning()
+                    if (!stillServing || service == null || handler == null || keepMobile == null) throw KeepMobileException.BunkerNotRunning()
                     acceptNostrconnectNow(appContext, service, handler, keepMobile, uri, info, approvedPerms)
                 }
                 val message = result.fold(

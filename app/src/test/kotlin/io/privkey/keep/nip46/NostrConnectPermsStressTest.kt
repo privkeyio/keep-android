@@ -48,8 +48,12 @@ class NostrConnectPermsStressTest {
     private fun violations(perms: String?): List<String> {
         val offered = offeredNostrconnectMethods(perms).toSet()
         val out = mutableListOf<String>()
+        // What the core grants the request as asked, from the oracle alone, so a method the
+        // screen drops cannot also drop out of what it is checked against.
+        val expected = coreGrant(perms, approved = null) - gpk
+        if (offered != expected) out += "offer: offered=$offered expected=$expected"
         val all = grantedWhenKeeping(perms) { it.toSet() } - gpk
-        if (all != offered) out += "kept all: offered=$offered granted=$all"
+        if (all != expected) out += "kept all: expected=$expected granted=$all"
         val none = grantedWhenKeeping(perms) { emptySet() }
         if (none != setOf(gpk)) out += "kept none: granted=$none"
         return out

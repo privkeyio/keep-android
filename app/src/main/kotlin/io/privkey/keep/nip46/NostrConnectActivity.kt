@@ -143,6 +143,8 @@ class NostrConnectActivity : FragmentActivity() {
         }
         val name = nostrconnectDisplayName(request.name) ?: getString(R.string.connections_nostrconnect_unknown_app)
 
+        // The bunker the user tapped Connect on, which the accept must run on after the prompt.
+        val serving = BunkerService.servingBunker()
         approving = true
         lifecycleScope.launch {
             // Adding a signer client is authorized now, never inside the biometric timeout window.
@@ -174,7 +176,7 @@ class NostrConnectActivity : FragmentActivity() {
             // screen is still up.
             val screen = WeakReference(this@NostrConnectActivity)
             val connected = try {
-                BunkerService.acceptNostrconnect(applicationContext, requestUri, request, approvedPerms) == NostrconnectOutcome.CONNECTED
+                BunkerService.acceptNostrconnect(applicationContext, serving, requestUri, request, approvedPerms) == NostrconnectOutcome.CONNECTED
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
