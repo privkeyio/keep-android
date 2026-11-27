@@ -48,12 +48,15 @@ class NostrConnectActivity : FragmentActivity() {
     private lateinit var biometricHelper: BiometricHelper
     private var uri: String? = null
     private var info: NostrConnectInfo? = null
+    private var account: String? = null
+    private var approving = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         window.setHideOverlayWindows(true)
-        biometricHelper = BiometricHelper(this, keepApp?.getBiometricTimeoutStore())
+        // No timeout store: pairing always prompts, and its prompt opens no window for other flows.
+        biometricHelper = BiometricHelper(this, null)
 
         val requestUri = requestUri(intent)
         val keepMobile = keepApp?.getKeepMobile()
@@ -67,6 +70,10 @@ class NostrConnectActivity : FragmentActivity() {
         }
         if (keepApp?.isSigningKilled() == true) {
             finishWith(getString(R.string.kill_switch_active_toast))
+            return
+        }
+        if (keepApp?.getPinStore()?.requiresAuthentication() == true) {
+            finishWith(getString(R.string.connections_nostrconnect_error_locked))
             return
         }
         if (BunkerService.status.value != BunkerStatus.RUNNING) {
@@ -91,6 +98,7 @@ class NostrConnectActivity : FragmentActivity() {
             }
             uri = requestUri
             info = parsed
+            account = activeAccount()
             setContent {
                 KeepAndroidTheme {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -102,6 +110,7 @@ class NostrConnectActivity : FragmentActivity() {
     }
 
     private fun handleApprove(approvedPerms: String, onComplete: (Boolean) -> Unit) {
+        if (approving) return
         val requestUri = uri
         val request = info
         val app = keepApp
@@ -115,6 +124,17 @@ class NostrConnectActivity : FragmentActivity() {
             finishWith(getString(R.string.kill_switch_active_toast))
             return
         }
+        if (app.getPinStore()?.requiresAuthentication() == true) {
+            onComplete(false)
+            finishWith(getString(R.string.connections_nostrconnect_error_locked))
+            return
+        }
+        // The request was shown for this account; a switch since then must not pair it with another.
+        if (activeAccount() != account) {
+            onComplete(false)
+            finishWith(getString(R.string.connections_nostrconnect_error_account_changed))
+            return
+        }
         val status = biometricHelper.checkBiometricStatus()
         if (status != BiometricHelper.BiometricStatus.AVAILABLE) {
             Toast.makeText(this, BiometricHelper.getBiometricNotReadyMessage(this, status), Toast.LENGTH_LONG).show()
@@ -123,6 +143,7 @@ class NostrConnectActivity : FragmentActivity() {
         }
         val name = nostrconnectDisplayName(request.name) ?: getString(R.string.connections_nostrconnect_unknown_app)
 
+        approving = true
         lifecycleScope.launch {
             // Adding a signer client is authorized now, never inside the biometric timeout window.
             val authed = biometricHelper.authenticate(
@@ -130,7 +151,8 @@ class NostrConnectActivity : FragmentActivity() {
                 subtitle = getString(R.string.connections_nostrconnect_auth_subtitle, name),
                 forcePrompt = true
             )
-            if (!authed) {
+            if (!authed || activeAccount() != account) {
+                approving = false
                 onComplete(false)
                 return@launch
             }
@@ -146,11 +168,14 @@ class NostrConnectActivity : FragmentActivity() {
                 false
             }
             screen.get()?.takeUnless { it.isDestroyed }?.let {
+                it.approving = false
                 onComplete(connected)
                 it.finish()
             }
         }
     }
+
+    private fun activeAccount(): String? = runCatching { keepApp?.getStorage()?.getActiveShareKey() }.getOrNull()
 
     private fun finishWith(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()

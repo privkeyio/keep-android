@@ -223,12 +223,14 @@ fun NostrConnectApprovalScreen(
                         Text(text = formatNip46Method(method), style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.connections_nostrconnect_grant_scope),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if ("sign_event" in kept) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.connections_nostrconnect_grant_scope),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 

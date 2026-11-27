@@ -147,6 +147,8 @@
     <string name="connections_nostrconnect_auth_subtitle">Connect <xliff:g id="name" example="Damus">%1$s</xliff:g> to your bunker</string>
     <string name="connections_nostrconnect_invalid">This is not a valid connection request</string>
     <string name="connections_nostrconnect_connected">Connected <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nostrconnect_error_locked">Keep is locked. Open Keep and unlock it, then try connecting again.</string>
+    <string name="connections_nostrconnect_error_account_changed">The active account changed. Open the connection request again to connect it to this account.</string>
     <string name="connections_nostrconnect_error_not_running">The bunker is not running. Check that it is on, then try connecting again.</string>
     <string name="connections_nostrconnect_error_already_connected">This app is already connected. Revoke it to connect it again.</string>
     <string name="connections_nostrconnect_error_timeout">The app\'s relays did not answer in time. Try again.</string>
