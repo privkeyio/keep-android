@@ -2,6 +2,7 @@ package io.privkey.keep.nip46
 
 import io.privkey.keep.ui.components.KeepCard
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,13 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.privkey.keep.MAX_BUNKER_RELAYS
 import io.privkey.keep.QrCodeDisplay
+import io.privkey.keep.QrScannerScreen
 import io.privkey.keep.R
 import io.privkey.keep.RELAY_URL_REGEX
 import io.privkey.keep.copySensitiveText
@@ -118,6 +123,7 @@ fun BunkerScreen(
     var showRevokeAllDialog by remember { mutableStateOf(false) }
     var pendingRevoke by remember { mutableStateOf<String?>(null) }
     var showRotateUrlDialog by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
     val isEnabled = bunkerStatus == BunkerStatus.RUNNING || bunkerStatus == BunkerStatus.STARTING
 
     val toastBunkerUrlCopied = stringResource(R.string.connections_bunker_url_copied)
@@ -131,14 +137,27 @@ fun BunkerScreen(
     val toastUrlRotated = stringResource(R.string.connections_bunker_toast_url_rotated)
     val toastRotateUrlFailed = stringResource(R.string.connections_bunker_toast_rotate_url_failed)
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
-                withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
+    // On every resume, not once: a client connected from a scanned code or a link is listed
+    // when the approval screen closes.
+    LifecycleResumeEffect(keepMobile) {
+        val load = scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { keepMobile.getBunkerConfig() }.onSuccess { config ->
+                    withContext(Dispatchers.Main) { authorizedClients = config.authorizedClients.toSet() }
+                }
+                runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
+                    withContext(Dispatchers.Main) { relays = config.bunkerRelays }
+                }
             }
-            runCatching { keepMobile.getRelayConfig(null) }.onSuccess { config ->
-                withContext(Dispatchers.Main) { relays = config.bunkerRelays }
-            }
+        }
+        onPauseOrDispose { load.cancel() }
+    }
+    // And whenever an accept or a revoke ends while this screen is shown, as one left running
+    // by an approval screen the user backed out of.
+    LaunchedEffect(keepMobile) {
+        BunkerService.clientListVersion.drop(1).collectLatest {
+            withContext(Dispatchers.IO) { runCatching { keepMobile.getBunkerConfig() } }
+                .onSuccess { config -> authorizedClients = config.authorizedClients.toSet() }
         }
     }
 
@@ -160,6 +179,20 @@ fun BunkerScreen(
                 Toast.makeText(context, toastSaveRelayFailed, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    if (showScanner) {
+        BackHandler { showScanner = false }
+        QrScannerScreen(
+            onCodeScanned = {
+                context.startActivity(NostrConnectActivity.intent(context, it))
+                showScanner = false
+            },
+            onDismiss = { showScanner = false },
+            validator = { it.startsWith("nostrconnect://") },
+            title = stringResource(R.string.connections_bunker_scan_connect_title)
+        )
+        return
     }
 
     Scaffold(
@@ -206,6 +239,15 @@ fun BunkerScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(stringResource(R.string.connections_bunker_copy_button))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { showScanner = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.connections_bunker_scan_connect_button))
             }
 
             Spacer(modifier = Modifier.height(8.dp))

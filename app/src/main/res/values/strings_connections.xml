@@ -125,6 +125,38 @@
     <string name="connections_bunker_clients_description">Clients that have been approved to connect</string>
     <string name="connections_bunker_clients_none">No authorized clients</string>
     <string name="connections_bunker_client_revoke_cd">Revoke</string>
+    <string name="connections_bunker_scan_connect_button">Scan Connection QR</string>
+    <string name="connections_bunker_scan_connect_title">Scan nostrconnect QR Code</string>
+
+    <!-- NostrConnectApprovalScreen -->
+    <string name="connections_nostrconnect_title">Connection Request</string>
+    <string name="connections_nostrconnect_from">from <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nostrconnect_unknown_app">Unknown app</string>
+    <string name="connections_nostrconnect_description">This app asked Keep to be its remote signer. Once approved, it stays connected until you revoke it and can always read your public key.</string>
+    <string name="connections_nostrconnect_unverified">Name and website are provided by the app and not verified</string>
+    <string name="connections_nostrconnect_client_pubkey">Client Pubkey</string>
+    <string name="connections_nostrconnect_website_claimed">Website (claimed by the app)</string>
+    <string name="connections_nostrconnect_relays">Relays</string>
+    <string name="connections_nostrconnect_requested_permissions">Permissions to grant</string>
+    <string name="connections_nostrconnect_default_permissions">It named no permissions, so it is offered the standard connection.</string>
+    <string name="connections_nostrconnect_no_permissions">It asked for nothing Keep can grant, so it can only read your public key.</string>
+    <string name="connections_nostrconnect_grant_scope">It can read your public key and, with Sign events, react to posts without asking. Other requests ask you first, unless you chose to remember your answer for that kind of event.</string>
+    <string name="connections_nostrconnect_reject">Reject</string>
+    <string name="connections_nostrconnect_connect">Connect</string>
+    <string name="connections_nostrconnect_auth_title">Approve Connection</string>
+    <string name="connections_nostrconnect_auth_subtitle">Connect <xliff:g id="name" example="Damus">%1$s</xliff:g> to your bunker</string>
+    <string name="connections_nostrconnect_invalid">This is not a valid connection request</string>
+    <string name="connections_nostrconnect_connected">Connected <xliff:g id="name" example="Damus">%1$s</xliff:g></string>
+    <string name="connections_nostrconnect_error_locked">Keep is locked. Open Keep and unlock it, then try connecting again.</string>
+    <string name="connections_nostrconnect_error_account_changed">The active account changed. Open the connection request again to connect it to this account.</string>
+    <string name="connections_nostrconnect_error_not_running">The bunker is not running. Check that it is on, then try connecting again.</string>
+    <string name="connections_nostrconnect_error_already_connected">This app is already connected. Revoke it to connect it again.</string>
+    <string name="connections_nostrconnect_error_timeout">The app\'s relays did not answer in time. Try again.</string>
+    <string name="connections_nostrconnect_error_network">Could not reach the app\'s relays</string>
+    <string name="connections_nostrconnect_error_failed">Could not connect this app</string>
+    <string name="connections_nostrconnect_error_revoked">This app was revoked while it was connecting</string>
+    <string name="connections_nostrconnect_error_restarted">The bunker restarted while connecting. Try connecting again.</string>
+    <string name="connections_nostrconnect_already_connecting">This app is already being connected</string>
 
     <!-- Nip46ApprovalScreen -->
     <string name="connections_nip46_title_connect">New Connection Request</string>

@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -111,6 +112,23 @@
             android:exported="false"
             android:launchMode="singleTop"
             android:theme="@style/Theme.KeepAndroid" />
+
+        <activity
+            android:name=".nip46.NostrConnectActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|locale|layoutDirection|density|keyboard|keyboardHidden|fontScale|navigation|touchscreen|mcc|mnc|colorMode|fontWeightAdjustment|grammaticalGender"
+            android:theme="@style/Theme.KeepAndroid">
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nostrconnect" />
+            </intent-filter>
+        </activity>
 
     </application>
 
